@@ -1,0 +1,33 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Playwright browser profiles
+.playwright/
+
+# Local data (SQLite DB, run outputs)
+data/*
+!data/.gitkeep
+
+# Interaction inspection outputs (screenshots, DOM dumps)
+interactions-output/*
+!interactions-output/.gitkeep
+
+# Local config (user-specific settings)
+config/local.json
+
+# Environment variables
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Planning artifacts (internal)
+.sisyphus/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

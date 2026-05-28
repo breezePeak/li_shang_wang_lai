@@ -1,0 +1,41 @@
+{
+  "name": "li-shang-wang-lai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "礼尚往来：基于 Playwright 的创作者互动助手 — 发现真实点赞与评论，辅助回复评论，并对符合规则的好友/互关用户进行作品回访互动。",
+  "keywords": [
+    "douyin",
+    "playwright",
+    "automation",
+    "creator",
+    "comments",
+    "reciprocity"
+  ],
+  "author": "",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "auth": "node ./src/auth-douyin.mjs",
+    "interactions:inspect": "node ./src/cli/inspect-interactions.mjs",
+    "db:init": "node ./src/db/migrations.mjs",
+    "interactions:scan": "node ./src/cli/scan-interactions.mjs",
+    "comments:plan": "node ./src/cli/plan-comments.mjs",
+    "comments:reply": "node ./src/cli/execute-comment-replies.mjs",
+    "likes:plan": "node ./src/cli/plan-likes.mjs",
+    "likes:reciprocate": "node ./src/cli/execute-reciprocal-likes.mjs",
+    "history": "node ./src/cli/show-history.mjs",
+    "server": "node ./src/server.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "express": "^5.2.1",
+    "playwright": "^1.52.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}
