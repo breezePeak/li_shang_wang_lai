@@ -122,8 +122,16 @@ export async function getVideoTitle(page) {
   }
 }
 
-export async function clickLike(page) {
+export async function clickLike(page, { execute = false } = {}) {
   try {
+    if (!execute) {
+      return blocking(
+        RESULT_CODES.ACTION_NOT_APPROVED,
+        '非 execute 模式，拒绝真实点赞操作',
+        { recoverable: false }
+      );
+    }
+
     const result = await page.evaluate(() => {
       const all = document.querySelectorAll('span, div, [role="button"], button');
 
