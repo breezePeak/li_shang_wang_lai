@@ -1,4 +1,6 @@
-// 最近作品选择器 — 占位
-export function placeholder() {
-  throw new Error('Not implemented yet');
+// Select latest non-pinned video from user profile
+// Called from user-profile-page adapter
+export async function selectLatestWork(page) {
+  const { findLatestNonPinnedVideo } = await import('../adapters/user-profile-page.mjs');
+  return findLatestNonPinnedVideo(page);
 }

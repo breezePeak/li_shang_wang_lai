@@ -1,37 +1,67 @@
 import { wait } from '../utils/wait.mjs';
+import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 
 const COMMENT_PAGE_URL = 'https://creator.douyin.com/creator-micro/interactive/comment';
 
-/**
- * Navigate to comment page and wait for it to be ready.
- * If the "选择作品" button is not visible, prompts user to login/navigate.
- */
 export async function ensureCommentPageReady(page, options = {}) {
   const { timeoutMs = 30000 } = options;
-  
-  // Skip navigation if already on the correct page
+
   const currentUrl = page.url();
-  if (currentUrl.includes('creator.douyin.com/creator-micro/interactive')) {
-    console.log('[comment-page] 已在评论页，跳过导航');
-    return;
+
+  if (currentUrl.includes('passport') || currentUrl.includes('login')) {
+    return blocking(RESULT_CODES.LOGIN_REQUIRED, '页面被重定向到登录页，请先扫码登录', { data: { currentUrl } });
   }
-  
-  await page.goto(COMMENT_PAGE_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+
+  if (!currentUrl.includes('creator.douyin.com/creator-micro/interactive')) {
+    console.log('[comment-page] 导航到评论管理页...');
+    try {
+      await page.goto(COMMENT_PAGE_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    } catch (err) {
+      return blocking(RESULT_CODES.NAVIGATION_TIMEOUT, `页面导航超时: ${err.message}`, { data: { url: COMMENT_PAGE_URL } });
+    }
+  } else {
+    console.log('[comment-page] 已在评论页，跳过导航');
+  }
+
+  await page.waitForTimeout(2000);
+
+  const pageState = await page.evaluate(() => {
+    const text = document.body?.innerText || '';
+    const url = window.location.href;
+
+    if (url.includes('passport') || url.includes('login')) {
+      return { state: 'login-required' };
+    }
+    if (text.includes('选择作品')) {
+      return { state: 'ready' };
+    }
+    if (text.includes('评论管理')) {
+      return { state: 'ready' };
+    }
+    return { state: 'unknown', preview: text.slice(0, 200) };
+  });
+
+  if (pageState.state === 'login-required') {
+    return blocking(RESULT_CODES.LOGIN_REQUIRED, '页面需要登录，请先扫码登录');
+  }
+
+  if (pageState.state === 'ready') {
+    return success({ pageState: pageState.state });
+  }
 
   const selectWorkBtn = page.locator('button:has-text("选择作品")').first();
   try {
     await selectWorkBtn.waitFor({ state: 'visible', timeout: 10000 });
-    return;
+    return success({ pageState: 'ready' });
   } catch {
-    console.log('[comment-page] 未检测到评论页入口，请确认已登录并手动导航到评论管理页。');
-    console.log('[comment-page] URL:', COMMENT_PAGE_URL);
+    return blocking(
+      RESULT_CODES.WRONG_PAGE,
+      `当前页面不是评论管理页。URL: ${page.url().slice(0, 100)}。请确认已登录并手动导航到评论管理页。`,
+      { data: { url: page.url(), pagePreview: pageState.preview || '' } }
+    );
   }
 }
 
-/**
- * Wait for the comment list area to be visible.
- * Uses text-based locators (more stable than CSS classes).
- */
 export async function waitForCommentsArea(page, timeoutMs = 15000) {
   const candidates = [
     page.locator('div:has-text("回复")').first(),
@@ -42,39 +72,143 @@ export async function waitForCommentsArea(page, timeoutMs = 15000) {
   while (Date.now() - startedAt < timeoutMs) {
     for (const loc of candidates) {
       if (await loc.isVisible().catch(() => false)) {
-        return;
+        return success({ pageState: 'comments-visible' });
       }
     }
     await wait(300);
   }
-  console.warn('[comment-page] 评论列表区域未在超时内出现，继续尝试扫描...');
+
+  const pageText = await page.evaluate(() => (document.body?.innerText || '').slice(0, 300));
+  if (pageText.includes('暂无评论') || pageText.includes('还没有评论') || pageText.includes('快来看看')) {
+    return success({ pageState: 'empty-comments' });
+  }
+
+  const hasAnyReply = await page.evaluate(() => {
+    const all = document.querySelectorAll('*');
+    for (const el of all) {
+      if ((el.innerText || '').trim() === '回复' && el.offsetHeight > 0) return true;
+    }
+    return false;
+  });
+
+  if (hasAnyReply) {
+    return success({ pageState: 'comments-visible' });
+  }
+
+  return blocking(
+    RESULT_CODES.COMMENT_LIST_NOT_FOUND,
+    '未找到评论列表。可能未选择作品或页面结构发生变化。',
+    { data: { pagePreview: pageText } }
+  );
 }
 
-/**
- * Extract comments from the current page.
- * Returns an array of comment objects: { username, content, timeText, likeCount, hasReplied }
- *
- * Strategy: Find all elements containing "回复" text (action buttons), then walk up to parent containers
- * to extract username, date, content. This is more robust than class-based selectors.
- */
+export async function scrollToLoadAllComments(page, { maxRound = 50, loadTimeout = 5000 } = {}) {
+  console.log('[comment-page] 滚动加载所有评论...');
+
+  let prevCount = 0;
+  let noNewRounds = 0;
+
+  for (let round = 0; round < maxRound; round++) {
+    const scrolled = await page.evaluate(() => {
+      const all = document.querySelectorAll('*');
+
+      for (const el of all) {
+        const rect = el.getBoundingClientRect();
+        if (rect.x < 200 || rect.height < 300 || rect.width < 400) continue;
+        const style = window.getComputedStyle(el);
+        const hasOverflow = style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflow === 'auto';
+        if (!hasOverflow) continue;
+        if (el.scrollHeight <= el.clientHeight) continue;
+        el.scrollTop = el.scrollHeight;
+        return 'overflow-container';
+      }
+
+      for (const el of all) {
+        const rect = el.getBoundingClientRect();
+        if (rect.x < 200 || rect.height < 300 || rect.width < 400) continue;
+        if (el.scrollHeight > el.clientHeight + 50) {
+          el.scrollTop = el.scrollHeight;
+          return 'large-container';
+        }
+      }
+
+      return null;
+    });
+
+    if (!scrolled) {
+      await page.mouse.wheel(0, 500);
+    }
+
+    const currentCount = await page.evaluate(() => {
+      let count = 0;
+      const all = document.querySelectorAll('*');
+      for (const el of all) {
+        if ((el.innerText || '').trim() === '回复' && el.offsetHeight > 0) count++;
+      }
+      return count;
+    });
+
+    if (currentCount > prevCount) {
+      console.log(`[comment-page]   已加载: ${currentCount} 条评论`);
+      prevCount = currentCount;
+      noNewRounds = 0;
+      await page.waitForTimeout(200);
+      continue;
+    }
+
+    try {
+      await page.waitForFunction(
+        (prev) => {
+          let count = 0;
+          const all = document.querySelectorAll('*');
+          for (const el of all) {
+            if ((el.innerText || '').trim() === '回复' && el.offsetHeight > 0) count++;
+          }
+          return count > prev;
+        },
+        currentCount,
+        { timeout: loadTimeout, polling: 500 }
+      );
+      noNewRounds = 0;
+    } catch {
+      noNewRounds++;
+      if (noNewRounds >= 4) {
+        console.log(`[comment-page]   连续 ${noNewRounds} 轮无新内容，停止滚动，共 ${prevCount} 条`);
+        break;
+      }
+    }
+
+    await page.waitForTimeout(200);
+  }
+
+  const finalCount = await page.evaluate(() => {
+    let count = 0;
+    const all = document.querySelectorAll('*');
+    for (const el of all) {
+      if ((el.innerText || '').trim() === '回复' && el.offsetHeight > 0) count++;
+    }
+    return count;
+  });
+
+  return success({ loadedCount: finalCount });
+}
+
 export async function extractComments(page) {
-  // Small wait to let React finish rendering comment list
+  // Scroll to load all comments first
+  await scrollToLoadAllComments(page);
+
   await page.waitForTimeout(1500);
 
-  return await page.evaluate(() => {
+  const comments = await page.evaluate(() => {
     const comments = [];
 
-    // Strategy: find elements whose innerText (user-visible text) is exactly "回复"
-    // Use a TreeWalker for efficiency — only check leaf-level elements
     const walker = document.createTreeWalker(
       document.body,
       NodeFilter.SHOW_ELEMENT,
       {
         acceptNode(node) {
-          // Only consider elements with no or few children (leaf/near-leaf)
           if (node.children.length > 3) return NodeFilter.FILTER_SKIP;
           const text = (node.innerText || '').trim();
-          // Match: exact "回复" or just "回复" as the only visible text
           if (text === '回复') return NodeFilter.FILTER_ACCEPT;
           return NodeFilter.FILTER_SKIP;
         }
@@ -86,7 +220,6 @@ export async function extractComments(page) {
       replyElements.push(walker.currentNode);
     }
 
-    // Fallback: if TreeWalker found nothing, try broader search
     if (replyElements.length === 0) {
       const all = document.querySelectorAll('button, span, div, a');
       for (const el of all) {
@@ -100,11 +233,9 @@ export async function extractComments(page) {
 
     for (const replyBtn of replyElements) {
       try {
-        // Walk up to find the comment container — look for a container with ≥3 children
         let container = replyBtn.parentElement;
         for (let i = 0; i < 8 && container && container !== document.body; i++) {
           if (container.children.length >= 3) {
-            // Check that this container has reasonable amount of text (not the whole page)
             const textLen = (container.innerText || '').length;
             if (textLen > 10 && textLen < 2000) break;
           }
@@ -116,7 +247,6 @@ export async function extractComments(page) {
         const lines = containerText.split('\n').map(l => l.trim()).filter(Boolean);
         if (lines.length < 3) continue;
 
-        // Heuristic parsing of the comment container text
         const username = lines.find(l =>
           l.length > 1 && l.length < 40 &&
           !/^\d+$/.test(l) &&
@@ -124,7 +254,6 @@ export async function extractComments(page) {
           !l.startsWith('http')
         ) || '';
 
-        // Skip duplicates
         if (username && seenUsernames.has(username)) continue;
         if (username) seenUsernames.add(username);
 
@@ -132,7 +261,6 @@ export async function extractComments(page) {
           /\d{2}:\d{2}/.test(l) || /\d+月\d+日/.test(l) || /^\d+[秒分时天]前/.test(l)
         ) || '';
 
-        // Content: longest non-action, non-username, non-time line
         const content = lines.find(l =>
           l.length > 2 &&
           l !== username && l !== timeText &&
@@ -156,23 +284,18 @@ export async function extractComments(page) {
 
     return comments;
   });
+
+  return success({ comments, count: comments.length });
 }
 
-/**
- * Get the currently selected work title from the page.
- * Strategy: find text between "选择作品" and "发布于" in the main content area,
- * not in the sidebar navigation.
- */
 export async function getSelectedWorkTitle(page) {
   try {
-    return await page.evaluate(() => {
-      // Find the "选择作品" button to anchor our search in the main content area
+    const title = await page.evaluate(() => {
       const selectBtn = Array.from(document.querySelectorAll('button, span, div')).find(el =>
         (el.innerText || '').trim() === '选择作品'
       );
       if (!selectBtn) return '';
 
-      // Walk up to find the content panel (exclude sidebar)
       let panel = selectBtn.parentElement;
       for (let i = 0; i < 6 && panel; i++) {
         const text = panel.innerText || '';
@@ -181,17 +304,13 @@ export async function getSelectedWorkTitle(page) {
       }
       if (!panel) return '';
 
-      // Now search within this panel for lines that look like a work title
       const lines = (panel.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
 
-      // Find the "发布于" line's index
       const publishIdx = lines.findIndex(l => l.startsWith('发布于'));
       if (publishIdx < 0) return '';
 
-      // The work title is the line just before "发布于" (or a few lines up)
       for (let i = publishIdx - 1; i >= 0; i--) {
         const line = lines[i];
-        // Work title characteristics: longer than 5 chars, not a button label, not a filter
         if (line.length > 5 &&
             !['选择作品', '评论管理', '发送', '全部评论', '全部人群', '最新发布', '未回复', '已回复'].includes(line) &&
             !line.startsWith('http')) {
@@ -201,114 +320,435 @@ export async function getSelectedWorkTitle(page) {
 
       return '';
     });
+
+    return success({ title, found: Boolean(title) });
   } catch {
-    return '';
+    return success({ title: '', found: false });
   }
 }
 
-/**
- * Find and click the "回复" button for a specific comment.
- * Returns true if the reply input appeared.
- */
 export async function openReplyBox(page, commentText) {
   try {
-    // First dump what "回复" elements exist on the page
-    const replyElements = await page.evaluate(() => {
-      const results = [];
-      const all = document.querySelectorAll('*');
-      for (const el of all) {
-        const text = (el.innerText || '').trim();
-        if (text === '回复' && el.children.length <= 2) {
-          results.push({
-            tag: el.tagName,
-            rect: el.getBoundingClientRect(),
-            visible: el.offsetHeight > 0,
-          });
+    const maxScrollRounds = 30;
+
+    for (let round = 0; round < maxScrollRounds; round++) {
+      const result = await page.evaluate((target) => {
+        // Strategy 1: Find via comment-content-text class (most precise)
+        const contentEls = document.querySelectorAll('[class*="comment-content"]');
+        for (const el of contentEls) {
+          if (el.offsetHeight === 0) continue;
+          const text = (el.innerText || '').trim();
+          if (!text.includes(target)) continue;
+
+          // Walk up max 3 levels to find operations container
+          let parent = el.parentElement;
+          for (let p = 0; p < 3 && parent && parent !== document.body; p++) {
+            // Find operations area within this parent
+            const opsEl = parent.querySelector('[class*="operations"]');
+            if (opsEl) {
+              // Find "回复" button inside operations
+              const items = opsEl.querySelectorAll('[class*="item"]');
+              for (const item of items) {
+                const itemText = (item.innerText || '').trim();
+                if (itemText === '回复' || itemText.startsWith('回复')) {
+                  el.scrollIntoView({ behavior: 'instant', block: 'center' });
+                  item.click();
+                  return { found: true, clicked: true, strategy: 'comment-content-class', matchText: text.slice(0, 60) };
+                }
+              }
+            }
+            parent = parent.parentElement;
+          }
         }
+
+        // Strategy 2: Walk up from "回复" buttons, max 3 levels (not 8!)
+        const allEl = document.querySelectorAll('*');
+        const replyBtns = [];
+        for (const el of allEl) {
+          if (el.offsetHeight === 0) continue;
+          if ((el.innerText || '').trim() !== '回复') continue;
+          if (el.children.length > 2) continue;
+          replyBtns.push(el);
+        }
+
+        for (const btn of replyBtns) {
+          // Skip buttons above the comment list (y < 150)
+          const btnRect = btn.getBoundingClientRect();
+          if (btnRect.y < 150) continue;
+
+          let container = btn.parentElement;
+          for (let level = 0; level < 3 && container && container !== document.body; level++) {
+            const ct = (container.innerText || '').trim();
+            // Only match small containers (single comment), not huge ones with many comments
+            if (ct.length > 10 && ct.length < 500 && ct.includes(target)) {
+              btn.scrollIntoView({ behavior: 'instant', block: 'center' });
+              btn.click();
+              return { found: true, clicked: true, strategy: 'reply-btn-walkup', level, matchText: ct.slice(0, 60) };
+            }
+            container = container.parentElement;
+          }
+        }
+
+        return { found: false, replyBtnCount: replyBtns.length };
+      }, commentText);
+
+      if (result.found && result.clicked) {
+        console.log(`[comment-page] 找到目标评论(${result.strategy})，匹配: "${result.matchText}"`);
+        await page.waitForTimeout(1500);
+        return success({ clicked: true, strategy: result.strategy });
       }
-      return results;
-    });
-    
-    console.log(`[reply] 页面上找到 ${replyElements.length} 个"回复"元素`);
-    
-    if (replyElements.length === 0) {
-      // Maybe no work selected — check
-      const pageText = await page.evaluate(() => {
-        const body = document.body;
-        return (body?.innerText || '').slice(0, 300);
+
+      if (round === maxScrollRounds - 1) {
+        const preview = commentText.slice(0, 40);
+        return blocking(
+          RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND,
+          `滚动${maxScrollRounds}轮后未找到匹配 "${preview}" 的评论 (${result.replyBtnCount || 0}个回复按钮)`,
+          { data: { preview, rounds: maxScrollRounds } }
+        );
+      }
+
+      // Scroll down to load more comments
+      await page.evaluate(() => {
+        const all = document.querySelectorAll('*');
+        for (const el of all) {
+          const rect = el.getBoundingClientRect();
+          if (rect.x < 200 || rect.height < 300 || rect.width < 400) continue;
+          const style = window.getComputedStyle(el);
+          const hasOverflow = style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflow === 'auto';
+          if (!hasOverflow) continue;
+          if (el.scrollHeight <= el.clientHeight) continue;
+          el.scrollTop = el.scrollHeight;
+          return;
+        }
+        window.scrollBy(0, 500);
       });
-      console.log(`[reply] 页面文本预览: "${pageText.replace(/\n/g, ' | ')}"`);
-      return false;
+      await page.waitForTimeout(1000);
     }
 
-    const searchText = commentText.slice(0, 30);
-
-    // Find all "回复" elements using Playwright locator
-    const replyLocators = page.locator('text="回复"');
-    const count = await replyLocators.count();
-
-    for (let i = 0; i < count; i++) {
-      const btn = replyLocators.nth(i);
-      
-      // Walk up to find the comment container
-      let container = btn.locator('..');
-      for (let level = 0; level < 6; level++) {
-        const text = await container.innerText({ timeout: 1000 }).catch(() => '');
-        if (text.includes(searchText)) {
-          console.log(`[reply] 在第 ${level+1} 层找到匹配，点击回复...`);
-          await btn.click({ timeout: 5000 });
-          await page.waitForTimeout(1000);
-          return true;
-        }
-        container = container.locator('..');
-      }
-    }
-
-    console.log(`[reply] 遍历了 ${count} 个"回复"，未匹配 "${searchText}"`);
-    // Print first "回复" container text for debug
-    if (count > 0) {
-      const firstBtn = replyLocators.first();
-      let c = firstBtn.locator('..');
-      for (let l = 0; l < 6; l++) {
-        const t = await c.innerText({ timeout: 500 }).catch(() => '');
-        if (t.length > 10) {
-          console.log(`[reply] 第一个回复容器(层${l+1}): "${t.slice(0, 100)}"`);
-          break;
-        }
-        c = c.locator('..');
-      }
-    }
-    return false;
+    return blocking(RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND, '滚动查找超时', { data: {} });
   } catch (err) {
-    console.log('[reply] openReplyBox 异常:', err.message);
-    return false;
+    console.log('[comment-page] openReplyBox 异常:', err.message);
+    return blocking(
+      RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND,
+      `打开回复框异常: ${err.message}`,
+      { data: { error: err.message } }
+    );
   }
 }
 
-/**
- * Type reply text into the reply input box and click send.
- * Returns true if send appeared to succeed.
- */
-export async function sendReply(page, replyText) {
+export async function fillReplyText(page, replyText) {
   try {
-    // Find the reply textarea/input (appears after clicking "回复")
-    const input = page.locator('textarea, [contenteditable="true"], [role="textbox"]').first();
-    await input.waitFor({ state: 'visible', timeout: 5000 });
-    await input.click();
-    await page.waitForTimeout(300);
-    await input.fill(replyText);
-    await page.waitForTimeout(500);
+    const filled = await page.evaluate((text) => {
+      // Find the reply-content container with a visible input
+      const replyContainers = document.querySelectorAll('[class*="reply-content"]');
+      for (const container of replyContainers) {
+        if (container.offsetHeight === 0) continue;
+        const input = container.querySelector('[contenteditable="true"], textarea, [role="textbox"]');
+        if (!input || input.offsetHeight === 0) continue;
 
-    // Click the "发送" or "回复" send button
-    const sendBtn = page.locator('button:has-text("发送"), button:has-text("回复"), span:has-text("发送")').first();
-    await sendBtn.click({ timeout: 5000 });
-    await page.waitForTimeout(2000);
+        input.focus();
+        input.innerText = text;
+        input.value = text;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        return { filled: true, method: 'reply-content-class' };
+      }
 
-    return true;
+      // Fallback: any visible contenteditable
+      const inputs = document.querySelectorAll('[contenteditable="true"], textarea, [role="textbox"]');
+      for (const el of inputs) {
+        if (el.offsetHeight === 0) continue;
+        el.focus();
+        el.innerText = text;
+        el.value = text;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return { filled: true, method: 'fallback-visible' };
+      }
+
+      return { filled: false };
+    }, replyText);
+
+    if (filled && filled.filled) {
+      console.log(`[comment-page] 填写回复文字成功 (${filled.method})`);
+      await page.waitForTimeout(800);
+      return success({ filled: true, method: filled.method });
+    }
+
+    return blocking(
+      RESULT_CODES.COMMENT_INPUT_NOT_FOUND,
+      '找不到回复输入框',
+      { data: {} }
+    );
   } catch (err) {
-    console.log(`[reply] 发送失败: ${err.message}`);
-    return false;
+    return blocking(
+      RESULT_CODES.COMMENT_INPUT_NOT_FOUND,
+      `填写回复文字异常: ${err.message}`,
+      { data: { error: err.message } }
+    );
   }
+}
+
+export async function clickSendReply(page) {
+  try {
+    async function findAndClick() {
+      return await page.evaluate(() => {
+        // Find the reply-content container with a filled input
+        const replyContainers = document.querySelectorAll('[class*="reply-content"]');
+        for (const container of replyContainers) {
+          if (container.offsetHeight === 0) continue;
+          const input = container.querySelector('[contenteditable="true"], textarea, [role="textbox"]');
+          if (!input || input.offsetHeight === 0) continue;
+          const inputText = (input.innerText || input.value || '').trim();
+          if (inputText.length === 0) continue;
+
+          // Find 发送 button within this container (prefer <button>)
+          const buttons = container.querySelectorAll('button');
+          for (const btn of buttons) {
+            if (btn.offsetHeight === 0) continue;
+            if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') continue;
+            if ((btn.innerText || '').trim() === '发送') {
+              btn.click();
+              return { ok: true, method: 'reply-content-class' };
+            }
+          }
+
+          // Fallback: any element with text 发送 inside the container
+          const allInContainer = container.querySelectorAll('*');
+          for (const el of allInContainer) {
+            if (el.offsetHeight === 0) continue;
+            if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+            if ((el.innerText || '').trim() !== '发送') continue;
+            el.click();
+            return { ok: true, method: 'reply-content-class-fallback' };
+          }
+        }
+
+        return { ok: false, reason: 'no-send-btn-in-reply-container' };
+      });
+    }
+
+    let result = await findAndClick();
+    if (!result.ok && result.reason === 'no-send-btn-in-reply-container') {
+      console.log('[comment-page] 发送按钮未找到或未启用，等待2秒重试...');
+      await page.waitForTimeout(2000);
+      result = await findAndClick();
+    }
+
+    if (!result.ok) {
+      return blocking(
+        RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND,
+        `找不到发送按钮: ${result.reason}`,
+        { data: { reason: result.reason } }
+      );
+    }
+
+    console.log(`[comment-page] 点击发送按钮成功 (${result.method})`);
+    await page.waitForTimeout(2000);
+    return success({ clicked: true });
+  } catch (err) {
+    return blocking(
+      RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND,
+      `找不到发送按钮或点击失败: ${err.message}`,
+      { data: { error: err.message } }
+    );
+  }
+}
+
+export async function confirmReplySucceeded(page) {
+  try {
+    const confirmed = await page.evaluate(() => {
+      const text = document.body?.innerText || '';
+
+      if (text.includes('已回复') || text.includes('回复成功') || text.includes('评论成功')) {
+        return { confirmed: true, signal: 'success-indicator' };
+      }
+
+      const inputs = document.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"]');
+      const visibleInputs = Array.from(inputs).filter(el => el.offsetHeight > 0);
+
+      if (visibleInputs.length === 0) {
+        return { confirmed: true, signal: 'input-hidden' };
+      }
+
+      const hasContent = visibleInputs.some(el => (el.value || el.innerText || '').trim().length > 0);
+      if (!hasContent) {
+        return { confirmed: true, signal: 'input-cleared' };
+      }
+
+      return { confirmed: false, signal: 'input-still-has-content', count: visibleInputs.length };
+    });
+
+    if (confirmed.confirmed) {
+      return success({ signal: confirmed.signal });
+    }
+
+    return blocking(
+      RESULT_CODES.COMMENT_SEND_UNCONFIRMED,
+      '点击发送后无法确认回复成功，请检查页面状态',
+      { data: { signal: confirmed.signal } }
+    );
+  } catch (err) {
+    return blocking(
+      RESULT_CODES.COMMENT_SEND_UNCONFIRMED,
+      `确认回复异常: ${err.message}`,
+      { data: { error: err.message } }
+    );
+  }
+}
+
+export async function sendReply(page, replyText) {
+  const fillResult = await fillReplyText(page, replyText);
+  if (!fillResult.ok) return fillResult;
+
+  const clickResult = await clickSendReply(page);
+  if (!clickResult.ok) return clickResult;
+
+  const confirmResult = await confirmReplySucceeded(page);
+  return confirmResult;
+}
+
+export async function selectWorkByTitle(page, workTitle) {
+  if (!workTitle) {
+    return blocking(RESULT_CODES.BLOCKED, '作品标题为空，无法选择作品', { data: { step: 'select-work' } });
+  }
+
+  const shortTitle = workTitle.slice(0, 30);
+  console.log(`[comment-page] 目标作品: "${workTitle.slice(0, 50)}"`);
+
+  // Check current selection
+  const currentResult = await getSelectedWorkTitle(page);
+  if (currentResult.ok && currentResult.data.found) {
+    const currentTitle = currentResult.data.title;
+    if (currentTitle.includes(shortTitle) || shortTitle.includes(currentTitle)) {
+      console.log(`[comment-page] 当前已是目标作品: "${currentTitle.slice(0, 50)}"`);
+      return success({ alreadySelected: true, title: currentTitle });
+    }
+    console.log(`[comment-page] 当前作品: "${currentTitle.slice(0, 50)}"，需要切换`);
+  }
+
+  // Step 1: Click "选择作品" button to open work selector panel
+  console.log('[comment-page] 点击"选择作品"按钮...');
+  try {
+    // Try multiple strategies to find and click the button
+    const selectBtn = page.locator('button:has-text("选择作品"), [role="button"]:has-text("选择作品")').first();
+    await selectBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await selectBtn.click({ timeout: 5000 });
+    console.log('[comment-page] 已点击"选择作品"');
+  } catch (err) {
+    // Fallback: try clicking any element containing "选择作品"
+    try {
+      const fallback = page.locator('text="选择作品"').first();
+      await fallback.click({ timeout: 3000 });
+      console.log('[comment-page] 通过 text locator 点击"选择作品"');
+    } catch {
+      return blocking(
+        RESULT_CODES.BLOCKED,
+        '找不到"选择作品"按钮，请确认在评论管理页',
+        { data: { step: 'click-select-work' } }
+      );
+    }
+  }
+
+  // Step 2: Wait for the work selector panel to appear
+  console.log('[comment-page] 等待作品选择面板出现...');
+  await page.waitForTimeout(2000);
+
+  // Step 3: Find and click the target work in the panel
+  const clickResult = await page.evaluate((target) => {
+    // Look for elements whose text matches the target title.
+    // Prefer elements that are in popup/overlay/modal panels (higher z-index or position).
+    const candidates = [];
+    const all = document.querySelectorAll('*');
+
+    for (const el of all) {
+      if (el.offsetHeight === 0 || el.offsetWidth === 0) continue;
+      const text = (el.innerText || '').trim();
+      if (text.length < 3 || text.length > 300) continue;
+      if (el.children.length > 10) continue;
+      if (!text.includes(target)) continue;
+
+      const rect = el.getBoundingClientRect();
+      // Skip elements in the main header area (y < 60)
+      if (rect.y < 60 && rect.height < 40) continue;
+
+      // Skip elements that are too small (likely icons)
+      if (rect.width < 50 && rect.height < 20) continue;
+
+      const style = window.getComputedStyle(el);
+      const zIndex = parseInt(style.zIndex) || 0;
+
+      candidates.push({
+        text: text.slice(0, 80),
+        tag: el.tagName,
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        w: Math.round(rect.width),
+        h: Math.round(rect.height),
+        z: zIndex,
+        hasPointer: style.cursor === 'pointer',
+      });
+    }
+
+    if (candidates.length === 0) return { found: false, total: 0 };
+
+    // Sort by: prefer clickable elements with higher z-index (popup panels)
+    candidates.sort((a, b) => {
+      if (a.hasPointer !== b.hasPointer) return b.hasPointer ? 1 : -1;
+      if (a.z !== b.z) return b.z - a.z;
+      return a.y - b.y;
+    });
+
+    // Try clicking candidates
+    for (const c of candidates.slice(0, 8)) {
+      const el = document.elementFromPoint(c.x + Math.min(c.w / 2, 80), c.y + Math.min(c.h / 2, 15));
+      if (!el) continue;
+
+      // Walk up to find clickable container
+      let clickTarget = el;
+      for (let i = 0; i < 8 && clickTarget; i++) {
+        const ct = (clickTarget.innerText || '').trim();
+        if (ct.includes(target) && ct.length > 3 && ct.length < 500) {
+          clickTarget.click();
+          return { found: true, text: ct.slice(0, 60), tag: clickTarget.tagName, total: candidates.length };
+        }
+        clickTarget = clickTarget.parentElement;
+      }
+    }
+
+    return { found: false, total: candidates.length, sample: candidates.slice(0, 3) };
+  }, shortTitle);
+
+  console.log(`[comment-page] 面板扫描结果: ${JSON.stringify(clickResult)}`);
+
+  if (clickResult.found) {
+    console.log(`[comment-page] 已点击目标作品: ${clickResult.tag} "${clickResult.text}"`);
+    await page.waitForTimeout(3000);
+
+    // Verify
+    const verifyResult = await getSelectedWorkTitle(page);
+    if (verifyResult.ok && verifyResult.data.found) {
+      console.log(`[comment-page] 切换后作品: "${verifyResult.data.title.slice(0, 50)}"`);
+      return success({ switchedTo: verifyResult.data.title });
+    }
+
+    return success({ switchedTo: 'clicked' });
+  }
+
+  // Failed: dump visible text around the click area for debugging
+  if (clickResult.total > 0) {
+    console.log(`[comment-page] 面板中找到 ${clickResult.total} 个文本匹配候选，但点击失败`);
+    console.log(`[comment-page] 候选样本: ${JSON.stringify(clickResult.sample)}`);
+  } else {
+    const pageText = await page.evaluate(() => (document.body?.innerText || '').slice(0, 800));
+    console.log(`[comment-page] 面板中未找到匹配。页面文本:\n${pageText.replace(/\n/g, ' | ')}`);
+  }
+
+  return blocking(
+    RESULT_CODES.BLOCKED,
+    `在作品选择面板中未找到 "${workTitle.slice(0, 40)}"。请手动点击选择作品，然后点目标作品，再按 r 重试`,
+    { data: { step: 'select-work', targetTitle: workTitle, candidatesFound: clickResult.total } }
+  );
 }
 
 export { COMMENT_PAGE_URL };

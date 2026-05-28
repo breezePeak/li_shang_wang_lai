@@ -1,10 +1,8 @@
-/**
- * comments:plan — 从 DB 读取新评论，生成回复计划 JSON
- */
 import { getEvents } from '../db/interaction-repository.mjs';
 import { createPlan } from '../db/plan-repository.mjs';
 import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
 import { runMigrations } from '../db/migrations.mjs';
+import { getDb } from '../db/database.mjs';
 import path from 'path';
 
 function parseArgs(argv) {
@@ -30,32 +28,44 @@ async function main() {
 
   console.log(`[plan] 找到 ${comments.length} 条待回复评论`);
 
-  const items = comments.map(c => ({
-    eventId: c.id,
-    actorName: c.actor_name,
-    workTitle: c.my_work_title || '',
-    commentText: c.comment_text || '',
-    commentTime: c.event_time_text || '',
-    replyText: '',
-    approved: false,
-  }));
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  const items = comments.map(c => {
+    db.prepare("UPDATE interaction_events SET status = 'planned', updated_at = ? WHERE id = ? AND status = 'new'")
+      .run(now, c.id);
+
+    return {
+      eventId: c.id,
+      actorName: c.actor_name,
+      workTitle: c.my_work_title || '',
+      commentText: c.comment_text || '',
+      commentTime: c.event_time_text || '',
+      replyText: '',
+      approved: false,
+    };
+  });
 
   const plan = {
     mode: args.mode,
     planType: 'comment_reply',
-    createdAt: new Date().toISOString(),
+    createdAt: now,
     items,
   };
 
   const planDir = path.resolve('data', 'plans');
   ensureDir(planDir);
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const timestamp = now.replace(/[:.]/g, '-').slice(0, 19);
   const outPath = args.out || path.join(planDir, `comments-plan-${timestamp}.json`);
   writeJSON(outPath, plan);
   console.log(`[plan] 计划已保存: ${outPath}`);
 
   const planId = createPlan({ planType: 'comment_reply', mode: args.mode, payload: plan });
   console.log(`[plan] DB 计划 ID: ${planId}`);
+
+  // Write planId back into the file so execute knows which plan this belongs to
+  plan.planId = planId;
+  writeJSON(outPath, plan);
 
   console.log('');
   console.log('===== 预览 =====');

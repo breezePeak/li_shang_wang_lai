@@ -1,4 +1,5 @@
-// 点赞回访工作流编排 — 占位
-export function placeholder() {
-  throw new Error('Not implemented yet');
-}
+// Like reciprocity workflow
+// plan-likes.mjs generates the plan, execute-reciprocal-likes.mjs executes it.
+// This file provides shared logic if needed.
+
+export { isReciprocateable, isBlocked } from '../domain/relationship-policy.mjs';
