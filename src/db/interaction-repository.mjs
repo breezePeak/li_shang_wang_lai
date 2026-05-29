@@ -4,17 +4,17 @@ import { getDb } from './database.mjs';
  * Insert a new interaction event. Returns the inserted row id.
  * Skips if fingerprint already exists (duplicate).
  */
-export function insertEvent({ eventType, actorName, actorProfileKey, actorProfileUrl, relation, myWorkTitle, commentText, eventTimeText, fingerprint, rawPayloadJson }) {
+export function insertEvent({ eventType, actorName, actorProfileKey, actorProfileUrl, relation, myWorkTitle, commentText, eventTimeText, fingerprint, rawPayloadJson, platformEventId, status = 'new' }) {
   const db = getDb();
   const scannedAt = new Date().toISOString();
 
   const stmt = db.prepare(`
     INSERT OR IGNORE INTO interaction_events
-      (event_type, actor_name, actor_profile_key, actor_profile_url, relation, my_work_title, comment_text, event_time_text, fingerprint, raw_payload_json, scanned_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (event_type, actor_name, actor_profile_key, actor_profile_url, relation, my_work_title, comment_text, event_time_text, platform_event_id, fingerprint, raw_payload_json, scanned_at, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const result = stmt.run(eventType, actorName, actorProfileKey || null, actorProfileUrl || null, relation || 'unknown', myWorkTitle || null, commentText || null, eventTimeText || null, fingerprint, rawPayloadJson || null, scannedAt);
+  const result = stmt.run(eventType, actorName, actorProfileKey || null, actorProfileUrl || null, relation || 'unknown', myWorkTitle || null, commentText || null, eventTimeText || null, platformEventId || null, fingerprint, rawPayloadJson || null, scannedAt, status);
   return result.changes > 0 ? result.lastInsertRowid : null;
 }
 
@@ -67,4 +67,29 @@ export function updateEventStatus(eventId, status) {
 export function getEvent(eventId) {
   const db = getDb();
   return db.prepare('SELECT * FROM interaction_events WHERE id = ?').get(eventId);
+}
+
+/**
+ * Update an existing event from unstable to stable:
+ * change status, timeText, and fingerprint when relative time becomes stable.
+ */
+export function promoteUnstableEvent(id, newFingerprint, newTimeText, newPlatformEventId) {
+  const db = getDb();
+  const result = db.prepare(`
+    UPDATE interaction_events
+    SET status = 'new', event_time_text = ?, fingerprint = ?,
+        platform_event_id = COALESCE(platform_event_id, ?),
+        updated_at = ?
+    WHERE id = ? AND status = 'unstable'
+  `).run(newTimeText || null, newFingerprint, newPlatformEventId || null, new Date().toISOString(), id);
+  return result.changes > 0;
+}
+
+/**
+ * Find an unstable event matching the given fingerprint (without time).
+ */
+export function findUnstableEvent(fingerprint) {
+  const db = getDb();
+  return db.prepare("SELECT * FROM interaction_events WHERE fingerprint = ? AND status = 'unstable'")
+    .get(fingerprint);
 }

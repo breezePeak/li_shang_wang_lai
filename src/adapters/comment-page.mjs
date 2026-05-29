@@ -304,6 +304,29 @@ export async function extractComments(page) {
 
         const hasReplied = lines.some(l => l === '已回复');
 
+        // Extract stable platform comment ID from DOM
+        // Look in container and nearby ancestors for data-comment-id / data-id / id attributes
+        let platformEventId = '';
+        const idAttrs = ['data-comment-id', 'data-commentid', 'data-id', 'data-item-id'];
+        for (const attr of idAttrs) {
+          let el = container;
+          for (let i = 0; i < 5 && el && el !== document.body; i++) {
+            const val = el.getAttribute(attr);
+            if (val && val.trim()) { platformEventId = val.trim(); break; }
+            el = el.parentElement;
+          }
+          if (platformEventId) break;
+        }
+        // Also check for <a href> containing comment/answer patterns
+        if (!platformEventId) {
+          const commentLink = container.querySelector('a[href*="comment"], a[href*="answer"], a[href*="reply"]');
+          if (commentLink) {
+            const href = commentLink.getAttribute('href') || '';
+            const match = href.match(/(?:comment|answer|reply)[=/](\d+)/i);
+            if (match) platformEventId = 'href-' + match[1];
+          }
+        }
+
         comments.push({
           username: username.slice(0, 50),
           content: content.slice(0, 500),
@@ -311,6 +334,7 @@ export async function extractComments(page) {
           likeCount: 0,
           hasReplied,
           rawContainerText,
+          platformEventId,
         });
       } catch {
         // skip malformed entries

@@ -5,8 +5,8 @@ import {
   extractComments,
   getSelectedWorkTitle,
 } from '../adapters/comment-page.mjs';
-import { commentFingerprint } from '../domain/event-fingerprint.mjs';
-import { insertEvent, getEventCounts } from '../db/interaction-repository.mjs';
+import { commentFingerprint, commentInitialStatus } from '../domain/event-fingerprint.mjs';
+import { insertEvent, getEventCounts, findUnstableEvent, promoteUnstableEvent } from '../db/interaction-repository.mjs';
 import logger from '../utils/logger.mjs';
 import { runMigrations } from '../db/migrations.mjs';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
@@ -52,6 +52,33 @@ async function runCommentScan(page, run) {
         continue;
       }
       const fp = commentFingerprint(c, workTitle);
+      const status = commentInitialStatus(c.timeText);
+
+      // If relative-time comment, check if unstable event exists → may be the same
+      // comment scanned again with drifted time.
+      const existing = status === 'unstable' ? findUnstableEvent(fp) : null;
+
+      if (existing) {
+        // Same comment re-scanned with drifted relative time — skip
+        duplicateCount++;
+        continue;
+      }
+
+      // For stable-time comments, check if there's a matching unstable event
+      // that should be promoted (relative time → stable time transition).
+      if (status === 'new') {
+        const unstableFp = commentFingerprint({ ...c, timeText: '' }, workTitle);
+        const unstableExisting = findUnstableEvent(unstableFp);
+        if (unstableExisting) {
+          const promoted = promoteUnstableEvent(unstableExisting.id, fp, c.timeText, c.platformEventId || null);
+          if (promoted) {
+            newCount++;
+            console.error(`[scan]   ^ ${c.username}: ${c.content.slice(0, 40)} (promoted from unstable)`);
+            continue;
+          }
+        }
+      }
+
       const id = insertEvent({
         eventType: 'comment',
         actorName: c.username,
@@ -59,12 +86,15 @@ async function runCommentScan(page, run) {
         myWorkTitle: workTitle,
         commentText: c.content,
         eventTimeText: c.timeText,
+        platformEventId: c.platformEventId || null,
         fingerprint: fp,
+        status,
       });
 
       if (id) {
         newCount++;
-        console.error(`[scan]   + ${c.username}: ${c.content.slice(0, 40)}...`);
+        const tag = status === 'unstable' ? ' [unstable]' : '';
+        console.error(`[scan]   + ${c.username}: ${c.content.slice(0, 40)}...${tag}`);
       } else {
         duplicateCount++;
       }

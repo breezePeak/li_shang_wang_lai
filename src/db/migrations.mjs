@@ -28,6 +28,7 @@ export function runMigrations(dbPath = DB_PATH) {
       my_work_title TEXT,
       comment_text TEXT,
       event_time_text TEXT,
+      platform_event_id TEXT,
       fingerprint TEXT NOT NULL UNIQUE,
       raw_payload_json TEXT,
       status TEXT NOT NULL DEFAULT 'new',

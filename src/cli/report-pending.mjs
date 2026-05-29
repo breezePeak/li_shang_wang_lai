@@ -1,4 +1,4 @@
-﻿// 待处理互动报告命令
+// 待处理互动报告命令
 // 查询本地数据库中未完成的互动事件（非 succeeded/blocked），按评论和点赞分类输出。
 // 同时关联 actions 表返回最近的动作状态。
 // Skill 可调用此命令获取待处理摘要，无需解析计划文件或直接查库。
@@ -44,12 +44,20 @@ function main() {
   const db = getDb();
 
   try {
-    // Query events that are NOT succeeded or blocked (i.e., still pending)
+    // Query events that are pending (new or planned, NOT unstable/blocked/succeeded)
     const pendingEvents = db.prepare(`
       SELECT * FROM interaction_events
-      WHERE status NOT IN ('succeeded', 'blocked')
+      WHERE status IN ('new', 'planned')
       ORDER BY created_at DESC
       LIMIT 200
+    `).all();
+
+    // Query unstable events separately
+    const unstableEvents = db.prepare(`
+      SELECT * FROM interaction_events
+      WHERE status = 'unstable'
+      ORDER BY created_at DESC
+      LIMIT 50
     `).all();
 
     // Query blocked events with reasons — use parameterized SQL
@@ -131,14 +139,25 @@ function main() {
     }
 
     if (args.json) {
+      const unstableItems = unstableEvents.map(ev => ({
+        eventId: ev.id,
+        actorName: ev.actor_name,
+        eventType: ev.event_type,
+        myWorkTitle: ev.my_work_title || '',
+        commentText: ev.comment_text || '',
+        eventTimeText: ev.event_time_text || '',
+        reason: '相对时间尚未稳定，等待重新扫描',
+      }));
       printJsonResult('actions:pending', {
         comments,
         likes,
         blocked: blockedItems,
+        unstableItems,
       }, {
         pendingComments: comments.length,
         pendingLikes: likes.length,
         blocked: blockedItems.length,
+        unstable: unstableItems.length,
       });
     } else {
       // Human-readable output

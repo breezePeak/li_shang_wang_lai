@@ -1,4 +1,4 @@
-﻿// 评论回复准备命令
+// 评论回复准备命令
 // 根据 eventId 和 replyText 创建一条待审批的回复动作。
 // 替代旧的手工编辑 JSON 计划文件中 replyText 和 approved 字段的方式。
 //
@@ -49,6 +49,10 @@ function main() {
   if (ev.event_type !== 'comment') {
     printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
       `事件 ID=${args.eventId} 不是评论类型`, { recoverable: false }); return;
+  }
+  if (ev.status === 'unstable') {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      `事件 ID=${args.eventId} 的相对时间尚未稳定，无法创建回复。请在时间稳定后重新扫描。`, { recoverable: false }); return;
   }
 
   // Check duplicate — already succeeded
