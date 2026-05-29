@@ -220,6 +220,7 @@ export async function extractComments(page) {
   const comments = await page.evaluate(() => {
     const comments = [];
     const RELATIVE_TIME_RE = /^(刚刚|\d+秒前|\d+分钟前|\d+小时前|\d+天前)$/;
+         const DAY_RELATIVE_RE = /^(昨天|前天)\s*\d{1,2}:\d{2}$/;
 
     const walker = document.createTreeWalker(
       document.body,
@@ -274,7 +275,8 @@ export async function extractComments(page) {
         const timeText = lines.find(l =>
           /\d{2}:\d{2}/.test(l) || /\d+月\d+日/.test(l) ||
           /^\d+[秒分时天]前/.test(l) || /^\d+(分钟|小时|天)前/.test(l) ||
-          l === '刚刚'
+          l === '刚刚' ||
+          /^(昨天|前天)\s*\d{1,2}:\d{2}$/.test(l)
         ) || '';
 
         // Prefer extracting content from a dedicated comment-body DOM node.
@@ -292,7 +294,8 @@ export async function extractComments(page) {
             !['回复', '删除', '举报', '已回复'].includes(l) &&
             !l.startsWith('http') &&
             !/^\d+$/.test(l) &&
-            !RELATIVE_TIME_RE.test(l.trim())
+            !RELATIVE_TIME_RE.test(l.trim()) &&
+            !DAY_RELATIVE_RE.test(l.trim())
           );
           content = contentCandidates.length > 0
             ? contentCandidates.reduce((a, b) => a.length >= b.length ? a : b)
@@ -389,9 +392,11 @@ export async function getSelectedWorkTitle(page) {
 // Relative time patterns that drift between scan and execute (e.g. "3分钟前" → "5分钟前").
 // Must NOT be used as strong match conditions because the value changes over time.
 const RELATIVE_TIME_RE = /^(刚刚|\d+秒前|\d+分钟前|\d+小时前|\d+天前)$/;
+const DAY_RELATIVE_RE = /^(昨天|前天)\s*\d{1,2}:\d{2}$/;
 
 function isRelativeTime(text) {
-  return RELATIVE_TIME_RE.test((text || '').trim());
+  const t = (text || '').trim();
+  return RELATIVE_TIME_RE.test(t) || DAY_RELATIVE_RE.test(t);
 }
 
 export async function openReplyBox(page, match) {

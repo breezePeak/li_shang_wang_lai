@@ -5,7 +5,7 @@ import {
   extractComments,
   getSelectedWorkTitle,
 } from '../adapters/comment-page.mjs';
-import { commentFingerprint, commentInitialStatus } from '../domain/event-fingerprint.mjs';
+import { commentFingerprint, commentInitialStatus, normalizeTimeText } from '../domain/event-fingerprint.mjs';
 import { insertEvent, getEventCounts, findUnstableEvent, promoteUnstableEvent } from '../db/interaction-repository.mjs';
 import logger from '../utils/logger.mjs';
 import { runMigrations } from '../db/migrations.mjs';
@@ -51,8 +51,10 @@ async function runCommentScan(page, run) {
         parseFailedCount++;
         continue;
       }
-      const fp = commentFingerprint(c, workTitle);
-      const status = commentInitialStatus(c.timeText);
+      // Normalize "昨天/前天 HH:MM" → absolute date before dedup
+      const normalizedTimeText = normalizeTimeText(c.timeText);
+      const fp = commentFingerprint({ ...c, timeText: normalizedTimeText }, workTitle);
+      const status = commentInitialStatus(normalizedTimeText);
 
       // If relative-time comment, check if unstable event exists → may be the same
       // comment scanned again with drifted time.
@@ -70,7 +72,7 @@ async function runCommentScan(page, run) {
         const unstableFp = commentFingerprint({ ...c, timeText: '' }, workTitle);
         const unstableExisting = findUnstableEvent(unstableFp);
         if (unstableExisting) {
-          const promoted = promoteUnstableEvent(unstableExisting.id, fp, c.timeText, c.platformEventId || null);
+          const promoted = promoteUnstableEvent(unstableExisting.id, fp, normalizedTimeText, c.platformEventId || null);
           if (promoted) {
             newCount++;
             console.error(`[scan]   ^ ${c.username}: ${c.content.slice(0, 40)} (promoted from unstable)`);
@@ -85,7 +87,7 @@ async function runCommentScan(page, run) {
         relation: 'unknown',
         myWorkTitle: workTitle,
         commentText: c.content,
-        eventTimeText: c.timeText,
+        eventTimeText: normalizedTimeText,
         platformEventId: c.platformEventId || null,
         fingerprint: fp,
         status,

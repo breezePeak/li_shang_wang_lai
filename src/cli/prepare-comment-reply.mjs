@@ -5,12 +5,16 @@
 // 用法：
 //   npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>"
 //   npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" --json
-//   npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" --decision reply --risk-level low --decision-reason "<理由>" --json
+//   npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" \
+//       --decision reply --risk-level low --relevance relevant \
+//       --decision-reason "<理由>" --work-context-id <作品ID> --json
 //
 // 决策约束：
 //   --decision 仅接受 reply / manual_review / ignore
 //   --risk-level 仅接受 low / medium / high
+//   --relevance 仅接受 relevant / neutral / irrelevant
 //   仅 decision=reply + riskLevel=low 可以创建动作
+//   decision=reply 时 relevance=irrelevant 必须阻断
 
 import { runMigrations } from '../db/migrations.mjs';
 import { createAction, hasSucceededAction, hasActiveAction } from '../db/action-repository.mjs';
@@ -19,7 +23,7 @@ import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 
 function parseArgs(argv) {
-  const args = { eventId: null, replyText: null, json: false, decision: null, riskLevel: null, decisionReason: '' };
+  const args = { eventId: null, replyText: null, json: false, decision: null, riskLevel: null, decisionReason: '', relevance: null, workContextId: '' };
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--event-id' && argv[i + 1]) args.eventId = parseInt(argv[++i]);
@@ -28,6 +32,8 @@ function parseArgs(argv) {
     if (argv[i] === '--decision' && argv[i + 1]) args.decision = argv[++i];
     if (argv[i] === '--risk-level' && argv[i + 1]) args.riskLevel = argv[++i];
     if (argv[i] === '--decision-reason' && argv[i + 1]) args.decisionReason = argv[++i];
+    if (argv[i] === '--relevance' && argv[i + 1]) args.relevance = argv[++i];
+    if (argv[i] === '--work-context-id' && argv[i + 1]) args.workContextId = argv[++i];
   }
 
   return args;
@@ -85,6 +91,17 @@ function main() {
       `风险等级为 "${args.riskLevel}"，不能创建回复动作。仅 riskLevel=low 可进入候选流程。`, { recoverable: false }); return;
   }
 
+  // Relevance gate: decision=reply + relevance=irrelevant must block
+  const validRelevance = ['relevant', 'neutral', 'irrelevant'];
+  if (!args.relevance || !validRelevance.includes(args.relevance)) {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      `缺少 --relevance 参数或值无效（允许: ${validRelevance.join(', ')}）。请先完成相关性判断。`, { recoverable: false }); return;
+  }
+  if (args.decision === 'reply' && args.relevance === 'irrelevant') {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      `相关性为 "irrelevant" 但决策为 "reply"，这不符合安全策略。irrelevant 评论不应自动回复。`, { recoverable: false }); return;
+  }
+
   // Check duplicate — already succeeded
   if (hasSucceededAction(args.eventId, 'reply_comment')) {
     printJsonError('comments:prepare', RESULT_CODES.DUPLICATE_ACTION,
@@ -101,7 +118,9 @@ function main() {
   const auditInfo = {
     decision: args.decision,
     riskLevel: args.riskLevel,
+    relevance: args.relevance || 'neutral',
     decisionReason: args.decisionReason || '',
+    workContextId: args.workContextId || '',
     policyVersion: '0.1.0',
   };
   const actionId = createAction({
@@ -125,6 +144,8 @@ function main() {
     status: 'prepared',
     decision: args.decision,
     riskLevel: args.riskLevel,
+    relevance: args.relevance || 'neutral',
+    workContextId: args.workContextId || '',
     decisionReason: args.decisionReason || '',
   };
 

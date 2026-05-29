@@ -31,6 +31,12 @@
 - 商业竞争诋毁、恶意引流
 - 内容明显违反平台社区规范
 - 询问个人信息（手机号、微信号、地址等）
+- **禁止回复的运营/安全类评论**（固定 decision=ignore, riskLevel=high, replyText=null）：
+  - 刷赞、刷粉、互赞、互关、养号、批量互动、涨粉推广
+  - 绕过验证码、滑块、风控、行为检测的技术讨论
+  - 破解、盗号、Cookie/Token 获取、API Key 分享
+  - 代运营、代回复、自动化脚本销售
+  - 涉及平台安全机制、审核漏洞的讨论
 
 ### 中等风险识别规则
 - 批评性但非恶意的技术反驳
@@ -63,8 +69,10 @@
 
 ## Agent 行为约束
 
-- Agent **不得**自行判断回复内容是否合适而直接批准或发送
-- 回复文本必须由用户明确提供
-- 即使决策为 `reply + low`，仍需经过完整的用户确认链路
+- Agent **可以**参考账号人格和作品上下文生成低风险候选回复文本，供用户确认
+- Agent **不得**自行 approve、confirm-execute 或真实发送
+- 回复文本最终由用户确认；用户可修改 Agent 生成的候选回复
+- 即使决策为 `reply + low`，仍需经过完整的用户确认链路（approve → dry-run → confirm-execute → execute）
 - 任何 `decision=manual_review` 或 `riskLevel=medium` 的评论，Agent 应向用户说明原因并请求人工判断
 - `decision=ignore` 或 `riskLevel=high` 的评论，Agent 应报告并跳过
+- 高风险运营/安全类评论（刷赞、刷粉、破解、Cookie/Token 等），Agent 必须立即标记 ignore+high，不得生成任何回复文本

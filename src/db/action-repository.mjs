@@ -45,24 +45,46 @@ export function confirmExecuteAction(actionId) {
 
 /**
  * 更新动作状态（dry_run_ok, succeeded, blocked, skipped 等）
+ * Preserves existing evidence_json when none provided; merges runtime audit fields.
  */
 export function updateActionStatus(actionId, status, reason = null, evidenceJson = null, screenshotPath = null) {
   const db = getDb();
   const now = new Date().toISOString();
 
-  // Only set executed_at on succeeded — it means "actually sent"
+  // Merge with existing evidence_json: preserve policy audit fields
+  let mergedEvidence = evidenceJson;
+  if (!evidenceJson) {
+    // Keep existing evidence_json to preserve policyDecision audit trail
+    const existing = db.prepare('SELECT evidence_json FROM actions WHERE id = ?').get(actionId);
+    if (existing && existing.evidence_json) {
+      mergedEvidence = existing.evidence_json;
+    }
+  } else {
+    // Merge new runtime fields into existing policy audit
+    const existing = db.prepare('SELECT evidence_json FROM actions WHERE id = ?').get(actionId);
+    if (existing && existing.evidence_json) {
+      try {
+        const oldAudit = JSON.parse(existing.evidence_json);
+        const newAudit = JSON.parse(evidenceJson);
+        mergedEvidence = JSON.stringify({ ...oldAudit, ...newAudit });
+      } catch {
+        mergedEvidence = evidenceJson;
+      }
+    }
+  }
+
   if (status === 'succeeded') {
     const result = db.prepare(`
       UPDATE actions SET status = ?, reason = ?, evidence_json = ?, screenshot_path = ?, executed_at = ?
       WHERE id = ?
-    `).run(status, reason, evidenceJson, screenshotPath, now, actionId);
+    `).run(status, reason, mergedEvidence, screenshotPath, now, actionId);
     return result.changes > 0;
   }
 
   const result = db.prepare(`
     UPDATE actions SET status = ?, reason = ?, evidence_json = ?, screenshot_path = ?
     WHERE id = ?
-  `).run(status, reason, evidenceJson, screenshotPath, actionId);
+  `).run(status, reason, mergedEvidence, screenshotPath, actionId);
   return result.changes > 0;
 }
 

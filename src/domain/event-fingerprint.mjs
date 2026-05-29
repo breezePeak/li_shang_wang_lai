@@ -1,9 +1,32 @@
 import crypto from 'crypto';
 
+// Relative time patterns: values that change between scans.
+// "昨天HH:mm" / "前天HH:mm" also drift (absolute date shifts daily).
 const RELATIVE_TIME_RE = /^(刚刚|\d+秒前|\d+分钟前|\d+小时前|\d+天前)$/;
+const DAY_RELATIVE_RE = /^(昨天|前天)\s*\d{1,2}:\d{2}$/;
 
 function isRelativeTime(text) {
-  return RELATIVE_TIME_RE.test((text || '').trim());
+  const t = (text || '').trim();
+  return RELATIVE_TIME_RE.test(t) || DAY_RELATIVE_RE.test(t);
+}
+
+/**
+ * Normalize relative day times to absolute dates.
+ * "昨天 23:44" → "2026-05-28 23:44"
+ * Non-relative times return as-is.
+ */
+export function normalizeTimeText(timeText) {
+  const t = (timeText || '').trim();
+  if (!DAY_RELATIVE_RE.test(t)) return t;
+  const now = new Date();
+  const match = t.match(/^(昨天|前天)/);
+  if (!match) return t;
+  const days = match[1] === '昨天' ? 1 : 2;
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
+  const pad = n => String(n).padStart(2, '0');
+  const datePart = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const timePart = t.replace(/^(昨天|前天)\s*/, '');
+  return `${datePart} ${timePart}`;
 }
 
 export { isRelativeTime, RELATIVE_TIME_RE };
