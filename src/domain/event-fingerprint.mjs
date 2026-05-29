@@ -84,18 +84,16 @@ export function notificationFingerprint({ eventType, username, actorProfileKey, 
 
   if ((workId || '').trim()) {
     const actorId = (actorProfileKey || '').trim() || (actorProfileUrl || '').trim() || (username || '').trim();
-    // For comments, include commentText so same user + same work + different comment = different event
     const textSummary = ((content || '').trim()).slice(0, 200);
     const raw = [eventType, actorId, workId.trim(), (action || '').trim(), textSummary]
       .map(s => s || '').join('||');
     return {
       fp: crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16),
-      confidence: 'strong',
+      confidence: 'medium',
     };
   }
 
   // No stable identifier — fallback with weak confidence.
-  // Exclude rawText (contains relative time) entirely; use only content.
   const actorId = (actorProfileKey || '').trim() || (actorProfileUrl || '').trim() || (username || '').trim();
   const actionPart = (action || '').trim();
   const textSummary = ((content || '').trim()).slice(0, 200);

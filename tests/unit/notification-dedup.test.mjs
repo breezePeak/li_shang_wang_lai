@@ -35,8 +35,8 @@ describe('notificationFingerprint — dedup safety (production module)', () => {
       workId: 'video-67890',
     });
     expect(r1.fp).not.toBe(r2.fp);
-    expect(r1.confidence).toBe('strong');
-    expect(r2.confidence).toBe('strong');
+    expect(r1.confidence).toBe('medium');
+    expect(r2.confidence).toBe('medium');
   });
 
   it('same friend comments same text on two different works → different fingerprints', () => {
@@ -49,8 +49,8 @@ describe('notificationFingerprint — dedup safety (production module)', () => {
       workId: 'video-222',
     });
     expect(r1.fp).not.toBe(r2.fp);
-    expect(r1.confidence).toBe('strong');
-    expect(r2.confidence).toBe('strong');
+    expect(r1.confidence).toBe('medium');
+    expect(r2.confidence).toBe('medium');
   });
 
   it('platformEventId takes highest priority', () => {
@@ -68,12 +68,12 @@ describe('notificationFingerprint — dedup safety (production module)', () => {
     expect(r1.confidence).toBe('strong');
   });
 
-  it('workId gives strong confidence', () => {
+  it('workId gives medium confidence', () => {
     const r = notificationFingerprint({
       eventType: 'comment', username: '张三', content: '你好',
       workId: 'video-456',
     });
-    expect(r.confidence).toBe('strong');
+    expect(r.confidence).toBe('medium');
   });
 
   it('no stable ID → weak confidence', () => {
@@ -115,7 +115,7 @@ describe('notificationFingerprint — dedup safety (production module)', () => {
     });
     // Different content → different fingerprints
     expect(r1.fp).not.toBe(r2.fp);
-    expect(r1.confidence).toBe('strong');
+    expect(r1.confidence).toBe('medium');
   });
 
   it('same friend, same work, same text, different platformEventId → two different events', () => {
