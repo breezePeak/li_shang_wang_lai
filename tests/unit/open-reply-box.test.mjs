@@ -170,4 +170,36 @@ describe('openReplyBox - adapter level', () => {
     expect(result).toBeDefined();
     expect(typeof result.ok).toBe('boolean');
   });
+
+  it('should click only the comment with matching eventTimeText when same actor has same text at different times', async () => {
+    await setComments([
+      { author: '张三', time: '05-28 10:00', text: '求教程' },
+      { author: '张三', time: '05-29 10:00', text: '求教程' },
+    ]);
+
+    const result = await openReplyBox(page, {
+      commentText: '求教程',
+      actorName: '张三',
+      eventTimeText: '05-29 10:00',
+    });
+
+    // Must succeed — only the second comment (05-29) should be clicked,
+    // NOT the first one (05-28) that appears earlier in DOM.
+    expect(result.ok).toBe(true);
+  });
+
+  it('should block when eventTimeText is provided but no matching comment has that time', async () => {
+    await setComments([
+      { author: '张三', time: '05-28 10:00', text: '求教程' },
+    ]);
+
+    const result = await openReplyBox(page, {
+      commentText: '求教程',
+      actorName: '张三',
+      eventTimeText: '05-29 10:00',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('COMMENT_MATCH_NOT_UNIQUE');
+  }, 40000);
 });

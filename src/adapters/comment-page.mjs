@@ -422,13 +422,14 @@ export async function openReplyBox(page, match) {
           }
         }
 
-        // Filter by eventTimeText if provided
-        if (eventTimeText && filtered.length > 1) {
+        // Filter by eventTimeText — mandatory when provided, regardless of candidate count.
+        // Prevents mis-clicking when same actor has same commentText at different times.
+        if (eventTimeText) {
           const timeFiltered = filtered.filter(c => c.containerText.includes(eventTimeText));
-          if (timeFiltered.length > 0) {
-            filtered = timeFiltered;
+          if (timeFiltered.length === 0) {
+            return { found: false, reason: 'time_not_verified', total: filtered.length };
           }
-          // If time filtering eliminates all, stick with actor-filtered set
+          filtered = timeFiltered;
         }
 
         // Uniqueness check
@@ -466,8 +467,15 @@ export async function openReplyBox(page, match) {
         );
       }
 
-      // Not found — scroll and try again
+      // Not found or time not verified — scroll and try again
       if (round === maxScrollRounds - 1) {
+        if (result.reason === 'time_not_verified') {
+          return blocking(
+            RESULT_CODES.COMMENT_MATCH_NOT_UNIQUE,
+            `已找到匹配 "${target.slice(0, 40)}" + "${actorName}" 的评论，但均不含目标时间 "${eventTimeText}"，无法确认目标。`,
+            { recoverable: true, data: { matchCount: result.total, target: target.slice(0, 60), actorName, eventTimeText } }
+          );
+        }
         return blocking(
           RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND,
           `滚动${maxScrollRounds}轮后未找到匹配 "${target.slice(0, 40)}" 的评论`,
