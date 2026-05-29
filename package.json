@@ -21,6 +21,7 @@
     "interactions:inspect": "node ./src/cli/inspect-interactions.mjs",
     "db:init": "node ./src/db/migrations.mjs",
     "interactions:scan": "node ./src/cli/scan-interactions.mjs",
+    "actions:pending": "node ./src/cli/report-pending.mjs",
     "comments:plan": "node ./src/cli/plan-comments.mjs",
     "comments:reply": "node ./src/cli/execute-comment-replies.mjs",
     "likes:plan": "node ./src/cli/plan-likes.mjs",
