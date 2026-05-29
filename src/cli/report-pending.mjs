@@ -52,13 +52,18 @@ function main() {
       LIMIT 200
     `).all();
 
-    // Query unstable events separately
-    const unstableEvents = db.prepare(`
+    // Query unstable events separately (filtered by --type if provided)
+    let unstableQuery = `
       SELECT * FROM interaction_events
       WHERE status = 'unstable'
-      ORDER BY created_at DESC
-      LIMIT 50
-    `).all();
+    `;
+    const unstableParams = [];
+    if (filterType) {
+      unstableQuery += ' AND event_type = ?';
+      unstableParams.push(filterType);
+    }
+    unstableQuery += ' ORDER BY created_at DESC LIMIT 50';
+    const unstableEvents = db.prepare(unstableQuery).all(...unstableParams);
 
     // Query blocked events with reasons — use parameterized SQL
     let blockedQuery = `

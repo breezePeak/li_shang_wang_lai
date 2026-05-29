@@ -67,15 +67,15 @@ export function runMigrations(dbPath = DB_PATH) {
     );
   `);
 
-  // Migrate existing databases that may have old constraint sets
-  const checkResult = db.prepare(
+  // Migrate existing databases that may have old constraint sets or missing columns
+  const checkActions = db.prepare(
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='actions'"
   ).get();
 
-  const sql = checkResult ? (checkResult.sql || '') : '';
-  const needsMigration = !sql.includes("execute_confirmed");
+  const actionsSql = checkActions ? (checkActions.sql || '') : '';
+  const needsActionsMigration = !actionsSql.includes("execute_confirmed");
 
-  if (needsMigration && sql) {
+  if (needsActionsMigration && actionsSql) {
     console.error('[db:init] 检测到旧版 actions 表约束，重建中...');
 
     db.exec(`
@@ -102,6 +102,24 @@ export function runMigrations(dbPath = DB_PATH) {
     `);
     console.error('[db:init] actions 表已重建');
   }
+
+  // Migrate: add platform_event_id column to existing interaction_events tables
+  const checkPlatformId = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='interaction_events'"
+  ).get();
+  const eventsSql = checkPlatformId ? (checkPlatformId.sql || '') : '';
+  if (eventsSql && !eventsSql.includes('platform_event_id')) {
+    console.error('[db:init] 旧版 interaction_events 缺少 platform_event_id 列，迁移中...');
+    db.exec('ALTER TABLE interaction_events ADD COLUMN platform_event_id TEXT');
+    console.error('[db:init] platform_event_id 列已添加');
+  }
+
+  // Index for platform_event_id lookups
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_event_platform_event_id
+    ON interaction_events(platform_event_id)
+    WHERE platform_event_id IS NOT NULL;
+  `);
 
   // unique index for like_work dedup
   db.exec(`

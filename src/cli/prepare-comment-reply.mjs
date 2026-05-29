@@ -5,6 +5,12 @@
 // 用法：
 //   npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>"
 //   npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" --json
+//   npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" --decision reply --risk-level low --decision-reason "<理由>" --json
+//
+// 决策约束：
+//   --decision 仅接受 reply / manual_review / ignore
+//   --risk-level 仅接受 low / medium / high
+//   仅 decision=reply + riskLevel=low 可以创建动作
 
 import { runMigrations } from '../db/migrations.mjs';
 import { createAction, hasSucceededAction, hasActiveAction } from '../db/action-repository.mjs';
@@ -13,12 +19,15 @@ import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 
 function parseArgs(argv) {
-  const args = { eventId: null, replyText: null, json: false };
+  const args = { eventId: null, replyText: null, json: false, decision: null, riskLevel: null, decisionReason: '' };
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--event-id' && argv[i + 1]) args.eventId = parseInt(argv[++i]);
     if (argv[i] === '--reply-text' && argv[i + 1]) args.replyText = argv[++i];
     if (argv[i] === '--json') args.json = true;
+    if (argv[i] === '--decision' && argv[i + 1]) args.decision = argv[++i];
+    if (argv[i] === '--risk-level' && argv[i + 1]) args.riskLevel = argv[++i];
+    if (argv[i] === '--decision-reason' && argv[i + 1]) args.decisionReason = argv[++i];
   }
 
   return args;
@@ -55,6 +64,27 @@ function main() {
       `事件 ID=${args.eventId} 的相对时间尚未稳定，无法创建回复。请在时间稳定后重新扫描。`, { recoverable: false }); return;
   }
 
+  // Decision policy validation
+  const validDecisions = ['reply', 'manual_review', 'ignore'];
+  const validRiskLevels = ['low', 'medium', 'high'];
+
+  if (!args.decision || !validDecisions.includes(args.decision)) {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      `缺少 --decision 参数或值无效（允许: ${validDecisions.join(', ')}）。请先完成评论决策。`, { recoverable: false }); return;
+  }
+  if (!args.riskLevel || !validRiskLevels.includes(args.riskLevel)) {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      `缺少 --risk-level 参数或值无效（允许: ${validRiskLevels.join(', ')}）。请先完成风险分级。`, { recoverable: false }); return;
+  }
+  if (args.decision !== 'reply') {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      `决策为 "${args.decision}"，不能创建回复动作。仅 decision=reply 可进入候选流程。`, { recoverable: false }); return;
+  }
+  if (args.riskLevel !== 'low') {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      `风险等级为 "${args.riskLevel}"，不能创建回复动作。仅 riskLevel=low 可进入候选流程。`, { recoverable: false }); return;
+  }
+
   // Check duplicate — already succeeded
   if (hasSucceededAction(args.eventId, 'reply_comment')) {
     printJsonError('comments:prepare', RESULT_CODES.DUPLICATE_ACTION,
@@ -67,12 +97,19 @@ function main() {
       '该评论已有活跃的回复动作（prepared/approved/dry_run_ok），不能重复创建。请先完成或取消已有动作。', { recoverable: false }); return;
   }
 
-  // Create action
+  // Create action with audit trail in evidence_json
+  const auditInfo = {
+    decision: args.decision,
+    riskLevel: args.riskLevel,
+    decisionReason: args.decisionReason || '',
+    policyVersion: '0.1.0',
+  };
   const actionId = createAction({
     eventId: args.eventId,
     actionType: 'reply_comment',
     targetTitle: ev.my_work_title || '',
     actionText: args.replyText.trim(),
+    evidenceJson: JSON.stringify(auditInfo),
   });
 
   // P0-3: Sync event status to 'planned'
@@ -86,6 +123,9 @@ function main() {
     commentText: ev.comment_text,
     replyText: args.replyText.trim(),
     status: 'prepared',
+    decision: args.decision,
+    riskLevel: args.riskLevel,
+    decisionReason: args.decisionReason || '',
   };
 
   if (args.json) {
@@ -96,6 +136,7 @@ function main() {
     console.log(`  作品: ${ev.my_work_title}`);
     console.log(`  原评论: ${ev.comment_text}`);
     console.log(`  回复文本: ${args.replyText}`);
+    console.log(`  决策: ${args.decision} | 风险: ${args.riskLevel}`);
     console.log(`  状态: prepared（待审批）`);
   }
 }

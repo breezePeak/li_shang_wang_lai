@@ -67,21 +67,21 @@ npm run actions:pending -- --json                     # 查看全部待处理互
 
 ### 评论回复流程（需逐步确认）
 
+> **步骤 0：评论决策（前置必选）**
+>
+> 在 `comments:prepare` 之前，Agent 必须先对照 `prompts/comment-reply-policy.md` 中的账号人格、
+> 相关性判断和风险分类规则，逐条输出决策结果。
+>
+> 仅当 `decision=reply` 且 `riskLevel=low` 时，才能继续进入候选流程。
+> `decision=manual_review` 或 `riskLevel=medium/high` 的评论，Agent 必须向用户说明原因并请求人工判断，
+> 不得自动跳过或隐藏。
+
 ```bash
-# 步骤 1：创建回复候选
-npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" --json
+# 步骤 0：评论决策（Agent 内部完成，可参考 prompts/comment-reply-policy.md）
+# 输出格式参见 prompts/comment-reply-policy.md → "决策输出格式"
 
-# 步骤 2：用户确认回复内容后，审批该动作
-npm run actions:approve -- --action-id <id> --json
-
-# 步骤 3：dry-run 定位目标评论（不发送）
-npm run comments:execute -- --action-id <id> --dry-run --json
-
-# 步骤 4：dry-run 成功后，用户再次确认"发送"
-npm run actions:confirm-execute -- --action-id <id> --json
-
-# 步骤 5：真实发送（最多 1 条，要求状态为 execute_confirmed）
-npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
+# 步骤 1：创建回复候选（需携带决策结果）
+npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" --decision reply --risk-level low --decision-reason "<理由>" --json
 ```
 
 > **旧命令兼容**：`npm run comments:plan` 和 `npm run comments:reply -- --plan <文件>` 仍可用，但不作为 Skill 主流程推荐。

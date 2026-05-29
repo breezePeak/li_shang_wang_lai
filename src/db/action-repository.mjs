@@ -7,12 +7,12 @@ import { getDb } from './database.mjs';
  * 创建一条待处理动作（状态为 'prepared'）
  * @returns {number} actionId
  */
-export function createAction({ eventId, actionType, targetTitle, targetUrl = null, actionText = '' }) {
+export function createAction({ eventId, actionType, targetTitle, targetUrl = null, actionText = '', evidenceJson = null }) {
   const db = getDb();
   const result = db.prepare(`
-    INSERT INTO actions (event_id, action_type, target_title, target_url, action_text, status, created_at)
-    VALUES (?, ?, ?, ?, ?, 'prepared', ?)
-  `).run(eventId, actionType, targetTitle, targetUrl, actionText, new Date().toISOString());
+    INSERT INTO actions (event_id, action_type, target_title, target_url, action_text, evidence_json, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'prepared', ?)
+  `).run(eventId, actionType, targetTitle, targetUrl, actionText, evidenceJson, new Date().toISOString());
 
   return result.lastInsertRowid;
 }
