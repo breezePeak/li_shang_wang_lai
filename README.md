@@ -179,13 +179,17 @@ dom-fragment.html
 
 ---
 
-### 第三步：扫描评论
+### 第三步：扫描评论和点赞
+
+所有新互动统一从通知中心采集：
 
 ```bash
-npm run interactions:scan -- --type comment
+npm run interactions:scan -- --type all --json    # 采集评论和点赞
+npm run interactions:scan -- --type comment --json # 只采集评论
+npm run interactions:scan -- --type like --json    # 只采集点赞
 ```
 
-程序会尝试打开评论管理页面，提取当前可见评论，并将新事件写入本地数据库。
+程序打开通知中心，滚动加载通知列表，逐批解析并去重入库。评论管理页面**不再**承担发现新评论的职责，仅用于后续定位原评论并执行回复。
 
 ---
 

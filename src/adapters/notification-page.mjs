@@ -236,6 +236,27 @@ export async function extractNotificationsBatch(page) {
         }
       }
 
+      // Extract work URL / workId from notification item links
+      let workUrl = '', workId = '', platformEventId = '';
+      const allLinks = itemEl.querySelectorAll('a[href]');
+      for (const link of allLinks) {
+        const href = link.getAttribute('href') || '';
+        // Video/work link patterns
+        const videoMatch = href.match(/\/video\/(\d+)/);
+        if (videoMatch) { workUrl = href; workId = 'video-' + videoMatch[1]; break; }
+        const noteMatch = href.match(/\/note\/(\d+)/);
+        if (noteMatch) { workUrl = href; workId = 'note-' + noteMatch[1]; break; }
+      }
+      // Also try data attributes on the notification item
+      if (!workId) {
+        platformEventId = itemEl.getAttribute('data-notification-id') ||
+          itemEl.getAttribute('data-id') || '';
+        if (!platformEventId) {
+          const parentWithId = itemEl.closest('[data-notification-id], [data-id]');
+          if (parentWithId) platformEventId = parentWithId.getAttribute('data-notification-id') || parentWithId.getAttribute('data-id') || '';
+        }
+      }
+
       const itemData = {
         username: username.slice(0, 50),
         relation, eventType, action,
@@ -244,6 +265,9 @@ export async function extractNotificationsBatch(page) {
         rawText: text.slice(0, 500),
         actorProfileUrl, actorProfileKey,
         profileResolveMethod,
+        workUrl,
+        workId,
+        platformEventId,
       };
       itemData.notificationItemKey = generateItemKey(itemData);
       items.push(itemData);

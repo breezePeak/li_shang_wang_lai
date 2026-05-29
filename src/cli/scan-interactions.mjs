@@ -144,11 +144,11 @@ async function runNotificationScan(page, run, type) {
   let totalCommentCount = 0;
   let totalDuplicateCount = 0;
   let totalEnrichedCount = 0;
-  let totalExtracted = 0;
   let totalProfileResolved = 0;
   let totalProfileUnresolved = 0;
   let scrollRounds = 0;
   const maxScrolls = 20;
+  const allEvents = [];
 
   console.error('[scan] 通知面板已打开，开始逐批采集...');
 
@@ -187,17 +187,17 @@ async function runNotificationScan(page, run, type) {
         if (n.actorProfileUrl) batchProfileResolved++;
         else batchProfileUnresolved++;
 
-        const fp = notificationFingerprint({
+        const { fp, confidence } = notificationFingerprint({
           eventType: n.eventType,
           username: n.username,
           actorProfileKey: n.actorProfileKey,
           actorProfileUrl: n.actorProfileUrl,
           action: n.action,
           content: n.eventType === 'comment' ? n.content : null,
-          timeText: n.timeText,
           rawText: n.rawText,
           notificationItemKey: n.notificationItemKey,
           platformEventId: n.platformEventId || null,
+          workId: n.workId || null,
         });
 
         const id = insertEvent({
@@ -224,6 +224,16 @@ async function runNotificationScan(page, run, type) {
           else batchCommentCount++;
           const tag = n.actorProfileUrl ? '' : ' [no-profile]';
           console.error(`[scan]   + ${n.username} [${n.relation}] ${n.action} ${n.timeText}${tag}`);
+          allEvents.push({
+            eventId: id,
+            eventType: n.eventType,
+            actorName: n.username,
+            actorProfileUrl: n.actorProfileUrl || null,
+            relation: n.relation,
+            profileResolutionStatus,
+            dbAction: 'inserted',
+            dedupConfidence: confidence,
+          });
         } else {
           const enriched = enrichEvent({
             fingerprint: fp,
@@ -239,8 +249,28 @@ async function runNotificationScan(page, run, type) {
           if (enriched) {
             batchEnrichedCount++;
             console.error(`[scan]   ~ ${n.username} [${n.relation}] enriched`);
+            allEvents.push({
+              eventId: enriched,
+              eventType: n.eventType,
+              actorName: n.username,
+              actorProfileUrl: n.actorProfileUrl || null,
+              relation: n.relation,
+              profileResolutionStatus,
+              dbAction: 'enriched',
+              dedupConfidence: confidence,
+            });
           } else {
             batchDuplicateCount++;
+            allEvents.push({
+              eventId: null,
+              eventType: n.eventType,
+              actorName: n.username,
+              actorProfileUrl: n.actorProfileUrl || null,
+              relation: n.relation,
+              profileResolutionStatus,
+              dbAction: 'duplicate',
+              dedupConfidence: confidence,
+            });
           }
         }
       } catch {
@@ -252,11 +282,11 @@ async function runNotificationScan(page, run, type) {
     totalCommentCount += batchCommentCount;
     totalDuplicateCount += batchDuplicateCount;
     totalEnrichedCount += batchEnrichedCount;
-    totalExtracted += batchLikeCount + batchCommentCount;
     totalProfileResolved += batchProfileResolved;
     totalProfileUnresolved += batchProfileUnresolved;
     scrollRounds++;
     run.scanned += notifications.length;
+    run.enriched = totalEnrichedCount;
 
     console.error(`[scan]   轮次 ${scrollRounds}: +${batchLikeCount}赞 +${batchCommentCount}评论 (${batchDuplicateCount}重复, ${batchEnrichedCount}补全, ${batchProfileResolved}主页已解析)`);
 
@@ -271,6 +301,7 @@ async function runNotificationScan(page, run, type) {
     duplicateCount: totalDuplicateCount, enriched: totalEnrichedCount,
     profileResolved: totalProfileResolved, profileUnresolved: totalProfileUnresolved,
     scrollRounds,
+    events: allEvents,
     step: 'notify-scan',
   });
 }
@@ -329,11 +360,19 @@ async function main() {
 
     // --json output for agent consumption
     if (options.json) {
-      printJsonResult('interactions:scan', { counts }, {
+      // Collect events from notification scan result
+      const notifData = notifResult.data || {};
+      printJsonResult('interactions:scan', {
+        events: notifData.events || [],
+        counts,
+      }, {
         totalScanned: run.scanned,
-        totalNew: counts.reduce((s, r) => s + r.count, 0),
-        blocked: run.hadBlocked ? 1 : 0,
+        inserted: notifData.likeCount + notifData.commentCount || 0,
+        duplicates: notifData.duplicateCount || 0,
         enriched: run.enriched || 0,
+        profileResolved: notifData.profileResolved || 0,
+        profileUnresolved: notifData.profileUnresolved || 0,
+        scrollRounds: notifData.scrollRounds || 0,
         source: 'notification',
       });
     }

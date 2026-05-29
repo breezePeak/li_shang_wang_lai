@@ -100,7 +100,7 @@ export function enrichEvent({ fingerprint, actorProfileUrl, actorProfileKey, raw
   params.push(existing.id);
 
   const result = db.prepare(`UPDATE interaction_events SET ${updates.join(', ')} WHERE id = ?`).run(...params);
-  return result.changes > 0;
+  return result.changes > 0 ? existing.id : false;
 }
 export function promoteUnstableEvent(id, newFingerprint, newTimeText, newPlatformEventId) {
   const db = getDb();
