@@ -1,0 +1,95 @@
+// 评论回复准备命令
+// 根据 eventId 和 replyText 创建一条待审批的回复动作。
+// 替代旧的手工编辑 JSON 计划文件中 replyText 和 approved 字段的方式。
+//
+// 用法：
+//   npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>"
+//   npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" --json
+
+import { runMigrations } from '../db/migrations.mjs';
+import { createAction, hasSucceededAction } from '../db/action-repository.mjs';
+import { getEvents } from '../db/interaction-repository.mjs';
+import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
+import { RESULT_CODES } from '../domain/result-codes.mjs';
+
+function parseArgs(argv) {
+  const args = { eventId: null, replyText: null, json: false };
+
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--event-id' && argv[i + 1]) args.eventId = parseInt(argv[++i]);
+    if (argv[i] === '--reply-text' && argv[i + 1]) args.replyText = argv[++i];
+    if (argv[i] === '--json') args.json = true;
+  }
+
+  return args;
+}
+
+function main() {
+  runMigrations();
+
+  const args = parseArgs(process.argv.slice(2));
+
+  // Validation
+  if (!args.eventId) {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      '缺少参数 --event-id', { recoverable: false });
+    process.exit(1);
+  }
+  if (!args.replyText || args.replyText.trim().length === 0) {
+    printJsonError('comments:prepare', RESULT_CODES.EMPTY_REPLY_TEXT,
+      '回复内容不能为空，请提供 --reply-text', { recoverable: false });
+    process.exit(1);
+  }
+
+  // Check the event exists and is a comment
+  const events = getEvents({ limit: 500 });
+  const ev = events.find(e => e.id === args.eventId);
+  if (!ev) {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      `找不到事件 ID=${args.eventId}`, { recoverable: false });
+    process.exit(1);
+  }
+  if (ev.event_type !== 'comment') {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      `事件 ID=${args.eventId} 不是评论类型`, { recoverable: false });
+    process.exit(1);
+  }
+
+  // Check duplicate
+  if (hasSucceededAction(args.eventId, 'reply_comment')) {
+    printJsonError('comments:prepare', RESULT_CODES.DUPLICATE_ACTION,
+      '该评论已有成功回复记录，不能重复创建', { recoverable: false });
+    process.exit(1);
+  }
+
+  // Create action
+  const actionId = createAction({
+    eventId: args.eventId,
+    actionType: 'reply_comment',
+    targetTitle: ev.my_work_title || '',
+    actionText: args.replyText.trim(),
+  });
+
+  const result = {
+    actionId,
+    eventId: args.eventId,
+    actorName: ev.actor_name,
+    workTitle: ev.my_work_title,
+    commentText: ev.comment_text,
+    replyText: args.replyText.trim(),
+    status: 'prepared',
+  };
+
+  if (args.json) {
+    printJsonResult('comments:prepare', result, { actionId });
+  } else {
+    console.log(`[prepare] 已创建回复候选 #${actionId}`);
+    console.log(`  目标用户: ${ev.actor_name}`);
+    console.log(`  作品: ${ev.my_work_title}`);
+    console.log(`  原评论: ${ev.comment_text}`);
+    console.log(`  回复文本: ${args.replyText}`);
+    console.log(`  状态: prepared（待审批）`);
+  }
+}
+
+main();
