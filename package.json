@@ -31,6 +31,7 @@
     "likes:plan": "node ./src/cli/plan-likes.mjs",
     "likes:reciprocate": "node ./src/cli/execute-reciprocal-likes.mjs",
     "comments:classify": "node ./src/cli/classify-comment.mjs",
+    "visits:plan": "node ./src/cli/plan-visits.mjs",
     "notify:inspect": "node ./src/cli/inspect-notifications.mjs",
     "icon:profile": "node ./.sisyphus/icon-profile.mjs",
     "history": "node ./src/cli/show-history.mjs",
