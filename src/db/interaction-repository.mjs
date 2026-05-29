@@ -18,10 +18,20 @@ function _isRelationUpgrade(existingRelation, newRelation) {
   return false;
 }
 
+const CONFIDENCE_ORDER = { weak: 1, medium: 2, strong: 3 };
+
+function _isConfidenceUpgrade(existingConfidence, newConfidence) {
+  const existingLevel = CONFIDENCE_ORDER[existingConfidence] || 0;
+  const newLevel = CONFIDENCE_ORDER[newConfidence] || 0;
+  return newLevel > existingLevel;
+}
+
 function _isKeyFieldEnrichment(existing, incoming) {
   for (const { dbCol, inKey } of KEY_FIELD_MAP) {
     if (dbCol === 'relation') {
       if (_isRelationUpgrade(existing.relation, incoming.relation)) return true;
+    } else if (dbCol === 'dedup_confidence') {
+      if (incoming[inKey] && _isConfidenceUpgrade(existing[dbCol], incoming[inKey])) return true;
     } else {
       if (incoming[inKey] && !existing[dbCol]) return true;
     }
@@ -31,9 +41,12 @@ function _isKeyFieldEnrichment(existing, incoming) {
 
 /**
  * Unified upsert for notification events. Handles:
- * 1. platformEventId match → enrich or duplicate
+ * 1. platformEventId match → exact match → enrich or duplicate
  * 2. fingerprint match → enrich or duplicate
- * 3. partial match (only with platformEventId or unique workId) → enrich, ambiguous, or skip
+ * 3. partial match (only with workId) → enrich, ambiguous, or skip
+ *    — platformEventId is for exact match only (step 1); new events with
+ *      platformEventId but no workId that miss step 1 are inserted as new.
+ *    — weak events (no platformEventId and no workId) MUST NOT auto-merge.
  * 4. No match → insert
  *
  * Returns { action: 'inserted'|'enriched'|'duplicate'|'ambiguous', eventId, error? }
@@ -81,26 +94,20 @@ export function upsertNotificationEvent({
     return { action: 'enriched', eventId: byFp.id };
   }
 
-  // ---- Step 3: Partial match — ONLY when platformEventId or workId provides unique match ----
-  // Weak events (no platformEventId and no workId) MUST NOT be auto-merged by actorName+action.
-  const hasPlatformId = !!(platformEventId || '').trim();
+  // ---- Step 3: Partial match — ONLY when workId provides a unique discriminator ----
+  // platformEventId is for exact match only (Step 1); it must NOT be used to guess-match old events.
+  // New events with platformEventId but no workId that can't find exact match are inserted as new.
   const hasWorkId = !!(workId || '').trim();
 
-  if (hasPlatformId || hasWorkId) {
+  if (hasWorkId) {
     const params = [];
     let sql = 'SELECT * FROM interaction_events WHERE event_type = ?';
     params.push(eventType);
     sql += ' AND actor_name = ?';
     params.push(actorName);
     sql += ' AND (actor_profile_url IS NULL OR actor_profile_url = \'\')';
-
-    if (hasWorkId) {
-      sql += ' AND target_work_id = ?';
-      params.push(workId);
-    }
-    if (hasPlatformId) {
-      sql += ' AND platform_event_id IS NULL';
-    }
+    sql += ' AND target_work_id = ?';
+    params.push(workId);
     if (eventType === 'comment' && commentText) {
       sql += ' AND comment_text = ?';
       params.push(commentText);
@@ -184,8 +191,7 @@ function _applyEnrich(existing, { actorProfileUrl, actorProfileKey, platformEven
     updates.push('target_work_url = ?');
     params.push(targetWorkUrl);
   }
-  if ((dedupConfidence === 'strong' && existing.dedup_confidence !== 'strong') ||
-      (dedupConfidence === 'medium' && !existing.dedup_confidence)) {
+  if (dedupConfidence && _isConfidenceUpgrade(existing.dedup_confidence, dedupConfidence)) {
     updates.push('dedup_confidence = ?');
     params.push(dedupConfidence);
   }

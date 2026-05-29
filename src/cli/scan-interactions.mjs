@@ -142,6 +142,7 @@ async function runNotificationScan(page, run, type) {
 
   let totalInserted = 0;
   let totalDuplicateCount = 0;
+  let totalAmbiguousCount = 0;
   let totalEnrichedCount = 0;
   let totalProfileResolved = 0;
   let totalProfileUnresolved = 0;
@@ -149,6 +150,7 @@ async function runNotificationScan(page, run, type) {
   let scrollRounds = 0;
   const maxScrolls = 20;
   const allEvents = [];
+  const ambiguousEvents = [];
   const failedEvents = [];
 
   console.error('[scan] 通知面板已打开，开始逐批采集...');
@@ -173,6 +175,7 @@ async function runNotificationScan(page, run, type) {
     let batchInserted = 0;
     let batchEnriched = 0;
     let batchDuplicate = 0;
+    let batchAmbiguous = 0;
     let batchProfileResolved = 0;
     let batchProfileUnresolved = 0;
 
@@ -239,6 +242,9 @@ async function runNotificationScan(page, run, type) {
             actorName: n.username, actorProfileUrl: n.actorProfileUrl || null,
             relation: n.relation, profileResolutionStatus,
             dbAction: 'inserted', dedupConfidence: confidence,
+            platformEventId: n.platformEventId || null,
+            targetWorkId: n.workId || null,
+            targetWorkUrl: n.workUrl || null,
           });
         } else if (result.action === 'enriched') {
           batchEnriched++;
@@ -248,12 +254,23 @@ async function runNotificationScan(page, run, type) {
             actorName: n.username, actorProfileUrl: n.actorProfileUrl || null,
             relation: n.relation, profileResolutionStatus,
             dbAction: 'enriched', dedupConfidence: confidence,
+            platformEventId: n.platformEventId || null,
+            targetWorkId: n.workId || null,
+            targetWorkUrl: n.workUrl || null,
           });
         } else if (result.action === 'duplicate') {
           batchDuplicate++;
         } else if (result.action === 'ambiguous') {
-          batchDuplicate++;
+          batchAmbiguous++;
           console.error(`[scan]   ? ${n.username} [${n.relation}] ambiguous match`);
+          ambiguousEvents.push({
+            eventType: n.eventType,
+            actorName: n.username, actorProfileUrl: n.actorProfileUrl || null,
+            relation: n.relation,
+            platformEventId: n.platformEventId || null,
+            targetWorkId: n.workId || null,
+            error: result.error || 'ambiguous',
+          });
         }
       } catch (err) {
         parseFailedCount++;
@@ -267,6 +284,7 @@ async function runNotificationScan(page, run, type) {
 
     totalInserted += batchInserted;
     totalDuplicateCount += batchDuplicate;
+    totalAmbiguousCount += batchAmbiguous;
     totalEnrichedCount += batchEnriched;
     totalProfileResolved += batchProfileResolved;
     totalProfileUnresolved += batchProfileUnresolved;
@@ -274,21 +292,23 @@ async function runNotificationScan(page, run, type) {
     run.scanned += notifications.length;
     run.enriched = totalEnrichedCount;
 
-    console.error(`[scan]   轮次 ${scrollRounds}: +${batchInserted}条 (${batchDuplicate}重复, ${batchEnriched}补全, ${batchProfileResolved}主页解析)`);
+    console.error(`[scan]   轮次 ${scrollRounds}: +${batchInserted}条 (${batchDuplicate}重复, ${batchEnriched}补全, ${batchAmbiguous}歧义, ${batchProfileResolved}主页解析)`);
 
     if (!hasNew) break;
   }
 
   await closeNotificationPanel(page);
 
-  console.error(`[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalProfileResolved} 主页已解析 | ${totalProfileUnresolved} 主页未解析 | ${parseFailedCount} 条解析失败 | ${scrollRounds} 轮滚动`);
+  console.error(`[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalAmbiguousCount} 歧义 | ${totalProfileResolved} 主页已解析 | ${totalProfileUnresolved} 主页未解析 | ${parseFailedCount} 条解析失败 | ${scrollRounds} 轮滚动`);
   return success({
     inserted: totalInserted,
     duplicateCount: totalDuplicateCount, enriched: totalEnrichedCount,
+    ambiguousCount: totalAmbiguousCount,
     profileResolved: totalProfileResolved, profileUnresolved: totalProfileUnresolved,
     parseFailed: parseFailedCount,
     scrollRounds,
     events: allEvents,
+    ambiguousEvents,
     failedEvents,
     step: 'notify-scan',
   });
@@ -352,12 +372,14 @@ async function main() {
       printJsonResult('interactions:scan', {
         events: notifData.events || [],
         failedEvents: notifData.failedEvents || [],
+        ambiguousEvents: notifData.ambiguousEvents || [],
         counts,
       }, {
         totalScanned: run.scanned,
         inserted: notifData.inserted || 0,
         duplicates: notifData.duplicateCount || 0,
         enriched: run.enriched || 0,
+        ambiguous: notifData.ambiguousCount || 0,
         parseFailed: notifData.parseFailed || 0,
         profileResolved: notifData.profileResolved || 0,
         profileUnresolved: notifData.profileUnresolved || 0,
