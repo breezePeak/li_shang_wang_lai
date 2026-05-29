@@ -248,8 +248,6 @@ export async function extractComments(page) {
       }
     }
 
-    const seenUsernames = new Set();
-
     for (const replyBtn of replyElements) {
       try {
         let container = replyBtn.parentElement;
@@ -272,9 +270,6 @@ export async function extractComments(page) {
           !['回复', '删除', '举报', '已回复'].includes(l) &&
           !l.startsWith('http')
         ) || '';
-
-        if (username && seenUsernames.has(username)) continue;
-        if (username) seenUsernames.add(username);
 
         const timeText = lines.find(l =>
           /\d{2}:\d{2}/.test(l) || /\d+月\d+日/.test(l) ||
@@ -383,13 +378,24 @@ export async function openReplyBox(page, match) {
   // Determine if eventTimeText is relative BEFORE entering page.evaluate
   const timeIsRelative = eventTimeText ? isRelativeTime(eventTimeText) : false;
 
+  // MVP: block ALL dry-run/execute when eventTimeText is relative time.
+  // Relative time drifts (e.g. "3分钟前" → "5分钟前") making it unsafe
+  // as a match anchor. Block unconditionally — do not attempt to click.
+  if (timeIsRelative) {
+    return blocking(
+      RESULT_CODES.RELATIVE_TIME_CONFLICT,
+      `评论时间 "${eventTimeText || ''}" 是相对时间（会随时间变化），MVP 阶段禁止定位。请等待时间稳定为具体时刻后再试。`,
+      { recoverable: true, data: { target: target.slice(0, 60), actorName, eventTimeText } }
+    );
+  }
+
   try {
     const maxScrollRounds = 30;
 
     for (let round = 0; round < maxScrollRounds; round++) {
       // Single page.evaluate: collect → match → click all in one atomic operation.
       // No string-based dedup; DOM elements matched by container position.
-      const result = await page.evaluate(({ target, actorName, eventTimeText, timeIsRelative }) => {
+      const result = await page.evaluate(({ target, actorName, eventTimeText }) => {
         // Collect all comment containers that match commentText AND have a reply button.
         // NO string dedup — two identical texts on different DOM nodes are distinct candidates.
         const candidates = [];
@@ -483,9 +489,9 @@ export async function openReplyBox(page, match) {
           }
         }
 
-        // Filter by eventTimeText — only for stable (non-relative) times.
-        // timeIsRelative is computed outside evaluate and passed in.
-        if (eventTimeText && !timeIsRelative) {
+        // Filter by eventTimeText — mandatory when provided.
+        // (Relative time already blocked before reaching evaluate.)
+        if (eventTimeText) {
           const timeFiltered = filtered.filter(c => c.containerText.includes(eventTimeText));
           if (timeFiltered.length === 0) {
             return { found: false, reason: 'time_not_verified', total: filtered.length };
@@ -495,15 +501,6 @@ export async function openReplyBox(page, match) {
 
         // Uniqueness check
         if (filtered.length > 1) {
-          if (timeIsRelative) {
-            return {
-              found: false,
-              reason: 'relative_time_conflict',
-              total: filtered.length,
-              actorName,
-              eventTimeText,
-            };
-          }
           return { found: false, reason: 'not_unique', total: filtered.length };
         }
 
@@ -513,7 +510,7 @@ export async function openReplyBox(page, match) {
         chosen.replyBtn.click();
         return { found: true, clicked: true, matchText: chosen.contentText.slice(0, 60) };
 
-      }, { target, actorName, eventTimeText, timeIsRelative });
+      }, { target, actorName, eventTimeText });
 
       if (result.found && result.clicked) {
         console.error(`[comment-page] 唯一定位成功，匹配: "${result.matchText}"`);
@@ -526,16 +523,6 @@ export async function openReplyBox(page, match) {
           RESULT_CODES.COMMENT_MATCH_NOT_UNIQUE,
           `评论 "${target.slice(0, 40)}" 匹配到 ${result.total} 条候选，无法唯一定位。`,
           { recoverable: true, data: { matchCount: result.total, target: target.slice(0, 60) } }
-        );
-      }
-
-      if (result.reason === 'relative_time_conflict') {
-        return blocking(
-          RESULT_CODES.RELATIVE_TIME_CONFLICT,
-          `评论 "${target.slice(0, 40)}" 对应 ${result.total} 条候选，且时间 "${
-            eventTimeText || ''
-          }" 是相对时间（会随时间变化），无法唯一定位。请等待时间稳定后再试或人工核对该评论。`,
-          { recoverable: true, data: { matchCount: result.total, target: target.slice(0, 60), actorName, eventTimeText } }
         );
       }
 

@@ -61,9 +61,11 @@ export function parseCommonArgs(argv) {
     remaining.push(arg);
   }
 
-  // --json mode forces keepOpen=false so the command exits cleanly after output.
+  // --json mode forces keep* flags to false so the command exits cleanly.
   if (options.json) {
     options.keepOpen = false;
+    options.keepOpenOnError = false;
+    options.pauseOnError = false;
   }
 
   return { options, remaining };
@@ -139,6 +141,9 @@ export function saveRunSummary(run) {
 }
 
 export function resolveBrowserClose(run) {
+  // --json mode must always close the browser (Agent cannot interact).
+  if (run.options.json) return true;
+
   if (run.options.keepOpen) {
     run.browserKeptOpen = true;
     return false;

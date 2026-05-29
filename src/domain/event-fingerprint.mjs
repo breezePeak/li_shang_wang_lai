@@ -1,11 +1,19 @@
 import crypto from 'crypto';
 
+const RELATIVE_TIME_RE = /^(刚刚|\d+秒前|\d+分钟前|\d+小时前|\d+天前)$/;
+
+function isRelativeTime(text) {
+  return RELATIVE_TIME_RE.test((text || '').trim());
+}
+
 /**
  * Generate a deduplication fingerprint for an interaction event.
- * Hash of: eventType + actorName + targetWork + content + timeText
+ * Relative time (e.g. "3分钟前") is excluded from the fingerprint
+ * because it drifts between scans and causes false duplicates.
  */
 export function generateFingerprint(eventType, actorName, targetWork, content, timeText) {
-  const raw = [eventType, actorName, targetWork, content, timeText]
+  const timePart = isRelativeTime(timeText) ? '' : (timeText || '').trim();
+  const raw = [eventType, actorName, targetWork, content, timePart]
     .map(s => (s || '').trim())
     .join('||');
   return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
@@ -39,7 +47,8 @@ export function notificationFingerprint({ eventType, username, actorProfileKey, 
   const actionPart = (action || '').trim();
   const textSummary = ((content || rawText || '').trim()).slice(0, 200);
 
-  const raw = [eventType, actorId, actionPart, textSummary, (timeText || '').trim()]
+  const timePart = isRelativeTime(timeText) ? '' : (timeText || '').trim();
+  const raw = [eventType, actorId, actionPart, textSummary, timePart]
     .map(s => s || '')
     .join('||');
   return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);

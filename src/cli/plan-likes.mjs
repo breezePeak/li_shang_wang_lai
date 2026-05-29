@@ -170,7 +170,7 @@ async function main() {
 
   try {
     console.error('[plan-likes] 启动浏览器...');
-    const ctx = await createBrowserContext({ headless: false, enableReuse: options.keepOpen });
+    const ctx = await createBrowserContext({ headless: false, enableReuse: commonArgs.options.keepOpen });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();

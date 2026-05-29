@@ -108,38 +108,35 @@ async function main() {
     // Navigate to comment management page
     const navResult = await ensureCommentPageReady(page);
     if (!navResult.ok) {
+      run.hadBlocked = true;
       await updateActionStatus(action.actionId, 'blocked', navResult.message);
       await updateEventStatus(action.eventId, 'blocked');
       printJsonError('comments:execute', navResult.code, navResult.message, { recoverable: true }); return;
-      run.hadBlocked = true;
-      return;
     }
 
-    // P0-2: Select the work — check result, block on failure
+    // Select the work — check result, block on failure
     if (action.workTitle) {
       log(`[execute] 选择作品: ${action.workTitle}`);
       const selectResult = await selectWorkByTitle(page, action.workTitle);
 
       if (!selectResult.ok) {
+        run.hadBlocked = true;
         await updateActionStatus(action.actionId, 'blocked', selectResult.message);
         await updateEventStatus(action.eventId, 'blocked');
         printJsonError('comments:execute', selectResult.code, selectResult.message, { recoverable: true }); return;
-        run.hadBlocked = true;
-        return;
       }
     }
 
     // Wait for comments area
     const areaResult = await waitForCommentsArea(page);
     if (!areaResult.ok) {
+      run.hadBlocked = true;
       await updateActionStatus(action.actionId, 'blocked', areaResult.message);
       await updateEventStatus(action.eventId, 'blocked');
       printJsonError('comments:execute', areaResult.code, areaResult.message, { recoverable: true }); return;
-      run.hadBlocked = true;
-      return;
     }
 
-    // P0-1 FIX: openReplyBox receives multi-field match object for unique identification
+    // openReplyBox receives multi-field match object for unique identification
     log(`[execute] 定位原评论: "${action.commentText.slice(0, 40)}" (${action.actorName})`);
     const openResult = await openReplyBox(page, {
       commentText: action.commentText,
@@ -148,11 +145,10 @@ async function main() {
     });
 
     if (!openResult.ok) {
+      run.hadBlocked = true;
       await updateActionStatus(action.actionId, 'blocked', openResult.message);
       await updateEventStatus(action.eventId, 'blocked');
       printJsonError('comments:execute', openResult.code, openResult.message, { recoverable: true }); return;
-      run.hadBlocked = true;
-      return;
     }
 
     if (isDryRun) {
@@ -187,14 +183,15 @@ async function main() {
         }, { executed: 1 });
         log('[execute] 已发送 1 条评论回复。');
       } else {
+        run.hadBlocked = true;
         await updateActionStatus(action.actionId, 'blocked', sendResult.message);
         await updateEventStatus(action.eventId, 'blocked');
         printJsonError('comments:execute', sendResult.code, sendResult.message, { recoverable: true }); return;
-        run.hadBlocked = true;
       }
     }
   } catch (err) {
     run.hadError = true;
+    run.hadBlocked = true;
     await updateActionStatus(action.actionId, 'blocked', err.message);
     await updateEventStatus(action.eventId, 'blocked');
 
@@ -209,7 +206,6 @@ async function main() {
     }
 
     printJsonError('comments:execute', RESULT_CODES.UNKNOWN_ERROR, err.message, { recoverable: false }); return;
-    process.exitCode = 1;
   } finally {
     saveRunSummary(run);
     const shouldClose = resolveBrowserClose(run);
