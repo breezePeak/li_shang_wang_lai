@@ -12,8 +12,9 @@ export const DEFAULTS = {
     maxReplyLength: 400,
   },
   likes: {
-    enabled: true,
-    mode: 'manual',
+    enabled: false,
+    experimentalExecuteEnabled: false,
+    mode: 'preview',
     allowedRelations: ['friend', 'mutual'],
     maxPerRun: 5,
     skipPinned: true,

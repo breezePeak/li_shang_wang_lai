@@ -15,6 +15,7 @@ import { existsSync, readFileSync } from 'fs';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
 import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
+import { loadConfig } from '../config/user-config.mjs';
 
 function parseArgs(argv) {
   const args = { plan: null, relation: 'friend' };
@@ -202,6 +203,27 @@ async function main() {
 
   const commonArgs = parseCommonArgs(process.argv.slice(2));
   const cmdArgs = parseArgs(commonArgs.remaining);
+
+  // ============================================================
+  // S0.5 HARD BLOCK: experimental like execution is disabled
+  // Must check BEFORE any browser launch, plan reading, or page interaction.
+  // ============================================================
+  if (commonArgs.options.execute) {
+    const config = loadConfig();
+    if (!config.likes.experimentalExecuteEnabled) {
+      const result = {
+        ok: false,
+        command: 'likes:reciprocate',
+        code: RESULT_CODES.FEATURE_DISABLED,
+        message: '真实回访点赞在 MVP 阶段默认禁用。如需实验性验证，请设置 config/local.json 中 likes.experimentalExecuteEnabled 为 true。',
+        recoverable: false,
+        evidence: null,
+      };
+      console.error(JSON.stringify(result, null, 2));
+      process.exit(1);
+    }
+  }
+  // ============================================================
 
   // Safety gate: --execute requires --plan
   if (commonArgs.options.execute && !cmdArgs.plan) {
