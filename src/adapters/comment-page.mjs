@@ -336,195 +336,146 @@ export async function openReplyBox(page, match) {
     const maxScrollRounds = 30;
 
     for (let round = 0; round < maxScrollRounds; round++) {
-      // Phase 1: Collect ALL candidates WITHOUT clicking.
-      // Each candidate stores its containerText (full text of the comment block)
-      // which is used later for click targeting — ensuring we click the SAME element.
+      // Single page.evaluate: collect → match → click all in one atomic operation.
+      // No string-based dedup; DOM elements matched by container position.
       const result = await page.evaluate(({ target, actorName, eventTimeText }) => {
-        const seen = new Set(); // dedup container texts
+        // Collect all comment containers that match commentText AND have a reply button.
+        // NO string dedup — two identical texts on different DOM nodes are distinct candidates.
         const candidates = [];
 
-        // Strategy 1: Find via comment-content class
+        // Find all comment-content elements
         const contentEls = document.querySelectorAll('[class*="comment-content"]');
         for (const el of contentEls) {
           if (el.offsetHeight === 0) continue;
           const text = (el.innerText || '').trim();
           if (!text.includes(target)) continue;
 
+          // Walk up to find reply button
           let parent = el.parentElement;
-          for (let p = 0; p < 3 && parent && parent !== document.body; p++) {
+          let replyBtn = null;
+          for (let p = 0; p < 3 && parent && parent !== document.body && !replyBtn; p++) {
             const opsEl = parent.querySelector('[class*="operations"]');
             if (opsEl) {
               const items = opsEl.querySelectorAll('[class*="item"]');
               for (const item of items) {
                 const itemText = (item.innerText || '').trim();
                 if (itemText === '回复' || itemText.startsWith('回复')) {
-                  // Use the whole parent container text as the unique key for clicking
-                  const containerText = (parent.closest('[class*="comment"]')?.innerText
-                    || parent.innerText || '').trim();
-                  const key = containerText.slice(0, 200);
-                  if (!seen.has(key)) {
-                    seen.add(key);
-                    candidates.push({
-                      strategy: 'comment-content-class',
-                      containerText: containerText,
-                      containerKey: key,
-                    });
-                  }
+                  replyBtn = item;
                   break;
                 }
               }
-              if (candidates.length > 0 && candidates[candidates.length - 1].containerKey === key) break;
             }
-            parent = parent.parentElement;
+            if (!replyBtn) parent = parent.parentElement;
           }
+
+          if (!replyBtn) continue;
+
+          // Get the full container text for actor/event matching
+          const containerEl = el.parentElement?.closest('[class*="comment"]') || el;
+          const containerText = (containerEl.innerText || '').trim();
+
+          candidates.push({
+            el: el,
+            replyBtn: replyBtn,
+            containerText: containerText,
+            contentText: text,
+          });
         }
 
-        // Strategy 2: Walk up from reply buttons
-        const allEl = document.querySelectorAll('*');
-        const replyBtns = [];
-        for (const el of allEl) {
-          if (el.offsetHeight === 0) continue;
-          if ((el.innerText || '').trim() !== '回复') continue;
-          if (el.children.length > 2) continue;
-          replyBtns.push(el);
-        }
+        // If no match via content class, try button walkup
+        if (candidates.length === 0) {
+          const allEl = document.querySelectorAll('*');
+          for (const el of allEl) {
+            if (el.offsetHeight === 0) continue;
+            if ((el.innerText || '').trim() !== '回复') continue;
+            if (el.children.length > 2) continue;
+            const btnRect = el.getBoundingClientRect();
+            if (btnRect.y < 150) continue;
 
-        for (const btn of replyBtns) {
-          const btnRect = btn.getBoundingClientRect();
-          if (btnRect.y < 150) continue;
-
-          let container = btn.parentElement;
-          for (let level = 0; level < 3 && container && container !== document.body; level++) {
-            const ct = (container.innerText || '').trim();
-            if (ct.length > 10 && ct.length < 500 && ct.includes(target)) {
-              const key = ct.slice(0, 200);
-              if (!seen.has(key)) {
-                seen.add(key);
+            let container = el.parentElement;
+            for (let level = 0; level < 3 && container && container !== document.body; level++) {
+              const ct = (container.innerText || '').trim();
+              if (ct.length > 10 && ct.length < 500 && ct.includes(target)) {
                 candidates.push({
-                  strategy: 'reply-btn-walkup',
+                  el: container,
+                  replyBtn: el,
                   containerText: ct,
-                  containerKey: key,
+                  contentText: ct,
                 });
+                break;
               }
-              break;
+              container = container.parentElement;
             }
-            container = container.parentElement;
           }
         }
 
-        return { candidates, replyBtnCount: replyBtns.length };
+        if (candidates.length === 0) {
+          return { found: false, reason: 'not_found' };
+        }
+
+        // Filter by actorName if provided
+        let filtered = candidates;
+        if (actorName) {
+          filtered = candidates.filter(c => c.containerText.includes(actorName));
+          if (filtered.length === 0) {
+            return { found: false, reason: 'actor_not_verified', total: candidates.length };
+          }
+        }
+
+        // Filter by eventTimeText if provided
+        if (eventTimeText && filtered.length > 1) {
+          const timeFiltered = filtered.filter(c => c.containerText.includes(eventTimeText));
+          if (timeFiltered.length > 0) {
+            filtered = timeFiltered;
+          }
+          // If time filtering eliminates all, stick with actor-filtered set
+        }
+
+        // Uniqueness check
+        if (filtered.length > 1) {
+          return { found: false, reason: 'not_unique', total: filtered.length };
+        }
+
+        // Exactly 1 match — click it NOW (same evaluate, same DOM reference)
+        const chosen = filtered[0];
+        chosen.el.scrollIntoView({ behavior: 'instant', block: 'center' });
+        chosen.replyBtn.click();
+        return { found: true, clicked: true, matchText: chosen.contentText.slice(0, 60) };
+
       }, { target, actorName, eventTimeText });
 
-      const candidates = result.candidates || [];
-
-      // Phase 2: Filter by actorName if provided — NO fallback to text-only
-      let filtered = candidates;
-      if (actorName) {
-        filtered = candidates.filter(c => c.containerText.includes(actorName));
-        // CRITICAL: if actorName is provided but can't be verified in any container, BLOCK
-        if (filtered.length === 0) {
-          if (candidates.length > 0) {
-            // There ARE text matches but none contain actorName — unsafe to proceed
-            return blocking(
-              RESULT_CODES.COMMENT_MATCH_NOT_UNIQUE,
-              `评论 "${target.slice(0, 40)}" 匹配到 ${candidates.length} 条，但均不含用户 "${actorName}"，无法确认目标。`,
-              { recoverable: true, data: { matchCount: candidates.length, target: target.slice(0, 60), actorName } }
-            );
-          }
-          // No matches at all — scroll and try again
-          if (round === maxScrollRounds - 1) {
-            return blocking(
-              RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND,
-              `滚动${maxScrollRounds}轮后未找到匹配 "${target.slice(0, 40)}" 的评论`,
-              { data: { preview: target.slice(0, 40), rounds: maxScrollRounds } }
-            );
-          }
-          await scrollPage(page);
-          continue;
-        }
+      if (result.found && result.clicked) {
+        console.error(`[comment-page] 唯一定位成功，匹配: "${result.matchText}"`);
+        await page.waitForTimeout(1500);
+        return success({ clicked: true });
       }
 
-      // Phase 3: Check uniqueness
-      if (filtered.length === 0) {
-        if (round === maxScrollRounds - 1) {
-          return blocking(
-            RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND,
-            `滚动${maxScrollRounds}轮后未找到匹配 "${target.slice(0, 40)}" 的评论 (${result.replyBtnCount || 0}个回复按钮)`,
-            { data: { preview: target.slice(0, 40), rounds: maxScrollRounds } }
-          );
-        }
-        await scrollPage(page);
-        continue;
-      }
-
-      if (filtered.length > 1) {
+      if (result.reason === 'not_unique') {
         return blocking(
           RESULT_CODES.COMMENT_MATCH_NOT_UNIQUE,
-          `评论 "${target.slice(0, 40)}" 匹配到 ${filtered.length} 条候选，无法唯一定位。`,
-          { recoverable: true, data: { matchCount: filtered.length, target: target.slice(0, 60) } }
+          `评论 "${target.slice(0, 40)}" 匹配到 ${result.total} 条候选，无法唯一定位。`,
+          { recoverable: true, data: { matchCount: result.total, target: target.slice(0, 60) } }
         );
       }
 
-      // Phase 4: Exactly 1 match — click using the SAME containerText
-      const unique = filtered[0];
-      console.error(`[comment-page] 唯一定位成功 (${unique.strategy})`);
-
-      const clickResult = await page.evaluate((containerKey) => {
-        // Use the container's unique text to find and click the correct reply button.
-        // This ensures we click the SAME comment that was matched during candidate collection,
-        // not a different comment with the same short text.
-        const contentEls = document.querySelectorAll('[class*="comment-content"]');
-        for (const el of contentEls) {
-          if (el.offsetHeight === 0) continue;
-          const text = (el.innerText || '').trim();
-          if (!text.includes(containerKey.slice(0, 40))) continue;
-          // Verify full match
-          if (containerKey.length > 40 && !text.includes(containerKey.slice(0, 80))) continue;
-
-          let parent = el.parentElement;
-          for (let p = 0; p < 3 && parent && parent !== document.body; p++) {
-            const opsEl = parent.querySelector('[class*="operations"]');
-            if (opsEl) {
-              const items = opsEl.querySelectorAll('[class*="item"]');
-              for (const item of items) {
-                const itemText = (item.innerText || '').trim();
-                if (itemText === '回复' || itemText.startsWith('回复')) {
-                  el.scrollIntoView({ behavior: 'instant', block: 'center' });
-                  item.click();
-                  return { clicked: true };
-                }
-              }
-            }
-            parent = parent.parentElement;
-          }
-        }
-
-        // Strategy 2 fallback: find by reply button walk-up
-        const btns = document.querySelectorAll('*');
-        for (const btn of btns) {
-          if (btn.offsetHeight === 0) continue;
-          if ((btn.innerText || '').trim() !== '回复') continue;
-          const btnRect = btn.getBoundingClientRect();
-          if (btnRect.y < 150) continue;
-          let c = btn.parentElement;
-          for (let lv = 0; lv < 3 && c && c !== document.body; lv++) {
-            const ct = (c.innerText || '').trim();
-            if (ct.includes(containerKey.slice(0, 80))) {
-              btn.scrollIntoView({ behavior: 'instant', block: 'center' });
-              btn.click();
-              return { clicked: true };
-            }
-            c = c.parentElement;
-          }
-        }
-        return { clicked: false };
-      }, unique.containerKey);
-
-      if (clickResult.clicked) {
-        await page.waitForTimeout(1500);
-        return success({ clicked: true, strategy: unique.strategy });
+      if (result.reason === 'actor_not_verified') {
+        return blocking(
+          RESULT_CODES.COMMENT_MATCH_NOT_UNIQUE,
+          `评论 "${target.slice(0, 40)}" 匹配到 ${result.total} 条，但均不含用户 "${actorName}"，无法确认目标。`,
+          { recoverable: true, data: { matchCount: result.total, target: target.slice(0, 60), actorName } }
+        );
       }
-      // Click failed — try next round
+
+      // Not found — scroll and try again
+      if (round === maxScrollRounds - 1) {
+        return blocking(
+          RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND,
+          `滚动${maxScrollRounds}轮后未找到匹配 "${target.slice(0, 40)}" 的评论`,
+          { data: { preview: target.slice(0, 40), rounds: maxScrollRounds } }
+        );
+      }
+
+      await scrollPage(page);
     }
 
     return blocking(RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND, '滚动查找超时', { data: {} });

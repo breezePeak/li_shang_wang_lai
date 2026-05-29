@@ -299,7 +299,6 @@ async function main() {
     } // end if (!run.hadError)
 
     if (browser) {
-      saveRunSummary(run);
       const shouldClose = resolveBrowserClose(run);
       if (shouldClose) {
         await browser.close();
