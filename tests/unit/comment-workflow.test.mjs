@@ -139,4 +139,26 @@ describe('comment workflow state machine', () => {
       expect(p.command).toBeDefined();
     }
   });
+
+  it('blocked items in pending report include myWorkTitle and commentText', () => {
+    const r = runCli('report-pending.mjs', ['--json']);
+    const p = parseStdout(r);
+    expect(p).not.toBeNull();
+    expect(Array.isArray(p.data.blocked)).toBe(true);
+    for (const b of p.data.blocked) {
+      expect(b).toHaveProperty('myWorkTitle');
+      expect(b).toHaveProperty('commentText');
+      expect(b).toHaveProperty('blockReason');
+      expect(b).toHaveProperty('retryTarget');
+    }
+  });
+
+  it('scan-interactions --json returns ok:false on invalid arguments', () => {
+    const r = runCli('scan-interactions.mjs', ['--json', '--type', 'invalid']);
+    const stdout = (r.stdout || '').trim();
+    expect(() => JSON.parse(stdout)).not.toThrow();
+    const p = JSON.parse(stdout);
+    expect(p.ok).toBe(false);
+    expect(p.command).toBe('interactions:scan');
+  });
 });

@@ -229,14 +229,27 @@ async function main() {
 
     // --- Comment scanning phase ---
     if (type === 'all' || type === 'comment') {
-      const commentResult = await runPhaseWithRecovery(page, run, 'comment', () => runCommentScan(page, run));
-      if (!commentResult.ok) return;
+      const commentResult = await runPhaseWithRecovery(page, run, 'comment', () => runCommentScan(page, run), options);
+      if (!commentResult.ok) {
+        if (options.json) {
+          printJsonError('interactions:scan', commentResult.code || RESULT_CODES.BLOCKED,
+            commentResult.message || '评论扫描失败', { recoverable: commentResult.recoverable !== false });
+        }
+        return;
+      }
       if (commentResult.action === 'quit-close' || commentResult.action === 'quit-keep-open') return;
     }
 
     // --- Notification scanning phase ---
     if (type === 'all' || type === 'like') {
-      const notifResult = await runPhaseWithRecovery(page, run, 'notification', () => runNotificationScan(page, run, type));
+      const notifResult = await runPhaseWithRecovery(page, run, 'notification', () => runNotificationScan(page, run, type), options);
+      if (!notifResult.ok) {
+        if (options.json) {
+          printJsonError('interactions:scan', notifResult.code || RESULT_CODES.BLOCKED,
+            notifResult.message || '通知扫描失败', { recoverable: notifResult.recoverable !== false });
+        }
+        return;
+      }
       if (notifResult.action === 'quit-close' || notifResult.action === 'quit-keep-open') return;
     }
 
@@ -296,7 +309,7 @@ async function main() {
   }
 }
 
-async function runPhaseWithRecovery(page, run, phaseName, phaseFn) {
+async function runPhaseWithRecovery(page, run, phaseName, phaseFn, options = {}) {
   let shouldRetry = true;
 
   while (shouldRetry) {
@@ -317,7 +330,8 @@ async function runPhaseWithRecovery(page, run, phaseName, phaseFn) {
 
     run.evidenceDirectories.push(evidenceDir);
 
-    if (!run.options.pauseOnError || !evidenceData.recoverable) {
+    // In --json mode, never show interactive prompts
+    if (!run.options.pauseOnError || !evidenceData.recoverable || options.json) {
       return result;
     }
 

@@ -180,46 +180,58 @@ async function main() {
 
     const panelOpen = await openNotificationPanel(page);
     if (!panelOpen) {
-      console.error('[plan-likes] 无法打开通知面板，请手动打开后重试');
       run.hadBlocked = true;
-    } else {
-      // Step 2: For each like event, click avatar to navigate to user profile
-      for (let i = 0; i < likes.length; i++) {
-        const item = await processOneLikeEvent(page, likes[i]);
-        items.push(item);
+      run.hadError = true;
+      if (commonArgs.options.json) {
+        printJsonError('likes:plan', RESULT_CODES.NOTIFICATION_PANEL_NOT_FOUND,
+          '无法打开通知面板', { recoverable: true });
+      } else {
+        console.error('[plan-likes] 无法打开通知面板，请手动打开后重试');
+      }
+      process.exit(1);
+    }
 
-        if (item.status === 'planned') {
-          hasVerifiedItem = true;
-        }
+    // Step 2: For each like event, click avatar to navigate to user profile
+    for (let i = 0; i < likes.length; i++) {
+      const item = await processOneLikeEvent(page, likes[i]);
+      items.push(item);
 
-        if (i < likes.length - 1) {
-          // Go back to self page and reopen notification panel for next item
-          console.error('[plan-likes] 返回个人主页...');
-          await ensureNotificationPageReady(page);
-          await openNotificationPanel(page);
-          await page.waitForTimeout(1000);
-        }
+      if (item.status === 'planned') {
+        hasVerifiedItem = true;
+      }
+
+      if (i < likes.length - 1) {
+        // Go back to self page and reopen notification panel for next item
+        console.error('[plan-likes] 返回个人主页...');
+        await ensureNotificationPageReady(page);
+        await openNotificationPanel(page);
+        await page.waitForTimeout(1000);
       }
     }
   } catch (err) {
     console.error('[plan-likes] 错误:', err.message);
     run.hadError = true;
+    if (commonArgs.options.json) {
+      printJsonError('likes:plan', RESULT_CODES.UNKNOWN_ERROR, err.message, { recoverable: false });
+    }
     process.exitCode = 1;
   } finally {
-    const planDir = path.resolve('data', 'plans');
-    ensureDir(planDir);
-    const timestamp = now.replace(/[:.]/g, '-').slice(0, 19);
-    const outPath = cmdArgs.out || path.join(planDir, `likes-plan-${timestamp}.json`);
+    // Only output success JSON when there was no error
+    if (!run.hadError) {
+      const planDir = path.resolve('data', 'plans');
+      ensureDir(planDir);
+      const timestamp = now.replace(/[:.]/g, '-').slice(0, 19);
+      const outPath = cmdArgs.out || path.join(planDir, `likes-plan-${timestamp}.json`);
 
-    const plan = {
-      planType: 'reciprocal_like',
-      mode: cmdArgs.mode,
-      createdAt: now,
-      plannedCount: items.filter(i => i.status === 'planned').length,
-      skippedCount: items.filter(i => i.status === 'skipped').length,
-      blockedCount: items.filter(i => i.status === 'blocked').length,
-      items,
-    };
+      const plan = {
+        planType: 'reciprocal_like',
+        mode: cmdArgs.mode,
+        createdAt: now,
+        plannedCount: items.filter(i => i.status === 'planned').length,
+        skippedCount: items.filter(i => i.status === 'skipped').length,
+        blockedCount: items.filter(i => i.status === 'blocked').length,
+        items,
+      };
 
     writeJSON(outPath, plan);
     console.error(`\n[plan-likes] 计划已保存: ${outPath}`);
@@ -283,6 +295,7 @@ async function main() {
         blocked: plan.blockedCount,
       });
     }
+    } // end if (!run.hadError)
 
     if (browser) {
       saveRunSummary(run);

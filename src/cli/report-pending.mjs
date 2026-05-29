@@ -42,12 +42,14 @@ function main() {
 
     // Query blocked events with reasons
     const blockedEvents = db.prepare(`
-      SELECT e.*, a.reason as blockReason, a.status as actionStatus
+      SELECT e.*, a.reason as blockReason, a.status as actionStatus,
+             a.evidence_json, a.screenshot_path
       FROM interaction_events e
       LEFT JOIN actions a ON a.event_id = e.id AND a.id IN (
         SELECT MAX(id) FROM actions GROUP BY event_id
       )
       WHERE e.status = 'blocked'
+        AND (${filterType ? "e.event_type = '" + filterType + "'" : '1=1'})
       ORDER BY e.updated_at DESC
       LIMIT 50
     `).all();
@@ -59,7 +61,11 @@ function main() {
       blockReason: ev.blockReason || '未知原因',
       actionStatus: ev.actionStatus || 'blocked',
       eventTimeText: ev.event_time_text,
-      retryTarget: ev.id, // eventId serves as retry target
+      myWorkTitle: ev.my_work_title || '',
+      commentText: ev.comment_text || '',
+      evidenceJson: ev.evidence_json || null,
+      screenshotPath: ev.screenshot_path || null,
+      retryTarget: ev.id,
     }));
 
     // Query latest action status for each event

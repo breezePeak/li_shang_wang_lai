@@ -157,6 +157,7 @@ async function main() {
 
     if (!openResult.ok) {
       await updateActionStatus(action.actionId, 'blocked', openResult.message);
+      await updateEventStatus(action.eventId, 'blocked');
       printJsonError('comments:execute', openResult.code, openResult.message, { recoverable: true });
       run.hadBlocked = true;
       return;

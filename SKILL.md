@@ -89,7 +89,8 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
 ### 回访候选预览（仅预览）
 
 ```bash
-npm run likes:plan       # 生成好友回访候选预览（不执行点赞）
+npm run likes:plan -- --json       # 生成回访候选预览（JSON 输出）
+npm run likes:plan                 # 人类可读输出
 ```
 
 > **真实回访点赞**（`likes:reciprocate --execute`）在 MVP 阶段被代码层硬阻断。只会返回 `FEATURE_DISABLED`。Skill 不得尝试绕过。
