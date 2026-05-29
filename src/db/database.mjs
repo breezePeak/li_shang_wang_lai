@@ -4,7 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_DB_PATH = resolve(__dirname, '../../data/lishangwanglai.db');
+const DEFAULT_DB_PATH = process.env.LISHANGWANGLAI_DB_PATH || resolve(__dirname, '../../data/lishangwanglai.db');
 
 let _db = null;
 
@@ -14,6 +14,13 @@ export function getDb(dbPath = DEFAULT_DB_PATH) {
     _db.pragma('journal_mode = WAL');
   }
   return _db;
+}
+
+export function resetDb() {
+  if (_db) {
+    _db.close();
+    _db = null;
+  }
 }
 
 export function closeDb() {

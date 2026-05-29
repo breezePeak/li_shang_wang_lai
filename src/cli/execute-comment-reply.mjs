@@ -152,7 +152,7 @@ async function main() {
     const openResult = await openReplyBox(page, {
       commentText: action.commentText,
       actorName: action.actorName,
-      eventTimeText: null, // reserved for future use
+      eventTimeText: action.eventTimeText,
     });
 
     if (!openResult.ok) {

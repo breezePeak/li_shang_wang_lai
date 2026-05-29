@@ -59,13 +59,14 @@ Node.js + Playwright + SQLite 执行引擎（本仓库）
 | 页面诊断采集 | 已实现 | 可保存页面文本、DOM、截图等诊断材料 |
 | 评论扫描与入库 | 初版可用 | 从创作者评论页面提取评论并入库、去重 |
 | 点赞/通知扫描 | 初版验证中 | 通知面板 hover 铃铛、滚动提取点赞事件 |
-| 待处理摘要 | 待新增 | Skill 可读取的结构化 pending report |
-| 评论 dry-run | 已有逻辑 | 定位目标评论但不发送（代码默认 `dryRun: true`） |
-| 单条评论真实发送 | 实验可用 | 需审批 + dry-run + 确认，每轮最多 1 条 |
-| 评论候选回复 | 待 Skill 化 | 由 Skill 根据评论生成候选文本 |
-| 好友回访候选 | 开发验证中 | 仅候选预览，不执行真实点赞 |
-| 真实回访点赞 | **默认禁用** | 非 MVP 能力，需实验开关 + 身份核验 |
-| 本地管理 / 历史查询 | 后置 | 非 MVP |
+| 待处理摘要 | 初版可用 | `actions:pending --json` 支持结构化输出 + blocked 明细 |
+| 评论候选回复 | 初版可用 | 通过 `comments:prepare` 创建单条候选 |
+| 评论 dry-run | 已有逻辑 | 定位目标评论但不发送（默认 `dryRun: true`） |
+| 评论审批闭环 | 开发验证中 | `prepare → approve → dry-run → confirm-execute → execute` |
+| 单条评论真实发送 | 实验可用 | 需双确认 + dry-run，每轮最多 1 条 |
+| JSON Agent 契约 | 修复中 | 大部分命令已实现纯净 stdout JSON |
+| 好友回访候选 | 开发验证中 | `likes:plan --json` 仅预览，`previewOnly:true` |
+| 真实回访点赞 | **默认禁用** | MVP 代码层硬阻断，`FEATURE_DISABLED` |
 
 ---
 

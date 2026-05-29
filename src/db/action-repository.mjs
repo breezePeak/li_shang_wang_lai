@@ -92,6 +92,7 @@ export function getActionWithEvent(actionId) {
       e.comment_text as commentText,
       e.actor_name as actorName,
       e.my_work_title as workTitle,
+      e.event_time_text as eventTimeText,
       e.status as eventStatus
     FROM actions a
     LEFT JOIN interaction_events e ON a.event_id = e.id

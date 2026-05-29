@@ -14,7 +14,6 @@ import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { promptRecoveryAction } from '../browser/interactive-control.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
-import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 
 async function runCommentScan(page, run) {
   console.error('[scan] === 评论扫描 ===');
