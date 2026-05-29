@@ -131,7 +131,7 @@ export function runMigrations(dbPath = DB_PATH) {
     WHERE action_type = 'like_work' AND status = 'succeeded';
   `);
 
-  console.log('[db:init] 数据库初始化完成:', dbPath);
+  console.error('[db:init] 数据库初始化完成:', dbPath);
   db.close();
 }
 

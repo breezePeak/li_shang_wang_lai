@@ -49,3 +49,22 @@ export function getEventCounts() {
   const db = getDb();
   return db.prepare('SELECT event_type, status, COUNT(*) as count FROM interaction_events GROUP BY event_type, status').all();
 }
+
+/**
+ * 更新事件状态（同步 actions 表的状态变化）
+ */
+export function updateEventStatus(eventId, status) {
+  const db = getDb();
+  const result = db.prepare(
+    'UPDATE interaction_events SET status = ?, updated_at = ? WHERE id = ?'
+  ).run(status, new Date().toISOString(), eventId);
+  return result.changes > 0;
+}
+
+/**
+ * 查询单条事件
+ */
+export function getEvent(eventId) {
+  const db = getDb();
+  return db.prepare('SELECT * FROM interaction_events WHERE id = ?').get(eventId);
+}

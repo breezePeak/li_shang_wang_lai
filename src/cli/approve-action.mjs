@@ -8,6 +8,7 @@
 
 import { runMigrations } from '../db/migrations.mjs';
 import { getAction, approveAction } from '../db/action-repository.mjs';
+import { updateEventStatus } from '../db/interaction-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 
@@ -52,6 +53,9 @@ function main() {
       `审批失败：动作 #${args.actionId} 可能已被审批或不存在`, { recoverable: false });
     process.exit(1);
   }
+
+  // P0-3: Sync event status to 'approved'
+  updateEventStatus(action.event_id, 'approved');
 
   const result = {
     actionId: args.actionId,

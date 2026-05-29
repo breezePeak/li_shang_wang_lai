@@ -7,8 +7,8 @@
 //   npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" --json
 
 import { runMigrations } from '../db/migrations.mjs';
-import { createAction, hasSucceededAction } from '../db/action-repository.mjs';
-import { getEvents } from '../db/interaction-repository.mjs';
+import { createAction, hasSucceededAction, hasActiveAction } from '../db/action-repository.mjs';
+import { getEvents, updateEventStatus } from '../db/interaction-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 
@@ -55,10 +55,17 @@ function main() {
     process.exit(1);
   }
 
-  // Check duplicate
+  // Check duplicate — already succeeded
   if (hasSucceededAction(args.eventId, 'reply_comment')) {
     printJsonError('comments:prepare', RESULT_CODES.DUPLICATE_ACTION,
       '该评论已有成功回复记录，不能重复创建', { recoverable: false });
+    process.exit(1);
+  }
+
+  // P1-3: Check duplicate — active action already exists
+  if (hasActiveAction(args.eventId, 'reply_comment')) {
+    printJsonError('comments:prepare', RESULT_CODES.DUPLICATE_ACTION,
+      '该评论已有活跃的回复动作（prepared/approved/dry_run_ok），不能重复创建。请先完成或取消已有动作。', { recoverable: false });
     process.exit(1);
   }
 
@@ -69,6 +76,9 @@ function main() {
     targetTitle: ev.my_work_title || '',
     actionText: args.replyText.trim(),
   });
+
+  // P0-3: Sync event status to 'planned'
+  updateEventStatus(args.eventId, 'planned');
 
   const result = {
     actionId,

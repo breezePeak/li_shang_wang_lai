@@ -32,8 +32,8 @@ describe('cli-output', () => {
     expect(parsed.warnings).toEqual([]);
   });
 
-  it('printJsonError should output valid JSON to stderr', () => {
-    const logs = captureStderr(() => {
+  it('printJsonError should output valid JSON to stdout', () => {
+    const logs = captureStdout(() => {
       printJsonError('likes:reciprocate', 'FEATURE_DISABLED', 'MVP 阶段默认禁用', { recoverable: false });
     });
 
@@ -45,7 +45,7 @@ describe('cli-output', () => {
   });
 
   it('printJsonError with data field', () => {
-    const logs = captureStderr(() => {
+    const logs = captureStdout(() => {
       printJsonError('comments:execute', 'BLOCKED', '定位失败', { data: { eventId: 1 }, evidence: '/tmp/ev' });
     });
 

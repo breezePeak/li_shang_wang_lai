@@ -1,14 +1,13 @@
 // 统一 CLI JSON 输出工具
 // 所有由 Skill 调用的命令，启用 --json 后应使用此工具输出机器可读结果。
-// 控制台日志通过 console.error 输出，不污染 stdout JSON。
+//
+// 规则（--json 模式）：
+//   stdout: 只能有一次 JSON 输出（printJsonResult 或 printJsonError）
+//   stderr: 所有调试日志、迁移信息、进度信息
+//   exitCode: 成功为 0，失败为非 0
 
 /**
  * 输出成功结果到 stdout
- * @param {string} command - 命令名称
- * @param {Object} data - 业务数据
- * @param {Object} [summary={}] - 摘要信息
- * @param {Array} [warnings=[]] - 警告列表
- * @param {Object} [extra={}] - 其他字段
  */
 export function printJsonResult(command, data, summary = {}, warnings = [], extra = {}) {
   const result = {
@@ -19,18 +18,12 @@ export function printJsonResult(command, data, summary = {}, warnings = [], extr
     warnings,
     ...extra,
   };
-  console.log(JSON.stringify(result, null, 2));
+  console.log(JSON.stringify(result));
 }
 
 /**
- * 输出错误结果到 stderr
- * @param {string} command - 命令名称
- * @param {string} code - 错误码（来自 RESULT_CODES）
- * @param {string} message - 错误描述
- * @param {Object} [options] - 可选字段
- * @param {boolean} [options.recoverable=true] - 是否可重试
- * @param {*} [options.data=null] - 额外数据
- * @param {*} [options.evidence=null] - 证据路径
+ * 输出错误结果到 stdout（Agent 统一从 stdout 读取）
+ * 同时设置 exitCode 为 1
  */
 export function printJsonError(command, code, message, { recoverable = true, data = null, evidence = null } = {}) {
   const result = {
@@ -42,5 +35,6 @@ export function printJsonError(command, code, message, { recoverable = true, dat
     evidence,
     ...(data ? { data } : {}),
   };
-  console.error(JSON.stringify(result, null, 2));
+  console.log(JSON.stringify(result));
+  process.exitCode = 1;
 }

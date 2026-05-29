@@ -17,7 +17,8 @@ import {
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
 import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { runMigrations } from '../db/migrations.mjs';
-import { getAction, updateActionStatus, hasSucceededAction } from '../db/action-repository.mjs';
+import { getActionWithEvent, updateActionStatus, hasSucceededAction } from '../db/action-repository.mjs';
+import { updateEventStatus } from '../db/interaction-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 
@@ -27,6 +28,11 @@ function parseArgs(argv) {
     if (argv[i] === '--action-id' && argv[i + 1]) args.actionId = parseInt(argv[++i]);
   }
   return args;
+}
+
+function log(msg) {
+  // All debug logs go to stderr so stdout stays clean for JSON
+  console.error(msg);
 }
 
 async function main() {
@@ -42,8 +48,8 @@ async function main() {
     process.exit(1);
   }
 
-  // Load action
-  const action = getAction(cmdArgs.actionId);
+  // Load action WITH associated event data (commentText, workTitle, actorName)
+  const action = getActionWithEvent(cmdArgs.actionId);
   if (!action) {
     printJsonError('comments:execute', RESULT_CODES.BLOCKED,
       `找不到动作 ID=${cmdArgs.actionId}`, { recoverable: false });
@@ -77,17 +83,23 @@ async function main() {
     }
   }
 
-  // Check duplicate
-  if (hasSucceededAction(action.event_id, 'reply_comment')) {
-    printJsonError('comments:execute', RESULT_CODES.DUPLICATE_ACTION,
-      '该评论已有成功回复记录', { recoverable: false });
+  // Validate comment text and reply text are available
+  if (!action.commentText || action.commentText.trim().length === 0) {
+    printJsonError('comments:execute', RESULT_CODES.BLOCKED,
+      `无法获取原始评论内容（eventId=${action.eventId}），无法定位目标评论`, { recoverable: false });
     process.exit(1);
   }
 
-  // Check reply text
-  if (!action.action_text || action.action_text.trim().length === 0) {
+  if (!action.actionText || action.actionText.trim().length === 0) {
     printJsonError('comments:execute', RESULT_CODES.EMPTY_REPLY_TEXT,
       '回复内容为空', { recoverable: false });
+    process.exit(1);
+  }
+
+  // Check duplicate — never re-reply to same comment
+  if (hasSucceededAction(action.eventId, 'reply_comment')) {
+    printJsonError('comments:execute', RESULT_CODES.DUPLICATE_ACTION,
+      '该评论已有成功回复记录', { recoverable: false });
     process.exit(1);
   }
 
@@ -104,65 +116,90 @@ async function main() {
     // Navigate to comment management page
     const navResult = await ensureCommentPageReady(page);
     if (!navResult.ok) {
-      await updateActionStatus(action.id, 'blocked', navResult.message);
+      await updateActionStatus(action.actionId, 'blocked', navResult.message);
+      await updateEventStatus(action.eventId, 'blocked');
       printJsonError('comments:execute', navResult.code, navResult.message, { recoverable: true });
       run.hadBlocked = true;
       return;
     }
 
-    // Select the work if target_title is known
-    if (action.target_title) {
-      await selectWorkByTitle(page, action.target_title);
+    // P0-2: Select the work — check result, block on failure
+    if (action.workTitle) {
+      log(`[execute] 选择作品: ${action.workTitle}`);
+      const selectResult = await selectWorkByTitle(page, action.workTitle);
+
+      if (!selectResult.ok) {
+        await updateActionStatus(action.actionId, 'blocked', selectResult.message);
+        await updateEventStatus(action.eventId, 'blocked');
+        printJsonError('comments:execute', selectResult.code, selectResult.message, { recoverable: true });
+        run.hadBlocked = true;
+        return;
+      }
     }
 
     // Wait for comments area
     const areaResult = await waitForCommentsArea(page);
     if (!areaResult.ok) {
-      await updateActionStatus(action.id, 'blocked', areaResult.message);
+      await updateActionStatus(action.actionId, 'blocked', areaResult.message);
+      await updateEventStatus(action.eventId, 'blocked');
       printJsonError('comments:execute', areaResult.code, areaResult.message, { recoverable: true });
       run.hadBlocked = true;
       return;
     }
 
+    // P0-1 FIX: openReplyBox uses ORIGINAL comment text to locate the reply button
+    log(`[execute] 定位原评论: "${action.commentText.slice(0, 40)}"`);
+    const openResult = await openReplyBox(page, action.commentText);
+
+    if (!openResult.ok) {
+      await updateActionStatus(action.actionId, 'blocked', openResult.message);
+      printJsonError('comments:execute', openResult.code, openResult.message, { recoverable: true });
+      run.hadBlocked = true;
+      return;
+    }
+
     if (isDryRun) {
-      // Dry-run: just try to open reply box to verify target is reachable
-      const replyResult = await openReplyBox(page, action.action_text, action.target_title);
-      if (replyResult.ok) {
-        await updateActionStatus(action.id, 'dry_run_ok');
-        printJsonResult('comments:execute', {
-          actionId: action.id,
-          mode: 'dry-run',
-          status: 'dry_run_ok',
-          replyText: action.action_text,
-        }, { actionId: action.id });
-        console.log('[execute] dry-run 成功：已定位到目标评论，未发送。');
-      } else {
-        await updateActionStatus(action.id, 'blocked', replyResult.message);
-        printJsonError('comments:execute', replyResult.code, replyResult.message, { recoverable: true });
-        run.hadBlocked = true;
-      }
+      // Dry-run: located the comment, opened the reply box — no send
+      await updateActionStatus(action.actionId, 'dry_run_ok');
+      printJsonResult('comments:execute', {
+        actionId: action.actionId,
+        mode: 'dry-run',
+        status: 'dry_run_ok',
+        actorName: action.actorName,
+        commentText: action.commentText,
+        replyText: action.actionText,
+      }, { actionId: action.actionId });
+      log('[execute] dry-run 成功：已定位到目标评论，未发送。');
     } else if (isExecute) {
-      // Execute: actually send the reply
-      const sendResult = await sendReply(page, action.action_text, action.target_title);
+      // P0-1 FIX: openReplyBox already called above.
+      // Now sendReply fills the already-open input box and clicks send.
+      log(`[execute] 发送回复: "${action.actionText.slice(0, 40)}"`);
+      const sendResult = await sendReply(page, action.actionText);
+
       if (sendResult.ok) {
-        await updateActionStatus(action.id, 'succeeded', null,
+        await updateActionStatus(action.actionId, 'succeeded', null,
           JSON.stringify({ dryRunConfirmed: true, confirmedAt: new Date().toISOString() }));
+        // P0-3: Sync event status so actions:pending no longer shows this
+        await updateEventStatus(action.eventId, 'succeeded');
         printJsonResult('comments:execute', {
-          actionId: action.id,
+          actionId: action.actionId,
           mode: 'execute',
           status: 'succeeded',
-          replyText: action.action_text,
+          actorName: action.actorName,
+          replyText: action.actionText.slice(0, 80),
         }, { executed: 1 });
-        console.log('[execute] 已发送 1 条评论回复。');
+        log('[execute] 已发送 1 条评论回复。');
       } else {
-        await updateActionStatus(action.id, 'blocked', sendResult.message);
+        await updateActionStatus(action.actionId, 'blocked', sendResult.message);
+        await updateEventStatus(action.eventId, 'blocked');
         printJsonError('comments:execute', sendResult.code, sendResult.message, { recoverable: true });
         run.hadBlocked = true;
       }
     }
   } catch (err) {
     run.hadError = true;
-    await updateActionStatus(action.id, 'blocked', err.message);
+    await updateActionStatus(action.actionId, 'blocked', err.message);
+    await updateEventStatus(action.eventId, 'blocked');
 
     if (page) {
       try {
@@ -182,7 +219,7 @@ async function main() {
     if (browser && shouldClose) {
       await browser.close();
     } else if (browser) {
-      console.log('[execute] 浏览器保持打开，供人工检查。');
+      log('[execute] 浏览器保持打开，供人工检查。');
     }
   }
 }

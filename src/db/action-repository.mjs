@@ -24,8 +24,8 @@ export function createAction({ eventId, actionType, targetTitle, targetUrl = nul
 export function approveAction(actionId) {
   const db = getDb();
   const result = db.prepare(`
-    UPDATE actions SET status = 'approved', executed_at = ? WHERE id = ? AND status = 'prepared'
-  `).run(new Date().toISOString(), actionId);
+    UPDATE actions SET status = 'approved' WHERE id = ? AND status = 'prepared'
+  `).run(actionId);
 
   return result.changes > 0;
 }
@@ -35,20 +35,69 @@ export function approveAction(actionId) {
  */
 export function updateActionStatus(actionId, status, reason = null, evidenceJson = null, screenshotPath = null) {
   const db = getDb();
-  const result = db.prepare(`
-    UPDATE actions SET status = ?, reason = ?, evidence_json = ?, screenshot_path = ?, executed_at = ?
-    WHERE id = ?
-  `).run(status, reason, evidenceJson, screenshotPath, new Date().toISOString(), actionId);
+  const now = new Date().toISOString();
 
+  // Only set executed_at on succeeded — it means "actually sent"
+  if (status === 'succeeded') {
+    const result = db.prepare(`
+      UPDATE actions SET status = ?, reason = ?, evidence_json = ?, screenshot_path = ?, executed_at = ?
+      WHERE id = ?
+    `).run(status, reason, evidenceJson, screenshotPath, now, actionId);
+    return result.changes > 0;
+  }
+
+  const result = db.prepare(`
+    UPDATE actions SET status = ?, reason = ?, evidence_json = ?, screenshot_path = ?
+    WHERE id = ?
+  `).run(status, reason, evidenceJson, screenshotPath, actionId);
   return result.changes > 0;
 }
 
 /**
- * 查询单条动作
+ * 查询单条动作（基本字段，不关联 events）
  */
 export function getAction(actionId) {
   const db = getDb();
   return db.prepare('SELECT * FROM actions WHERE id = ?').get(actionId);
+}
+
+/**
+ * 查询单条动作（关联原始事件数据）
+ * 返回 { id, eventId, actionType, targetTitle, actionText, status,
+ *         commentText, actorName, workTitle, eventStatus }
+ */
+export function getActionWithEvent(actionId) {
+  const db = getDb();
+  return db.prepare(`
+    SELECT
+      a.id as actionId,
+      a.event_id as eventId,
+      a.action_type as actionType,
+      a.target_title as targetTitle,
+      a.action_text as actionText,
+      a.status,
+      e.comment_text as commentText,
+      e.actor_name as actorName,
+      e.my_work_title as workTitle,
+      e.status as eventStatus
+    FROM actions a
+    LEFT JOIN interaction_events e ON a.event_id = e.id
+    WHERE a.id = ?
+  `).get(actionId);
+}
+
+/**
+ * 检查某事件是否已有活跃的同类动作（prepared/approved/dry_run_ok/execute_confirmed）
+ */
+export function hasActiveAction(eventId, actionType) {
+  const db = getDb();
+  const row = db.prepare(
+    `SELECT id FROM actions
+     WHERE event_id = ? AND action_type = ?
+       AND status IN ('prepared', 'approved', 'dry_run_ok', 'execute_confirmed')
+     LIMIT 1`
+  ).get(eventId, actionType);
+  return !!row;
 }
 
 /**

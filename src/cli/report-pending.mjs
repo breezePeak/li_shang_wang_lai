@@ -1,5 +1,6 @@
 // 待处理互动报告命令
-// 查询本地数据库中状态为 'new' 的互动事件，按评论和点赞分类输出。
+// 查询本地数据库中未完成的互动事件（非 succeeded/blocked），按评论和点赞分类输出。
+// 同时关联 actions 表返回最近的动作状态。
 // Skill 可调用此命令获取待处理摘要，无需解析计划文件或直接查库。
 //
 // 用法：
@@ -8,7 +9,7 @@
 //   node src/cli/report-pending.mjs --type comment --json
 
 import { runMigrations } from '../db/migrations.mjs';
-import { getEvents, getEventCounts } from '../db/interaction-repository.mjs';
+import { getDb } from '../db/database.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 
 function parseArgs(argv) {
@@ -27,16 +28,42 @@ function main() {
 
   const args = parseArgs(process.argv.slice(2));
   const filterType = args.type;
+  const db = getDb();
 
   try {
-    // Query pending events (status = 'new')
-    const pendingEvents = getEvents({ status: 'new', limit: 200 });
+    // Query events that are NOT succeeded or blocked (i.e., still pending)
+    // Include: new, planned, approved
+    const pendingEvents = db.prepare(`
+      SELECT * FROM interaction_events
+      WHERE status NOT IN ('succeeded', 'blocked')
+      ORDER BY created_at DESC
+      LIMIT 200
+    `).all();
+
+    // Query blocked events separately for count
+    const blockedCount = db.prepare(
+      "SELECT COUNT(*) as cnt FROM interaction_events WHERE status = 'blocked'"
+    ).get().cnt;
+
+    // Query latest action status for each event
+    const latestActions = db.prepare(`
+      SELECT a.event_id, a.status as actionStatus, a.action_text as actionText
+      FROM actions a
+      WHERE a.id IN (
+        SELECT MAX(id) FROM actions GROUP BY event_id
+      )
+    `).all();
+    const actionMap = {};
+    for (const act of latestActions) {
+      actionMap[act.event_id] = { actionStatus: act.actionStatus, actionText: act.actionText };
+    }
 
     const comments = [];
     const likes = [];
-    let blocked = 0;
 
     for (const ev of pendingEvents) {
+      const latestAction = actionMap[ev.id] || null;
+
       const item = {
         eventId: ev.id,
         actorName: ev.actor_name,
@@ -44,7 +71,8 @@ function main() {
         myWorkTitle: ev.my_work_title || '',
         commentText: ev.comment_text || '',
         eventTimeText: ev.event_time_text || '',
-        status: ev.status,
+        eventStatus: ev.status,
+        ...(latestAction ? { latestActionStatus: latestAction.actionStatus } : {}),
       };
 
       if (ev.event_type === 'comment') {
@@ -62,43 +90,35 @@ function main() {
       }
     }
 
-    // Also count blocked events
-    const blockedEvents = getEvents({ status: 'blocked', limit: 200 });
-    blocked = blockedEvents.length;
-
-    const result = {
-      data: {
+    if (args.json) {
+      printJsonResult('actions:pending', {
         comments,
         likes,
-      },
-      summary: {
+      }, {
         pendingComments: comments.length,
         pendingLikes: likes.length,
-        blocked,
-      },
-    };
-
-    if (args.json) {
-      printJsonResult('actions:pending', result.data, result.summary);
+        blocked: blockedCount,
+      });
     } else {
       // Human-readable output
-      console.log('');
-      console.log('===== 待处理互动摘要 =====');
-      console.log('');
-      console.log(`未处理评论: ${comments.length} 条`);
+      console.error('');
+      console.error('===== 待处理互动摘要 =====');
+      console.error('');
+      console.error(`未处理评论: ${comments.length} 条`);
       for (const c of comments) {
-        console.log(`  [${c.eventId}] ${c.actorName} 在《${c.myWorkTitle}》评论: ${c.commentText.slice(0, 40)}`);
+        const actionTag = c.latestActionStatus ? ` [${c.latestActionStatus}]` : '';
+        console.error(`  [${c.eventId}]${actionTag} ${c.actorName} 在《${c.myWorkTitle}》评论: ${c.commentText.slice(0, 40)}`);
       }
-      console.log('');
-      console.log(`未处理点赞: ${likes.length} 条`);
+      console.error('');
+      console.error(`未处理点赞: ${likes.length} 条`);
       for (const l of likes) {
-        console.log(`  [${l.eventId}] ${l.actorName} [${l.relation}] — 仅预览`);
+        console.error(`  [${l.eventId}] ${l.actorName} [${l.relation}] — 仅预览`);
       }
-      if (blocked > 0) {
-        console.log('');
-        console.log(`阻断项: ${blocked} 条（需人工检查）`);
+      if (blockedCount > 0) {
+        console.error('');
+        console.error(`阻断项: ${blockedCount} 条（需人工检查）`);
       }
-      console.log('');
+      console.error('');
     }
   } catch (err) {
     if (args.json) {
@@ -111,3 +131,4 @@ function main() {
 }
 
 main();
+
