@@ -649,8 +649,76 @@ describe('work-context validation + audit', () => {
       '--json',
     ], 10_000);
     const parsed = parseStdout(result);
-    // Fails: either event not found or work-context not found
     expect(parsed).not.toBeNull();
     expect(parsed.ok).toBe(false);
   });
+
+  it('prepare blocks when event work title is empty (even with valid work-context-id)', () => {
+    // Use event 999 which doesn't exist → my_work_title would be undefined/null
+    // But even if it existed with empty title, the block would fire
+    const result = runCli('prepare-comment-reply.mjs', [
+      '--event-id', '999', '--reply-text', 'test',
+      '--decision', 'reply', '--risk-level', 'low',
+      '--relevance', 'relevant',
+      '--work-context-id', 'opus4.8',
+      '--json',
+    ], 10_000);
+    const parsed = parseStdout(result);
+    expect(parsed).not.toBeNull();
+    expect(parsed.ok).toBe(false);
+  });
+
+  it('succeeded evidence_json preserves full audit chain (policy + timeline + runtime)', async () => {
+    const { createAction, updateActionStatus, confirmExecuteAction, getAction } = await import('../../src/db/action-repository.mjs');
+    const { insertEvent } = await import('../../src/db/interaction-repository.mjs');
+    const { runMigrations: initDb } = await import('../../src/db/migrations.mjs');
+    initDb();
+
+    // Create a test interaction event first (FK constraint)
+    const eid = insertEvent({
+      eventType: 'comment',
+      actorName: '测试用户',
+      relation: 'unknown',
+      myWorkTitle: '测试作品',
+      commentText: '测试评论',
+      eventTimeText: '05-29 12:00',
+      fingerprint: 'test-fp-' + Date.now(),
+    });
+    expect(eid).toBeGreaterThan(0);
+
+    const actionId = createAction({
+      eventId: eid,
+      actionType: 'reply_comment',
+      targetTitle: '测试作品',
+      actionText: 'test reply',
+      evidenceJson: JSON.stringify({ decision: 'reply', riskLevel: 'low', policyVersion: '0.1.0', preparedAt: new Date().toISOString() }),
+    });
+    expect(actionId).toBeGreaterThan(0);
+
+    // dry-run: append dryRunAt
+    updateActionStatus(actionId, 'dry_run_ok', null, null);
+    let action = getAction(actionId);
+    let audit = JSON.parse(action.evidence_json);
+    expect(audit.decision).toBe('reply');
+    expect(audit.dryRunAt).toBeDefined();
+
+    // confirm-execute: executeConfirmedAt set by confirmExecuteAction
+    confirmExecuteAction(actionId);
+    action = getAction(actionId);
+    audit = JSON.parse(action.evidence_json);
+    expect(audit.executeConfirmedAt).toBeDefined();
+
+    // execute (succeeded): merge runtime fields + executedAt, preserving all above
+    updateActionStatus(actionId, 'succeeded', null, JSON.stringify({ runtime: 'ok', dryRunConfirmed: true }));
+    action = getAction(actionId);
+    audit = JSON.parse(action.evidence_json);
+    expect(audit.decision).toBe('reply');
+    expect(audit.riskLevel).toBe('low');
+    expect(audit.policyVersion).toBe('0.1.0');
+    expect(audit.dryRunAt).toBeDefined();
+    expect(audit.executeConfirmedAt).toBeDefined();
+    expect(audit.executedAt).toBeDefined();
+    expect(audit.runtime).toBe('ok');
+    expect(audit.dryRunConfirmed).toBe(true);
+  }, 15000);
 });

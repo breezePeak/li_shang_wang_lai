@@ -131,9 +131,19 @@ function main() {
       printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
         `--work-context-id "${args.workContextId}" 在 work-context.json 中未找到`, { recoverable: false }); return;
     }
-    const eventTitle = (ev.my_work_title || '').toLowerCase();
-    const workTitle = (matchedWork.title || '').toLowerCase();
-    if (!eventTitle.includes(workTitle) && !workTitle.includes(eventTitle)) {
+    const eventTitle = (ev.my_work_title || '').trim();
+    const workTitle = (matchedWork.title || '').trim();
+    if (!eventTitle) {
+      printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+        `事件 #${args.eventId} 缺少作品标题，无法校验作品上下文匹配。请改为 decision=manual_review。`, { recoverable: false }); return;
+    }
+    if (!workTitle) {
+      printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+        `work-context "${args.workContextId}" 缺少 title 字段，无法校验匹配。`, { recoverable: false }); return;
+    }
+    const eventTitleLower = eventTitle.toLowerCase();
+    const workTitleLower = workTitle.toLowerCase();
+    if (!eventTitleLower.includes(workTitleLower) && !workTitleLower.includes(eventTitleLower)) {
       printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
         `作品标题不匹配: event="${ev.my_work_title}" vs work-context="${matchedWork.title}"。请确认 --work-context-id 或改为 decision=manual_review。`, { recoverable: false }); return;
     }

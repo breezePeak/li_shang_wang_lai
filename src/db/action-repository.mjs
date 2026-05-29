@@ -91,16 +91,16 @@ export function updateActionStatus(actionId, status, reason = null, evidenceJson
     }
   }
 
-  // Append audit timeline timestamp for specific state transitions
+  // Append audit timeline timestamp for specific state transitions.
+  // CRITICAL: must merge into mergedEvidence (not re-read from DB) to preserve
+  // the policy+runtime fields that were already merged above.
   if (status === 'dry_run_ok') {
-    const existing = db.prepare('SELECT evidence_json FROM actions WHERE id = ?').get(actionId);
-    const audit = existing?.evidence_json ? JSON.parse(existing.evidence_json) : {};
+    const audit = mergedEvidence ? JSON.parse(mergedEvidence) : {};
     audit.dryRunAt = now;
     mergedEvidence = JSON.stringify(audit);
   }
   if (status === 'succeeded') {
-    const existing = db.prepare('SELECT evidence_json FROM actions WHERE id = ?').get(actionId);
-    const audit = existing?.evidence_json ? JSON.parse(existing.evidence_json) : {};
+    const audit = mergedEvidence ? JSON.parse(mergedEvidence) : {};
     audit.executedAt = now;
     mergedEvidence = JSON.stringify(audit);
   }
