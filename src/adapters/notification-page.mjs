@@ -3,6 +3,8 @@
  * Panel appears on mouse hover over svg.LtuRRess on /user/self
  */
 
+import { notificationItemFingerprint } from '../domain/event-fingerprint.mjs';
+
 const SELF_URL = 'https://www.douyin.com/user/self';
 
 export async function ensureNotificationPageReady(page) {
@@ -219,24 +221,58 @@ export async function extractNotifications(page) {
         }
       }
 
-      items.push({
+      // Extract profile URL and key from links within this notification item
+      let actorProfileUrl = '';
+      let actorProfileKey = '';
+      const links = itemEl.querySelectorAll('a[href]');
+      for (const link of links) {
+        const href = link.getAttribute('href') || '';
+        const match = href.match(/\/user\/([A-Za-z0-9_.-]+)/);
+        if (match) {
+          actorProfileUrl = href.startsWith('http') ? href : `https://www.douyin.com${href}`;
+          actorProfileKey = match[1];
+          break;
+        }
+      }
+
+      // Also try extracting from img parent anchors (avatar links)
+      if (!actorProfileUrl) {
+        const imgs = itemEl.querySelectorAll('img');
+        for (const img of imgs) {
+          let el = img.parentElement;
+          for (let i = 0; i < 4 && el; i++) {
+            const href = el.getAttribute('href') || '';
+            const match = href.match(/\/user\/([A-Za-z0-9_.-]+)/);
+            if (match) {
+              actorProfileUrl = href.startsWith('http') ? href : `https://www.douyin.com${href}`;
+              actorProfileKey = match[1];
+              break;
+            }
+            el = el.parentElement;
+          }
+          if (actorProfileUrl) break;
+        }
+      }
+
+      const itemData = {
         username: username.slice(0, 50),
         relation,
         eventType,
         action,
         content: content.slice(0, 300),
         timeText,
-      });
+        rawText: text.slice(0, 500),
+        actorProfileUrl,
+        actorProfileKey,
+      };
+
+      // Generate a per-notification-item fingerprint for precise matching
+      itemData.notificationItemKey = generateItemKey(itemData);
+
+      items.push(itemData);
     }
 
-    return items;
-  });
-}
-
-export async function clickLikeProfileLink(page, username) {
-  const shortName = username.slice(0, 20);
-
-  const result = await page.evaluate((name) => {
+    // Find notification panel in DOM
     function findNotificationPanel() {
       for (const el of document.querySelectorAll('*')) {
         const t = (el.innerText || '').trim();
@@ -254,51 +290,180 @@ export async function clickLikeProfileLink(page, username) {
       return null;
     }
 
+    // Simple hash function for in-browser fingerprint
+    function generateItemKey(d) {
+      const raw = [d.username, d.relation, d.action, (d.content || '').slice(0, 200), d.timeText, d.actorProfileKey || d.actorProfileUrl]
+        .map(s => (s || '').trim())
+        .join('||');
+      let hash = 0;
+      for (let i = 0; i < raw.length; i++) {
+        const c = raw.charCodeAt(i);
+        hash = ((hash << 5) - hash) + c;
+        hash |= 0;
+      }
+      const profilePart = d.actorProfileKey || d.actorProfileUrl || '';
+      return Math.abs(hash).toString(36) + '_' + (profilePart.length > 0 ? profilePart.length : 0);
+    }
+
+    return items;
+  });
+}
+
+/**
+ * Click the profile link of a specific notification item.
+ * Uses precise matching based on full event context (name + relation + action + timeText)
+ * to avoid mis-clicking on wrong users with similar names.
+ *
+ * @param {Page} page
+ * @param {Object} eventCtx - { username, relation, action, timeText, notificationItemKey, rawText }
+ * @returns {Promise<boolean>}
+ */
+export async function clickLikeProfileLink(page, eventCtx) {
+  // Accept both old-style (string username) and new-style (object context)
+  const ctx = typeof eventCtx === 'string' ? { username: eventCtx } : eventCtx;
+  const { username, relation, action, timeText, notificationItemKey } = ctx;
+  const shortName = (username || '').slice(0, 20);
+
+  const result = await page.evaluate(({ name, rel, act, time, itemKey }) => {
+    function findNotificationPanel() {
+      for (const el of document.querySelectorAll('*')) {
+        const t = (el.innerText || '').trim();
+        if (t.startsWith('互动消息') || t.startsWith('全部消息')) {
+          const r = el.getBoundingClientRect();
+          if (r.width < 100 || r.height < 30) continue;
+          let c = el.parentElement;
+          for (let i = 0; i < 6 && c && c !== document.body; i++) {
+            const cr = c.getBoundingClientRect();
+            if (cr.width > 250 && cr.height > 300) return c;
+            c = c.parentElement;
+          }
+        }
+      }
+      return null;
+    }
+
+    // Simple hash for in-browser notification item matching
+    function makeItemKey(d) {
+      const raw = [d.username, d.relation, d.action, d.content, d.time, d.profileKey]
+        .map(s => (s || '').trim())
+        .join('||');
+      let hash = 0;
+      for (let i = 0; i < raw.length; i++) {
+        const c = raw.charCodeAt(i);
+        hash = ((hash << 5) - hash) + c;
+        hash |= 0;
+      }
+      return Math.abs(hash).toString(36);
+    }
+
     const panel = findNotificationPanel();
     if (!panel) return { clicked: false, reason: 'panel-not-found' };
 
     const items = panel.querySelectorAll('li, [class*="item"], [class*="row"], [class*="entry"]');
-    for (const item of items) {
-      const text = (item.innerText || '').trim();
-      if (!text.includes(name)) continue;
 
-      const imgs = item.querySelectorAll('img');
-        for (const img of imgs) {
-          if (img.offsetHeight > 0) {
-            let clickTarget = img;
-            // Try clicking the img's parent anchor/link wrapper
-            for (let i = 0; i < 3 && clickTarget; i++) {
-              if (clickTarget.tagName === 'A' || clickTarget.getAttribute('href')) {
-                clickTarget.click();
-                return { clicked: true, method: 'avatar-link', text: text.slice(0, 60) };
+    // Phase 1: try precise match using notificationItemKey (if available)
+    if (itemKey) {
+      for (const itemEl of items) {
+        const text = (itemEl.innerText || '').trim();
+        if (!text.includes(name)) continue;
+
+        // Extract matching metadata from this item for comparison
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        const itemUsername = lines[0] || '';
+        const itemRel = ['朋友', '互相关注'].includes(lines[1]) ? lines[1] : '';
+        const hasAction = act ? text.includes(act) : true;
+        const hasTime = time ? text.includes(time) : true;
+
+        // Build candidate key
+        const candidateKey = makeItemKey({
+          username: itemUsername,
+          relation: itemRel,
+          action: act,
+          content: text.slice(0, 200),
+          time: time,
+          profileKey: '',
+        });
+
+        // Must match username AND at least one of: exact itemKey, action text, or time text
+        if (candidateKey === itemKey || (hasAction && hasTime)) {
+          // Try avatar first
+          const imgs = itemEl.querySelectorAll('img');
+          for (const img of imgs) {
+            if (img.offsetHeight > 0) {
+              let clickTarget = img;
+              for (let i = 0; i < 3 && clickTarget; i++) {
+                if (clickTarget.tagName === 'A' || clickTarget.getAttribute('href')) {
+                  clickTarget.click();
+                  return { clicked: true, method: 'precise-avatar-link', text: text.slice(0, 60) };
+                }
+                clickTarget = clickTarget.parentElement;
               }
-              clickTarget = clickTarget.parentElement;
+              img.click();
+              return { clicked: true, method: 'precise-avatar-image', text: text.slice(0, 60) };
             }
-            // Fallback: click the image directly
-            img.click();
-            return { clicked: true, method: 'avatar-image', text: text.slice(0, 60) };
           }
-        }
 
-        // Fallback: click any link in the item
-        const links = item.querySelectorAll('a[href]');
-        for (const link of links) {
-          if (link.offsetHeight > 0 && link.getAttribute('href').includes('/user/')) {
-            link.click();
-            return { clicked: true, method: 'user-link', text: text.slice(0, 60) };
+          // Fallback: click any user link in the item
+          const links = itemEl.querySelectorAll('a[href]');
+          for (const link of links) {
+            if (link.offsetHeight > 0 && link.getAttribute('href').includes('/user/')) {
+              link.click();
+              return { clicked: true, method: 'precise-user-link', text: text.slice(0, 60) };
+            }
           }
         }
       }
-    return { clicked: false };
-  }, shortName);
+    }
+
+    // Phase 2: fallback — username + action + time matching (still stricter than name-only)
+    for (const itemEl of items) {
+      const text = (itemEl.innerText || '').trim();
+      if (!text.includes(name)) continue;
+
+      // Require at least action or time match when available
+      if (act && !text.includes(act)) continue;
+      if (time && !text.includes(time)) continue;
+      // If relation provided, prefer matching items
+      if (rel && (rel === 'friend' || rel === 'mutual')) {
+        const relText = rel === 'friend' ? '朋友' : '互相关注';
+        if (!text.includes(relText)) continue;
+      }
+
+      const imgs = itemEl.querySelectorAll('img');
+      for (const img of imgs) {
+        if (img.offsetHeight > 0) {
+          let clickTarget = img;
+          for (let i = 0; i < 3 && clickTarget; i++) {
+            if (clickTarget.tagName === 'A' || clickTarget.getAttribute('href')) {
+              clickTarget.click();
+              return { clicked: true, method: 'fallback-avatar-link', text: text.slice(0, 60) };
+            }
+            clickTarget = clickTarget.parentElement;
+          }
+          img.click();
+          return { clicked: true, method: 'fallback-avatar-image', text: text.slice(0, 60) };
+        }
+      }
+
+      const links = itemEl.querySelectorAll('a[href]');
+      for (const link of links) {
+        if (link.offsetHeight > 0 && link.getAttribute('href').includes('/user/')) {
+          link.click();
+          return { clicked: true, method: 'fallback-user-link', text: text.slice(0, 60) };
+        }
+      }
+    }
+
+    return { clicked: false, reason: 'not-found' };
+  }, { name: shortName, rel: relation || '', act: action || '', time: timeText || '', itemKey: notificationItemKey || '' });
 
   if (result.clicked) {
-    console.log(`[notify-page] 点击 ${username} 的头像 (${result.method})`);
+    console.log(`[notify-page] 点击 ${shortName} 的头像 (${result.method})`);
     await page.waitForTimeout(3000);
     return true;
   }
 
-  console.log(`[notify-page] 未找到 ${username} 的通知条目`);
+  console.log(`[notify-page] 未找到 ${shortName} 的精确匹配通知条目 (reason: ${result.reason})`);
   return false;
 }
 

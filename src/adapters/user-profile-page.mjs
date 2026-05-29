@@ -63,9 +63,16 @@ export async function navigateToProfile(page, username, options = {}) {
   }
 }
 
+/**
+ * Read-only: find the latest non-pinned video candidate on the current profile page.
+ * Does NOT click or navigate — only reads the DOM.
+ *
+ * @returns {{ ok: true, data: { videoUrl, videoId, candidateCount, targetRule, isPinned } }} on success
+ * @returns {{ ok: false, code, message }} on failure
+ */
 export async function findLatestNonPinnedVideo(page) {
   try {
-    const video = await page.evaluate(() => {
+    const candidate = await page.evaluate(() => {
       const all = document.querySelectorAll('a');
 
       const videoLinks = [];
@@ -87,13 +94,19 @@ export async function findLatestNonPinnedVideo(page) {
 
       if (videoLinks.length === 0) return null;
 
-      // Try to open and check the first one
+      // Read-only: extract candidate data without clicking
       const first = videoLinks[0];
-      first.click();
-      return first;
+      const videoIdMatch = first.url.match(/\/video\/(\d+)/);
+      return {
+        videoUrl: first.url,
+        videoId: videoIdMatch ? videoIdMatch[1] : null,
+        candidateCount: videoLinks.length,
+        y: first.y,
+        x: first.x,
+      };
     });
 
-    if (!video) {
+    if (!candidate) {
       return blocking(
         RESULT_CODES.BLOCKED,
         '该用户主页未找到非置顶视频',
@@ -101,8 +114,15 @@ export async function findLatestNonPinnedVideo(page) {
       );
     }
 
-    console.log(`[user-profile] 找到最新视频: ${video.url}`);
-    return success({ videoUrl: video.url });
+    console.log(`[user-profile] 候选最新视频: ${candidate.videoUrl} (共 ${candidate.candidateCount} 个视频)`);
+    return success({
+      videoUrl: candidate.videoUrl,
+      videoId: candidate.videoId,
+      candidateCount: candidate.candidateCount,
+      targetRule: 'latest_non_pinned_video',
+      isPinned: false,
+      evidence: { y: candidate.y, x: candidate.x },
+    });
   } catch (err) {
     return blocking(
       RESULT_CODES.BLOCKED,

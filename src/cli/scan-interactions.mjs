@@ -133,7 +133,7 @@ async function runNotificationScan(page, run, type) {
     console.log('[scan] --- 原始文本结束 ---');
   }
 
-  const { generateFingerprint } = await import('../domain/event-fingerprint.mjs');
+  const { notificationFingerprint } = await import('../domain/event-fingerprint.mjs');
 
   const wantComments = (type === 'all');
   const wantLikes = true;
@@ -147,16 +147,29 @@ async function runNotificationScan(page, run, type) {
       if (!wantComments && n.eventType === 'comment') continue;
       if (!wantLikes && n.eventType === 'like') continue;
 
-      const fp = generateFingerprint(n.eventType, n.username, '', n.content || n.action, n.timeText);
+      // Use notificationFingerprint for robust dedup (includes profile identifiers)
+      const fp = notificationFingerprint({
+        eventType: n.eventType,
+        username: n.username,
+        actorProfileKey: n.actorProfileKey,
+        actorProfileUrl: n.actorProfileUrl,
+        action: n.action,
+        content: n.content,
+        timeText: n.timeText,
+        rawText: n.rawText,
+      });
 
       const id = insertEvent({
         eventType: n.eventType,
         actorName: n.username,
+        actorProfileKey: n.actorProfileKey || null,
+        actorProfileUrl: n.actorProfileUrl || null,
         relation: n.relation,
         myWorkTitle: '',
         commentText: n.eventType === 'comment' ? n.content : null,
         eventTimeText: n.timeText,
         fingerprint: fp,
+        rawPayloadJson: n.rawText ? JSON.stringify({ rawText: n.rawText, notificationItemKey: n.notificationItemKey }) : null,
       });
 
       if (id) {

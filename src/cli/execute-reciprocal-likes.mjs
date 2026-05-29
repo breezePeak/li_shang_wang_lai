@@ -144,6 +144,15 @@ async function processOneItem(page, item, db, run, planId) {
     run.hadBlocked = true;
     return r;
   }
+  if (stateResult.data.confidence !== 'confirmed') {
+    r.status = 'blocked';
+    r.reason = `点赞状态置信度不足 (${stateResult.data.confidence || 'unknown'})，禁止点击`;
+    r.code = RESULT_CODES.LIKE_STATE_UNKNOWN;
+    console.log(`[reciprocate]   ✗ 点赞状态置信度不足，禁止点击`);
+    recordAction(db, item.eventId, item.targetVideoTitle || '', item.targetVideoUrl, 'blocked', r.reason, null, null);
+    run.hadBlocked = true;
+    return r;
+  }
   if (stateResult.data.alreadyLiked) {
     r.status = 'skipped';
     r.reason = '已经点过赞';

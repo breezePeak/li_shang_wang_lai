@@ -31,8 +31,10 @@ async function processOneLikeEvent(page, event) {
     relation: event.relation,
     actorProfileUrl: '',
     targetVideoUrl: '',
+    targetVideoId: null,
     targetVideoTitle: '',
     targetRule: 'latest_non_pinned_video',
+    candidateCount: 0,
     alreadyLiked: null,
     approved: false,
     status: 'planned',
@@ -48,16 +50,39 @@ async function processOneLikeEvent(page, event) {
 
   console.log(`\n[plan-likes] ${event.actor_name} [${event.relation}]`);
 
-  // Click avatar in notification panel → navigates to user profile
-  const clicked = await clickLikeProfileLink(page, event.actor_name);
-  if (!clicked) {
-    r.status = 'blocked';
-    r.reason = `通知面板中未找到 ${event.actor_name} 的头像链接`;
-    return r;
-  }
+  // Build full event context for precise notification matching
+  // Extract stored rawText / notificationItemKey from raw_payload_json if available
+  let rawPayload = {};
+  try {
+    if (event.raw_payload_json) rawPayload = JSON.parse(event.raw_payload_json);
+  } catch { /* ignore */ }
 
-  r.actorProfileUrl = page.url();
-  console.log(`[plan-likes]   主页: ${r.actorProfileUrl.slice(0, 60)}`);
+  // If the event already has a profile URL from notification scanning, use it directly
+  if (event.actor_profile_url) {
+    r.actorProfileUrl = event.actor_profile_url;
+    console.log(`[plan-likes]   主页(来自扫描): ${r.actorProfileUrl.slice(0, 60)}`);
+    // Navigate directly to known profile URL instead of clicking notification item
+    await page.goto(r.actorProfileUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.waitForTimeout(3000);
+  } else {
+    // Click avatar in notification panel → navigates to user profile
+    // Pass full event context for precise matching (not just username)
+    const clicked = await clickLikeProfileLink(page, {
+      username: event.actor_name,
+      relation: event.relation,
+      action: '赞了你的作品',  // Like events always have this action
+      timeText: event.event_time_text,
+      notificationItemKey: rawPayload.notificationItemKey || '',
+      rawText: rawPayload.rawText || '',
+    });
+    if (!clicked) {
+      r.status = 'blocked';
+      r.reason = `通知面板中未找到 ${event.actor_name} 的精确匹配条目`;
+      return r;
+    }
+    r.actorProfileUrl = page.url();
+    console.log(`[plan-likes]   主页(来自通知): ${r.actorProfileUrl.slice(0, 60)}`);
+  }
 
   // Find latest non-pinned video on profile page
   const videoResult = await findLatestNonPinnedVideo(page);
@@ -69,7 +94,10 @@ async function processOneLikeEvent(page, event) {
   }
 
   r.targetVideoUrl = videoResult.data.videoUrl;
-  console.log(`[plan-likes]   最新视频: ${r.targetVideoUrl.slice(0, 60)}`);
+  r.targetRule = videoResult.data.targetRule || 'latest_non_pinned_video';
+  r.targetVideoId = videoResult.data.videoId || null;
+  r.candidateCount = videoResult.data.candidateCount || 0;
+  console.log(`[plan-likes]   最新视频: ${r.targetVideoUrl.slice(0, 60)} (id=${r.targetVideoId}, 共${r.candidateCount}个候选)`);
 
   await page.waitForTimeout(2000);
 
@@ -83,7 +111,15 @@ async function processOneLikeEvent(page, event) {
   }
 
   const likeResult = await checkLikeState(page);
-  if (likeResult.ok && likeResult.data.alreadyLiked) {
+  if (!likeResult.ok || likeResult.data.confidence !== 'confirmed') {
+    r.status = 'blocked';
+    r.reason = likeResult.ok
+      ? `点赞状态置信度不足 (${likeResult.data.confidence || 'unknown'})`
+      : likeResult.message;
+    r.code = likeResult.code || 'LIKE_STATE_UNKNOWN';
+    return r;
+  }
+  if (likeResult.data.alreadyLiked) {
     r.status = 'skipped';
     r.reason = '已经点过赞';
     r.alreadyLiked = true;

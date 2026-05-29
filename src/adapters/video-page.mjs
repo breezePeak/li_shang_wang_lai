@@ -98,7 +98,12 @@ export async function checkLikeState(page) {
     }
 
     console.log(`[video-page] 点赞状态: ${state.liked ? '已赞' : '未赞'}`);
-    return success({ alreadyLiked: state.liked, text: state.text });
+    return success({
+      alreadyLiked: state.liked,
+      text: state.text,
+      confidence: 'confirmed',
+      signal: state.liked ? 'red-fill-or-active-class' : 'neutral-state',
+    });
   } catch (err) {
     return blocking(
       RESULT_CODES.LIKE_STATE_UNKNOWN,

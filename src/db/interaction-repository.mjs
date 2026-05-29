@@ -4,17 +4,17 @@ import { getDb } from './database.mjs';
  * Insert a new interaction event. Returns the inserted row id.
  * Skips if fingerprint already exists (duplicate).
  */
-export function insertEvent({ eventType, actorName, actorProfileKey, relation, myWorkTitle, commentText, eventTimeText, fingerprint }) {
+export function insertEvent({ eventType, actorName, actorProfileKey, actorProfileUrl, relation, myWorkTitle, commentText, eventTimeText, fingerprint, rawPayloadJson }) {
   const db = getDb();
   const scannedAt = new Date().toISOString();
 
   const stmt = db.prepare(`
     INSERT OR IGNORE INTO interaction_events
-      (event_type, actor_name, actor_profile_key, relation, my_work_title, comment_text, event_time_text, fingerprint, scanned_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (event_type, actor_name, actor_profile_key, actor_profile_url, relation, my_work_title, comment_text, event_time_text, fingerprint, raw_payload_json, scanned_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const result = stmt.run(eventType, actorName, actorProfileKey || null, relation || 'unknown', myWorkTitle || null, commentText || null, eventTimeText || null, fingerprint, scannedAt);
+  const result = stmt.run(eventType, actorName, actorProfileKey || null, actorProfileUrl || null, relation || 'unknown', myWorkTitle || null, commentText || null, eventTimeText || null, fingerprint, rawPayloadJson || null, scannedAt);
   return result.changes > 0 ? result.lastInsertRowid : null;
 }
 
