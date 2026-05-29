@@ -1,11 +1,11 @@
-import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
+﻿import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 
 export async function navigateToProfile(page, username, options = {}) {
   const { timeoutMs = 15000 } = options;
 
   try {
     const searchUrl = `https://www.douyin.com/search/${encodeURIComponent(username)}?type=user`;
-    console.log(`[user-profile] 搜索用户: "${username}"`);
+    console.error(`[user-profile] 搜索用户: "${username}"`);
 
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await page.waitForTimeout(3000);
@@ -31,7 +31,7 @@ export async function navigateToProfile(page, username, options = {}) {
       );
     }
 
-    console.log(`[user-profile] 找到主页: ${profileUrl.url}`);
+    console.error(`[user-profile] 找到主页: ${profileUrl.url}`);
     await page.goto(profileUrl.url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await page.waitForTimeout(3000);
 
@@ -114,7 +114,7 @@ export async function findLatestNonPinnedVideo(page) {
       );
     }
 
-    console.log(`[user-profile] 候选最新视频: ${candidate.videoUrl} (共 ${candidate.candidateCount} 个视频)`);
+    console.error(`[user-profile] 候选最新视频: ${candidate.videoUrl} (共 ${candidate.candidateCount} 个视频)`);
     return success({
       videoUrl: candidate.videoUrl,
       videoId: candidate.videoId,

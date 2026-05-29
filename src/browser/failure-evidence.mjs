@@ -1,4 +1,4 @@
-import {
+﻿import {
   capturePageDiagnostics,
   extractVisibleText,
   captureFullScreenshot,
@@ -64,7 +64,7 @@ export async function captureEvidence(page, {
   try {
     const screenshotOk = await captureFullScreenshot(page, path.join(evidenceDir, 'screenshot.png'));
     if (!screenshotOk) {
-      console.log(`[evidence] 截图失败 — ${step}`);
+      console.error(`[evidence] 截图失败 — ${step}`);
     }
   } catch {
     // non-fatal
@@ -76,10 +76,10 @@ export async function captureEvidence(page, {
     // non-fatal
   }
 
-  console.log(`[evidence] 现场证据已保存: ${evidenceDir}`);
-  console.log(`[evidence]   步骤: ${step}`);
-  console.log(`[evidence]   错误码: ${code}`);
-  console.log(`[evidence]   可恢复: ${recoverable ? '是' : '否'}`);
+  console.error(`[evidence] 现场证据已保存: ${evidenceDir}`);
+  console.error(`[evidence]   步骤: ${step}`);
+  console.error(`[evidence]   错误码: ${code}`);
+  console.error(`[evidence]   可恢复: ${recoverable ? '是' : '否'}`);
 
   return { evidenceDir, evidenceInfo };
 }

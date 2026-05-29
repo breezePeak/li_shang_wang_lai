@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 检查当前页面登录状态
  * @param {import('playwright').Page} page
  * @returns {Promise<{loggedIn: boolean, reason?: string}>}

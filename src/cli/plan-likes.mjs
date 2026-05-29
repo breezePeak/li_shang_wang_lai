@@ -1,4 +1,4 @@
-import { getEvents } from '../db/interaction-repository.mjs';
+﻿import { getEvents } from '../db/interaction-repository.mjs';
 import { createPlan } from '../db/plan-repository.mjs';
 import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
 import { runMigrations } from '../db/migrations.mjs';
@@ -13,6 +13,7 @@ import {
 import { findLatestNonPinnedVideo } from '../adapters/user-profile-page.mjs';
 import { navigateToVideo, checkLikeState, getVideoTitle } from '../adapters/video-page.mjs';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
+import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import path from 'path';
 
 function parseArgs(argv) {
@@ -48,7 +49,7 @@ async function processOneLikeEvent(page, event) {
     return r;
   }
 
-  console.log(`\n[plan-likes] ${event.actor_name} [${event.relation}]`);
+  console.error(`\n[plan-likes] ${event.actor_name} [${event.relation}]`);
 
   // Build full event context for precise notification matching
   // Extract stored rawText / notificationItemKey from raw_payload_json if available
@@ -60,7 +61,7 @@ async function processOneLikeEvent(page, event) {
   // If the event already has a profile URL from notification scanning, use it directly
   if (event.actor_profile_url) {
     r.actorProfileUrl = event.actor_profile_url;
-    console.log(`[plan-likes]   主页(来自扫描): ${r.actorProfileUrl.slice(0, 60)}`);
+    console.error(`[plan-likes]   主页(来自扫描): ${r.actorProfileUrl.slice(0, 60)}`);
     // Navigate directly to known profile URL instead of clicking notification item
     await page.goto(r.actorProfileUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForTimeout(3000);
@@ -81,7 +82,7 @@ async function processOneLikeEvent(page, event) {
       return r;
     }
     r.actorProfileUrl = page.url();
-    console.log(`[plan-likes]   主页(来自通知): ${r.actorProfileUrl.slice(0, 60)}`);
+    console.error(`[plan-likes]   主页(来自通知): ${r.actorProfileUrl.slice(0, 60)}`);
   }
 
   // Find latest non-pinned video on profile page
@@ -97,7 +98,7 @@ async function processOneLikeEvent(page, event) {
   r.targetRule = videoResult.data.targetRule || 'latest_non_pinned_video';
   r.targetVideoId = videoResult.data.videoId || null;
   r.candidateCount = videoResult.data.candidateCount || 0;
-  console.log(`[plan-likes]   最新视频: ${r.targetVideoUrl.slice(0, 60)} (id=${r.targetVideoId}, 共${r.candidateCount}个候选)`);
+  console.error(`[plan-likes]   最新视频: ${r.targetVideoUrl.slice(0, 60)} (id=${r.targetVideoId}, 共${r.candidateCount}个候选)`);
 
   await page.waitForTimeout(2000);
 
@@ -131,7 +132,7 @@ async function processOneLikeEvent(page, event) {
     r.targetVideoTitle = titleResult.data.title;
   }
 
-  console.log(`[plan-likes]   未点赞，加入计划`);
+  console.error(`[plan-likes]   未点赞，加入计划`);
   return r;
 }
 
@@ -141,15 +142,15 @@ async function main() {
   const commonArgs = parseCommonArgs(process.argv.slice(2));
   const cmdArgs = parseArgs(commonArgs.remaining);
 
-  console.log('[plan-likes] 读取点赞事件...');
+  console.error('[plan-likes] 读取点赞事件...');
   const likes = getEvents({ eventType: 'like', status: 'new', limit: 20 });
 
   if (likes.length === 0) {
-    console.log('[plan-likes] 没有点赞事件。先运行 npm run interactions:scan -- --type like');
+    console.error('[plan-likes] 没有点赞事件。先运行 npm run interactions:scan -- --type like');
     process.exit(0);
   }
 
-  console.log(`[plan-likes] 找到 ${likes.length} 个点赞事件`);
+  console.error(`[plan-likes] 找到 ${likes.length} 个点赞事件`);
 
   const run = createRunContext('plan-likes', commonArgs.options);
   const db = getDb();
@@ -161,19 +162,19 @@ async function main() {
   let hasVerifiedItem = false;
 
   try {
-    console.log('[plan-likes] 启动浏览器...');
+    console.error('[plan-likes] 启动浏览器...');
     const ctx = await createBrowserContext({ headless: false });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
 
     // Step 1: Navigate to self page and open notification panel
-    console.log('[plan-likes] 导航到个人主页并打开通知面板...');
+    console.error('[plan-likes] 导航到个人主页并打开通知面板...');
     await ensureNotificationPageReady(page);
 
     const panelOpen = await openNotificationPanel(page);
     if (!panelOpen) {
-      console.log('[plan-likes] 无法打开通知面板，请手动打开后重试');
+      console.error('[plan-likes] 无法打开通知面板，请手动打开后重试');
       run.hadBlocked = true;
     } else {
       // Step 2: For each like event, click avatar to navigate to user profile
@@ -187,7 +188,7 @@ async function main() {
 
         if (i < likes.length - 1) {
           // Go back to self page and reopen notification panel for next item
-          console.log('[plan-likes] 返回个人主页...');
+          console.error('[plan-likes] 返回个人主页...');
           await ensureNotificationPageReady(page);
           await openNotificationPanel(page);
           await page.waitForTimeout(1000);
@@ -215,12 +216,12 @@ async function main() {
     };
 
     writeJSON(outPath, plan);
-    console.log(`\n[plan-likes] 计划已保存: ${outPath}`);
+    console.error(`\n[plan-likes] 计划已保存: ${outPath}`);
 
     const planId = createPlan({ planType: 'reciprocal_like', mode: cmdArgs.mode, payload: plan });
     plan.planId = planId;
     writeJSON(outPath, plan);
-    console.log(`[plan-likes] DB 计划 ID: ${planId}`);
+    console.error(`[plan-likes] DB 计划 ID: ${planId}`);
 
     // Update event statuses
     for (const item of items) {
@@ -236,24 +237,45 @@ async function main() {
     run.blocked = plan.blockedCount;
     saveRunSummary(run);
 
-    console.log(`\n===== 汇总 =====`);
-    console.log(`  计划内: ${plan.plannedCount} | 跳过: ${plan.skippedCount} | 阻塞: ${plan.blockedCount}`);
+    console.error(`\n===== 汇总 =====`);
+    console.error(`  计划内: ${plan.plannedCount} | 跳过: ${plan.skippedCount} | 阻塞: ${plan.blockedCount}`);
 
     if (hasVerifiedItem) {
-      console.log('\n===== 预览 =====');
+      console.error('\n===== 候选预览 =====');
+      console.error('注意：好友回访在 MVP 阶段仅支持预览，真实点赞默认禁用。');
       for (const item of items) {
         if (item.status === 'planned') {
-          console.log(`  [${item.eventId}] ${item.actorName} [${item.relation}]`);
-          console.log(`    主页: ${item.actorProfileUrl}`);
-          console.log(`    目标: ${item.targetVideoUrl}`);
-          console.log(`    标题: ${item.targetVideoTitle.slice(0, 60)}`);
-          console.log('');
+          console.error(`  [${item.eventId}] ${item.actorName} [${item.relation}] previewOnly`);
+          if (item.actorProfileUrl) console.error(`    主页: ${item.actorProfileUrl}`);
+          if (item.targetVideoUrl) console.error(`    目标: ${item.targetVideoUrl}`);
+          if (item.targetVideoTitle) console.error(`    标题: ${item.targetVideoTitle.slice(0, 60)}`);
+          console.error('');
         }
       }
-      console.log('===== 下一步 =====');
-      console.log(`1. 编辑 ${outPath.replace(/\\/g, '/')}`);
-      console.log('2. 将需要回赞的条目 approved 设为 true');
-      console.log(`3. 运行 npm run likes:reciprocate -- --plan ${outPath.replace(/\\/g, '/')} --execute --max-items 1`);
+    }
+
+    // --json output for agent consumption
+    if (commonArgs.options.json) {
+      printJsonResult('likes:plan', {
+        candidates: items.map(i => ({
+          eventId: i.eventId,
+          actorName: i.actorName,
+          relation: i.relation,
+          actorProfileUrl: i.actorProfileUrl || null,
+          targetVideoUrl: i.targetVideoUrl || null,
+          targetVideoTitle: i.targetVideoTitle || null,
+          alreadyLiked: i.alreadyLiked || false,
+          status: i.status,
+          reason: i.reason || null,
+          previewOnly: true,
+          executeAllowed: false,
+        })),
+      }, {
+        total: items.length,
+        planned: plan.plannedCount,
+        skipped: plan.skippedCount,
+        blocked: plan.blockedCount,
+      });
     }
 
     if (browser) {
@@ -262,7 +284,7 @@ async function main() {
       if (shouldClose) {
         await browser.close();
       } else {
-        console.log('[plan-likes] 浏览器保持打开，供人工检查。');
+        console.error('[plan-likes] 浏览器保持打开，供人工检查。');
       }
     }
   }

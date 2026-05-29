@@ -147,9 +147,13 @@ async function main() {
       return;
     }
 
-    // P0-1 FIX: openReplyBox uses ORIGINAL comment text to locate the reply button
-    log(`[execute] 定位原评论: "${action.commentText.slice(0, 40)}"`);
-    const openResult = await openReplyBox(page, action.commentText);
+    // P0-1 FIX: openReplyBox receives multi-field match object for unique identification
+    log(`[execute] 定位原评论: "${action.commentText.slice(0, 40)}" (${action.actorName})`);
+    const openResult = await openReplyBox(page, {
+      commentText: action.commentText,
+      actorName: action.actorName,
+      eventTimeText: null, // reserved for future use
+    });
 
     if (!openResult.ok) {
       await updateActionStatus(action.actionId, 'blocked', openResult.message);

@@ -1,4 +1,4 @@
-import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
+﻿import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
 import path from 'path';
 
 const DEFAULT_OPTIONS = {
@@ -101,10 +101,10 @@ export function createRunContext(command, commonArgs) {
     evidenceDirectories: [],
   };
 
-  console.log(`[run] 运行 ID: ${runId}`);
-  console.log(`[run] 命令: ${command}`);
-  console.log(`[run] 输出目录: ${outputDir}`);
-  console.log(`[run] 参数: debug=${commonArgs.debug} dry-run=${commonArgs.dryRun} execute=${commonArgs.execute} max-items=${commonArgs.maxItems}`);
+  console.error(`[run] 运行 ID: ${runId}`);
+  console.error(`[run] 命令: ${command}`);
+  console.error(`[run] 输出目录: ${outputDir}`);
+  console.error(`[run] 参数: debug=${commonArgs.debug} dry-run=${commonArgs.dryRun} execute=${commonArgs.execute} max-items=${commonArgs.maxItems}`);
 
   return run;
 }
@@ -130,7 +130,7 @@ export function saveRunSummary(run) {
     hadBlocked: run.hadBlocked,
     evidenceDirectories: run.evidenceDirectories,
   });
-  console.log(`[run] 摘要已保存: ${summaryPath}`);
+  console.error(`[run] 摘要已保存: ${summaryPath}`);
 }
 
 export function resolveBrowserClose(run) {
@@ -142,7 +142,7 @@ export function resolveBrowserClose(run) {
   if (run.hadError || run.hadBlocked) {
     if (run.options.keepOpenOnError) {
       run.browserKeptOpen = true;
-      console.log('[run] 检测到错误/阻塞，根据 --keep-open-on-error 保留浏览器。');
+      console.error('[run] 检测到错误/阻塞，根据 --keep-open-on-error 保留浏览器。');
       return false;
     }
   }

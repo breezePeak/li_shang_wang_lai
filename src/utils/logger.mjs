@@ -1,33 +1,26 @@
-// 日志工具
-
-const LEVELS = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
-let currentLevel = LEVELS.INFO;
+// 日志工具 — 所有日志统一输出到 stderr，不污染 stdout JSON 输出
+let currentLevel = 1; // INFO
 
 function formatTime() {
   return new Date().toISOString().replace('T', ' ').substring(0, 19);
 }
 
-/**
- * @param {string} level
- * @param {string} message
- * @param  {...any} args
- */
 function log(level, message, ...args) {
-  if (LEVELS[level] < currentLevel) return;
+  if (level < currentLevel) return;
   const timestamp = formatTime();
-  const prefix = `[${timestamp}] [${level}]`;
-  console.log(prefix, message, ...args);
+  const prefix = `[${timestamp}]`;
+  console.error(prefix, message, ...args);
 }
 
 export const logger = {
-  setLevel(level) {
-    if (LEVELS[level] !== undefined) currentLevel = LEVELS[level];
+  setLevel(label) {
+    const map = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
+    if (map[label] !== undefined) currentLevel = map[label];
   },
-
-  debug(...args) { log('DEBUG', ...args); },
-  info(...args) { log('INFO', ...args); },
-  warn(...args) { log('WARN', ...args); },
-  error(...args) { log('ERROR', ...args); },
+  debug(...args) { log(0, ...args); },
+  info(...args) { log(1, ...args); },
+  warn(...args) { log(2, ...args); },
+  error(...args) { log(3, ...args); },
 };
 
 export default logger;

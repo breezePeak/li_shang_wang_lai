@@ -1,10 +1,10 @@
-import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
+﻿import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 
 export async function navigateToVideo(page, videoUrl, options = {}) {
   const { timeoutMs = 15000 } = options;
 
   try {
-    console.log(`[video-page] 打开视频: ${videoUrl}`);
+    console.error(`[video-page] 打开视频: ${videoUrl}`);
     await page.goto(videoUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await page.waitForTimeout(3000);
 
@@ -97,7 +97,7 @@ export async function checkLikeState(page) {
       );
     }
 
-    console.log(`[video-page] 点赞状态: ${state.liked ? '已赞' : '未赞'}`);
+    console.error(`[video-page] 点赞状态: ${state.liked ? '已赞' : '未赞'}`);
     return success({
       alreadyLiked: state.liked,
       text: state.text,
@@ -175,7 +175,7 @@ export async function clickLike(page, { execute = false } = {}) {
       );
     }
 
-    console.log('[video-page] 已点击点赞按钮');
+    console.error('[video-page] 已点击点赞按钮');
     await page.waitForTimeout(2000);
     return success({ clicked: true });
   } catch (err) {

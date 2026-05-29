@@ -1,4 +1,4 @@
-import { wait } from '../utils/wait.mjs';
+﻿import { wait } from '../utils/wait.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 
 const COMMENT_PAGE_URL = 'https://creator.douyin.com/creator-micro/interactive/comment';
@@ -13,14 +13,14 @@ export async function ensureCommentPageReady(page, options = {}) {
   }
 
   if (!currentUrl.includes('creator.douyin.com/creator-micro/interactive')) {
-    console.log('[comment-page] 导航到评论管理页...');
+    console.error('[comment-page] 导航到评论管理页...');
     try {
       await page.goto(COMMENT_PAGE_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     } catch (err) {
       return blocking(RESULT_CODES.NAVIGATION_TIMEOUT, `页面导航超时: ${err.message}`, { data: { url: COMMENT_PAGE_URL } });
     }
   } else {
-    console.log('[comment-page] 已在评论页，跳过导航');
+    console.error('[comment-page] 已在评论页，跳过导航');
   }
 
   await page.waitForTimeout(2000);
@@ -103,7 +103,7 @@ export async function waitForCommentsArea(page, timeoutMs = 15000) {
 }
 
 export async function scrollToLoadAllComments(page, { maxRound = 50, loadTimeout = 5000 } = {}) {
-  console.log('[comment-page] 滚动加载所有评论...');
+  console.error('[comment-page] 滚动加载所有评论...');
 
   let prevCount = 0;
   let noNewRounds = 0;
@@ -149,7 +149,7 @@ export async function scrollToLoadAllComments(page, { maxRound = 50, loadTimeout
     });
 
     if (currentCount > prevCount) {
-      console.log(`[comment-page]   已加载: ${currentCount} 条评论`);
+      console.error(`[comment-page]   已加载: ${currentCount} 条评论`);
       prevCount = currentCount;
       noNewRounds = 0;
       await page.waitForTimeout(200);
@@ -173,7 +173,7 @@ export async function scrollToLoadAllComments(page, { maxRound = 50, loadTimeout
     } catch {
       noNewRounds++;
       if (noNewRounds >= 4) {
-        console.log(`[comment-page]   连续 ${noNewRounds} 轮无新内容，停止滚动，共 ${prevCount} 条`);
+        console.error(`[comment-page]   连续 ${noNewRounds} 轮无新内容，停止滚动，共 ${prevCount} 条`);
         break;
       }
     }
@@ -327,12 +327,33 @@ export async function getSelectedWorkTitle(page) {
   }
 }
 
-export async function openReplyBox(page, commentText) {
+export async function openReplyBox(page, match) {
+  const target = typeof match === 'string' ? match : (match.commentText || '');
+  const actorName = typeof match === 'object' ? match.actorName : null;
+  const eventTimeText = typeof match === 'object' ? match.eventTimeText : null;
+
   try {
     const maxScrollRounds = 30;
+    let lastMatchCount = 0;
 
     for (let round = 0; round < maxScrollRounds; round++) {
-      const result = await page.evaluate((target) => {
+      // Pre-check: count matching comments for uniqueness
+      const countResult = await page.evaluate(({ target, actorName }) => {
+        const contentEls = document.querySelectorAll('[class*="comment-content"]');
+        let matchCount = 0;
+        for (const el of contentEls) {
+          if (el.offsetHeight === 0) continue;
+          const text = (el.innerText || '').trim();
+          if (!text.includes(target)) continue;
+          if (actorName && !text.includes(actorName)) continue;
+          matchCount++;
+        }
+        return { matchCount };
+      }, { target, actorName });
+
+      lastMatchCount = countResult.matchCount;
+
+      const result = await page.evaluate(({ target, actorName, eventTimeText }) => {
         // Strategy 1: Find via comment-content-text class (most precise)
         const contentEls = document.querySelectorAll('[class*="comment-content"]');
         for (const el of contentEls) {
@@ -390,10 +411,21 @@ export async function openReplyBox(page, commentText) {
         }
 
         return { found: false, replyBtnCount: replyBtns.length };
-      }, commentText);
+      }, { target, actorName, eventTimeText });
 
       if (result.found && result.clicked) {
-        console.log(`[comment-page] 找到目标评论(${result.strategy})，匹配: "${result.matchText}"`);
+        console.error(`[comment-page] 找到目标评论(${result.strategy})，匹配: "${result.matchText}"`);
+
+        // Multi-match check: if actorName provided, count similar comments
+        if (actorName && result.matchCount > 1) {
+          console.error(`[comment-page] ⚠️ 发现 ${result.matchCount} 条匹配评论（相同文本），存在错配风险`);
+          return blocking(
+            RESULT_CODES.BLOCKED,
+            `评论文本 "${target.slice(0, 30)}" 匹配到 ${result.matchCount} 条，无法唯一定位。请人工核对后重试。`,
+            { data: { matchCount: result.matchCount, target: target.slice(0, 60) } }
+          );
+        }
+
         await page.waitForTimeout(1500);
         return success({ clicked: true, strategy: result.strategy });
       }
@@ -427,7 +459,7 @@ export async function openReplyBox(page, commentText) {
 
     return blocking(RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND, '滚动查找超时', { data: {} });
   } catch (err) {
-    console.log('[comment-page] openReplyBox 异常:', err.message);
+    console.error('[comment-page] openReplyBox 异常:', err.message);
     return blocking(
       RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND,
       `打开回复框异常: ${err.message}`,
@@ -470,7 +502,7 @@ export async function fillReplyText(page, replyText) {
     }, replyText);
 
     if (filled && filled.filled) {
-      console.log(`[comment-page] 填写回复文字成功 (${filled.method})`);
+      console.error(`[comment-page] 填写回复文字成功 (${filled.method})`);
       await page.waitForTimeout(800);
       return success({ filled: true, method: filled.method });
     }
@@ -530,7 +562,7 @@ export async function clickSendReply(page) {
 
     let result = await findAndClick();
     if (!result.ok && result.reason === 'no-send-btn-in-reply-container') {
-      console.log('[comment-page] 发送按钮未找到或未启用，等待2秒重试...');
+      console.error('[comment-page] 发送按钮未找到或未启用，等待2秒重试...');
       await page.waitForTimeout(2000);
       result = await findAndClick();
     }
@@ -543,7 +575,7 @@ export async function clickSendReply(page) {
       );
     }
 
-    console.log(`[comment-page] 点击发送按钮成功 (${result.method})`);
+    console.error(`[comment-page] 点击发送按钮成功 (${result.method})`);
     await page.waitForTimeout(2000);
     return success({ clicked: true });
   } catch (err) {
@@ -614,33 +646,33 @@ export async function selectWorkByTitle(page, workTitle) {
   }
 
   const shortTitle = workTitle.slice(0, 30);
-  console.log(`[comment-page] 目标作品: "${workTitle.slice(0, 50)}"`);
+  console.error(`[comment-page] 目标作品: "${workTitle.slice(0, 50)}"`);
 
   // Check current selection
   const currentResult = await getSelectedWorkTitle(page);
   if (currentResult.ok && currentResult.data.found) {
     const currentTitle = currentResult.data.title;
     if (currentTitle.includes(shortTitle) || shortTitle.includes(currentTitle)) {
-      console.log(`[comment-page] 当前已是目标作品: "${currentTitle.slice(0, 50)}"`);
+      console.error(`[comment-page] 当前已是目标作品: "${currentTitle.slice(0, 50)}"`);
       return success({ alreadySelected: true, title: currentTitle });
     }
-    console.log(`[comment-page] 当前作品: "${currentTitle.slice(0, 50)}"，需要切换`);
+    console.error(`[comment-page] 当前作品: "${currentTitle.slice(0, 50)}"，需要切换`);
   }
 
   // Step 1: Click "选择作品" button to open work selector panel
-  console.log('[comment-page] 点击"选择作品"按钮...');
+  console.error('[comment-page] 点击"选择作品"按钮...');
   try {
     // Try multiple strategies to find and click the button
     const selectBtn = page.locator('button:has-text("选择作品"), [role="button"]:has-text("选择作品")').first();
     await selectBtn.waitFor({ state: 'visible', timeout: 5000 });
     await selectBtn.click({ timeout: 5000 });
-    console.log('[comment-page] 已点击"选择作品"');
+    console.error('[comment-page] 已点击"选择作品"');
   } catch (err) {
     // Fallback: try clicking any element containing "选择作品"
     try {
       const fallback = page.locator('text="选择作品"').first();
       await fallback.click({ timeout: 3000 });
-      console.log('[comment-page] 通过 text locator 点击"选择作品"');
+      console.error('[comment-page] 通过 text locator 点击"选择作品"');
     } catch {
       return blocking(
         RESULT_CODES.BLOCKED,
@@ -651,7 +683,7 @@ export async function selectWorkByTitle(page, workTitle) {
   }
 
   // Step 2: Wait for the work selector panel to appear
-  console.log('[comment-page] 等待作品选择面板出现...');
+  console.error('[comment-page] 等待作品选择面板出现...');
   await page.waitForTimeout(2000);
 
   // Step 3: Find and click the target work in the panel
@@ -719,16 +751,16 @@ export async function selectWorkByTitle(page, workTitle) {
     return { found: false, total: candidates.length, sample: candidates.slice(0, 3) };
   }, shortTitle);
 
-  console.log(`[comment-page] 面板扫描结果: ${JSON.stringify(clickResult)}`);
+  console.error(`[comment-page] 面板扫描结果: ${JSON.stringify(clickResult)}`);
 
   if (clickResult.found) {
-    console.log(`[comment-page] 已点击目标作品: ${clickResult.tag} "${clickResult.text}"`);
+    console.error(`[comment-page] 已点击目标作品: ${clickResult.tag} "${clickResult.text}"`);
     await page.waitForTimeout(3000);
 
     // Verify
     const verifyResult = await getSelectedWorkTitle(page);
     if (verifyResult.ok && verifyResult.data.found) {
-      console.log(`[comment-page] 切换后作品: "${verifyResult.data.title.slice(0, 50)}"`);
+      console.error(`[comment-page] 切换后作品: "${verifyResult.data.title.slice(0, 50)}"`);
       return success({ switchedTo: verifyResult.data.title });
     }
 
@@ -737,11 +769,11 @@ export async function selectWorkByTitle(page, workTitle) {
 
   // Failed: dump visible text around the click area for debugging
   if (clickResult.total > 0) {
-    console.log(`[comment-page] 面板中找到 ${clickResult.total} 个文本匹配候选，但点击失败`);
-    console.log(`[comment-page] 候选样本: ${JSON.stringify(clickResult.sample)}`);
+    console.error(`[comment-page] 面板中找到 ${clickResult.total} 个文本匹配候选，但点击失败`);
+    console.error(`[comment-page] 候选样本: ${JSON.stringify(clickResult.sample)}`);
   } else {
     const pageText = await page.evaluate(() => (document.body?.innerText || '').slice(0, 800));
-    console.log(`[comment-page] 面板中未找到匹配。页面文本:\n${pageText.replace(/\n/g, ' | ')}`);
+    console.error(`[comment-page] 面板中未找到匹配。页面文本:\n${pageText.replace(/\n/g, ' | ')}`);
   }
 
   return blocking(

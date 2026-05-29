@@ -364,34 +364,32 @@ interactions-output/
 
 ## 开发路线
 
-本项目正在按以下阶段进行 Skill 化改造（详见 `docs/PROJECT_SKILL_REFACTOR_PLAN.md`）：
-
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| S0 | 文档与能力状态统一 | 🟡 进行中 |
-| S0.5 | 真实点赞代码层硬阻断 | ⬜ 待开始 |
-| S1 | `SKILL.md` + JSON 结构化输出 | ⬜ 待开始 |
-| S2 | 只读互动收件箱稳定化 | ⬜ 待开始 |
-| S3 | 评论回复审批与单条执行闭环 | ⬜ 待开始 |
-| S4 | 好友回访候选预览 | ⬜ 待开始 |
-| S5 | 实验性单条回访验证（非 MVP） | ⬜ 待开始 |
+| S0 | 文档与能力状态统一 | ✅ 完成 |
+| S0.5 | 真实点赞代码层硬阻断 | ✅ 完成 |
+| S1 | `SKILL.md` + JSON 结构化输出 | ✅ 完成 |
+| S2 | 只读互动收件箱 + `actions:pending` | ✅ 完成 |
+| S3 | 评论审批闭环（prepare→approve→dry-run→confirm→execute） | ✅ 完成 |
+| S4 | 好友回访候选预览 | ⬜ 后续 |
 
 ### 已完成
 
-- [x] 浏览器登录态复用与持久化
-- [x] 评论扫描、入库与去重
-- [x] 通知面板扫描与事件采集
-- [x] 运行上下文、失败证据与异常现场保存
-- [x] dry-run / execute 模式隔离（默认 `dryRun: true`）
-- [x] 评论回复防重复执行
-- [x] 点赞回访基础探索流程（通知 → 主页 → 视频）
+- [x] 浏览器登录态复用、评论/通知扫描与去重
+- [x] dry-run / execute 模式隔离、防重复执行
+- [x] 真实点赞 `FEATURE_DISABLED` 硬阻断
+- [x] 根目录 `SKILL.md` 入口
+- [x] 核心命令 `--json` 输出（Agent 可解析）
+- [x] `actions:pending` 待处理报告（关联 action 状态）
+- [x] 评论审批闭环：prepare → approve → dry-run → confirm-execute → execute
+- [x] 代码层双确认（`execute_confirmed` 状态机）
+- [x] 评论唯一定位（多字段匹配防错配）
+- [x] 点赞回访候选预览（`previewOnly: true, executeAllowed: false`）
 
 ### 下一步
 
-- [ ] 真实点赞代码层默认禁用（`FEATURE_DISABLED` 硬阻断）
-- [ ] 新增根目录 `SKILL.md`
-- [ ] 核心命令支持 `--json` 输出
-- [ ] 新增结构化待办报告命令
+- [ ] S4: 好友回访候选预览完善
+- [ ] S5: 实验性单条回访验证（需身份核验 + 实验开关）
 
 ---
 

@@ -40,10 +40,27 @@ function main() {
       LIMIT 200
     `).all();
 
-    // Query blocked events separately for count
-    const blockedCount = db.prepare(
-      "SELECT COUNT(*) as cnt FROM interaction_events WHERE status = 'blocked'"
-    ).get().cnt;
+    // Query blocked events with reasons
+    const blockedEvents = db.prepare(`
+      SELECT e.*, a.reason as blockReason, a.status as actionStatus
+      FROM interaction_events e
+      LEFT JOIN actions a ON a.event_id = e.id AND a.id IN (
+        SELECT MAX(id) FROM actions GROUP BY event_id
+      )
+      WHERE e.status = 'blocked'
+      ORDER BY e.updated_at DESC
+      LIMIT 50
+    `).all();
+
+    const blockedItems = blockedEvents.map(ev => ({
+      eventId: ev.id,
+      actorName: ev.actor_name,
+      eventType: ev.event_type,
+      blockReason: ev.blockReason || '未知原因',
+      actionStatus: ev.actionStatus || 'blocked',
+      eventTimeText: ev.event_time_text,
+      retryTarget: ev.id, // eventId serves as retry target
+    }));
 
     // Query latest action status for each event
     const latestActions = db.prepare(`
@@ -94,10 +111,11 @@ function main() {
       printJsonResult('actions:pending', {
         comments,
         likes,
+        blocked: blockedItems,
       }, {
         pendingComments: comments.length,
         pendingLikes: likes.length,
-        blocked: blockedCount,
+        blocked: blockedItems.length,
       });
     } else {
       // Human-readable output
@@ -114,9 +132,12 @@ function main() {
       for (const l of likes) {
         console.error(`  [${l.eventId}] ${l.actorName} [${l.relation}] — 仅预览`);
       }
-      if (blockedCount > 0) {
+      if (blockedItems.length > 0) {
         console.error('');
-        console.error(`阻断项: ${blockedCount} 条（需人工检查）`);
+        console.error(`阻断项: ${blockedItems.length} 条（需人工检查）`);
+        for (const b of blockedItems) {
+          console.error(`  [${b.eventId}] ${b.actorName} — ${b.blockReason}`);
+        }
       }
       console.error('');
     }

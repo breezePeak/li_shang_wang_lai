@@ -1,4 +1,4 @@
-import { createBrowserContext } from '../browser/browser-context.mjs';
+﻿import { createBrowserContext } from '../browser/browser-context.mjs';
 import {
   ensureCommentPageReady,
   waitForCommentsArea,
@@ -14,32 +14,33 @@ import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { promptRecoveryAction } from '../browser/interactive-control.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
+import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 
 async function runCommentScan(page, run) {
-  console.log('[scan] === 评论扫描 ===');
+  console.error('[scan] === 评论扫描 ===');
 
-  console.log('[scan] 导航到评论管理页...');
+  console.error('[scan] 导航到评论管理页...');
   const navResult = await ensureCommentPageReady(page);
   if (!navResult.ok) return { ...navResult, data: { ...navResult.data, step: 'comment-navigate' } };
 
-  console.log('[scan] 等待评论列表...');
+  console.error('[scan] 等待评论列表...');
   const areaResult = await waitForCommentsArea(page);
   if (!areaResult.ok) return { ...areaResult, data: { ...areaResult.data, step: 'comment-wait-area' } };
 
   if (areaResult.data.pageState === 'empty-comments') {
-    console.log('[scan] 暂无评论');
+    console.error('[scan] 暂无评论');
     return success({ commentCount: 0, step: 'comment-scan' });
   }
 
   const titleResult = await getSelectedWorkTitle(page);
   const workTitle = titleResult.data?.title || '';
-  console.log(`[scan] 当前作品: ${workTitle || '(未识别)'}`);
+  console.error(`[scan] 当前作品: ${workTitle || '(未识别)'}`);
 
   const extractResult = await extractComments(page);
   if (!extractResult.ok) return { ...extractResult, data: { ...extractResult.data, step: 'comment-extract' } };
 
   const comments = extractResult.data.comments;
-  console.log(`[scan] 发现 ${comments.length} 条评论`);
+  console.error(`[scan] 发现 ${comments.length} 条评论`);
 
   let newCount = 0;
   let duplicateCount = 0;
@@ -64,7 +65,7 @@ async function runCommentScan(page, run) {
 
       if (id) {
         newCount++;
-        console.log(`[scan]   + ${c.username}: ${c.content.slice(0, 40)}...`);
+        console.error(`[scan]   + ${c.username}: ${c.content.slice(0, 40)}...`);
       } else {
         duplicateCount++;
       }
@@ -76,12 +77,12 @@ async function runCommentScan(page, run) {
   run.scanned += comments.length;
   run.parseFailed += parseFailedCount;
 
-  console.log(`[scan] 评论扫描完成: ${newCount} 条新入库, ${duplicateCount} 条重复${parseFailedCount > 0 ? `, ${parseFailedCount} 条解析失败` : ''}`);
+  console.error(`[scan] 评论扫描完成: ${newCount} 条新入库, ${duplicateCount} 条重复${parseFailedCount > 0 ? `, ${parseFailedCount} 条解析失败` : ''}`);
   return success({ commentCount: newCount, duplicateCount, parseFailedCount, step: 'comment-scan' });
 }
 
 async function runNotificationScan(page, run, type) {
-  console.log('[scan] === 通知面板扫描（点赞+评论） ===');
+  console.error('[scan] === 通知面板扫描（点赞+评论） ===');
 
   const { ensureNotificationPageReady, openNotificationPanel, closeNotificationPanel, extractNotifications } = await import('../adapters/notification-page.mjs');
 
@@ -104,7 +105,7 @@ async function runNotificationScan(page, run, type) {
     );
   }
 
-  console.log('[scan] 通知面板已打开，提取通知...');
+  console.error('[scan] 通知面板已打开，提取通知...');
 
   let notifications;
   try {
@@ -117,7 +118,7 @@ async function runNotificationScan(page, run, type) {
     );
   }
 
-  console.log(`[scan] 面板中发现 ${notifications.length} 条通知`);
+  console.error(`[scan] 面板中发现 ${notifications.length} 条通知`);
 
   const rawText = await page.evaluate(() => {
     const panels = document.querySelectorAll('[class*="interaction"], [class*="notice"], [class*="message-panel"], [class*="scroll"], [class*="popup"], [class*="popper"], [class*="drawer"]');
@@ -129,9 +130,9 @@ async function runNotificationScan(page, run, type) {
   });
 
   if (run.options.debug) {
-    console.log('[scan] --- 面板原始文本 ---');
-    console.log(rawText.slice(0, 1500));
-    console.log('[scan] --- 原始文本结束 ---');
+    console.error('[scan] --- 面板原始文本 ---');
+    console.error(rawText.slice(0, 1500));
+    console.error('[scan] --- 原始文本结束 ---');
   }
 
   const { notificationFingerprint } = await import('../domain/event-fingerprint.mjs');
@@ -176,10 +177,10 @@ async function runNotificationScan(page, run, type) {
       if (id) {
         if (n.eventType === 'like') {
           likeCount++;
-          console.log(`[scan]   + ${n.username} [${n.relation}] ${n.action} ${n.timeText}`);
+          console.error(`[scan]   + ${n.username} [${n.relation}] ${n.action} ${n.timeText}`);
         } else {
           commentCount++;
-          console.log(`[scan]   + ${n.username}: ${n.content.slice(0, 30)} ${n.timeText}`);
+          console.error(`[scan]   + ${n.username}: ${n.content.slice(0, 30)} ${n.timeText}`);
         }
       } else {
         duplicateCount++;
@@ -192,7 +193,7 @@ async function runNotificationScan(page, run, type) {
   await closeNotificationPanel(page);
 
   run.scanned += (likeCount + commentCount);
-  console.log(`[scan] 通知扫描完成: ${likeCount} 赞 + ${commentCount} 评论入库${duplicateCount > 0 ? `, ${duplicateCount} 重复` : ''}`);
+  console.error(`[scan] 通知扫描完成: ${likeCount} 赞 + ${commentCount} 评论入库${duplicateCount > 0 ? `, ${duplicateCount} 重复` : ''}`);
   return success({ likeCount, commentCount, duplicateCount, step: 'notify-scan' });
 }
 
@@ -203,7 +204,12 @@ async function main() {
   const type = typeIdx >= 0 ? remaining[typeIdx + 1] : 'all';
   const validTypes = ['all', 'comment', 'like'];
   if (!validTypes.includes(type)) {
-    console.error(`Invalid --type: ${type}. Must be one of: ${validTypes.join(', ')}`);
+    if (options.json) {
+      printJsonError('interactions:scan', RESULT_CODES.BLOCKED,
+        `Invalid --type: ${type}. Must be one of: ${validTypes.join(', ')}`, { recoverable: false });
+    } else {
+      console.error(`Invalid --type: ${type}. Must be one of: ${validTypes.join(', ')}`);
+    }
     process.exit(1);
   }
 
@@ -216,7 +222,7 @@ async function main() {
   let page = null;
 
   try {
-    console.log('[scan] 启动浏览器...');
+    console.error('[scan] 启动浏览器...');
     const ctx = await createBrowserContext({ headless: false });
     browser = ctx.browser;
     const pages = ctx.context.pages();
@@ -235,11 +241,11 @@ async function main() {
       if (notifResult.action === 'quit-close' || notifResult.action === 'quit-keep-open') return;
     }
 
-    console.log('');
-    console.log('[scan] ====== 扫描完成 ======');
+    console.error('');
+    console.error('[scan] ====== 扫描完成 ======');
     const counts = getEventCounts();
     for (const row of counts) {
-      console.log(`[scan] ${row.event_type}/${row.status}: ${row.count}`);
+      console.error(`[scan] ${row.event_type}/${row.status}: ${row.count}`);
     }
 
     // --json output for agent consumption
@@ -270,6 +276,12 @@ async function main() {
       }
     }
 
+    // Structured JSON error on failure
+    if (options.json) {
+      printJsonError('interactions:scan', RESULT_CODES.UNKNOWN_ERROR,
+        err.message, { recoverable: false, evidence: run.evidenceDirectories });
+    }
+
     process.exitCode = 1;
   } finally {
     saveRunSummary(run);
@@ -277,10 +289,10 @@ async function main() {
     const shouldClose = resolveBrowserClose(run);
 
     if (browser && shouldClose) {
-      console.log('[scan] 关闭浏览器...');
+      console.error('[scan] 关闭浏览器...');
       await browser.close();
     } else if (browser) {
-      console.log('[scan] 浏览器保持打开，供人工检查。手动关闭窗口或 Ctrl+C 退出。');
+      console.error('[scan] 浏览器保持打开，供人工检查。手动关闭窗口或 Ctrl+C 退出。');
     }
   }
 }
@@ -318,7 +330,7 @@ async function runPhaseWithRecovery(page, run, phaseName, phaseFn) {
       case 'retry':
         continue;
       case 'skip':
-        console.log(`[scan]  跳过 ${phaseName}`);
+        console.error(`[scan]  跳过 ${phaseName}`);
         return { ...result, action: 'skipped' };
       case 'diagnose':
         try {
@@ -329,17 +341,17 @@ async function runPhaseWithRecovery(page, run, phaseName, phaseFn) {
             message: 'User-requested diagnostic rescan',
             recoverable: true,
           });
-          console.log('[scan]  诊断信息已保存。可以再次选择操作。');
+          console.error('[scan]  诊断信息已保存。可以再次选择操作。');
         } catch (err) {
-          console.log(`[scan]  诊断保存失败: ${err.message}`);
+          console.error(`[scan]  诊断保存失败: ${err.message}`);
         }
         shouldRetry = true;
         break;
       case 'quit-close':
-        console.log('[scan] 用户选择退出，关闭浏览器...');
+        console.error('[scan] 用户选择退出，关闭浏览器...');
         return { ...result, action: 'quit-close' };
       case 'quit-keep-open':
-        console.log('[scan] 用户选择退出，浏览器保持打开。');
+        console.error('[scan] 用户选择退出，浏览器保持打开。');
         return { ...result, action: 'quit-keep-open' };
       default:
         shouldRetry = true;

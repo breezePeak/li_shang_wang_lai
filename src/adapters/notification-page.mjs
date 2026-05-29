@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Notification panel adapter — hover bell icon, extract notification items
  * Panel appears on mouse hover over svg.LtuRRess on /user/self
  */
@@ -9,15 +9,15 @@ const SELF_URL = 'https://www.douyin.com/user/self';
 
 export async function ensureNotificationPageReady(page) {
   await page.goto(SELF_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  console.log('[notify-page] 等待页面加载...');
+  console.error('[notify-page] 等待页面加载...');
   await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(3000);
-  console.log('[notify-page] 页面就绪');
+  console.error('[notify-page] 页面就绪');
 }
 
 export async function openNotificationPanel(page) {
   try {
-    console.log('[notify-page] 定位通知铃铛...');
+    console.error('[notify-page] 定位通知铃铛...');
 
     // Strategy 1: hover svg.LtuRRess
     const bell = page.locator('svg.LtuRRess').first();
@@ -26,11 +26,11 @@ export async function openNotificationPanel(page) {
       await bell.hover({ timeout: 3000 });
       const found = await waitForPanelContent(page);
       if (found) {
-        console.log('[notify-page] ✅ hover 铃铛触发了通知面板');
+        console.error('[notify-page] ✅ hover 铃铛触发了通知面板');
         return true;
       }
     } catch {
-      console.log('[notify-page] hover 铃铛失败');
+      console.error('[notify-page] hover 铃铛失败');
     }
 
     // Strategy 2: click the data-e2e parent container
@@ -39,15 +39,15 @@ export async function openNotificationPanel(page) {
       await bellBtn.click({ timeout: 5000 });
       const found = await waitForPanelContent(page);
       if (found) {
-        console.log('[notify-page] ✅ click data-e2e 容器触发了通知面板');
+        console.error('[notify-page] ✅ click data-e2e 容器触发了通知面板');
         return true;
       }
     } catch {
-      console.log('[notify-page] click 容器失败');
+      console.error('[notify-page] click 容器失败');
     }
 
     // Strategy 3: fallback — scan top nav icons
-    console.log('[notify-page] 降级扫描顶部图标...');
+    console.error('[notify-page] 降级扫描顶部图标...');
     const candidates = await page.evaluate(() => {
       const all = document.querySelectorAll('[data-e2e], [class*="icon"], [class*="btn"], header *, nav *');
       const icons = [];
@@ -75,15 +75,15 @@ export async function openNotificationPanel(page) {
       await page.mouse.move(c.x, c.y, { steps: 3 });
       const found = await waitForPanelContent(page, { maxWait: 3000 });
       if (found) {
-        console.log(`[notify-page] ✅ hover #${i+1} 触发: ${c.class.slice(0, 30)}`);
+        console.error(`[notify-page] ✅ hover #${i+1} 触发: ${c.class.slice(0, 30)}`);
         return true;
       }
     }
 
-    console.log('[notify-page] 所有策略均未触发通知面板');
+    console.error('[notify-page] 所有策略均未触发通知面板');
     return false;
   } catch (err) {
-    console.log('[notify-page] 异常:', err.message);
+    console.error('[notify-page] 异常:', err.message);
     return false;
   }
 }
@@ -458,12 +458,12 @@ export async function clickLikeProfileLink(page, eventCtx) {
   }, { name: shortName, rel: relation || '', act: action || '', time: timeText || '', itemKey: notificationItemKey || '' });
 
   if (result.clicked) {
-    console.log(`[notify-page] 点击 ${shortName} 的头像 (${result.method})`);
+    console.error(`[notify-page] 点击 ${shortName} 的头像 (${result.method})`);
     await page.waitForTimeout(3000);
     return true;
   }
 
-  console.log(`[notify-page] 未找到 ${shortName} 的精确匹配通知条目 (reason: ${result.reason})`);
+  console.error(`[notify-page] 未找到 ${shortName} 的精确匹配通知条目 (reason: ${result.reason})`);
   return false;
 }
 
@@ -489,7 +489,7 @@ export async function clickCommentLink(page, username) {
   }, shortName);
 
   if (result.clicked) {
-    console.log(`[notify-page] 点击 ${username} 的评论通知`);
+    console.error(`[notify-page] 点击 ${username} 的评论通知`);
     await page.waitForTimeout(3000);
     return true;
   }
