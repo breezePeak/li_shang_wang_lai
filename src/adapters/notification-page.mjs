@@ -117,72 +117,62 @@ export async function closeNotificationPanel(page) {
 }
 
 /**
- * Extract notification items from the open notification panel.
- * Each item: { username, relation, action, content, timeText }
- * 
- * Uses innerText matching pattern:
- *   [username]
- *   [relation or empty]
- *   [action+content or content+action]
+ * Old extractNotifications — scrolls all first then extracts.
+ * Deprecated; use extractNotificationsBatch for incremental scanning.
+ * Kept for backward compatibility with execute-reciprocal-likes.mjs.
  */
-export async function scrollAndLoadAllNotifications(page) {
-  for (let round = 0; round < 10; round++) {
-    const scrolled = await page.evaluate(() => {
-      const panel = findNotificationPanel();
-      if (!panel) return false;
-      if (panel.scrollHeight > panel.clientHeight + 10) {
-        panel.scrollTop = panel.scrollHeight;
-        return true;
-      }
-      return false;
-
-      function findNotificationPanel() {
-        for (const el of document.querySelectorAll('*')) {
-          const t = (el.innerText || '').trim();
-          if (t.startsWith('互动消息') || t.startsWith('全部消息')) {
-            const r = el.getBoundingClientRect();
-            if (r.width < 100 || r.height < 30) continue;
-            let c = el.parentElement;
-            for (let i = 0; i < 6 && c && c !== document.body; i++) {
-              const cr = c.getBoundingClientRect();
-              if (cr.width > 250 && cr.height > 300) return c;
-              c = c.parentElement;
-            }
-          }
-        }
-        return null;
-      }
-    });
-
-    if (!scrolled) break;
-    await page.waitForTimeout(600);
+export async function extractNotifications(page) {
+  const allItems = [];
+  const seen = new Set();
+  let rounds = 0;
+  while (rounds < 10) {
+    const batchResult = await extractNotificationsBatch(page);
+    if (!batchResult || !batchResult.ok) break;
+    const batch = batchResult.data.notifications || [];
+    if (batch.length === 0) break;
+    for (const item of batch) {
+      const key = item.notificationItemKey || (item.username + '||' + item.action + '||' + item.content);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      allItems.push(item);
+    }
+    if (!batchResult.data.hasNew) break;
+    rounds++;
   }
+  return allItems;
 }
 
-export async function extractNotifications(page) {
-  await scrollAndLoadAllNotifications(page);
-
+/**
+ * Extract ONE batch of notification items from the currently visible panel.
+ * Returns parsed items + a flag indicating if there are more items to scroll to.
+ * The caller drives the scroll loop and handles dedup/enrich per-batch.
+ */
+export async function extractNotificationsBatch(page) {
   return await page.evaluate(() => {
     const items = [];
     const panel = findNotificationPanel();
-    if (!panel) return items;
+    if (!panel) {
+      return { ok: false, data: { notifications: [], hasNew: false }, message: 'notification panel not found' };
+    }
 
     const skipSet = new Set(['互动消息', '全部消息', '点击加载更多', '加载更多', '没有更多了', '暂无消息', '推荐了你的视频']);
-
-    // Find all list-item-like children
     const listItems = panel.querySelectorAll('li, [class*="item"], [class*="row"], [class*="entry"], [class*="list"] > *');
     const actionPatterns = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '评论了你的作品', '回复了你的评论'];
     const timePattern = /^(\d{2}:\d{2}|\d+[秒分时天周月年]前|\d{2}-\d{2}|\d+月\d+日|昨天\s?\d{2}:\d{2}|星期\S)$/;
     const relationMap = { '朋友': 'friend', '互相关注': 'mutual' };
 
+    const seenTexts = new Set();
+
     for (const itemEl of listItems) {
       const text = (itemEl.innerText || '').trim();
       if (text.length < 3 || skipSet.has(text)) continue;
+      // Skip items we've already seen in this batch
+      if (seenTexts.has(text)) continue;
+      seenTexts.add(text);
 
       const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
       if (lines.length < 2) continue;
 
-      // Parse lines: username [relation] action [content] time
       let idx = 0;
       const username = lines[idx];
       if (!username || username.length > 40 || timePattern.test(username) || relationMap[username] || skipSet.has(username)) continue;
@@ -194,16 +184,13 @@ export async function extractNotifications(page) {
         idx++;
       }
 
-      // Find action line
       let eventType = '', action = '', content = '';
       for (let k = idx; k < lines.length; k++) {
         for (const pat of actionPatterns) {
           if (lines[k].includes(pat)) {
             action = pat;
             eventType = pat.includes('赞了') ? 'like' : 'comment';
-            if (k > idx) {
-              content = lines.slice(idx, k).join(' ');
-            }
+            if (k > idx) content = lines.slice(idx, k).join(' ');
             idx = k + 1;
             break;
           }
@@ -212,19 +199,13 @@ export async function extractNotifications(page) {
       }
       if (!eventType) continue;
 
-      // Find time
       let timeText = '';
       for (let k = idx; k < lines.length; k++) {
-        if (timePattern.test(lines[k])) {
-          timeText = lines[k];
-          break;
-        }
+        if (timePattern.test(lines[k])) { timeText = lines[k]; break; }
       }
 
-      // Extract profile URL and key from links within this notification item
-      let actorProfileUrl = '';
-      let actorProfileKey = '';
-      let profileResolveMethod = 'unresolved';
+      // Extract profile URL
+      let actorProfileUrl = '', actorProfileKey = '', profileResolveMethod = 'unresolved';
       const links = itemEl.querySelectorAll('a[href]');
       for (const link of links) {
         const href = link.getAttribute('href') || '';
@@ -236,8 +217,6 @@ export async function extractNotifications(page) {
           break;
         }
       }
-
-      // Also try extracting from img parent anchors (avatar links)
       if (!actorProfileUrl) {
         const imgs = itemEl.querySelectorAll('img');
         for (const img of imgs) {
@@ -259,24 +238,20 @@ export async function extractNotifications(page) {
 
       const itemData = {
         username: username.slice(0, 50),
-        relation,
-        eventType,
-        action,
+        relation, eventType, action,
         content: content.slice(0, 300),
         timeText,
         rawText: text.slice(0, 500),
-        actorProfileUrl,
-        actorProfileKey,
+        actorProfileUrl, actorProfileKey,
         profileResolveMethod,
       };
-
-      // Generate a per-notification-item fingerprint for precise matching
       itemData.notificationItemKey = generateItemKey(itemData);
-
       items.push(itemData);
     }
 
-    // Find notification panel in DOM
+    // Check if panel has scrollable content beyond current view
+    const hasMore = panel.scrollHeight > panel.clientHeight + panel.scrollTop + 10;
+
     function findNotificationPanel() {
       for (const el of document.querySelectorAll('*')) {
         const t = (el.innerText || '').trim();
@@ -294,22 +269,21 @@ export async function extractNotifications(page) {
       return null;
     }
 
-    // Simple hash function for in-browser fingerprint
     function generateItemKey(d) {
-      const raw = [d.username, d.relation, d.action, (d.content || '').slice(0, 200), d.timeText, d.actorProfileKey || d.actorProfileUrl]
+      const raw = [d.username, d.relation, d.action, (d.content || '').slice(0, 200), d.actorProfileKey || d.actorProfileUrl]
         .map(s => (s || '').trim())
         .join('||');
       let hash = 0;
-      for (let i = 0; i < raw.length; i++) {
-        const c = raw.charCodeAt(i);
-        hash = ((hash << 5) - hash) + c;
-        hash |= 0;
-      }
-      const profilePart = d.actorProfileKey || d.actorProfileUrl || '';
-      return Math.abs(hash).toString(36) + '_' + (profilePart.length > 0 ? profilePart.length : 0);
+      for (let i = 0; i < raw.length; i++) { hash = ((hash << 5) - hash) + raw.charCodeAt(i); hash |= 0; }
+      return Math.abs(hash).toString(36);
     }
 
-    return items;
+    // Scroll panel down for next batch
+    if (hasMore && panel.scrollHeight > panel.clientHeight + 10) {
+      panel.scrollTop = panel.scrollTop + panel.clientHeight * 0.8;
+    }
+
+    return { ok: true, data: { notifications: items, hasNew: hasMore } };
   });
 }
 

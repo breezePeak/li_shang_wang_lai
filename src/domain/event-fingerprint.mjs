@@ -64,10 +64,12 @@ export function commentInitialStatus(timeText) {
  * Generate a robust fingerprint for notification events (likes, comments).
  * Priority order: actorProfileKey > actorProfileUrl > username
  */
-export function notificationFingerprint({ eventType, username, actorProfileKey, actorProfileUrl, action, content, timeText, rawText, notificationItemKey }) {
-  // notificationItemKey is the strongest per-item dedup identifier when available
-  if ((notificationItemKey || '').trim()) {
-    return crypto.createHash('sha256').update('notify:item:' + notificationItemKey.trim()).digest('hex').slice(0, 16);
+export function notificationFingerprint({ eventType, username, actorProfileKey, actorProfileUrl, action, content, timeText, rawText, notificationItemKey, platformEventId }) {
+  // platformEventId is the ONLY stable cross-scan dedup identifier.
+  // notificationItemKey is locally generated (includes timeText) and must NOT
+  // be used as the highest-priority cross-scan fingerprint.
+  if ((platformEventId || '').trim()) {
+    return crypto.createHash('sha256').update('notify:pid:' + platformEventId.trim()).digest('hex').slice(0, 16);
   }
 
   // Use profile key as primary identifier when available; fall back to URL, then name
@@ -76,9 +78,9 @@ export function notificationFingerprint({ eventType, username, actorProfileKey, 
     || (username || '').trim();
   const actionPart = (action || '').trim();
   const textSummary = ((content || rawText || '').trim()).slice(0, 200);
-  const timePart = isRelativeTime(timeText) ? '' : (timeText || '').trim();
 
-  const raw = [eventType, actorId, actionPart, textSummary, timePart]
+  // timeText is intentionally excluded — relative times drift between scans
+  const raw = [eventType, actorId, actionPart, textSummary]
     .map(s => s || '')
     .join('||');
   return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);

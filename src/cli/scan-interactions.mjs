@@ -114,9 +114,9 @@ async function runCommentScan(page, run) {
 }
 
 async function runNotificationScan(page, run, type) {
-  console.error('[scan] === 通知面板扫描（点赞+评论） ===');
+  console.error('[scan] === 通知面板扫描（增量逐批采集） ===');
 
-  const { ensureNotificationPageReady, openNotificationPanel, closeNotificationPanel, extractNotifications } = await import('../adapters/notification-page.mjs');
+  const { ensureNotificationPageReady, openNotificationPanel, closeNotificationPanel, extractNotificationsBatch } = await import('../adapters/notification-page.mjs');
 
   try {
     await ensureNotificationPageReady(page);
@@ -137,100 +137,80 @@ async function runNotificationScan(page, run, type) {
     );
   }
 
-  console.error('[scan] 通知面板已打开，提取通知...');
+  const wantComments = (type === 'all' || type === 'comment');
+  const wantLikes = (type === 'all' || type === 'like');
 
-  let notifications;
-  try {
-    notifications = await extractNotifications(page);
-  } catch (err) {
-    return blocking(
-      RESULT_CODES.NOTIFICATION_ITEMS_EMPTY,
-      `通知解析失败: ${err.message}`,
-      { data: { step: 'notify-extract' } }
-    );
-  }
+  let totalLikeCount = 0;
+  let totalCommentCount = 0;
+  let totalDuplicateCount = 0;
+  let totalEnrichedCount = 0;
+  let totalExtracted = 0;
+  let totalProfileResolved = 0;
+  let totalProfileUnresolved = 0;
+  let scrollRounds = 0;
+  const maxScrolls = 20;
 
-  console.error(`[scan] 面板中发现 ${notifications.length} 条通知`);
+  console.error('[scan] 通知面板已打开，开始逐批采集...');
 
-  const rawText = await page.evaluate(() => {
-    const panels = document.querySelectorAll('[class*="interaction"], [class*="notice"], [class*="message-panel"], [class*="scroll"], [class*="popup"], [class*="popper"], [class*="drawer"]');
-    for (const p of panels) {
-      const t = p.innerText || '';
-      if (t.includes('互动消息') || t.includes('全部消息')) return t;
+  // Incremental batch: parse → dedup/enrich → scroll → repeat
+  while (scrollRounds < maxScrolls) {
+    const batchResult = await extractNotificationsBatch(page);
+    if (!batchResult || !batchResult.ok) {
+      if (scrollRounds === 0) {
+        return blocking(
+          RESULT_CODES.NOTIFICATION_ITEMS_EMPTY,
+          batchResult?.message || '通知解析失败',
+          { data: { step: 'notify-extract' } }
+        );
+      }
+      break;
     }
-    return '(panel not found)';
-  });
 
-  if (run.options.debug) {
-    console.error('[scan] --- 面板原始文本 ---');
-    console.error(rawText.slice(0, 1500));
-    console.error('[scan] --- 原始文本结束 ---');
-  }
+    const { notifications, hasNew } = batchResult.data;
+    if (!notifications || notifications.length === 0) break;
 
-  const { notificationFingerprint } = await import('../domain/event-fingerprint.mjs');
+    let batchLikeCount = 0;
+    let batchCommentCount = 0;
+    let batchDuplicateCount = 0;
+    let batchEnrichedCount = 0;
+    let batchProfileResolved = 0;
+    let batchProfileUnresolved = 0;
 
-  const wantComments = (type === 'all');
-  const wantLikes = true;
+    for (const n of notifications) {
+      try {
+        if (!wantComments && n.eventType === 'comment') continue;
+        if (!wantLikes && n.eventType === 'like') continue;
 
-  let likeCount = 0;
-  let commentCount = 0;
-  let duplicateCount = 0;
+        const profileResolutionStatus = n.actorProfileUrl
+          ? (n.profileResolveMethod || 'dom_href') : 'unresolved';
 
-  for (const n of notifications) {
-    try {
-      if (!wantComments && n.eventType === 'comment') continue;
-      if (!wantLikes && n.eventType === 'like') continue;
+        if (n.actorProfileUrl) batchProfileResolved++;
+        else batchProfileUnresolved++;
 
-      const profileResolutionStatus = n.actorProfileUrl
-        ? (n.profileResolveMethod || 'dom_href') : 'unresolved';
-
-      const fp = notificationFingerprint({
-        eventType: n.eventType,
-        username: n.username,
-        actorProfileKey: n.actorProfileKey,
-        actorProfileUrl: n.actorProfileUrl,
-        action: n.action,
-        content: n.eventType === 'comment' ? n.content : null,
-        timeText: n.timeText,
-        rawText: n.rawText,
-        notificationItemKey: n.notificationItemKey,
-      });
-
-      const id = insertEvent({
-        eventType: n.eventType,
-        actorName: n.username,
-        actorProfileKey: n.actorProfileKey || null,
-        actorProfileUrl: n.actorProfileUrl || null,
-        relation: n.relation,
-        myWorkTitle: '',
-        commentText: n.eventType === 'comment' ? n.content : null,
-        eventTimeText: n.timeText,
-        fingerprint: fp,
-        notificationItemKey: n.notificationItemKey || null,
-        rawPayloadJson: JSON.stringify({
+        const fp = notificationFingerprint({
+          eventType: n.eventType,
+          username: n.username,
+          actorProfileKey: n.actorProfileKey,
+          actorProfileUrl: n.actorProfileUrl,
+          action: n.action,
+          content: n.eventType === 'comment' ? n.content : null,
+          timeText: n.timeText,
           rawText: n.rawText,
           notificationItemKey: n.notificationItemKey,
-          extractSource: 'notification',
-          profileResolveMethod: profileResolutionStatus,
-        }),
-      });
+          platformEventId: n.platformEventId || null,
+        });
 
-      if (id) {
-        if (n.eventType === 'like') {
-          likeCount++;
-          const tag = n.actorProfileUrl ? '' : ' [no-profile]';
-          console.error(`[scan]   + ${n.username} [${n.relation}] ${n.action} ${n.timeText}${tag}`);
-        } else {
-          commentCount++;
-          const tag = n.actorProfileUrl ? '' : ' [no-profile]';
-          console.error(`[scan]   + ${n.username}: ${(n.content||'').slice(0, 30)} ${n.timeText}${tag}`);
-        }
-      } else {
-        // Not new — try enrichment
-        const enriched = enrichEvent({
-          fingerprint: fp,
-          actorProfileUrl: n.actorProfileUrl || null,
+        const id = insertEvent({
+          eventType: n.eventType,
+          actorName: n.username,
           actorProfileKey: n.actorProfileKey || null,
+          actorProfileUrl: n.actorProfileUrl || null,
+          relation: n.relation,
+          myWorkTitle: '',
+          commentText: n.eventType === 'comment' ? n.content : null,
+          eventTimeText: n.timeText,
+          fingerprint: fp,
+          notificationItemKey: n.notificationItemKey || null,
           rawPayloadJson: JSON.stringify({
             rawText: n.rawText,
             notificationItemKey: n.notificationItemKey,
@@ -238,23 +218,61 @@ async function runNotificationScan(page, run, type) {
             profileResolveMethod: profileResolutionStatus,
           }),
         });
-        if (enriched) {
-          console.error(`[scan]   ~ ${n.username} [${n.relation}] enriched (profile URL updated)`);
-          run.enriched = (run.enriched || 0) + 1;
+
+        if (id) {
+          if (n.eventType === 'like') batchLikeCount++;
+          else batchCommentCount++;
+          const tag = n.actorProfileUrl ? '' : ' [no-profile]';
+          console.error(`[scan]   + ${n.username} [${n.relation}] ${n.action} ${n.timeText}${tag}`);
         } else {
-          duplicateCount++;
+          const enriched = enrichEvent({
+            fingerprint: fp,
+            actorProfileUrl: n.actorProfileUrl || null,
+            actorProfileKey: n.actorProfileKey || null,
+            rawPayloadJson: JSON.stringify({
+              rawText: n.rawText,
+              notificationItemKey: n.notificationItemKey,
+              extractSource: 'notification',
+              profileResolveMethod: profileResolutionStatus,
+            }),
+          });
+          if (enriched) {
+            batchEnrichedCount++;
+            console.error(`[scan]   ~ ${n.username} [${n.relation}] enriched`);
+          } else {
+            batchDuplicateCount++;
+          }
         }
+      } catch {
+        // skip malformed entries
       }
-    } catch {
-      // skip malformed entries
     }
+
+    totalLikeCount += batchLikeCount;
+    totalCommentCount += batchCommentCount;
+    totalDuplicateCount += batchDuplicateCount;
+    totalEnrichedCount += batchEnrichedCount;
+    totalExtracted += batchLikeCount + batchCommentCount;
+    totalProfileResolved += batchProfileResolved;
+    totalProfileUnresolved += batchProfileUnresolved;
+    scrollRounds++;
+    run.scanned += notifications.length;
+
+    console.error(`[scan]   轮次 ${scrollRounds}: +${batchLikeCount}赞 +${batchCommentCount}评论 (${batchDuplicateCount}重复, ${batchEnrichedCount}补全, ${batchProfileResolved}主页已解析)`);
+
+    if (!hasNew) break;
   }
 
   await closeNotificationPanel(page);
 
-  run.scanned += (likeCount + commentCount);
-  console.error(`[scan] 通知扫描完成: ${likeCount} 赞 + ${commentCount} 评论入库${duplicateCount > 0 ? `, ${duplicateCount} 重复` : ''}${run.enriched > 0 ? `, ${run.enriched} 补充信息` : ''}`);
-  return success({ likeCount, commentCount, duplicateCount, enriched: run.enriched || 0, step: 'notify-scan' });
+  console.error(`[scan] 通知扫描完成: ${totalLikeCount} 赞 + ${totalCommentCount} 评论入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalProfileResolved} 主页已解析 | ${totalProfileUnresolved} 主页未解析 | ${scrollRounds} 轮滚动`);
+  return success({
+    likeCount: totalLikeCount, commentCount: totalCommentCount,
+    duplicateCount: totalDuplicateCount, enriched: totalEnrichedCount,
+    profileResolved: totalProfileResolved, profileUnresolved: totalProfileUnresolved,
+    scrollRounds,
+    step: 'notify-scan',
+  });
 }
 
 async function main() {
@@ -288,31 +306,19 @@ async function main() {
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
 
-    // --- Comment scanning phase ---
-    if (type === 'all' || type === 'comment') {
-      const commentResult = await runPhaseWithRecovery(page, run, 'comment', () => runCommentScan(page, run), options);
-      if (!commentResult.ok) {
-        if (options.json) {
-          printJsonError('interactions:scan', commentResult.code || RESULT_CODES.BLOCKED,
-            commentResult.message || '评论扫描失败', { recoverable: commentResult.recoverable !== false }); return;
-        }
-        return;
+    // --- Notification scanning phase (ONLY interaction entry point) ---
+    // All new interaction collection flows through the notification center.
+    // runCommentScan() is preserved only for reply execution positioning,
+    // NOT for new event collection.
+    const notifResult = await runPhaseWithRecovery(page, run, 'notification', () => runNotificationScan(page, run, type), options);
+    if (!notifResult.ok) {
+      if (options.json) {
+        printJsonError('interactions:scan', notifResult.code || RESULT_CODES.BLOCKED,
+          notifResult.message || '通知扫描失败', { recoverable: notifResult.recoverable !== false }); return;
       }
-      if (commentResult.action === 'quit-close' || commentResult.action === 'quit-keep-open') return;
+      return;
     }
-
-    // --- Notification scanning phase ---
-    if (type === 'all' || type === 'like') {
-      const notifResult = await runPhaseWithRecovery(page, run, 'notification', () => runNotificationScan(page, run, type), options);
-      if (!notifResult.ok) {
-        if (options.json) {
-          printJsonError('interactions:scan', notifResult.code || RESULT_CODES.BLOCKED,
-            notifResult.message || '通知扫描失败', { recoverable: notifResult.recoverable !== false }); return;
-        }
-        return;
-      }
-      if (notifResult.action === 'quit-close' || notifResult.action === 'quit-keep-open') return;
-    }
+    if (notifResult.action === 'quit-close' || notifResult.action === 'quit-keep-open') return;
 
     console.error('');
     console.error('[scan] ====== 扫描完成 ======');
