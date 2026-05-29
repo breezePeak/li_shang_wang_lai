@@ -1,4 +1,4 @@
-﻿import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
+import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
 import path from 'path';
 
 const DEFAULT_OPTIONS = {
@@ -6,7 +6,7 @@ const DEFAULT_OPTIONS = {
   dryRun: true,
   execute: false,
   json: false,
-  keepOpen: false,
+  keepOpen: true,
   keepOpenOnError: true,
   pauseOnError: true,
   maxItems: 1,

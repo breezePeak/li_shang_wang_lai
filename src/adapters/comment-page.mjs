@@ -1,4 +1,4 @@
-﻿import { wait } from '../utils/wait.mjs';
+import { wait } from '../utils/wait.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 
 const COMMENT_PAGE_URL = 'https://creator.douyin.com/creator-micro/interactive/comment';
@@ -139,14 +139,20 @@ export async function scrollToLoadAllComments(page, { maxRound = 50, loadTimeout
       await page.mouse.wheel(0, 500);
     }
 
-    const currentCount = await page.evaluate(() => {
+    const { currentCount, noMoreText } = await page.evaluate(() => {
       let count = 0;
       const all = document.querySelectorAll('*');
       for (const el of all) {
         if ((el.innerText || '').trim() === '回复' && el.offsetHeight > 0) count++;
       }
-      return count;
+      const noMore = document.querySelector('[class*="loading"]')?.innerText?.includes('没有更多') || false;
+      return { currentCount: count, noMoreText: noMore };
     });
+
+    if (noMoreText) {
+      console.error('[comment-page]   页面显示"没有更多评论"，停止滚动');
+      break;
+    }
 
     if (currentCount > prevCount) {
       console.error(`[comment-page]   已加载: ${currentCount} 条评论`);
@@ -258,15 +264,21 @@ export async function extractComments(page) {
         if (username) seenUsernames.add(username);
 
         const timeText = lines.find(l =>
-          /\d{2}:\d{2}/.test(l) || /\d+月\d+日/.test(l) || /^\d+[秒分时天]前/.test(l)
+          /\d{2}:\d{2}/.test(l) || /\d+月\d+日/.test(l) ||
+          /^\d+[秒分时天]前/.test(l) || /^\d+(分钟|小时|天)前/.test(l) ||
+          l === '刚刚'
         ) || '';
 
-        const content = lines.find(l =>
+        const contentCandidates = lines.filter(l =>
           l.length > 2 &&
           l !== username && l !== timeText &&
           !['回复', '删除', '举报', '已回复'].includes(l) &&
+          !l.startsWith('http') &&
           !/^\d+$/.test(l)
-        ) || '';
+        );
+        const content = contentCandidates.length > 0
+          ? contentCandidates.reduce((a, b) => a.length >= b.length ? a : b)
+          : '';
 
         const hasReplied = lines.some(l => l === '已回复');
 
@@ -370,8 +382,18 @@ export async function openReplyBox(page, match) {
 
           if (!replyBtn) continue;
 
-          // Get the full container text for actor/event matching
-          const containerEl = el.parentElement?.closest('[class*="comment"]') || el;
+          // Walk up to find a broad container that includes actor name, content, and reply button.
+          // Try multiple levels: first .comment* class, then larger card containers.
+          let containerEl = el.closest('[class*="comment-item"], [class*="commentItem"], [class*="comment-container"], [class*="commentContainer"]');
+          if (!containerEl) containerEl = el.parentElement?.closest('[class*="comment"]');
+          if (!containerEl) {
+            // Fallback: walk up 5 levels
+            containerEl = el.parentElement;
+            for (let i = 0; i < 5 && containerEl && containerEl !== document.body; i++) {
+              containerEl = containerEl.parentElement;
+            }
+          }
+          if (!containerEl || containerEl === document.body) containerEl = el;
           const containerText = (containerEl.innerText || '').trim();
 
           candidates.push({
@@ -417,6 +439,11 @@ export async function openReplyBox(page, match) {
         let filtered = candidates;
         if (actorName) {
           filtered = candidates.filter(c => c.containerText.includes(actorName));
+          if (filtered.length === 0 && actorName.length >= 3) {
+            // Fallback: partial match by first 3 chars (handles truncated names in DOM)
+            const partialName = actorName.slice(0, 3);
+            filtered = candidates.filter(c => c.containerText.includes(partialName));
+          }
           if (filtered.length === 0) {
             return { found: false, reason: 'actor_not_verified', total: candidates.length };
           }
