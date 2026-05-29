@@ -95,6 +95,58 @@ async function main() {
       '该评论已有成功回复记录', { recoverable: false }); return;
   }
 
+  // --- Policy/audit gate check (defense in depth) ---
+  let policyGateOk = true;
+  let policyGateReason = '';
+  try {
+    // Read full action record to get evidence_json with policy audit fields
+    const { getAction } = await import('../db/action-repository.mjs');
+    const fullAction = getAction(action.actionId);
+    const evidence = fullAction?.evidence_json ? JSON.parse(fullAction.evidence_json) : {};
+
+    // Check event status
+    const { getEvent } = await import('../db/interaction-repository.mjs');
+    const event = getEvent(action.eventId);
+    if (event && event.status === 'unstable') {
+      policyGateOk = false;
+      policyGateReason = `事件 #${action.eventId} 仍处于 unstable 状态，无法执行。`;
+    }
+
+    // Check autoExecuteAllowed
+    if (evidence.autoExecuteAllowed === true && commonArgs.options.execute) {
+      policyGateOk = false;
+      policyGateReason = 'autoExecuteAllowed 当前必须为 false，不允许自动真实发送。';
+    }
+
+    // Execute requires decision=reply + riskLevel=low + relevance != irrelevant
+    if (isExecute) {
+      if (evidence.decision && evidence.decision !== 'reply') {
+        policyGateOk = false;
+        policyGateReason = `决策为 "${evidence.decision}"，不允许真实发送。`;
+      }
+      if (evidence.riskLevel && evidence.riskLevel !== 'low') {
+        policyGateOk = false;
+        policyGateReason = `风险等级为 "${evidence.riskLevel}"，不允许真实发送。`;
+      }
+      if (evidence.relevance === 'irrelevant') {
+        policyGateOk = false;
+        policyGateReason = '相关性为 irrelevant，不允许真实发送。';
+      }
+      if (evidence.replyMode === 'ignore') {
+        policyGateOk = false;
+        policyGateReason = 'replyMode=ignore 的评论不允许发送。';
+      }
+    }
+  } catch (err) {
+    policyGateOk = false;
+    policyGateReason = `门禁检查异常: ${err.message}`;
+  }
+
+  if (!policyGateOk) {
+    printJsonError('comments:execute', RESULT_CODES.BLOCKED,
+      policyGateReason, { recoverable: false }); return;
+  }
+
   const run = createRunContext('comment-execute', commonArgs.options);
   let browser = null;
   let page = null;

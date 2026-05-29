@@ -75,6 +75,18 @@ function pickTemplate(category) {
 }
 
 /**
+ * Reserved fields for future auto-send (all currently locked).
+ */
+const RESERVED_GATE = {
+  templateId: '',
+  classifierSource: 'local_rules',
+  dailyAutoReplyLimit: 0,
+  sameUserSameWorkLimit: 0,
+  shadowModePassed: false,
+  autoExecuteAllowed: false,
+};
+
+/**
  * 检查文本是否包含任一关键词（大小写不敏感）
  */
 function containsAnyKeyword(text, keywords) {
@@ -106,7 +118,7 @@ export function classifyComment(commentText) {
       riskLevel: 'medium',
       reason: '空评论文本',
       replyText: '',
-      autoExecuteAllowed: false,
+      ...RESERVED_GATE,
     };
   }
 
@@ -118,7 +130,7 @@ export function classifyComment(commentText) {
       riskLevel: 'high',
       reason: '评论包含违规/运营风险关键词',
       replyText: '',
-      autoExecuteAllowed: false,
+      ...RESERVED_GATE,
     };
   }
 
@@ -132,7 +144,7 @@ export function classifyComment(commentText) {
       riskLevel: 'medium',
       reason: '评论包含问句、请求或需审核关键词',
       replyText: '',
-      autoExecuteAllowed: false,
+      ...RESERVED_GATE,
     };
   }
 
@@ -140,12 +152,13 @@ export function classifyComment(commentText) {
   for (const { pattern, category, templateKey } of SIMPLE_POSITIVE_PATTERNS) {
     if (pattern.test(text)) {
       return {
+        ...RESERVED_GATE,
         commentCategory: category,
         replyMode: 'auto_simple_candidate',
         riskLevel: 'low',
         reason: `匹配简单正向模式: ${category}`,
         replyText: pickTemplate(templateKey),
-        autoExecuteAllowed: false,
+        templateId: `template-${templateKey}-1`,
       };
     }
   }
@@ -157,6 +170,6 @@ export function classifyComment(commentText) {
     riskLevel: 'medium',
     reason: '无法确定评论意图，默认需人工审核',
     replyText: '',
-    autoExecuteAllowed: false,
+    ...RESERVED_GATE,
   };
 }
