@@ -103,7 +103,9 @@ export function createRunContext(command, commonArgs) {
     failed: 0,
     blocked: 0,
     skipped: 0,
+    scanFailed: 0,
     parseFailed: 0,
+    enriched: 0,
     browserKeptOpen: false,
     evidenceDirectories: [],
   };
@@ -132,6 +134,7 @@ export function saveRunSummary(run) {
     blocked: run.blocked,
     skipped: run.skipped,
     parseFailed: run.parseFailed,
+    enriched: run.enriched || 0,
     browserKeptOpen: run.browserKeptOpen,
     hadError: run.hadError,
     hadBlocked: run.hadBlocked,

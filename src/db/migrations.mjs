@@ -29,6 +29,7 @@ export function runMigrations(dbPath = DB_PATH) {
       comment_text TEXT,
       event_time_text TEXT,
       platform_event_id TEXT,
+      notification_item_key TEXT,
       fingerprint TEXT NOT NULL UNIQUE,
       raw_payload_json TEXT,
       status TEXT NOT NULL DEFAULT 'new',
@@ -112,6 +113,12 @@ export function runMigrations(dbPath = DB_PATH) {
     console.error('[db:init] 旧版 interaction_events 缺少 platform_event_id 列，迁移中...');
     db.exec('ALTER TABLE interaction_events ADD COLUMN platform_event_id TEXT');
     console.error('[db:init] platform_event_id 列已添加');
+  }
+
+  if (eventsSql && !eventsSql.includes('notification_item_key')) {
+    console.error('[db:init] 旧版 interaction_events 缺少 notification_item_key 列，迁移中...');
+    db.exec('ALTER TABLE interaction_events ADD COLUMN notification_item_key TEXT');
+    console.error('[db:init] notification_item_key 列已添加');
   }
 
   // Index for platform_event_id lookups

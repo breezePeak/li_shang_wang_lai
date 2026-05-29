@@ -6,7 +6,7 @@ import {
   getSelectedWorkTitle,
 } from '../adapters/comment-page.mjs';
 import { commentFingerprint, commentInitialStatus, normalizeTimeText } from '../domain/event-fingerprint.mjs';
-import { insertEvent, getEventCounts, findUnstableEvent, promoteUnstableEvent } from '../db/interaction-repository.mjs';
+import { insertEvent, getEventCounts, findUnstableEvent, promoteUnstableEvent, enrichEvent } from '../db/interaction-repository.mjs';
 import logger from '../utils/logger.mjs';
 import { runMigrations } from '../db/migrations.mjs';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
@@ -181,16 +181,19 @@ async function runNotificationScan(page, run, type) {
       if (!wantComments && n.eventType === 'comment') continue;
       if (!wantLikes && n.eventType === 'like') continue;
 
-      // Use notificationFingerprint for robust dedup (includes profile identifiers)
+      const profileResolutionStatus = n.actorProfileUrl
+        ? (n.profileResolveMethod || 'dom_href') : 'unresolved';
+
       const fp = notificationFingerprint({
         eventType: n.eventType,
         username: n.username,
         actorProfileKey: n.actorProfileKey,
         actorProfileUrl: n.actorProfileUrl,
         action: n.action,
-        content: n.content,
+        content: n.eventType === 'comment' ? n.content : null,
         timeText: n.timeText,
         rawText: n.rawText,
+        notificationItemKey: n.notificationItemKey,
       });
 
       const id = insertEvent({
@@ -203,19 +206,44 @@ async function runNotificationScan(page, run, type) {
         commentText: n.eventType === 'comment' ? n.content : null,
         eventTimeText: n.timeText,
         fingerprint: fp,
-        rawPayloadJson: n.rawText ? JSON.stringify({ rawText: n.rawText, notificationItemKey: n.notificationItemKey }) : null,
+        notificationItemKey: n.notificationItemKey || null,
+        rawPayloadJson: JSON.stringify({
+          rawText: n.rawText,
+          notificationItemKey: n.notificationItemKey,
+          extractSource: 'notification',
+          profileResolveMethod: profileResolutionStatus,
+        }),
       });
 
       if (id) {
         if (n.eventType === 'like') {
           likeCount++;
-          console.error(`[scan]   + ${n.username} [${n.relation}] ${n.action} ${n.timeText}`);
+          const tag = n.actorProfileUrl ? '' : ' [no-profile]';
+          console.error(`[scan]   + ${n.username} [${n.relation}] ${n.action} ${n.timeText}${tag}`);
         } else {
           commentCount++;
-          console.error(`[scan]   + ${n.username}: ${n.content.slice(0, 30)} ${n.timeText}`);
+          const tag = n.actorProfileUrl ? '' : ' [no-profile]';
+          console.error(`[scan]   + ${n.username}: ${(n.content||'').slice(0, 30)} ${n.timeText}${tag}`);
         }
       } else {
-        duplicateCount++;
+        // Not new — try enrichment
+        const enriched = enrichEvent({
+          fingerprint: fp,
+          actorProfileUrl: n.actorProfileUrl || null,
+          actorProfileKey: n.actorProfileKey || null,
+          rawPayloadJson: JSON.stringify({
+            rawText: n.rawText,
+            notificationItemKey: n.notificationItemKey,
+            extractSource: 'notification',
+            profileResolveMethod: profileResolutionStatus,
+          }),
+        });
+        if (enriched) {
+          console.error(`[scan]   ~ ${n.username} [${n.relation}] enriched (profile URL updated)`);
+          run.enriched = (run.enriched || 0) + 1;
+        } else {
+          duplicateCount++;
+        }
       }
     } catch {
       // skip malformed entries
@@ -225,8 +253,8 @@ async function runNotificationScan(page, run, type) {
   await closeNotificationPanel(page);
 
   run.scanned += (likeCount + commentCount);
-  console.error(`[scan] 通知扫描完成: ${likeCount} 赞 + ${commentCount} 评论入库${duplicateCount > 0 ? `, ${duplicateCount} 重复` : ''}`);
-  return success({ likeCount, commentCount, duplicateCount, step: 'notify-scan' });
+  console.error(`[scan] 通知扫描完成: ${likeCount} 赞 + ${commentCount} 评论入库${duplicateCount > 0 ? `, ${duplicateCount} 重复` : ''}${run.enriched > 0 ? `, ${run.enriched} 补充信息` : ''}`);
+  return success({ likeCount, commentCount, duplicateCount, enriched: run.enriched || 0, step: 'notify-scan' });
 }
 
 async function main() {
@@ -299,6 +327,8 @@ async function main() {
         totalScanned: run.scanned,
         totalNew: counts.reduce((s, r) => s + r.count, 0),
         blocked: run.hadBlocked ? 1 : 0,
+        enriched: run.enriched || 0,
+        source: 'notification',
       });
     }
 

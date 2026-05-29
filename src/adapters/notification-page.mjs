@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Notification panel adapter — hover bell icon, extract notification items
  * Panel appears on mouse hover over svg.LtuRRess on /user/self
  */
@@ -224,6 +224,7 @@ export async function extractNotifications(page) {
       // Extract profile URL and key from links within this notification item
       let actorProfileUrl = '';
       let actorProfileKey = '';
+      let profileResolveMethod = 'unresolved';
       const links = itemEl.querySelectorAll('a[href]');
       for (const link of links) {
         const href = link.getAttribute('href') || '';
@@ -231,6 +232,7 @@ export async function extractNotifications(page) {
         if (match) {
           actorProfileUrl = href.startsWith('http') ? href : `https://www.douyin.com${href}`;
           actorProfileKey = match[1];
+          profileResolveMethod = 'dom_href';
           break;
         }
       }
@@ -246,6 +248,7 @@ export async function extractNotifications(page) {
             if (match) {
               actorProfileUrl = href.startsWith('http') ? href : `https://www.douyin.com${href}`;
               actorProfileKey = match[1];
+              profileResolveMethod = 'dom_avatar_href';
               break;
             }
             el = el.parentElement;
@@ -264,6 +267,7 @@ export async function extractNotifications(page) {
         rawText: text.slice(0, 500),
         actorProfileUrl,
         actorProfileKey,
+        profileResolveMethod,
       };
 
       // Generate a per-notification-item fingerprint for precise matching

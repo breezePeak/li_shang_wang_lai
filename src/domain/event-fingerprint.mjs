@@ -64,7 +64,13 @@ export function commentInitialStatus(timeText) {
  * Generate a robust fingerprint for notification events (likes, comments).
  * Priority order: actorProfileKey > actorProfileUrl > username
  */
-export function notificationFingerprint({ eventType, username, actorProfileKey, actorProfileUrl, action, content, timeText, rawText }) {
+export function notificationFingerprint({ eventType, username, actorProfileKey, actorProfileUrl, action, content, timeText, rawText, notificationItemKey }) {
+  // notificationItemKey is the strongest per-item dedup identifier when available
+  if ((notificationItemKey || '').trim()) {
+    return crypto.createHash('sha256').update('notify:item:' + notificationItemKey.trim()).digest('hex').slice(0, 16);
+  }
+
+  // Use profile key as primary identifier when available; fall back to URL, then name
   const actorId = (actorProfileKey || '').trim()
     || (actorProfileUrl || '').trim()
     || (username || '').trim();

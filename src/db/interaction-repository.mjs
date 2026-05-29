@@ -4,17 +4,17 @@ import { getDb } from './database.mjs';
  * Insert a new interaction event. Returns the inserted row id.
  * Skips if fingerprint already exists (duplicate).
  */
-export function insertEvent({ eventType, actorName, actorProfileKey, actorProfileUrl, relation, myWorkTitle, commentText, eventTimeText, fingerprint, rawPayloadJson, platformEventId, status = 'new' }) {
+export function insertEvent({ eventType, actorName, actorProfileKey, actorProfileUrl, relation, myWorkTitle, commentText, eventTimeText, fingerprint, rawPayloadJson, platformEventId, notificationItemKey, status = 'new' }) {
   const db = getDb();
   const scannedAt = new Date().toISOString();
 
   const stmt = db.prepare(`
     INSERT OR IGNORE INTO interaction_events
-      (event_type, actor_name, actor_profile_key, actor_profile_url, relation, my_work_title, comment_text, event_time_text, platform_event_id, fingerprint, raw_payload_json, scanned_at, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (event_type, actor_name, actor_profile_key, actor_profile_url, relation, my_work_title, comment_text, event_time_text, platform_event_id, fingerprint, raw_payload_json, notification_item_key, scanned_at, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const result = stmt.run(eventType, actorName, actorProfileKey || null, actorProfileUrl || null, relation || 'unknown', myWorkTitle || null, commentText || null, eventTimeText || null, platformEventId || null, fingerprint, rawPayloadJson || null, scannedAt, status);
+  const result = stmt.run(eventType, actorName, actorProfileKey || null, actorProfileUrl || null, relation || 'unknown', myWorkTitle || null, commentText || null, eventTimeText || null, platformEventId || null, fingerprint, rawPayloadJson || null, notificationItemKey || null, scannedAt, status);
   return result.changes > 0 ? result.lastInsertRowid : null;
 }
 
@@ -70,9 +70,38 @@ export function getEvent(eventId) {
 }
 
 /**
- * Update an existing event from unstable to stable:
- * change status, timeText, and fingerprint when relative time becomes stable.
+ * Update an existing event with previously-missing profile information.
+ * Called when a new scan finds actorProfileUrl/actorProfileKey that was absent before.
+ * Returns true if the event was updated.
  */
+export function enrichEvent({ fingerprint, actorProfileUrl, actorProfileKey, rawPayloadJson }) {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM interaction_events WHERE fingerprint = ?').get(fingerprint);
+  if (!existing) return false;
+
+  const updates = [];
+  const params = [];
+  if (actorProfileUrl && !existing.actor_profile_url) {
+    updates.push('actor_profile_url = ?');
+    params.push(actorProfileUrl);
+  }
+  if (actorProfileKey && !existing.actor_profile_key) {
+    updates.push('actor_profile_key = ?');
+    params.push(actorProfileKey);
+  }
+  if (rawPayloadJson) {
+    updates.push('raw_payload_json = ?');
+    params.push(rawPayloadJson);
+  }
+  if (updates.length === 0) return false;
+
+  updates.push('updated_at = ?');
+  params.push(new Date().toISOString());
+  params.push(existing.id);
+
+  const result = db.prepare(`UPDATE interaction_events SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  return result.changes > 0;
+}
 export function promoteUnstableEvent(id, newFingerprint, newTimeText, newPlatformEventId) {
   const db = getDb();
   const result = db.prepare(`
