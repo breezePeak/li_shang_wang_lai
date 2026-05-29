@@ -216,6 +216,9 @@ async function runNotificationScan(page, run, type) {
             notificationItemKey: n.notificationItemKey,
             extractSource: 'notification',
             profileResolveMethod: profileResolutionStatus,
+            workId: n.workId || null,
+            workUrl: n.workUrl || null,
+            dedupConfidence: confidence,
           }),
         });
 
@@ -239,11 +242,17 @@ async function runNotificationScan(page, run, type) {
             fingerprint: fp,
             actorProfileUrl: n.actorProfileUrl || null,
             actorProfileKey: n.actorProfileKey || null,
+            username: n.username,
+            action: n.action,
+            content: n.eventType === 'comment' ? n.content : null,
+            workId: n.workId || null,
             rawPayloadJson: JSON.stringify({
               rawText: n.rawText,
               notificationItemKey: n.notificationItemKey,
               extractSource: 'notification',
               profileResolveMethod: profileResolutionStatus,
+              workId: n.workId,
+              workUrl: n.workUrl,
             }),
           });
           if (enriched) {

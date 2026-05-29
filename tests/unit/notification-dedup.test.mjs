@@ -105,4 +105,48 @@ describe('notificationFingerprint — dedup safety (production module)', () => {
     });
     expect(r1.fp).not.toBe(r2.fp);
   });
+
+  it('same friend, same work, two different comments → two different events', () => {
+    const r1 = notificationFingerprint({
+      eventType: 'comment', username: '张三', workId: 'video-123', content: '写得不错',
+    });
+    const r2 = notificationFingerprint({
+      eventType: 'comment', username: '张三', workId: 'video-123', content: '这个功能真好',
+    });
+    // Different content → different fingerprints
+    expect(r1.fp).not.toBe(r2.fp);
+    expect(r1.confidence).toBe('strong');
+  });
+
+  it('same friend, same work, same text, different platformEventId → two different events', () => {
+    const r1 = notificationFingerprint({
+      eventType: 'comment', username: '张三', platformEventId: 'pid-1', content: '写得不错',
+    });
+    const r2 = notificationFingerprint({
+      eventType: 'comment', username: '张三', platformEventId: 'pid-2', content: '写得不错',
+    });
+    expect(r1.fp).not.toBe(r2.fp);
+    expect(r1.confidence).toBe('strong');
+  });
+
+  it('platformEventId overrides workId when both present', () => {
+    const r1 = notificationFingerprint({
+      eventType: 'comment', username: '张三', platformEventId: 'pid-99', workId: 'video-123',
+      content: '很好',
+    });
+    const r2 = notificationFingerprint({
+      eventType: 'comment', username: '张三', platformEventId: 'pid-99', workId: 'video-456',
+      content: '不同',
+    });
+    // Same platformEventId → same fingerprint, workId difference ignored
+    expect(r1.fp).toBe(r2.fp);
+  });
+
+  it('weak events are valid but not auto-executable', () => {
+    const r = notificationFingerprint({
+      eventType: 'like', username: '张三', action: '赞了你的作品',
+    });
+    expect(r.confidence).toBe('weak');
+    expect(r.fp).toBeTruthy();
+  });
 });

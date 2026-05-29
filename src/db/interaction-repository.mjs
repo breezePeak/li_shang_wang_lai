@@ -71,12 +71,36 @@ export function getEvent(eventId) {
 
 /**
  * Update an existing event with previously-missing profile information.
- * Called when a new scan finds actorProfileUrl/actorProfileKey that was absent before.
- * Returns true if the event was updated.
+ * First tries exact fingerprint match, then falls back to partial match
+ * (username + action + content) for enrichment when actor identifier changed.
+ * Returns the event ID if updated, false otherwise.
  */
-export function enrichEvent({ fingerprint, actorProfileUrl, actorProfileKey, rawPayloadJson }) {
+export function enrichEvent({ fingerprint, actorProfileUrl, actorProfileKey, rawPayloadJson, username, action, content, workId }) {
   const db = getDb();
-  const existing = db.prepare('SELECT * FROM interaction_events WHERE fingerprint = ?').get(fingerprint);
+
+  // Try exact fingerprint match first
+  let existing = db.prepare('SELECT * FROM interaction_events WHERE fingerprint = ?').get(fingerprint);
+
+  // Fallback: partial match by username/action/content when no exact match
+  if (!existing && username) {
+    const params = [username];
+    let sql = 'SELECT * FROM interaction_events WHERE 1=1';
+    sql += ' AND (actor_profile_url IS NULL OR actor_profile_url = \'\')';
+    sql += ' AND LOWER(actor_name) = LOWER(?)';
+    params.push(username);
+    if (workId) {
+      // Try finding by workId in rawPayloadJson
+      sql += " AND raw_payload_json LIKE ?";
+      params.push('%' + workId + '%');
+    }
+    if (action) {
+      sql += " AND raw_payload_json LIKE ?";
+      params.push('%' + action + '%');
+    }
+    sql += ' ORDER BY created_at DESC LIMIT 1';
+    existing = db.prepare(sql).all(...params)[0];
+  }
+
   if (!existing) return false;
 
   const updates = [];

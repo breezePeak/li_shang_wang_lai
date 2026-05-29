@@ -237,23 +237,27 @@ export async function extractNotificationsBatch(page) {
       }
 
       // Extract work URL / workId from notification item links
-      let workUrl = '', workId = '', platformEventId = '';
+      let workUrl = '', workId = '';
       const allLinks = itemEl.querySelectorAll('a[href]');
       for (const link of allLinks) {
         const href = link.getAttribute('href') || '';
-        // Video/work link patterns
         const videoMatch = href.match(/\/video\/(\d+)/);
         if (videoMatch) { workUrl = href; workId = 'video-' + videoMatch[1]; break; }
         const noteMatch = href.match(/\/note\/(\d+)/);
         if (noteMatch) { workUrl = href; workId = 'note-' + noteMatch[1]; break; }
       }
-      // Also try data attributes on the notification item
-      if (!workId) {
-        platformEventId = itemEl.getAttribute('data-notification-id') ||
-          itemEl.getAttribute('data-id') || '';
-        if (!platformEventId) {
-          const parentWithId = itemEl.closest('[data-notification-id], [data-id]');
-          if (parentWithId) platformEventId = parentWithId.getAttribute('data-notification-id') || parentWithId.getAttribute('data-id') || '';
+
+      // Extract platformEventId independently from workId
+      let platformEventId = '';
+      platformEventId = itemEl.getAttribute('data-notification-id') ||
+        itemEl.getAttribute('data-id') ||
+        itemEl.getAttribute('data-comment-id') || '';
+      if (!platformEventId) {
+        const parentWithId = itemEl.closest('[data-notification-id], [data-id], [data-comment-id]');
+        if (parentWithId) {
+          platformEventId = parentWithId.getAttribute('data-notification-id') ||
+            parentWithId.getAttribute('data-id') ||
+            parentWithId.getAttribute('data-comment-id') || '';
         }
       }
 

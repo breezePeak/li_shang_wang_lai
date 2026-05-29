@@ -83,9 +83,10 @@ export function notificationFingerprint({ eventType, username, actorProfileKey, 
   }
 
   if ((workId || '').trim()) {
-    // workId distinguishes different works — critical for dedup
     const actorId = (actorProfileKey || '').trim() || (actorProfileUrl || '').trim() || (username || '').trim();
-    const raw = [eventType, actorId, workId.trim(), (action || '').trim()]
+    // For comments, include commentText so same user + same work + different comment = different event
+    const textSummary = ((content || '').trim()).slice(0, 200);
+    const raw = [eventType, actorId, workId.trim(), (action || '').trim(), textSummary]
       .map(s => s || '').join('||');
     return {
       fp: crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16),
