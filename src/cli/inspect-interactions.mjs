@@ -93,7 +93,7 @@ async function main() {
   try {
     // 2. 启动浏览器
     console.log('[inspect] 正在启动浏览器...');
-    const ctx = await createBrowserContext({ headless: false });
+    const ctx = await createBrowserContext({ headless: false, enableReuse: options.keepOpen });
     browser = ctx.browser;
 
     const pages = ctx.context.pages();

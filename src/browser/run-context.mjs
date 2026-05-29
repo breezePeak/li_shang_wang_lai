@@ -6,7 +6,7 @@ const DEFAULT_OPTIONS = {
   dryRun: true,
   execute: false,
   json: false,
-  keepOpen: true,
+  keepOpen: false,
   keepOpenOnError: true,
   pauseOnError: true,
   maxItems: 1,
@@ -59,6 +59,11 @@ export function parseCommonArgs(argv) {
     }
 
     remaining.push(arg);
+  }
+
+  // --json mode forces keepOpen=false so the command exits cleanly after output.
+  if (options.json) {
+    options.keepOpen = false;
   }
 
   return { options, remaining };

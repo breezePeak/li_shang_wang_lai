@@ -35,6 +35,6 @@ export function printJsonError(command, code, message, { recoverable = true, dat
     evidence,
     ...(data ? { data } : {}),
   };
-  process.stdout.write(JSON.stringify(result) + '\n');
+  console.log(JSON.stringify(result));
   process.exitCode = 1;
 }

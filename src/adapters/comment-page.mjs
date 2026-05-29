@@ -145,7 +145,19 @@ export async function scrollToLoadAllComments(page, { maxRound = 50, loadTimeout
       for (const el of all) {
         if ((el.innerText || '').trim() === '回复' && el.offsetHeight > 0) count++;
       }
-      const noMore = document.querySelector('[class*="loading"]')?.innerText?.includes('没有更多') || false;
+      // Only check for "没有更多" inside the scrollable comment list container,
+      // not in unrelated overlay/modals that may also contain loading classes.
+      let noMore = false;
+      const scrollEls = document.querySelectorAll('[class*="scroll"], [class*="list"], [class*="comment-list"]');
+      for (const el of scrollEls) {
+        if (el.offsetHeight > 0) {
+          const loadingEl = el.querySelector('[class*="loading"]');
+          if (loadingEl && (loadingEl.innerText || '').includes('没有更多')) {
+            noMore = true;
+            break;
+          }
+        }
+      }
       return { currentCount: count, noMoreText: noMore };
     });
 
@@ -207,6 +219,7 @@ export async function extractComments(page) {
 
   const comments = await page.evaluate(() => {
     const comments = [];
+    const RELATIVE_TIME_RE = /^(刚刚|\d+秒前|\d+分钟前|\d+小时前|\d+天前)$/;
 
     const walker = document.createTreeWalker(
       document.body,
@@ -269,16 +282,30 @@ export async function extractComments(page) {
           l === '刚刚'
         ) || '';
 
-        const contentCandidates = lines.filter(l =>
-          l.length > 2 &&
-          l !== username && l !== timeText &&
-          !['回复', '删除', '举报', '已回复'].includes(l) &&
-          !l.startsWith('http') &&
-          !/^\d+$/.test(l)
-        );
-        const content = contentCandidates.length > 0
-          ? contentCandidates.reduce((a, b) => a.length >= b.length ? a : b)
-          : '';
+        // Prefer extracting content from a dedicated comment-body DOM node.
+        // Falls back to line-based deduction with raw text for human verification.
+        let content = '';
+        let rawContainerText = '';
+        const contentEl = container.querySelector('[class*="comment-content"], [class*="comment-body"], [class*="comment-text"]');
+        if (contentEl) {
+          content = (contentEl.innerText || '').trim();
+        }
+        if (!content) {
+          const contentCandidates = lines.filter(l =>
+            l.length > 2 &&
+            l !== username && l !== timeText &&
+            !['回复', '删除', '举报', '已回复'].includes(l) &&
+            !l.startsWith('http') &&
+            !/^\d+$/.test(l) &&
+            !RELATIVE_TIME_RE.test(l.trim())
+          );
+          content = contentCandidates.length > 0
+            ? contentCandidates.reduce((a, b) => a.length >= b.length ? a : b)
+            : '';
+        }
+        if (!content && lines.length > 0) {
+          rawContainerText = containerText.slice(0, 500);
+        }
 
         const hasReplied = lines.some(l => l === '已回复');
 
@@ -288,6 +315,7 @@ export async function extractComments(page) {
           timeText: timeText.slice(0, 30),
           likeCount: 0,
           hasReplied,
+          rawContainerText,
         });
       } catch {
         // skip malformed entries
@@ -339,10 +367,21 @@ export async function getSelectedWorkTitle(page) {
   }
 }
 
+// Relative time patterns that drift between scan and execute (e.g. "3分钟前" → "5分钟前").
+// Must NOT be used as strong match conditions because the value changes over time.
+const RELATIVE_TIME_RE = /^(刚刚|\d+秒前|\d+分钟前|\d+小时前|\d+天前)$/;
+
+function isRelativeTime(text) {
+  return RELATIVE_TIME_RE.test((text || '').trim());
+}
+
 export async function openReplyBox(page, match) {
   const target = typeof match === 'string' ? match : (match.commentText || '');
   const actorName = typeof match === 'object' ? match.actorName : null;
   const eventTimeText = typeof match === 'object' ? match.eventTimeText : null;
+
+  // Determine if eventTimeText is relative BEFORE entering page.evaluate
+  const timeIsRelative = eventTimeText ? isRelativeTime(eventTimeText) : false;
 
   try {
     const maxScrollRounds = 30;
@@ -350,7 +389,7 @@ export async function openReplyBox(page, match) {
     for (let round = 0; round < maxScrollRounds; round++) {
       // Single page.evaluate: collect → match → click all in one atomic operation.
       // No string-based dedup; DOM elements matched by container position.
-      const result = await page.evaluate(({ target, actorName, eventTimeText }) => {
+      const result = await page.evaluate(({ target, actorName, eventTimeText, timeIsRelative }) => {
         // Collect all comment containers that match commentText AND have a reply button.
         // NO string dedup — two identical texts on different DOM nodes are distinct candidates.
         const candidates = [];
@@ -435,23 +474,18 @@ export async function openReplyBox(page, match) {
           return { found: false, reason: 'not_found' };
         }
 
-        // Filter by actorName if provided
+        // Filter by actorName if provided — exact match only.
         let filtered = candidates;
         if (actorName) {
           filtered = candidates.filter(c => c.containerText.includes(actorName));
-          if (filtered.length === 0 && actorName.length >= 3) {
-            // Fallback: partial match by first 3 chars (handles truncated names in DOM)
-            const partialName = actorName.slice(0, 3);
-            filtered = candidates.filter(c => c.containerText.includes(partialName));
-          }
           if (filtered.length === 0) {
             return { found: false, reason: 'actor_not_verified', total: candidates.length };
           }
         }
 
-        // Filter by eventTimeText — mandatory when provided, regardless of candidate count.
-        // Prevents mis-clicking when same actor has same commentText at different times.
-        if (eventTimeText) {
+        // Filter by eventTimeText — only for stable (non-relative) times.
+        // timeIsRelative is computed outside evaluate and passed in.
+        if (eventTimeText && !timeIsRelative) {
           const timeFiltered = filtered.filter(c => c.containerText.includes(eventTimeText));
           if (timeFiltered.length === 0) {
             return { found: false, reason: 'time_not_verified', total: filtered.length };
@@ -461,6 +495,15 @@ export async function openReplyBox(page, match) {
 
         // Uniqueness check
         if (filtered.length > 1) {
+          if (timeIsRelative) {
+            return {
+              found: false,
+              reason: 'relative_time_conflict',
+              total: filtered.length,
+              actorName,
+              eventTimeText,
+            };
+          }
           return { found: false, reason: 'not_unique', total: filtered.length };
         }
 
@@ -470,7 +513,7 @@ export async function openReplyBox(page, match) {
         chosen.replyBtn.click();
         return { found: true, clicked: true, matchText: chosen.contentText.slice(0, 60) };
 
-      }, { target, actorName, eventTimeText });
+      }, { target, actorName, eventTimeText, timeIsRelative });
 
       if (result.found && result.clicked) {
         console.error(`[comment-page] 唯一定位成功，匹配: "${result.matchText}"`);
@@ -486,9 +529,19 @@ export async function openReplyBox(page, match) {
         );
       }
 
+      if (result.reason === 'relative_time_conflict') {
+        return blocking(
+          RESULT_CODES.RELATIVE_TIME_CONFLICT,
+          `评论 "${target.slice(0, 40)}" 对应 ${result.total} 条候选，且时间 "${
+            eventTimeText || ''
+          }" 是相对时间（会随时间变化），无法唯一定位。请等待时间稳定后再试或人工核对该评论。`,
+          { recoverable: true, data: { matchCount: result.total, target: target.slice(0, 60), actorName, eventTimeText } }
+        );
+      }
+
       if (result.reason === 'actor_not_verified') {
         return blocking(
-          RESULT_CODES.COMMENT_MATCH_NOT_UNIQUE,
+          RESULT_CODES.ACTOR_NAME_NOT_VERIFIED,
           `评论 "${target.slice(0, 40)}" 匹配到 ${result.total} 条，但均不含用户 "${actorName}"，无法确认目标。`,
           { recoverable: true, data: { matchCount: result.total, target: target.slice(0, 60), actorName } }
         );

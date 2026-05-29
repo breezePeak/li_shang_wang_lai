@@ -1,4 +1,4 @@
-﻿// 评论回复执行命令（按 actionId 单条执行）
+// 评论回复执行命令（按 actionId 单条执行）
 // 替代旧的手工传入 JSON 计划文件方式，直接通过 actionId 驱动执行。
 // 强制校验审批状态链：approved → dry_run_ok → executed
 //
@@ -100,7 +100,7 @@ async function main() {
   let page = null;
 
   try {
-    const ctx = await createBrowserContext({ headless: false });
+    const ctx = await createBrowserContext({ headless: false, enableReuse: commonArgs.options.keepOpen });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();

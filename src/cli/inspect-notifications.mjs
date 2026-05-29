@@ -38,7 +38,7 @@ async function main() {
   let browser = null;
   try {
     console.log('[notify] 启动浏览器...');
-    const ctx = await createBrowserContext({ headless: false });
+    const ctx = await createBrowserContext({ headless: false, enableReuse: options.keepOpen });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     const page = pages.length > 0 ? pages[0] : await ctx.context.newPage();

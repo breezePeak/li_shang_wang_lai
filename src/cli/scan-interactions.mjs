@@ -1,4 +1,4 @@
-﻿import { createBrowserContext } from '../browser/browser-context.mjs';
+import { createBrowserContext } from '../browser/browser-context.mjs';
 import {
   ensureCommentPageReady,
   waitForCommentsArea,
@@ -222,7 +222,7 @@ async function main() {
 
   try {
     console.error('[scan] 启动浏览器...');
-    const ctx = await createBrowserContext({ headless: false });
+    const ctx = await createBrowserContext({ headless: false, enableReuse: options.keepOpen });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();

@@ -20,16 +20,6 @@ function checkPort() {
   });
 }
 
-function waitForPort(timeoutMs = 15000) {
-  const started = Date.now();
-  const poll = () => checkPort().then(ok => {
-    if (ok) return true;
-    if (Date.now() - started > timeoutMs) return false;
-    return new Promise(r => setTimeout(r, 500)).then(poll);
-  });
-  return poll();
-}
-
 function isBrowserAlive() {
   if (!existsSync(LOCK_FILE)) return false;
   try {
@@ -40,11 +30,15 @@ function isBrowserAlive() {
 
 /**
  * 创建或复用浏览器上下文（复用登录态）
- * 首次启动打开浏览器并写 PID 锁文件；后续调用检测锁文件 + CDP 端口复用。
+ *
+ * CDP reuse is ONLY enabled in explicit keep-open / debug modes.
+ * In Agent mode (keepOpen=false), each command starts and closes its own browser.
+ *
  * @param {Object} options
  * @param {boolean} [options.headless=false]
  * @param {string} [options.profileDir]
  * @param {number} [options.slowMo=150]
+ * @param {boolean} [options.enableReuse=false] - set to true to allow CDP reuse
  * @returns {Promise<{browser: Object, context: import('playwright').BrowserContext, reused: boolean}>}
  */
 export async function createBrowserContext(options = {}) {
@@ -52,10 +46,11 @@ export async function createBrowserContext(options = {}) {
     headless = false,
     profileDir = DEFAULT_PROFILE_DIR,
     slowMo = 150,
+    enableReuse = false,
   } = options;
 
-  // Try to reuse an existing browser
-  if (isBrowserAlive()) {
+  // CDP reuse is only attempted when explicitly enabled (e.g. keep-open mode).
+  if (enableReuse && isBrowserAlive()) {
     const portOpen = await checkPort();
     if (portOpen) {
       try {
@@ -84,17 +79,17 @@ export async function createBrowserContext(options = {}) {
   const context = await chromium.launchPersistentContext(profileDir, {
     headless,
     slowMo,
-    args: [`--remote-debugging-port=${CDP_PORT}`],
+    args: enableReuse ? [`--remote-debugging-port=${CDP_PORT}`] : [],
     viewport: { width: 1280, height: 800 },
   });
 
-  // Write lock file with current process PID (browser child of this process)
-  writeFileSync(LOCK_FILE, String(process.pid));
-
-  // Close lock file on process exit (unless reused)
-  process.on('exit', () => {
-    try { if (existsSync(LOCK_FILE)) unlinkSync(LOCK_FILE); } catch {}
-  });
+  // Only write lock file and expose CDP when reuse is explicitly enabled
+  if (enableReuse) {
+    writeFileSync(LOCK_FILE, String(process.pid));
+    process.on('exit', () => {
+      try { if (existsSync(LOCK_FILE)) unlinkSync(LOCK_FILE); } catch {}
+    });
+  }
 
   return {
     browser: context,

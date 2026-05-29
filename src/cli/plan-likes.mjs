@@ -1,4 +1,4 @@
-﻿import { getEvents } from '../db/interaction-repository.mjs';
+import { getEvents } from '../db/interaction-repository.mjs';
 import { createPlan } from '../db/plan-repository.mjs';
 import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
 import { runMigrations } from '../db/migrations.mjs';
@@ -170,7 +170,7 @@ async function main() {
 
   try {
     console.error('[plan-likes] 启动浏览器...');
-    const ctx = await createBrowserContext({ headless: false });
+    const ctx = await createBrowserContext({ headless: false, enableReuse: options.keepOpen });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
