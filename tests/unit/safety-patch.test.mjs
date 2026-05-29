@@ -608,4 +608,49 @@ describe('fingerprint — promote with platform ID', () => {
     );
     expect(fp1).toBe(fp2);
   });
+
+  it('promote: unstable (no PID) + stable (with PID) → content-only match finds unstable', () => {
+    // Simulate: first scan unstable, no PID
+    const fpUnstable = commentFingerprint(
+      { platformEventId: '', username: '张三', content: '很好', timeText: '3分钟前' }, '作品A'
+    );
+    // Second scan: stable time, HAS PID — use content-only fingerprint for matching
+    const fpContentOnly = commentFingerprint(
+      { platformEventId: '', username: '张三', content: '很好', timeText: '' }, '作品A'
+    );
+    // content-only fingerprint should match the unstable event's fingerprint
+    expect(fpContentOnly).toBe(fpUnstable);
+  });
+});
+
+// ============================================================
+// 10. Work-context validation + audit timeline
+// ============================================================
+describe('work-context validation + audit', () => {
+  it('prepare with --work-context-id matching existing work should have clean JSON', () => {
+    const result = runCli('prepare-comment-reply.mjs', [
+      '--event-id', '1', '--reply-text', 'test',
+      '--decision', 'reply', '--risk-level', 'low',
+      '--relevance', 'relevant',
+      '--work-context-id', 'opus4.8',
+      '--json',
+    ], 10_000);
+    const parsed = parseStdout(result);
+    expect(parsed).not.toBeNull();
+    expect(typeof parsed.ok).toBe('boolean');
+  });
+
+  it('prepare with --work-context-id missing from work-context.json blocks', () => {
+    const result = runCli('prepare-comment-reply.mjs', [
+      '--event-id', '1', '--reply-text', 'test',
+      '--decision', 'reply', '--risk-level', 'low',
+      '--relevance', 'relevant',
+      '--work-context-id', 'nonexistent-work',
+      '--json',
+    ], 10_000);
+    const parsed = parseStdout(result);
+    // Fails: either event not found or work-context not found
+    expect(parsed).not.toBeNull();
+    expect(parsed.ok).toBe(false);
+  });
 });

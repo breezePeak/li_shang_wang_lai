@@ -19,15 +19,29 @@ export function createAction({ eventId, actionType, targetTitle, targetUrl = nul
 
 /**
  * 审批一条动作（状态改为 'approved'）
+ * Records approvedAt in evidence_json audit timeline.
  * @returns {boolean} 是否成功
  */
 export function approveAction(actionId) {
   const db = getDb();
+  const now = new Date().toISOString();
   const result = db.prepare(`
     UPDATE actions SET status = 'approved' WHERE id = ? AND status = 'prepared'
   `).run(actionId);
 
+  if (result.changes > 0) {
+    _appendAuditTime(actionId, 'approvedAt', now);
+  }
   return result.changes > 0;
+}
+
+function _appendAuditTime(actionId, key, timestamp) {
+  const db = getDb();
+  const existing = db.prepare('SELECT evidence_json FROM actions WHERE id = ?').get(actionId);
+  const audit = existing?.evidence_json ? JSON.parse(existing.evidence_json) : {};
+  audit[key] = timestamp;
+  db.prepare('UPDATE actions SET evidence_json = ? WHERE id = ?')
+    .run(JSON.stringify(audit), actionId);
 }
 
 /**
@@ -36,10 +50,14 @@ export function approveAction(actionId) {
  */
 export function confirmExecuteAction(actionId) {
   const db = getDb();
+  const now = new Date().toISOString();
   const result = db.prepare(`
     UPDATE actions SET status = 'execute_confirmed' WHERE id = ? AND status = 'dry_run_ok'
   `).run(actionId);
 
+  if (result.changes > 0) {
+    _appendAuditTime(actionId, 'executeConfirmedAt', now);
+  }
   return result.changes > 0;
 }
 
@@ -71,6 +89,20 @@ export function updateActionStatus(actionId, status, reason = null, evidenceJson
         mergedEvidence = evidenceJson;
       }
     }
+  }
+
+  // Append audit timeline timestamp for specific state transitions
+  if (status === 'dry_run_ok') {
+    const existing = db.prepare('SELECT evidence_json FROM actions WHERE id = ?').get(actionId);
+    const audit = existing?.evidence_json ? JSON.parse(existing.evidence_json) : {};
+    audit.dryRunAt = now;
+    mergedEvidence = JSON.stringify(audit);
+  }
+  if (status === 'succeeded') {
+    const existing = db.prepare('SELECT evidence_json FROM actions WHERE id = ?').get(actionId);
+    const audit = existing?.evidence_json ? JSON.parse(existing.evidence_json) : {};
+    audit.executedAt = now;
+    mergedEvidence = JSON.stringify(audit);
   }
 
   if (status === 'succeeded') {

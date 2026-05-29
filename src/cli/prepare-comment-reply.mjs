@@ -21,6 +21,19 @@ import { createAction, hasSucceededAction, hasActiveAction } from '../db/action-
 import { getEvents, updateEventStatus } from '../db/interaction-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
+import { readFileSync, existsSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const WORK_CONTEXT_PATH = resolve(__dirname, '../../prompts/work-context.json');
+
+function loadWorkContext() {
+  if (!existsSync(WORK_CONTEXT_PATH)) return null;
+  try {
+    return JSON.parse(readFileSync(WORK_CONTEXT_PATH, 'utf-8'));
+  } catch { return null; }
+}
 
 function parseArgs(argv) {
   const args = { eventId: null, replyText: null, json: false, decision: null, riskLevel: null, decisionReason: '', relevance: null, workContextId: '' };
@@ -102,6 +115,30 @@ function main() {
       `相关性为 "irrelevant" 但决策为 "reply"，这不符合安全策略。irrelevant 评论不应自动回复。`, { recoverable: false }); return;
   }
 
+  // Work-context validation: --work-context-id must match a known work
+  const workCtx = loadWorkContext();
+  if (args.decision === 'reply' && args.relevance === 'relevant') {
+    if (!args.workContextId) {
+      printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+        `decision=reply 且 relevance=relevant 时，必须提供 --work-context-id。缺少作品上下文时，请设置 decision=manual_review。`, { recoverable: false }); return;
+    }
+    if (!workCtx || !Array.isArray(workCtx.works)) {
+      printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+        'work-context.json 缺失或格式错误，无法校验作品上下文', { recoverable: false }); return;
+    }
+    const matchedWork = workCtx.works.find(w => w.id === args.workContextId);
+    if (!matchedWork) {
+      printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+        `--work-context-id "${args.workContextId}" 在 work-context.json 中未找到`, { recoverable: false }); return;
+    }
+    const eventTitle = (ev.my_work_title || '').toLowerCase();
+    const workTitle = (matchedWork.title || '').toLowerCase();
+    if (!eventTitle.includes(workTitle) && !workTitle.includes(eventTitle)) {
+      printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+        `作品标题不匹配: event="${ev.my_work_title}" vs work-context="${matchedWork.title}"。请确认 --work-context-id 或改为 decision=manual_review。`, { recoverable: false }); return;
+    }
+  }
+
   // Check duplicate — already succeeded
   if (hasSucceededAction(args.eventId, 'reply_comment')) {
     printJsonError('comments:prepare', RESULT_CODES.DUPLICATE_ACTION,
@@ -114,6 +151,8 @@ function main() {
       '该评论已有活跃的回复动作（prepared/approved/dry_run_ok），不能重复创建。请先完成或取消已有动作。', { recoverable: false }); return;
   }
 
+  const matchedWork = workCtx?.works?.find(w => w.id === args.workContextId) || null;
+
   // Create action with audit trail in evidence_json
   const auditInfo = {
     decision: args.decision,
@@ -121,7 +160,10 @@ function main() {
     relevance: args.relevance || 'neutral',
     decisionReason: args.decisionReason || '',
     workContextId: args.workContextId || '',
+    workContextTitle: matchedWork ? matchedWork.title : '',
+    workContextSummary: matchedWork ? matchedWork.summary : '',
     policyVersion: '0.1.0',
+    preparedAt: new Date().toISOString(),
   };
   const actionId = createAction({
     eventId: args.eventId,

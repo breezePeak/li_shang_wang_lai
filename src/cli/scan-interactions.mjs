@@ -51,10 +51,11 @@ async function runCommentScan(page, run) {
         parseFailedCount++;
         continue;
       }
-      // Normalize "昨天/前天 HH:MM" → absolute date before dedup
-      const normalizedTimeText = normalizeTimeText(c.timeText);
-      const fp = commentFingerprint({ ...c, timeText: normalizedTimeText }, workTitle);
-      const status = commentInitialStatus(normalizedTimeText);
+      // Do NOT normalize day-relative time before status check:
+      // "昨天23:44" must stay unstable so it doesn't enter prepare/dry-run.
+      // normalizeTimeText is only used for display/normalized storage, not for status.
+      const status = commentInitialStatus(c.timeText);
+      const fp = commentFingerprint(c, workTitle);
 
       // If relative-time comment, check if unstable event exists → may be the same
       // comment scanned again with drifted time.
@@ -66,16 +67,16 @@ async function runCommentScan(page, run) {
         continue;
       }
 
-      // For stable-time comments, check if there's a matching unstable event
-      // that should be promoted (relative time → stable time transition).
+      // For stable-time comments, check if there's a matching unstable event that should
+      // be promoted. Use content-only fingerprint (no PID, no time) to match the unstable entry.
       if (status === 'new') {
-        const unstableFp = commentFingerprint({ ...c, timeText: '' }, workTitle);
+        const unstableFp = commentFingerprint({ ...c, platformEventId: '', timeText: '' }, workTitle);
         const unstableExisting = findUnstableEvent(unstableFp);
         if (unstableExisting) {
-          const promoted = promoteUnstableEvent(unstableExisting.id, fp, normalizedTimeText, c.platformEventId || null);
+          const promoted = promoteUnstableEvent(unstableExisting.id, fp, c.timeText, c.platformEventId || null);
           if (promoted) {
             newCount++;
-            console.error(`[scan]   ^ ${c.username}: ${c.content.slice(0, 40)} (promoted from unstable)`);
+            console.error(`[scan]   ^ ${c.username}: ${c.content.slice(0, 40)} (promoted from unstable event #${unstableExisting.id})`);
             continue;
           }
         }
@@ -87,7 +88,7 @@ async function runCommentScan(page, run) {
         relation: 'unknown',
         myWorkTitle: workTitle,
         commentText: c.content,
-        eventTimeText: normalizedTimeText,
+        eventTimeText: c.timeText,
         platformEventId: c.platformEventId || null,
         fingerprint: fp,
         status,
