@@ -15,6 +15,7 @@ export function runMigrations(dbPath = DB_PATH) {
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
 
+  // Initial schema — uses latest constraint set for new installs
   db.exec(`
     CREATE TABLE IF NOT EXISTS interaction_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,7 +55,7 @@ export function runMigrations(dbPath = DB_PATH) {
       target_url TEXT,
       target_title TEXT,
       action_text TEXT,
-      status TEXT NOT NULL CHECK (status IN ('planned', 'approved', 'running', 'succeeded', 'failed', 'blocked', 'skipped')),
+      status TEXT NOT NULL CHECK (status IN ('planned','prepared','approved','dry_run_ok','execute_confirmed','running','succeeded','failed','blocked','skipped')),
       reason TEXT,
       evidence_json TEXT,
       screenshot_path TEXT,
@@ -65,40 +66,17 @@ export function runMigrations(dbPath = DB_PATH) {
     );
   `);
 
-  // Fix: if actions table was created with old constraint (missing 'blocked'), recreate it
+  // Migrate existing databases that may have old constraint sets
   const checkResult = db.prepare(
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='actions'"
   ).get();
-  if (checkResult && checkResult.sql && !checkResult.sql.includes("'blocked'")) {
-    console.log('[db:init] 检测到旧版 actions 表约束(缺 blocked)，重建中...');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS actions_new (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        event_id INTEGER NOT NULL,
-        plan_id INTEGER,
-        action_type TEXT NOT NULL CHECK (action_type IN ('reply_comment', 'like_work', 'skip')),
-        target_url TEXT,
-        target_title TEXT,
-        action_text TEXT,
-        status TEXT NOT NULL CHECK (status IN ('planned', 'prepared', 'approved', 'dry_run_ok', 'running', 'succeeded', 'failed', 'blocked', 'skipped')),
-        reason TEXT,
-        evidence_json TEXT,
-        screenshot_path TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        executed_at TEXT,
-        FOREIGN KEY(event_id) REFERENCES interaction_events(id),
-        FOREIGN KEY(plan_id) REFERENCES action_plans(id)
-      );
-      INSERT INTO actions_new SELECT * FROM actions;
-      DROP TABLE actions;
-      ALTER TABLE actions_new RENAME TO actions;
-    `);
-    console.log('[db:init] actions 表已重建');
-  }
 
-  // Fix: if actions table missing 'prepared' and 'dry_run_ok' in constraint
-  if (checkResult && checkResult.sql && !checkResult.sql.includes("'prepared'")) {
-    console.log('[db:init] 检测到 actions 表约束缺少 prepared/dry_run_ok，重建中...');
+  const sql = checkResult ? (checkResult.sql || '') : '';
+  const needsMigration = !sql.includes("execute_confirmed");
+
+  if (needsMigration && sql) {
+    console.error('[db:init] 检测到旧版 actions 表约束，重建中...');
+
     db.exec(`
       CREATE TABLE IF NOT EXISTS actions_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,7 +86,7 @@ export function runMigrations(dbPath = DB_PATH) {
         target_url TEXT,
         target_title TEXT,
         action_text TEXT,
-        status TEXT NOT NULL CHECK (status IN ('planned', 'prepared', 'approved', 'dry_run_ok', 'running', 'succeeded', 'failed', 'blocked', 'skipped')),
+        status TEXT NOT NULL CHECK (status IN ('planned','prepared','approved','dry_run_ok','execute_confirmed','running','succeeded','failed','blocked','skipped')),
         reason TEXT,
         evidence_json TEXT,
         screenshot_path TEXT,
@@ -121,7 +99,7 @@ export function runMigrations(dbPath = DB_PATH) {
       DROP TABLE actions;
       ALTER TABLE actions_new RENAME TO actions;
     `);
-    console.log('[db:init] actions 表已重建（新增 prepared/dry_run_ok 状态）');
+    console.error('[db:init] actions 表已重建');
   }
 
   // unique index for like_work dedup
@@ -131,11 +109,19 @@ export function runMigrations(dbPath = DB_PATH) {
     WHERE action_type = 'like_work' AND status = 'succeeded';
   `);
 
+  // unique index for active reply_comment dedup
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_reply_action
+    ON actions(event_id, action_type)
+    WHERE action_type = 'reply_comment'
+      AND status IN ('prepared','approved','dry_run_ok','execute_confirmed');
+  `);
+
   console.error('[db:init] 数据库初始化完成:', dbPath);
   db.close();
 }
 
-// 直接运行时执行迁移
+// Direct execution
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
 if (isMain) {
   runMigrations();

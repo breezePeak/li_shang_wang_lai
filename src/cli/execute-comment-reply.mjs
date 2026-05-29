@@ -76,9 +76,9 @@ async function main() {
   }
 
   if (isExecute) {
-    if (action.status !== 'dry_run_ok') {
+    if (action.status !== 'execute_confirmed') {
       printJsonError('comments:execute', RESULT_CODES.BLOCKED,
-        `真实发送要求先完成 dry-run（当前状态: ${action.status}）`, { recoverable: false });
+        `真实发送要求先完成 dry-run 并二次确认（当前状态: ${action.status}）。请先执行 actions:confirm-execute。`, { recoverable: false });
       process.exit(1);
     }
   }

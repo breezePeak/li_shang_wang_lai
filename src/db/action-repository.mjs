@@ -31,6 +31,19 @@ export function approveAction(actionId) {
 }
 
 /**
+ * 二次确认发送（dry-run 成功后，用户明确说"发送"）
+ * 状态从 dry_run_ok 变为 execute_confirmed
+ */
+export function confirmExecuteAction(actionId) {
+  const db = getDb();
+  const result = db.prepare(`
+    UPDATE actions SET status = 'execute_confirmed' WHERE id = ? AND status = 'dry_run_ok'
+  `).run(actionId);
+
+  return result.changes > 0;
+}
+
+/**
  * 更新动作状态（dry_run_ok, succeeded, blocked, skipped 等）
  */
 export function updateActionStatus(actionId, status, reason = null, evidenceJson = null, screenshotPath = null) {

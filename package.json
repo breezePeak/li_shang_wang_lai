@@ -27,6 +27,7 @@
     "comments:execute": "node ./src/cli/execute-comment-reply.mjs",
     "comments:reply": "node ./src/cli/execute-comment-replies.mjs",
     "actions:approve": "node ./src/cli/approve-action.mjs",
+    "actions:confirm-execute": "node ./src/cli/confirm-execute.mjs",
     "likes:plan": "node ./src/cli/plan-likes.mjs",
     "likes:reciprocate": "node ./src/cli/execute-reciprocal-likes.mjs",
     "notify:inspect": "node ./src/cli/inspect-notifications.mjs",
