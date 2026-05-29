@@ -146,7 +146,13 @@ async function main() {
   const likes = getEvents({ eventType: 'like', status: 'new', limit: 20 });
 
   if (likes.length === 0) {
-    console.error('[plan-likes] 没有点赞事件。先运行 npm run interactions:scan -- --type like');
+    if (commonArgs.options.json) {
+      printJsonResult('likes:plan', { candidates: [] }, {
+        total: 0, planned: 0, skipped: 0, blocked: 0,
+      });
+    } else {
+      console.error('[plan-likes] 没有点赞事件。先运行 npm run interactions:scan -- --type like');
+    }
     process.exit(0);
   }
 
