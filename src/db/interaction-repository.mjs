@@ -1,10 +1,39 @@
 import { getDb } from './database.mjs';
 
+const KEY_FIELD_MAP = [
+  { dbCol: 'actor_profile_url', inKey: 'actorProfileUrl' },
+  { dbCol: 'actor_profile_key', inKey: 'actorProfileKey' },
+  { dbCol: 'platform_event_id', inKey: 'platformEventId' },
+  { dbCol: 'relation', inKey: 'relation' },
+  { dbCol: 'target_work_id', inKey: 'targetWorkId' },
+  { dbCol: 'target_work_url', inKey: 'targetWorkUrl' },
+  { dbCol: 'dedup_confidence', inKey: 'dedupConfidence' },
+  { dbCol: 'profile_resolution_status', inKey: 'profileResolutionStatus' },
+];
+
+function _isRelationUpgrade(existingRelation, newRelation) {
+  if (!newRelation) return false;
+  if (existingRelation === 'unknown' && (newRelation === 'friend' || newRelation === 'mutual')) return true;
+  if (existingRelation === 'friend' && newRelation === 'mutual') return true;
+  return false;
+}
+
+function _isKeyFieldEnrichment(existing, incoming) {
+  for (const { dbCol, inKey } of KEY_FIELD_MAP) {
+    if (dbCol === 'relation') {
+      if (_isRelationUpgrade(existing.relation, incoming.relation)) return true;
+    } else {
+      if (incoming[inKey] && !existing[dbCol]) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Unified upsert for notification events. Handles:
- * 1. platformEventId match → enrich
- * 2. fingerprint match → enrich
- * 3. partial match (old unresolved) → enrich
+ * 1. platformEventId match → enrich or duplicate
+ * 2. fingerprint match → enrich or duplicate
+ * 3. partial match (only with platformEventId or unique workId) → enrich, ambiguous, or skip
  * 4. No match → insert
  *
  * Returns { action: 'inserted'|'enriched'|'duplicate'|'ambiguous', eventId, error? }
@@ -14,9 +43,17 @@ export function upsertNotificationEvent({
   commentText, eventTimeText, fingerprint, dedupConfidence,
   platformEventId, notificationItemKey, workId, workUrl,
   action, content, rawPayloadJson,
+  targetWorkId, targetWorkUrl, profileResolutionStatus,
 }) {
   const db = getDb();
   const scannedAt = new Date().toISOString();
+  const incoming = {
+    actorProfileUrl, actorProfileKey, platformEventId, fingerprint,
+    relation: relation || 'unknown',
+    targetWorkId: targetWorkId || (workId || null),
+    targetWorkUrl: targetWorkUrl || (workUrl || null),
+    dedupConfidence, profileResolutionStatus,
+  };
 
   // ---- Step 1: Match by platformEventId ----
   if (platformEventId) {
@@ -24,10 +61,11 @@ export function upsertNotificationEvent({
       'SELECT * FROM interaction_events WHERE platform_event_id = ?'
     ).get(platformEventId);
     if (byPid) {
-      const enriched = _applyEnrich(byPid, { actorProfileUrl, actorProfileKey, platformEventId, fingerprint, rawPayloadJson });
-      return enriched
-        ? { action: 'enriched', eventId: byPid.id }
-        : { action: 'duplicate', eventId: byPid.id };
+      if (!_isKeyFieldEnrichment(byPid, incoming)) {
+        return { action: 'duplicate', eventId: byPid.id };
+      }
+      _applyEnrich(byPid, { ...incoming, rawPayloadJson });
+      return { action: 'enriched', eventId: byPid.id };
     }
   }
 
@@ -36,14 +74,19 @@ export function upsertNotificationEvent({
     'SELECT * FROM interaction_events WHERE fingerprint = ?'
   ).get(fingerprint);
   if (byFp) {
-    const enriched = _applyEnrich(byFp, { actorProfileUrl, actorProfileKey, platformEventId, fingerprint, rawPayloadJson });
-    return enriched
-      ? { action: 'enriched', eventId: byFp.id }
-      : { action: 'duplicate', eventId: byFp.id };
+    if (!_isKeyFieldEnrichment(byFp, incoming)) {
+      return { action: 'duplicate', eventId: byFp.id };
+    }
+    _applyEnrich(byFp, { ...incoming, rawPayloadJson });
+    return { action: 'enriched', eventId: byFp.id };
   }
 
-  // ---- Step 3: Partial match for old unresolved events ----
-  if (actorProfileUrl || actorProfileKey) {
+  // ---- Step 3: Partial match — ONLY when platformEventId or workId provides unique match ----
+  // Weak events (no platformEventId and no workId) MUST NOT be auto-merged by actorName+action.
+  const hasPlatformId = !!(platformEventId || '').trim();
+  const hasWorkId = !!(workId || '').trim();
+
+  if (hasPlatformId || hasWorkId) {
     const params = [];
     let sql = 'SELECT * FROM interaction_events WHERE event_type = ?';
     params.push(eventType);
@@ -51,17 +94,16 @@ export function upsertNotificationEvent({
     params.push(actorName);
     sql += ' AND (actor_profile_url IS NULL OR actor_profile_url = \'\')';
 
-    if (workId) {
-      sql += ' AND raw_payload_json LIKE ?';
-      params.push('%' + workId + '%');
+    if (hasWorkId) {
+      sql += ' AND target_work_id = ?';
+      params.push(workId);
+    }
+    if (hasPlatformId) {
+      sql += ' AND platform_event_id IS NULL';
     }
     if (eventType === 'comment' && commentText) {
       sql += ' AND comment_text = ?';
       params.push(commentText);
-    }
-    if (eventType === 'like' && action) {
-      sql += ' AND raw_payload_json LIKE ?';
-      params.push('%' + action + '%');
     }
 
     sql += ' ORDER BY created_at DESC';
@@ -69,10 +111,11 @@ export function upsertNotificationEvent({
 
     if (partialMatches.length === 1) {
       const old = partialMatches[0];
-      const enriched = _applyEnrich(old, { actorProfileUrl, actorProfileKey, platformEventId, fingerprint, rawPayloadJson });
-      return enriched
-        ? { action: 'enriched', eventId: old.id }
-        : { action: 'duplicate', eventId: old.id };
+      if (_isKeyFieldEnrichment(old, incoming)) {
+        _applyEnrich(old, { ...incoming, rawPayloadJson, fingerprint });
+        return { action: 'enriched', eventId: old.id };
+      }
+      return { action: 'duplicate', eventId: old.id };
     }
     if (partialMatches.length > 1) {
       return { action: 'ambiguous', eventId: null, error: `partial match returned ${partialMatches.length} results` };
@@ -80,31 +123,35 @@ export function upsertNotificationEvent({
   }
 
   // ---- Step 4: Insert new event ----
-  const status = dedupConfidence === 'weak' ? 'new' : 'new';
   const stmt = db.prepare(`
     INSERT INTO interaction_events
       (event_type, actor_name, actor_profile_key, actor_profile_url, relation, comment_text, event_time_text,
-       platform_event_id, fingerprint, notification_item_key, raw_payload_json, scanned_at, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       platform_event_id, fingerprint, notification_item_key,
+       target_work_id, target_work_url, dedup_confidence, profile_resolution_status,
+       raw_payload_json, scanned_at, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     eventType, actorName,
     actorProfileKey || null, actorProfileUrl || null, relation || 'unknown',
     commentText || null, eventTimeText || null,
     platformEventId || null, fingerprint, notificationItemKey || null,
-    rawPayloadJson || null, scannedAt, status,
+    incoming.targetWorkId, incoming.targetWorkUrl,
+    dedupConfidence || null, profileResolutionStatus || null,
+    rawPayloadJson || null, scannedAt, 'new',
   );
   if (result.changes > 0) {
     return { action: 'inserted', eventId: result.lastInsertRowid };
   }
-  return { action: 'duplicate', eventId: null, error: 'INSERT IGNORE returned 0 changes' };
+  return { action: 'duplicate', eventId: null, error: 'INSERT returned 0 changes' };
 }
 
 /**
- * Apply enrichment to an existing event: update missing fields.
- * Returns true if any field was updated.
+ * Apply enrichment to an existing event: update missing key fields + metadata.
+ * Only updates fields that are actually new or upgraded.
  */
-function _applyEnrich(existing, { actorProfileUrl, actorProfileKey, platformEventId, fingerprint, rawPayloadJson }) {
+function _applyEnrich(existing, { actorProfileUrl, actorProfileKey, platformEventId, fingerprint,
+  rawPayloadJson, relation, targetWorkId, targetWorkUrl, dedupConfidence, profileResolutionStatus }) {
   const db = getDb();
   const updates = [];
   const params = [];
@@ -125,20 +172,43 @@ function _applyEnrich(existing, { actorProfileUrl, actorProfileKey, platformEven
     updates.push('fingerprint = ?');
     params.push(fingerprint);
   }
+  if (_isRelationUpgrade(existing.relation, relation)) {
+    updates.push('relation = ?');
+    params.push(relation);
+  }
+  if (targetWorkId && !existing.target_work_id) {
+    updates.push('target_work_id = ?');
+    params.push(targetWorkId);
+  }
+  if (targetWorkUrl && !existing.target_work_url) {
+    updates.push('target_work_url = ?');
+    params.push(targetWorkUrl);
+  }
+  if ((dedupConfidence === 'strong' && existing.dedup_confidence !== 'strong') ||
+      (dedupConfidence === 'medium' && !existing.dedup_confidence)) {
+    updates.push('dedup_confidence = ?');
+    params.push(dedupConfidence);
+  }
+  if (profileResolutionStatus && profileResolutionStatus !== 'unresolved' &&
+      (!existing.profile_resolution_status || existing.profile_resolution_status === 'unresolved')) {
+    updates.push('profile_resolution_status = ?');
+    params.push(profileResolutionStatus);
+  }
   if (rawPayloadJson) {
     updates.push('raw_payload_json = ?');
     params.push(rawPayloadJson);
   }
+
   if (updates.length === 0) return false;
 
   updates.push('updated_at = ?');
   params.push(new Date().toISOString());
   params.push(existing.id);
 
-  const result = db.prepare(
+  db.prepare(
     `UPDATE interaction_events SET ${updates.join(', ')} WHERE id = ?`
   ).run(...params);
-  return result.changes > 0;
+  return true;
 }
 
 // ---- Legacy functions kept for backward compat ----
@@ -194,7 +264,7 @@ export function enrichEvent({ fingerprint, actorProfileUrl, actorProfileKey, raw
     const params = [];
     sql += ' AND actor_name = ?'; params.push(username);
     sql += ' AND (actor_profile_url IS NULL OR actor_profile_url = \'\')';
-    if (workId) { sql += ' AND raw_payload_json LIKE ?'; params.push('%' + workId + '%'); }
+    if (workId) { sql += ' AND target_work_id = ?'; params.push(workId); }
     if (action) { sql += ' AND raw_payload_json LIKE ?'; params.push('%' + action + '%'); }
     sql += ' ORDER BY created_at DESC LIMIT 1';
     existing = db.prepare(sql).all(...params)[0];

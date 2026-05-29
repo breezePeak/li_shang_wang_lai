@@ -225,6 +225,9 @@ async function runNotificationScan(page, run, type) {
           action: n.action,
           content: n.eventType === 'comment' ? n.content : null,
           rawPayloadJson: JSON.stringify(rawPayload),
+          targetWorkId: n.workId || null,
+          targetWorkUrl: n.workUrl || null,
+          profileResolutionStatus,
         });
 
         if (result.action === 'inserted') {

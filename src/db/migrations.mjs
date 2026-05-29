@@ -32,6 +32,10 @@ export function runMigrations(dbPath = DB_PATH) {
       notification_item_key TEXT,
       fingerprint TEXT NOT NULL UNIQUE,
       raw_payload_json TEXT,
+      target_work_id TEXT,
+      target_work_url TEXT,
+      dedup_confidence TEXT,
+      profile_resolution_status TEXT,
       status TEXT NOT NULL DEFAULT 'new',
       scanned_at TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -142,6 +146,23 @@ export function runMigrations(dbPath = DB_PATH) {
     WHERE action_type = 'reply_comment'
       AND status IN ('prepared','approved','dry_run_ok','execute_confirmed');
   `);
+
+  // Migrate: add target_work_id, target_work_url, dedup_confidence, profile_resolution_status
+  const newColumns = [
+    { col: 'target_work_id', check: 'target_work_id' },
+    { col: 'target_work_url', check: 'target_work_url' },
+    { col: 'dedup_confidence', check: 'dedup_confidence' },
+    { col: 'profile_resolution_status', check: 'profile_resolution_status' },
+  ];
+  const currentEventsSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='interaction_events'").get();
+  const eventsSqlCurrent = currentEventsSql ? (currentEventsSql.sql || '') : '';
+  for (const { col, check } of newColumns) {
+    if (eventsSqlCurrent && !eventsSqlCurrent.includes(check)) {
+      console.error(`[db:init] 旧版 interaction_events 缺少 ${col} 列，迁移中...`);
+      db.exec(`ALTER TABLE interaction_events ADD COLUMN ${col} TEXT`);
+      console.error(`[db:init] ${col} 列已添加`);
+    }
+  }
 
   console.error('[db:init] 数据库初始化完成:', dbPath);
   db.close();
