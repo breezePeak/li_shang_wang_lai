@@ -13,6 +13,7 @@ import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose 
 import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { promptRecoveryAction } from '../browser/interactive-control.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
+import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 
 async function runCommentScan(page, run) {
   console.log('[scan] === 评论扫描 ===');
@@ -239,6 +240,15 @@ async function main() {
     const counts = getEventCounts();
     for (const row of counts) {
       console.log(`[scan] ${row.event_type}/${row.status}: ${row.count}`);
+    }
+
+    // --json output for agent consumption
+    if (options.json) {
+      printJsonResult('interactions:scan', { counts }, {
+        totalScanned: run.scanned,
+        totalNew: counts.reduce((s, r) => s + r.count, 0),
+        blocked: run.hadBlocked ? 1 : 0,
+      });
     }
 
   } catch (err) {

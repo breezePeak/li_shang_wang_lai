@@ -16,6 +16,7 @@ import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose 
 import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 import { loadConfig } from '../config/user-config.mjs';
+import { printJsonError } from '../utils/cli-output.mjs';
 
 function parseArgs(argv) {
   const args = { plan: null, relation: 'friend' };
@@ -211,15 +212,9 @@ async function main() {
   if (commonArgs.options.execute) {
     const config = loadConfig();
     if (!config.likes.experimentalExecuteEnabled) {
-      const result = {
-        ok: false,
-        command: 'likes:reciprocate',
-        code: RESULT_CODES.FEATURE_DISABLED,
-        message: '真实回访点赞在 MVP 阶段默认禁用。如需实验性验证，请设置 config/local.json 中 likes.experimentalExecuteEnabled 为 true。',
-        recoverable: false,
-        evidence: null,
-      };
-      console.error(JSON.stringify(result, null, 2));
+      printJsonError('likes:reciprocate', RESULT_CODES.FEATURE_DISABLED,
+        '真实回访点赞在 MVP 阶段默认禁用。如需实验性验证，请设置 config/local.json 中 likes.experimentalExecuteEnabled 为 true。',
+        { recoverable: false });
       process.exit(1);
     }
   }
