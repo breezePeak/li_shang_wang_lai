@@ -1,4 +1,4 @@
-// 二次确认发送命令（dry-run 成功后，用户明确说"发送"）
+﻿// 二次确认发送命令（dry-run 成功后，用户明确说"发送"）
 // 将 action 状态从 dry_run_ok 变为 execute_confirmed，
 // 之后 comments:execute --execute 才能真实发送。
 //
@@ -28,28 +28,24 @@ function main() {
 
   if (!args.actionId) {
     printJsonError('actions:confirm-execute', RESULT_CODES.BLOCKED,
-      '缺少参数 --action-id', { recoverable: false });
-    process.exit(1);
+      '缺少参数 --action-id', { recoverable: false }); return;
   }
 
   const action = getActionWithEvent(args.actionId);
   if (!action) {
     printJsonError('actions:confirm-execute', RESULT_CODES.BLOCKED,
-      `找不到动作 ID=${args.actionId}`, { recoverable: false });
-    process.exit(1);
+      `找不到动作 ID=${args.actionId}`, { recoverable: false }); return;
   }
 
   if (action.status !== 'dry_run_ok') {
     printJsonError('actions:confirm-execute', RESULT_CODES.ACTION_NOT_APPROVED,
-      `确认发送要求动作状态为 dry_run_ok，当前: ${action.status}`, { recoverable: false });
-    process.exit(1);
+      `确认发送要求动作状态为 dry_run_ok，当前: ${action.status}`, { recoverable: false }); return;
   }
 
   const ok = confirmExecuteAction(args.actionId);
   if (!ok) {
     printJsonError('actions:confirm-execute', RESULT_CODES.BLOCKED,
-      `确认失败：动作 #${args.actionId} 状态可能已变更`, { recoverable: false });
-    process.exit(1);
+      `确认失败：动作 #${args.actionId} 状态可能已变更`, { recoverable: false }); return;
   }
 
   const result = {

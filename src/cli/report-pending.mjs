@@ -1,4 +1,4 @@
-// 待处理互动报告命令
+﻿// 待处理互动报告命令
 // 查询本地数据库中未完成的互动事件（非 succeeded/blocked），按评论和点赞分类输出。
 // 同时关联 actions 表返回最近的动作状态。
 // Skill 可调用此命令获取待处理摘要，无需解析计划文件或直接查库。
@@ -11,6 +11,7 @@
 import { runMigrations } from '../db/migrations.mjs';
 import { getDb } from '../db/database.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
+import { RESULT_CODES } from '../domain/result-codes.mjs';
 
 function parseArgs(argv) {
   const args = { json: false, type: null };
@@ -28,11 +29,22 @@ function main() {
 
   const args = parseArgs(process.argv.slice(2));
   const filterType = args.type;
+
+  // Validate --type
+  if (filterType && !['comment', 'like'].includes(filterType)) {
+    if (args.json) {
+      printJsonError('actions:pending', RESULT_CODES.INVALID_ARGUMENTS,
+        `--type 仅允许 comment 或 like，收到: ${filterType}`, { recoverable: false }); return;
+    } else {
+      console.error(`--type 仅允许 comment 或 like，收到: ${filterType}`);
+    }
+    process.exit(1);
+  }
+
   const db = getDb();
 
   try {
     // Query events that are NOT succeeded or blocked (i.e., still pending)
-    // Include: new, planned, approved
     const pendingEvents = db.prepare(`
       SELECT * FROM interaction_events
       WHERE status NOT IN ('succeeded', 'blocked')
@@ -40,8 +52,8 @@ function main() {
       LIMIT 200
     `).all();
 
-    // Query blocked events with reasons
-    const blockedEvents = db.prepare(`
+    // Query blocked events with reasons — use parameterized SQL
+    let blockedQuery = `
       SELECT e.*, a.reason as blockReason, a.status as actionStatus,
              a.evidence_json, a.screenshot_path
       FROM interaction_events e
@@ -49,10 +61,15 @@ function main() {
         SELECT MAX(id) FROM actions GROUP BY event_id
       )
       WHERE e.status = 'blocked'
-        AND (${filterType ? "e.event_type = '" + filterType + "'" : '1=1'})
-      ORDER BY e.updated_at DESC
-      LIMIT 50
-    `).all();
+    `;
+    const blockedParams = [];
+    if (filterType) {
+      blockedQuery += ' AND e.event_type = ?';
+      blockedParams.push(filterType);
+    }
+    blockedQuery += ' ORDER BY e.updated_at DESC LIMIT 50';
+
+    const blockedEvents = db.prepare(blockedQuery).all(...blockedParams);
 
     const blockedItems = blockedEvents.map(ev => ({
       eventId: ev.id,
@@ -149,7 +166,7 @@ function main() {
     }
   } catch (err) {
     if (args.json) {
-      printJsonError('actions:pending', 'UNKNOWN_ERROR', err.message, { recoverable: false });
+      printJsonError('actions:pending', 'UNKNOWN_ERROR', err.message, { recoverable: false }); return;
     } else {
       console.error('[report-pending] 错误:', err.message);
     }

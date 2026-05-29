@@ -14,6 +14,7 @@ import { findLatestNonPinnedVideo } from '../adapters/user-profile-page.mjs';
 import { navigateToVideo, checkLikeState, getVideoTitle } from '../adapters/video-page.mjs';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
+import { RESULT_CODES } from '../domain/result-codes.mjs';
 import path from 'path';
 
 function parseArgs(argv) {
@@ -153,7 +154,7 @@ async function main() {
     } else {
       console.error('[plan-likes] 没有点赞事件。先运行 npm run interactions:scan -- --type like');
     }
-    process.exit(0);
+    return;
   }
 
   console.error(`[plan-likes] 找到 ${likes.length} 个点赞事件`);
@@ -188,7 +189,7 @@ async function main() {
       } else {
         console.error('[plan-likes] 无法打开通知面板，请手动打开后重试');
       }
-      process.exit(1);
+      return;
     }
 
     // Step 2: For each like event, click avatar to navigate to user profile

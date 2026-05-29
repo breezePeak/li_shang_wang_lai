@@ -233,7 +233,7 @@ async function main() {
       if (!commentResult.ok) {
         if (options.json) {
           printJsonError('interactions:scan', commentResult.code || RESULT_CODES.BLOCKED,
-            commentResult.message || '评论扫描失败', { recoverable: commentResult.recoverable !== false });
+            commentResult.message || '评论扫描失败', { recoverable: commentResult.recoverable !== false }); return;
         }
         return;
       }
@@ -246,7 +246,7 @@ async function main() {
       if (!notifResult.ok) {
         if (options.json) {
           printJsonError('interactions:scan', notifResult.code || RESULT_CODES.BLOCKED,
-            notifResult.message || '通知扫描失败', { recoverable: notifResult.recoverable !== false });
+            notifResult.message || '通知扫描失败', { recoverable: notifResult.recoverable !== false }); return;
         }
         return;
       }
@@ -291,7 +291,7 @@ async function main() {
     // Structured JSON error on failure
     if (options.json) {
       printJsonError('interactions:scan', RESULT_CODES.UNKNOWN_ERROR,
-        err.message, { recoverable: false, evidence: run.evidenceDirectories });
+        err.message, { recoverable: false, evidence: run.evidenceDirectories }); return;
     }
 
     process.exitCode = 1;

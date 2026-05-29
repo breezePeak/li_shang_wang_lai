@@ -336,8 +336,11 @@ export async function openReplyBox(page, match) {
     const maxScrollRounds = 30;
 
     for (let round = 0; round < maxScrollRounds; round++) {
-      // Phase 1: Collect ALL candidates WITHOUT clicking
+      // Phase 1: Collect ALL candidates WITHOUT clicking.
+      // Each candidate stores its containerText (full text of the comment block)
+      // which is used later for click targeting — ensuring we click the SAME element.
       const result = await page.evaluate(({ target, actorName, eventTimeText }) => {
+        const seen = new Set(); // dedup container texts
         const candidates = [];
 
         // Strategy 1: Find via comment-content class
@@ -347,7 +350,6 @@ export async function openReplyBox(page, match) {
           const text = (el.innerText || '').trim();
           if (!text.includes(target)) continue;
 
-          // Walk up to find reply button
           let parent = el.parentElement;
           for (let p = 0; p < 3 && parent && parent !== document.body; p++) {
             const opsEl = parent.querySelector('[class*="operations"]');
@@ -356,17 +358,22 @@ export async function openReplyBox(page, match) {
               for (const item of items) {
                 const itemText = (item.innerText || '').trim();
                 if (itemText === '回复' || itemText.startsWith('回复')) {
-                  candidates.push({
-                    strategy: 'comment-content-class',
-                    matchText: text,
-                    containerText: text,
-                    btn: null, // will click via DOM query after return
-                    btnSelector: null, // candidates matched in DOM cannot pass elements
-                  });
+                  // Use the whole parent container text as the unique key for clicking
+                  const containerText = (parent.closest('[class*="comment"]')?.innerText
+                    || parent.innerText || '').trim();
+                  const key = containerText.slice(0, 200);
+                  if (!seen.has(key)) {
+                    seen.add(key);
+                    candidates.push({
+                      strategy: 'comment-content-class',
+                      containerText: containerText,
+                      containerKey: key,
+                    });
+                  }
                   break;
                 }
               }
-              if (candidates.length > 0) break;
+              if (candidates.length > 0 && candidates[candidates.length - 1].containerKey === key) break;
             }
             parent = parent.parentElement;
           }
@@ -390,12 +397,15 @@ export async function openReplyBox(page, match) {
           for (let level = 0; level < 3 && container && container !== document.body; level++) {
             const ct = (container.innerText || '').trim();
             if (ct.length > 10 && ct.length < 500 && ct.includes(target)) {
-              candidates.push({
-                strategy: 'reply-btn-walkup',
-                matchText: ct.slice(0, 60),
-                containerText: ct,
-                btnIndex: candidates.length,
-              });
+              const key = ct.slice(0, 200);
+              if (!seen.has(key)) {
+                seen.add(key);
+                candidates.push({
+                  strategy: 'reply-btn-walkup',
+                  containerText: ct,
+                  containerKey: key,
+                });
+              }
               break;
             }
             container = container.parentElement;
@@ -407,20 +417,35 @@ export async function openReplyBox(page, match) {
 
       const candidates = result.candidates || [];
 
-      // Phase 2: Filter by actorName if provided
+      // Phase 2: Filter by actorName if provided — NO fallback to text-only
       let filtered = candidates;
       if (actorName) {
         filtered = candidates.filter(c => c.containerText.includes(actorName));
-      }
-      // If actorName filter eliminates all, fall back to all candidates
-      // (some comments might not show the actor name in the container)
-      if (actorName && filtered.length === 0 && candidates.length > 0) {
-        filtered = candidates;
+        // CRITICAL: if actorName is provided but can't be verified in any container, BLOCK
+        if (filtered.length === 0) {
+          if (candidates.length > 0) {
+            // There ARE text matches but none contain actorName — unsafe to proceed
+            return blocking(
+              RESULT_CODES.COMMENT_MATCH_NOT_UNIQUE,
+              `评论 "${target.slice(0, 40)}" 匹配到 ${candidates.length} 条，但均不含用户 "${actorName}"，无法确认目标。`,
+              { recoverable: true, data: { matchCount: candidates.length, target: target.slice(0, 60), actorName } }
+            );
+          }
+          // No matches at all — scroll and try again
+          if (round === maxScrollRounds - 1) {
+            return blocking(
+              RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND,
+              `滚动${maxScrollRounds}轮后未找到匹配 "${target.slice(0, 40)}" 的评论`,
+              { data: { preview: target.slice(0, 40), rounds: maxScrollRounds } }
+            );
+          }
+          await scrollPage(page);
+          continue;
+        }
       }
 
-      // Phase 3: Check uniqueness and click
-      if (filtered.length === 0 && candidates.length === 0) {
-        // No match found — scroll and try again
+      // Phase 3: Check uniqueness
+      if (filtered.length === 0) {
         if (round === maxScrollRounds - 1) {
           return blocking(
             RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND,
@@ -428,44 +453,34 @@ export async function openReplyBox(page, match) {
             { data: { preview: target.slice(0, 40), rounds: maxScrollRounds } }
           );
         }
-        // Scroll and continue
-        await page.evaluate(() => {
-          const all = document.querySelectorAll('*');
-          for (const el of all) {
-            const rect = el.getBoundingClientRect();
-            if (rect.x < 200 || rect.height < 300 || rect.width < 400) continue;
-            const style = window.getComputedStyle(el);
-            const hasOverflow = style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflow === 'auto';
-            if (!hasOverflow) continue;
-            if (el.scrollHeight <= el.clientHeight) continue;
-            el.scrollTop = el.scrollHeight;
-            return;
-          }
-          window.scrollBy(0, 500);
-        });
-        await page.waitForTimeout(1000);
+        await scrollPage(page);
         continue;
       }
 
       if (filtered.length > 1) {
         return blocking(
           RESULT_CODES.COMMENT_MATCH_NOT_UNIQUE,
-          `评论 "${target.slice(0, 40)}" 匹配到 ${filtered.length} 条候选，无法唯一定位。请指定更多信息（如评论者昵称）后重试。`,
+          `评论 "${target.slice(0, 40)}" 匹配到 ${filtered.length} 条候选，无法唯一定位。`,
           { recoverable: true, data: { matchCount: filtered.length, target: target.slice(0, 60) } }
         );
       }
 
-      // Exactly 1 match — click it now
-      console.error(`[comment-page] 唯一定位成功，匹配: "${filtered[0].matchText}"`);
-      
-      // Now click: re-run a targeted click in the page
-      const clickResult = await page.evaluate((target) => {
-        // Strategy 1: click via comment-content class
+      // Phase 4: Exactly 1 match — click using the SAME containerText
+      const unique = filtered[0];
+      console.error(`[comment-page] 唯一定位成功 (${unique.strategy})`);
+
+      const clickResult = await page.evaluate((containerKey) => {
+        // Use the container's unique text to find and click the correct reply button.
+        // This ensures we click the SAME comment that was matched during candidate collection,
+        // not a different comment with the same short text.
         const contentEls = document.querySelectorAll('[class*="comment-content"]');
         for (const el of contentEls) {
           if (el.offsetHeight === 0) continue;
           const text = (el.innerText || '').trim();
-          if (!text.includes(target)) continue;
+          if (!text.includes(containerKey.slice(0, 40))) continue;
+          // Verify full match
+          if (containerKey.length > 40 && !text.includes(containerKey.slice(0, 80))) continue;
+
           let parent = el.parentElement;
           for (let p = 0; p < 3 && parent && parent !== document.body; p++) {
             const opsEl = parent.querySelector('[class*="operations"]');
@@ -483,15 +498,33 @@ export async function openReplyBox(page, match) {
             parent = parent.parentElement;
           }
         }
+
+        // Strategy 2 fallback: find by reply button walk-up
+        const btns = document.querySelectorAll('*');
+        for (const btn of btns) {
+          if (btn.offsetHeight === 0) continue;
+          if ((btn.innerText || '').trim() !== '回复') continue;
+          const btnRect = btn.getBoundingClientRect();
+          if (btnRect.y < 150) continue;
+          let c = btn.parentElement;
+          for (let lv = 0; lv < 3 && c && c !== document.body; lv++) {
+            const ct = (c.innerText || '').trim();
+            if (ct.includes(containerKey.slice(0, 80))) {
+              btn.scrollIntoView({ behavior: 'instant', block: 'center' });
+              btn.click();
+              return { clicked: true };
+            }
+            c = c.parentElement;
+          }
+        }
         return { clicked: false };
-      }, target);
+      }, unique.containerKey);
 
       if (clickResult.clicked) {
         await page.waitForTimeout(1500);
-        return success({ clicked: true, strategy: filtered[0].strategy });
+        return success({ clicked: true, strategy: unique.strategy });
       }
-
-      // Click failed — try again next round
+      // Click failed — try next round
     }
 
     return blocking(RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND, '滚动查找超时', { data: {} });
@@ -503,6 +536,24 @@ export async function openReplyBox(page, match) {
       { data: { error: err.message } }
     );
   }
+}
+
+async function scrollPage(page) {
+  await page.evaluate(() => {
+    const all = document.querySelectorAll('*');
+    for (const el of all) {
+      const rect = el.getBoundingClientRect();
+      if (rect.x < 200 || rect.height < 300 || rect.width < 400) continue;
+      const style = window.getComputedStyle(el);
+      const hasOverflow = style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflow === 'auto';
+      if (!hasOverflow) continue;
+      if (el.scrollHeight <= el.clientHeight) continue;
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    window.scrollBy(0, 500);
+  });
+  await page.waitForTimeout(1000);
 }
 
 export async function fillReplyText(page, replyText) {

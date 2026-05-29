@@ -1,20 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { printJsonResult, printJsonError } from '../../src/utils/cli-output.mjs';
 
-// Capture console output for verification
 function captureStdout(fn) {
   const logs = [];
-  const orig = console.log;
+  const origLog = console.log;
+  const origWrite = process.stdout.write;
   console.log = (...args) => logs.push(...args);
-  try { fn(); } finally { console.log = orig; }
-  return logs;
-}
-
-function captureStderr(fn) {
-  const logs = [];
-  const orig = console.error;
-  console.error = (...args) => logs.push(...args);
-  try { fn(); } finally { console.error = orig; }
+  process.stdout.write = (chunk) => { logs.push(chunk); return true; };
+  try { fn(); } finally {
+    console.log = origLog;
+    process.stdout.write = origWrite;
+  }
   return logs;
 }
 

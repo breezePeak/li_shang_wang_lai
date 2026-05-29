@@ -161,4 +161,19 @@ describe('comment workflow state machine', () => {
     expect(p.ok).toBe(false);
     expect(p.command).toBe('interactions:scan');
   });
+
+  it('actions:pending rejects invalid --type', () => {
+    const r = runCli('report-pending.mjs', ['--json', '--type', 'invalid']);
+    const p = parseStdout(r);
+    expect(p).not.toBeNull();
+    expect(p.ok).toBe(false);
+    expect(p.code).toBe('INVALID_ARGUMENTS');
+  });
+
+  it('actions:pending accepts valid --type comment', () => {
+    const r = runCli('report-pending.mjs', ['--json', '--type', 'comment']);
+    const p = parseStdout(r);
+    expect(p).not.toBeNull();
+    expect(p.ok).toBe(true);
+  });
 });

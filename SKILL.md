@@ -172,7 +172,5 @@ Skill 输出候选清单（仅预览）：
 
 ## 当前版本限制
 
-- 评论审批已支持命令式流程（`prepare → approve → dry-run → execute`），旧 `comments:plan` + JSON 计划文件方式保留兼容；
-- 好友回访仅提供候选预览，真实点赞代码层硬阻断；
-- 核心命令已支持 `--json` 输出，Agent 可稳定解析；
-- `actions:pending` 已可用，支持按类型筛选和关联 action 状态。
+- 评论回复流程：`prepare → approve → dry-run → confirm-execute → execute`
+- 好友回访仅提供候选预览，真实点赞代码层硬阻断

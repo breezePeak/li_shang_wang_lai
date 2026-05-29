@@ -1,4 +1,4 @@
-// 评论回复执行命令（按 actionId 单条执行）
+﻿// 评论回复执行命令（按 actionId 单条执行）
 // 替代旧的手工传入 JSON 计划文件方式，直接通过 actionId 驱动执行。
 // 强制校验审批状态链：approved → dry_run_ok → executed
 //
@@ -44,23 +44,20 @@ async function main() {
   // Validate action-id
   if (!cmdArgs.actionId) {
     printJsonError('comments:execute', RESULT_CODES.BLOCKED,
-      '缺少参数 --action-id', { recoverable: false });
-    process.exit(1);
+      '缺少参数 --action-id', { recoverable: false }); return;
   }
 
   // Load action WITH associated event data (commentText, workTitle, actorName)
   const action = getActionWithEvent(cmdArgs.actionId);
   if (!action) {
     printJsonError('comments:execute', RESULT_CODES.BLOCKED,
-      `找不到动作 ID=${cmdArgs.actionId}`, { recoverable: false });
-    process.exit(1);
+      `找不到动作 ID=${cmdArgs.actionId}`, { recoverable: false }); return;
   }
 
   // --dry-run and --execute conflict
   if (commonArgs.options.dryRun && commonArgs.options.execute) {
     printJsonError('comments:execute', RESULT_CODES.BLOCKED,
-      '--dry-run 与 --execute 不可同时使用', { recoverable: false });
-    process.exit(1);
+      '--dry-run 与 --execute 不可同时使用', { recoverable: false }); return;
   }
 
   const isDryRun = commonArgs.options.dryRun && !commonArgs.options.execute;
@@ -70,37 +67,32 @@ async function main() {
   if (isDryRun) {
     if (action.status !== 'approved') {
       printJsonError('comments:execute', RESULT_CODES.ACTION_NOT_APPROVED,
-        `dry-run 要求动作状态为 approved，当前: ${action.status}`, { recoverable: false });
-      process.exit(1);
+        `dry-run 要求动作状态为 approved，当前: ${action.status}`, { recoverable: false }); return;
     }
   }
 
   if (isExecute) {
     if (action.status !== 'execute_confirmed') {
       printJsonError('comments:execute', RESULT_CODES.BLOCKED,
-        `真实发送要求先完成 dry-run 并二次确认（当前状态: ${action.status}）。请先执行 actions:confirm-execute。`, { recoverable: false });
-      process.exit(1);
+        `真实发送要求先完成 dry-run 并二次确认（当前状态: ${action.status}）。请先执行 actions:confirm-execute。`, { recoverable: false }); return;
     }
   }
 
   // Validate comment text and reply text are available
   if (!action.commentText || action.commentText.trim().length === 0) {
     printJsonError('comments:execute', RESULT_CODES.BLOCKED,
-      `无法获取原始评论内容（eventId=${action.eventId}），无法定位目标评论`, { recoverable: false });
-    process.exit(1);
+      `无法获取原始评论内容（eventId=${action.eventId}），无法定位目标评论`, { recoverable: false }); return;
   }
 
   if (!action.actionText || action.actionText.trim().length === 0) {
     printJsonError('comments:execute', RESULT_CODES.EMPTY_REPLY_TEXT,
-      '回复内容为空', { recoverable: false });
-    process.exit(1);
+      '回复内容为空', { recoverable: false }); return;
   }
 
   // Check duplicate — never re-reply to same comment
   if (hasSucceededAction(action.eventId, 'reply_comment')) {
     printJsonError('comments:execute', RESULT_CODES.DUPLICATE_ACTION,
-      '该评论已有成功回复记录', { recoverable: false });
-    process.exit(1);
+      '该评论已有成功回复记录', { recoverable: false }); return;
   }
 
   const run = createRunContext('comment-execute', commonArgs.options);
@@ -118,7 +110,7 @@ async function main() {
     if (!navResult.ok) {
       await updateActionStatus(action.actionId, 'blocked', navResult.message);
       await updateEventStatus(action.eventId, 'blocked');
-      printJsonError('comments:execute', navResult.code, navResult.message, { recoverable: true });
+      printJsonError('comments:execute', navResult.code, navResult.message, { recoverable: true }); return;
       run.hadBlocked = true;
       return;
     }
@@ -131,7 +123,7 @@ async function main() {
       if (!selectResult.ok) {
         await updateActionStatus(action.actionId, 'blocked', selectResult.message);
         await updateEventStatus(action.eventId, 'blocked');
-        printJsonError('comments:execute', selectResult.code, selectResult.message, { recoverable: true });
+        printJsonError('comments:execute', selectResult.code, selectResult.message, { recoverable: true }); return;
         run.hadBlocked = true;
         return;
       }
@@ -142,7 +134,7 @@ async function main() {
     if (!areaResult.ok) {
       await updateActionStatus(action.actionId, 'blocked', areaResult.message);
       await updateEventStatus(action.eventId, 'blocked');
-      printJsonError('comments:execute', areaResult.code, areaResult.message, { recoverable: true });
+      printJsonError('comments:execute', areaResult.code, areaResult.message, { recoverable: true }); return;
       run.hadBlocked = true;
       return;
     }
@@ -158,7 +150,7 @@ async function main() {
     if (!openResult.ok) {
       await updateActionStatus(action.actionId, 'blocked', openResult.message);
       await updateEventStatus(action.eventId, 'blocked');
-      printJsonError('comments:execute', openResult.code, openResult.message, { recoverable: true });
+      printJsonError('comments:execute', openResult.code, openResult.message, { recoverable: true }); return;
       run.hadBlocked = true;
       return;
     }
@@ -197,7 +189,7 @@ async function main() {
       } else {
         await updateActionStatus(action.actionId, 'blocked', sendResult.message);
         await updateEventStatus(action.eventId, 'blocked');
-        printJsonError('comments:execute', sendResult.code, sendResult.message, { recoverable: true });
+        printJsonError('comments:execute', sendResult.code, sendResult.message, { recoverable: true }); return;
         run.hadBlocked = true;
       }
     }
@@ -216,7 +208,7 @@ async function main() {
       } catch { /* secondary failure */ }
     }
 
-    printJsonError('comments:execute', RESULT_CODES.UNKNOWN_ERROR, err.message, { recoverable: false });
+    printJsonError('comments:execute', RESULT_CODES.UNKNOWN_ERROR, err.message, { recoverable: false }); return;
     process.exitCode = 1;
   } finally {
     saveRunSummary(run);

@@ -1,4 +1,4 @@
-// 动作审批命令
+﻿// 动作审批命令
 // 将一条 prepared 状态的 action 标记为 approved。
 // 用户确认回复内容和目标后调用此命令。
 //
@@ -30,28 +30,24 @@ function main() {
 
   if (!args.actionId) {
     printJsonError('actions:approve', RESULT_CODES.BLOCKED,
-      '缺少参数 --action-id', { recoverable: false });
-    process.exit(1);
+      '缺少参数 --action-id', { recoverable: false }); return;
   }
 
   const action = getAction(args.actionId);
   if (!action) {
     printJsonError('actions:approve', RESULT_CODES.BLOCKED,
-      `找不到动作 ID=${args.actionId}`, { recoverable: false });
-    process.exit(1);
+      `找不到动作 ID=${args.actionId}`, { recoverable: false }); return;
   }
 
   if (action.status !== 'prepared') {
     printJsonError('actions:approve', RESULT_CODES.ACTION_NOT_APPROVED,
-      `动作 #${args.actionId} 当前状态为 ${action.status}，只有 prepared 状态才能审批`, { recoverable: false });
-    process.exit(1);
+      `动作 #${args.actionId} 当前状态为 ${action.status}，只有 prepared 状态才能审批`, { recoverable: false }); return;
   }
 
   const ok = approveAction(args.actionId);
   if (!ok) {
     printJsonError('actions:approve', RESULT_CODES.BLOCKED,
-      `审批失败：动作 #${args.actionId} 可能已被审批或不存在`, { recoverable: false });
-    process.exit(1);
+      `审批失败：动作 #${args.actionId} 可能已被审批或不存在`, { recoverable: false }); return;
   }
 
   // P0-3: Sync event status to 'approved'
