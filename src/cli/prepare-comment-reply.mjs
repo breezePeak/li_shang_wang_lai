@@ -7,20 +7,25 @@
 //   npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" --json
 //   npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" \
 //       --decision reply --risk-level low --relevance relevant \
-//       --decision-reason "<理由>" --work-context-id <作品ID> --json
+//       --decision-reason "<理由>" --work-context-id <作品ID> \
+//       --comment-category praise --reply-mode auto_simple --json
 //
 // 决策约束：
 //   --decision 仅接受 reply / manual_review / ignore
 //   --risk-level 仅接受 low / medium / high
 //   --relevance 仅接受 relevant / neutral / irrelevant
+//   --comment-category 参见 comment-reply-policy.md 评论分类
+//   --reply-mode 仅接受 auto_simple / needs_review / ignore
 //   仅 decision=reply + riskLevel=low 可以创建动作
-//   decision=reply 时 relevance=irrelevant 必须阻断
+//   replyMode=ignore 禁止创建动作
+//   replyMode=auto_simple 仅从模板池选回复，autoExecuteAllowed 固定 false
 
 import { runMigrations } from '../db/migrations.mjs';
 import { createAction, hasSucceededAction, hasActiveAction } from '../db/action-repository.mjs';
 import { getEvents, updateEventStatus } from '../db/interaction-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
+import { isAllowedTemplate } from '../domain/reply-templates.mjs';
 import { readFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -36,7 +41,7 @@ function loadWorkContext() {
 }
 
 function parseArgs(argv) {
-  const args = { eventId: null, replyText: null, json: false, decision: null, riskLevel: null, decisionReason: '', relevance: null, workContextId: '' };
+  const args = { eventId: null, replyText: null, json: false, decision: null, riskLevel: null, decisionReason: '', relevance: null, workContextId: '', commentCategory: null, replyMode: null };
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--event-id' && argv[i + 1]) args.eventId = parseInt(argv[++i]);
@@ -47,6 +52,8 @@ function parseArgs(argv) {
     if (argv[i] === '--decision-reason' && argv[i + 1]) args.decisionReason = argv[++i];
     if (argv[i] === '--relevance' && argv[i + 1]) args.relevance = argv[++i];
     if (argv[i] === '--work-context-id' && argv[i + 1]) args.workContextId = argv[++i];
+    if (argv[i] === '--comment-category' && argv[i + 1]) args.commentCategory = argv[++i];
+    if (argv[i] === '--reply-mode' && argv[i + 1]) args.replyMode = argv[++i];
   }
 
   return args;
@@ -115,6 +122,39 @@ function main() {
       `相关性为 "irrelevant" 但决策为 "reply"，这不符合安全策略。irrelevant 评论不应自动回复。`, { recoverable: false }); return;
   }
 
+  // Reply mode validation
+  const validReplyModes = ['auto_simple', 'needs_review', 'ignore'];
+  const validCategories = ['praise', 'encouragement', 'useful', 'question', 'request', 'risk', 'spam', 'unclear'];
+
+  if (!args.replyMode || !validReplyModes.includes(args.replyMode)) {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      `缺少 --reply-mode 参数或值无效（允许: ${validReplyModes.join(', ')}）。`, { recoverable: false }); return;
+  }
+  if (!args.commentCategory || !validCategories.includes(args.commentCategory)) {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      `缺少 --comment-category 参数或值无效（允许: ${validCategories.join(', ')}）。`, { recoverable: false }); return;
+  }
+
+  // replyMode=ignore must not create action
+  if (args.replyMode === 'ignore') {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      `replyMode=ignore 的评论不应创建回复动作。该评论需跳过。`, { recoverable: false }); return;
+  }
+
+  // replyMode=needs_review must not auto-create (decision must be manual_review)
+  if (args.replyMode === 'needs_review' && args.decision === 'reply') {
+    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+      `replyMode=needs_review 的评论需要人工审核，不能设置 decision=reply。请改为 decision=manual_review。`, { recoverable: false }); return;
+  }
+
+  // replyMode=auto_simple: validate reply text is from allowed template pool
+  if (args.replyMode === 'auto_simple') {
+    if (!isAllowedTemplate(args.replyText)) {
+      printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+        `replyMode=auto_simple 的回复必须从安全模板池中选取。"${args.replyText.slice(0, 40)}" 不在允许的模板列表中。`, { recoverable: false }); return;
+    }
+  }
+
   // Work-context validation: --work-context-id must match a known work
   const workCtx = loadWorkContext();
   if (args.decision === 'reply' && args.relevance === 'relevant') {
@@ -168,6 +208,9 @@ function main() {
     decision: args.decision,
     riskLevel: args.riskLevel,
     relevance: args.relevance || 'neutral',
+    commentCategory: args.commentCategory || '',
+    replyMode: args.replyMode || '',
+    autoExecuteAllowed: false,
     decisionReason: args.decisionReason || '',
     workContextId: args.workContextId || '',
     workContextTitle: matchedWork ? matchedWork.title : '',
@@ -197,6 +240,9 @@ function main() {
     decision: args.decision,
     riskLevel: args.riskLevel,
     relevance: args.relevance || 'neutral',
+    commentCategory: args.commentCategory || '',
+    replyMode: args.replyMode || '',
+    autoExecuteAllowed: false,
     workContextId: args.workContextId || '',
     decisionReason: args.decisionReason || '',
   };

@@ -61,11 +61,76 @@
   commentText: <评论原文>
   relevance: relevant / neutral / irrelevant
   riskLevel: low / medium / high
+  commentCategory: praise / encouragement / useful / question / request / risk / spam / unclear
+  replyMode: auto_simple / needs_review / ignore
   decision: reply / manual_review / ignore
   decisionReason: <1-2句人工可理解的判断依据>
+  candidateReply: <replyMode=auto_simple 时从模板池选，否则为空>
 ```
 
-仅当 `decision=reply` 且 `riskLevel=low` 时，Agent 才能调用 `comments:prepare`。
+## 评论分类（commentCategory）
+
+| 分类 | 含义 | 示例 |
+|------|------|------|
+| praise | 明确赞赏 | "讲得真好"、"厉害了"、"支持一下" |
+| encouragement | 鼓励/加油 | "加油"、"继续更新"、"期待下期" |
+| useful | 表示内容有用 | "学到了"、"这个分享有用"、"干货" |
+| question | 提问类 | "怎么配置"、"这个用React怎么做" |
+| request | 请求类 | "求教程"、"出一期XX"、"源码在哪" |
+| risk | 安全/运营风险 | "会封号吗"、"能绕过检测吗" |
+| spam | 刷量/推广/违规 | "刷赞不被发现"、"加微信xxx" |
+| unclear | 含义不清/纯表情 | "😊"、单个字"好" |
+
+## 回复模式（replyMode）
+
+| 模式 | 适用 | 可自动候选 | 约束 |
+|------|------|-----------|------|
+| auto_simple | praise/encouragement/useful，无问句、无请求、无风险、无事实承诺 | ✅ 候选（不自动发送） | 只能从模板池选回复，autoExecuteAllowed 固定 false |
+| needs_review | question/request/unclear，或包含争议/技术内容 | ❌ 需人工 | Agent 只能标记，不能创建 action |
+| ignore | risk/spam，或高/中风险 | ❌ 禁止 | 不生成回复文本 |
+
+### auto_simple 判定标准
+- 只有明确正向、无问题、无请求、无事实承诺、无风险的评论允许 auto_simple；
+- 正例：支持一下、厉害了、讲得真好、学到了、加油、这个分享有用；
+- 反例（含问句、请求、技术、安全、规章等 → needs_review）：
+  求教程、怎么配置、开源吗、源码在哪、能分享一下吗、这个bug怎么修；
+- 含刷赞、绕风控、破解、Cookie、Token、验证码等 → ignore + high。
+
+### autoExecuteAllowed
+- 当前默认固定为 **false**；
+- 所有 auto_simple 评论仅创建候选，不自动执行真实回复；
+- 仍需用户 approve → dry-run → confirm-execute → execute 完整链路。
+
+## 模板池（src/domain/reply-templates.mjs）
+
+| 分类 | 可用模板 |
+|------|---------|
+| praise | 谢谢认可～ / 感谢支持，继续折腾～ / 哈哈谢谢，一起进步～ |
+| encouragement | 谢谢鼓励，继续努力～ / 感谢关注，持续更新中～ / 有你们的支持真好～ |
+| useful | 能帮上忙就好～ / 有用就好，感谢支持～ / 对大家有帮助就是最好的反馈～ |
+
+## Agent 输出格式
+
+每次扫描后的 Agent 输出必须包含三类列表：
+
+1. **自动回复候选**（auto_simple，可调用 prepare）
+   - 显示评论原文、分类、候选回复模板、风险等级
+
+2. **需人工审核**（needs_review）
+   - 显示评论原文、分类、需审核原因
+
+3. **忽略/阻断**（ignore）
+   - 显示评论原文、分类、阻断原因
+
+## 可用命令（新增参数）
+
+```bash
+# 创建回复候选（需携带分类信息）
+npm run comments:prepare -- --event-id <id> --reply-text "<模板回复>" \
+    --decision reply --risk-level low --relevance neutral \
+    --comment-category praise --reply-mode auto_simple \
+    --decision-reason "正面赞赏" --json
+```
 
 ## Agent 行为约束
 
