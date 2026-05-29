@@ -12,6 +12,7 @@ import { runMigrations } from '../db/migrations.mjs';
 import { getDb } from '../db/database.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
+import { classifyComment } from '../domain/comment-classifier.mjs';
 
 function parseArgs(argv) {
   const args = { json: false, type: null };
@@ -153,16 +154,48 @@ function main() {
         eventTimeText: ev.event_time_text || '',
         reason: '相对时间尚未稳定，等待重新扫描',
       }));
+
+      // Classify comment events using local classifier for split views
+      const simpleCandidates = [];
+      const reviewItems = [];
+      const ignoredItems = [];
+      const commentEvents = pendingEvents.filter(ev => ev.event_type === 'comment');
+      for (const ev of commentEvents) {
+        const cls = classifyComment(ev.comment_text || '');
+        const item = {
+          eventId: ev.id,
+          actorName: ev.actor_name,
+          myWorkTitle: ev.my_work_title || '',
+          commentText: ev.comment_text || '',
+          eventTimeText: ev.event_time_text || '',
+          eventStatus: ev.status,
+          ...cls,
+        };
+        if (cls.replyMode === 'auto_simple_candidate') {
+          simpleCandidates.push(item);
+        } else if (cls.replyMode === 'ignore') {
+          ignoredItems.push(item);
+        } else {
+          reviewItems.push(item);
+        }
+      }
+
       printJsonResult('actions:pending', {
         comments,
         likes,
         blocked: blockedItems,
         unstableItems,
+        simpleCandidates,
+        reviewItems,
+        ignoredItems,
       }, {
         pendingComments: comments.length,
         pendingLikes: likes.length,
         blocked: blockedItems.length,
         unstable: unstableItems.length,
+        simple: simpleCandidates.length,
+        review: reviewItems.length,
+        ignored: ignoredItems.length,
       });
     } else {
       // Human-readable output
