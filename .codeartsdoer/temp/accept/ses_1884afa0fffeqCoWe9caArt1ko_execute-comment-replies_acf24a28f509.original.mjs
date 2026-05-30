@@ -56,51 +56,7 @@ function updateEventStatus(db, eventId, status) {
     .run(status, new Date().toISOString(), eventId);
 }
 
-export function getWorkGroupKey(item) {
-  return item.workId || item.workUrl || item.workTitle || '__unknown_work__';
-}
-
-export function groupApprovedItemsByWork(items) {
-  const groupMap = new Map();
-  const groupOrder = [];
-
-  for (const item of items) {
-    const key = getWorkGroupKey(item);
-    if (!groupMap.has(key)) {
-      const group = {
-        key,
-        workTitle: item.workTitle || null,
-        workId: item.workId || null,
-        workUrl: item.workUrl || null,
-        items: [],
-      };
-      groupMap.set(key, group);
-      groupOrder.push(key);
-    }
-    groupMap.get(key).items.push(item);
-  }
-
-  return groupOrder.map(key => groupMap.get(key));
-}
-
-async function selectWorkForGroup(page, group) {
-  if (!group.workTitle) return success();
-
-  try {
-    const currentTitle = await getSelectedWorkTitle(page);
-    if (currentTitle.ok && currentTitle.data?.title === group.workTitle) {
-      console.log(`[reply]   作品已选中: "${group.workTitle}"，跳过切换`);
-      return success();
-    }
-  } catch {
-    // fall through to select
-  }
-
-  console.log(`[reply]   切换作品: "${group.workTitle}"`);
-  return await selectWorkByTitle(page, group.workTitle);
-}
-
-async function executeOneItemInCurrentWork(page, item, db, run, planId) {
+async function executeOneItem(page, item, db, run, planId) {
   const r = {
     eventId: item.eventId,
     actorName: item.actorName,
@@ -110,6 +66,7 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     code: '',
   };
 
+  // Validate
   const validResult = validateItem(item);
   if (!validResult.ok) {
     r.status = validResult.code === RESULT_CODES.ACTION_NOT_APPROVED ? 'skipped' : 'blocked';
@@ -119,6 +76,7 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     return r;
   }
 
+  // Check for duplicate
   if (hasSucceededAction(db, item.eventId)) {
     r.status = 'skipped';
     r.reason = '已成功回复过，跳过';
@@ -127,6 +85,7 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     return r;
   }
 
+  // Check maxItems
   if (run.executed >= run.options.maxItems) {
     r.status = 'skipped';
     r.reason = `已达到本轮最大执行数量 ${run.options.maxItems}`;
@@ -134,52 +93,72 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     return r;
   }
 
-  console.log(`[reply]   处理: ${item.actorName} "${item.commentText.slice(0, 40)}"`);
+  console.log(`\n[reply] 处理: ${item.actorName} "${item.commentText.slice(0, 40)}"`);
 
+  // Select the correct work first
+  if (item.workTitle) {
+    const selectResult = await selectWorkByTitle(page, item.workTitle);
+    if (!selectResult.ok) {
+      r.status = 'blocked';
+      r.reason = `作品选择失败: ${selectResult.message}`;
+      r.code = selectResult.code;
+      r.step = 'select-work';
+      console.log(`[reply]   ✗ [${selectResult.code}] ${selectResult.message}`);
+      return r;
+    }
+  }
+
+  console.log(`[reply]   DEBUG: dryRun=${run.options.dryRun} execute=${run.options.execute} replyText="${(item.replyText || '').slice(0, 20)}"`);
+
+  // Dry-run: locate only
   if (run.options.dryRun) {
     r.step = 'dry-run-locate';
     const locateResult = await openReplyBox(page, item.commentText);
     if (locateResult.ok) {
       r.status = 'dry-run-ok';
       r.reason = 'dry-run 定位成功，未实际发送';
-      console.log(`[reply]     ✓ dry-run 定位成功`);
+      console.log(`[reply]   ✓ dry-run 定位成功`);
     } else {
       r.status = 'blocked';
       r.reason = locateResult.message;
       r.code = locateResult.code;
-      console.log(`[reply]     ✗ [${locateResult.code}] ${locateResult.message}`);
+      console.log(`[reply]   ✗ [${locateResult.code}] ${locateResult.message}`);
     }
     return r;
   }
 
+  // Step 1: Open the reply box for this comment
   r.step = 'open-reply-box';
   const openResult = await openReplyBox(page, item.commentText);
   if (!openResult.ok) {
     r.status = 'blocked';
     r.reason = `打开回复框失败: ${openResult.message}`;
     r.code = openResult.code;
-    console.log(`[reply]     ✗ [${openResult.code}] ${openResult.message}`);
+    console.log(`[reply]   ✗ [${openResult.code}] ${openResult.message}`);
     recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText, 'blocked', r.reason, null, null);
     run.hadBlocked = true;
     return r;
   }
-  console.log(`[reply]     ✓ 回复框已打开`);
+  console.log(`[reply]   ✓ 回复框已打开`);
 
+  // Step 2: send reply (adapter handles fill + click + confirm)
   r.step = 'execute-reply';
   const replyResult = await sendReply(page, item.replyText);
   if (!replyResult.ok) {
     r.status = 'blocked';
     r.reason = replyResult.message;
     r.code = replyResult.code;
-    console.log(`[reply]     ✗ [${replyResult.code}] ${replyResult.message}`);
+    console.log(`[reply]   ✗ [${replyResult.code}] ${replyResult.message}`);
     recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText, 'blocked', replyResult.message, null, null);
     run.hadBlocked = true;
     return r;
   }
 
+  // Success
   r.status = 'succeeded';
-  console.log(`[reply]     ✓ 回复成功`);
+  console.log(`[reply]   ✓ 回复成功`);
 
+  // Record action in DB
   try {
     const titleResult = await getSelectedWorkTitle(page);
     const workTitle = titleResult.ok ? (titleResult.data?.title || '') : item.workTitle || '';
@@ -188,48 +167,10 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     run.executed++;
     run.succeeded++;
   } catch (err) {
-    console.log(`[reply]     动作记录写入失败: ${err.message}`);
+    console.log(`[reply]   动作记录写入失败: ${err.message}`);
   }
 
   return r;
-}
-
-async function executeWorkGroup(page, group, db, run, planId) {
-  const results = [];
-
-  console.log(`[reply] 作品组: ${group.workTitle || group.key}，${group.items.length} 条评论`);
-
-  const selectResult = await selectWorkForGroup(page, group);
-  if (!selectResult.ok) {
-    console.log(`[reply]   ✗ 作品选择失败: [${selectResult.code}] ${selectResult.message}`);
-    for (const item of group.items) {
-      const r = {
-        eventId: item.eventId,
-        actorName: item.actorName,
-        status: 'blocked',
-        reason: `作品选择失败: ${selectResult.message}`,
-        step: 'select-work',
-        code: selectResult.code,
-      };
-      recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText || '', 'blocked', r.reason, null, null);
-      results.push(r);
-      run.hadBlocked = true;
-    }
-    return results;
-  }
-
-  for (let i = 0; i < group.items.length; i++) {
-    const result = await executeOneItemInCurrentWork(page, group.items[i], db, run, planId);
-    results.push(result);
-
-    if (run.options.execute && run.executed >= run.options.maxItems) {
-      break;
-    }
-
-    if (i < group.items.length - 1) await page.waitForTimeout(1000);
-  }
-
-  return results;
 }
 
 async function main() {
@@ -266,9 +207,8 @@ async function main() {
   commonArgs.options.keepOpen = true;
 
   const actionMode = commonArgs.options.execute ? 'execute' : 'dry-run';
-  const groups = groupApprovedItemsByWork(approvedItems);
   console.log(`[reply] 模式: ${actionMode}`);
-  console.log(`[reply] ~ ${approvedItems.length} 条待处理 / ${groups.length} 个作品, 最大执行 ${commonArgs.options.maxItems} 条`);
+  console.log(`[reply] ~ ${approvedItems.length} 条待处理, 最大执行 ${commonArgs.options.maxItems} 条`);
 
   const db = getDb();
   let browser = null;
@@ -280,7 +220,7 @@ async function main() {
 
   try {
     console.log('[reply] 启动浏览器...');
-    const ctx = await createBrowserContext({ headless: false, enableReuse: commonArgs.options.keepOpen });
+    const ctx = await createBrowserContext({ headless: false, enableReuse: options.keepOpen });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
@@ -298,20 +238,24 @@ async function main() {
       }
     }
 
-    for (const group of groups) {
-      const groupResults = await executeWorkGroup(page, group, db, run, planId);
-      results.push(...groupResults);
+    for (let i = 0; i < approvedItems.length; i++) {
+      const result = await executeOneItem(page, approvedItems[i], db, run, planId);
+      results.push(result);
 
-      for (const r of groupResults) {
-        if (r.status === 'succeeded') successCount++;
-        else if (r.status === 'skipped') skipCount++;
-        else if (r.status === 'blocked') blockedCount++;
+      if (result.status === 'succeeded') successCount++;
+      else if (result.status === 'skipped') skipCount++;
+      else if (result.status === 'blocked') {
+        blockedCount++;
+        run.hadBlocked = true;
       }
 
+      // Stop if we hit max items
       if (commonArgs.options.execute && run.executed >= commonArgs.options.maxItems) {
         console.log(`[reply] 已达到本轮最大执行数量 ${commonArgs.options.maxItems}, 停止。`);
         break;
       }
+
+      if (i < approvedItems.length - 1) await page.waitForTimeout(1000);
     }
 
   } catch (err) {
@@ -335,6 +279,7 @@ async function main() {
 
     process.exitCode = 1;
   } finally {
+    // Write results BEFORE deciding browser lifecycle
     const plansDir = path.resolve('data', 'plans');
     ensureDir(plansDir);
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -345,7 +290,6 @@ async function main() {
       results,
       summary: {
         total: approvedItems.length,
-        workGroups: groups.length,
         succeeded: successCount,
         skipped: skipCount,
         blocked: blockedCount,
@@ -368,6 +312,4 @@ async function main() {
   }
 }
 
-if (process.argv[1] && process.argv[1].includes('execute-comment-replies')) {
-  main().catch(err => { console.error(err.message); process.exit(1); });
-}
+main().catch(err => { console.error(err.message); process.exit(1); });

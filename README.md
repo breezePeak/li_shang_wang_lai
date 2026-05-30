@@ -1,8 +1,9 @@
-# li_shang_wang_lai
+# 礼尚往来
+```text
+ Agent 用的抖音互动处理 Skill。
+```
 
-给 Agent 用的抖音互动处理 Skill。
 
-不是刷互动，而是帮你从通知中心里找到值得回应的人，避免漏掉评论、点赞、好友/互关用户的互动。
 
 ## 项目是什么
 
@@ -203,6 +204,16 @@ FEATURE_DISABLED
 
 后续如果项目要脱离 Hermes / OpenClaw 独立运行，可以在这个模式里接入大模型。
 
+## comments:reply 按作品分组处理
+
+`comments:reply` 执行评论回复时，会按作品分组处理：
+
+- 同一作品下的评论聚合为一组，只切换一次作品选中状态；
+- 分组键优先级：`workId` → `workUrl` → `workTitle` → `__unknown_work__`；
+- 作品选择失败时，该组所有评论标记为 blocked；
+- 同一 eventId 的回复只执行一次（防重复）；
+- 支持 `--dry-run` 定位和 `--execute` 真实发送，`--max-items` 限制总执行数。
+
 ## 常用命令
 
 | 命令 | 说明 |
@@ -214,6 +225,7 @@ FEATURE_DISABLED
 | `npm run visits:discover -- --json --max-items 5` | 发现好友作品并检查点赞状态 |
 | `npm run visits:live-review -- --comment-mode skill --json --max-items 1` | Skill 模式，输出作品上下文 |
 | `npm run visits:live-review -- --comment-mode local --max-items 5` | Local 模式，本地生成评论候选 |
+| `npm run comments:reply -- --plan <文件> [--dry-run\|--execute]` | 按作品分组批量回复评论 |
 | `npm test` | 运行测试 |
 
 ## Skill 入口
