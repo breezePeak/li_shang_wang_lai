@@ -4,6 +4,7 @@ import {
   waitForCommentsArea,
   openReplyBoxForComment,
   sendReply,
+  verifyReplyVisible,
   getSelectedWorkTitle,
   selectWorkByTitle,
 } from '../adapters/comment-page.mjs';
@@ -205,6 +206,19 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     return r;
   }
 
+  // Verify the reply text appears on the page before marking succeeded
+  r.step = 'verify-reply';
+  const verifyResult = await verifyReplyVisible(page, item, item.replyText);
+  if (!verifyResult.ok) {
+    r.status = 'sent_unverified';
+    r.reason = verifyResult.message;
+    r.code = verifyResult.code;
+    console.log(`[reply]     ⚠ 发送后未确认: ${verifyResult.message}`);
+    recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText, 'sent_unverified', verifyResult.message, null, null);
+    run.hadBlocked = true;
+    return r;
+  }
+
   r.status = 'succeeded';
   console.log(`[reply]     ✓ 回复成功`);
 
@@ -302,6 +316,7 @@ async function main() {
   let successCount = 0;
   let skipCount = 0;
   let blockedCount = 0;
+  let sentUnverifiedCount = 0;
 
   try {
     console.log('[reply] 启动浏览器...');
@@ -329,6 +344,7 @@ async function main() {
 
       for (const r of groupResults) {
         if (r.status === 'succeeded') successCount++;
+        else if (r.status === 'sent_unverified') sentUnverifiedCount++;
         else if (r.status === 'skipped') skipCount++;
         else if (r.status === 'blocked') blockedCount++;
       }
@@ -373,13 +389,14 @@ async function main() {
         workGroups: groups.length,
         processed: run.processed || 0,
         succeeded: successCount,
+        sentUnverified: sentUnverifiedCount,
         skipped: skipCount,
         blocked: blockedCount,
         maxItems: commonArgs.options.maxItems,
       },
     });
     console.log(`[reply] 结果已保存: ${resultPath}`);
-    console.log(`[reply] ${successCount} 成功 / ${blockedCount} 阻塞 / ${skipCount} 跳过 / ${approvedItems.length} 总计`);
+    console.log(`[reply] ${successCount} 成功 / ${sentUnverifiedCount} 未确认 / ${blockedCount} 阻塞 / ${skipCount} 跳过 / ${approvedItems.length} 总计`);
 
     saveRunSummary(run);
 

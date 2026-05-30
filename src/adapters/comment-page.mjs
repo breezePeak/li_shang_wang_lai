@@ -604,6 +604,57 @@ export async function openReplyBoxForComment(page, item) {
   return openReplyBox(page, item);
 }
 
+export async function verifyReplyVisible(page, item, replyText, { timeoutMs = 5000 } = {}) {
+  const actorName = item && item.actorName;
+  const commentText = (item && item.commentText) || '';
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const found = await page.evaluate(({ actorName, commentText, replyText }) => {
+      // Strategy: find the target comment container by matching commentText + actorName,
+      // then verify replyText is within that same container.
+      // This scopes the check to the comment card, avoiding false positives from
+      // global document.body text matching.
+
+      // Primary: use comment-item containers
+      const containers = document.querySelectorAll('[class*="comment-item"], [class*="commentItem"]');
+      for (const container of containers) {
+        const text = (container.innerText || '').trim();
+        if (!text.includes(commentText)) continue;
+        if (actorName && !text.includes(actorName)) continue;
+        if (text.includes(replyText)) return { verified: true };
+      }
+
+      // Fallback: from comment-content elements, walk up to find a container with replyText
+      const contentEls = document.querySelectorAll('[class*="comment-content"]');
+      for (const el of contentEls) {
+        if (el.offsetHeight === 0) continue;
+        if (!(el.innerText || '').trim().includes(commentText)) continue;
+
+        let container = el.parentElement;
+        for (let i = 0; i < 6 && container && container !== document.body; i++) {
+          const ct = (container.innerText || '').trim();
+          if (!ct.includes(commentText)) break;
+          if (actorName && !ct.includes(actorName)) break;
+          if (ct.includes(replyText)) return { verified: true };
+          container = container.parentElement;
+        }
+      }
+
+      return { verified: false };
+    }, { actorName, commentText, replyText });
+
+    if (found.verified) return success({ verified: true });
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  return blocking(
+    RESULT_CODES.COMMENT_SEND_UNCONFIRMED,
+    '回复发送后未能在目标评论下确认回复内容',
+    { recoverable: true, data: { actorName, commentText: (commentText || '').slice(0, 60), replyText: (replyText || '').slice(0, 60) } }
+  );
+}
+
 async function scrollPage(page) {
   await page.evaluate(() => {
     const all = document.querySelectorAll('*');
