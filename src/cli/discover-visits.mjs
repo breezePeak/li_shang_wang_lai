@@ -8,89 +8,124 @@ import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose 
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 
-async function processCandidate(page, candidate) {
-  const name = candidate.actorName || 'unknown';
-  const r = {
-    actorName: name,
-    actorProfileUrl: candidate.actorProfileUrl || '',
+export const FRIENDLY_RELATIONS = new Set(['friend', 'mutual']);
+
+export function createVisitDiscoveryBase(candidate) {
+  return {
+    actorName: candidate.actorName || 'unknown',
     actorProfileKey: candidate.actorProfileKey || '',
-    canonicalActorProfileUrl: candidate.canonicalActorProfileUrl || '',
+    actorProfileUrl: candidate.actorProfileUrl || '',
     relation: candidate.relation || 'unknown',
     sourceEventIds: candidate.sourceEventIds || [],
     sourceEventTypes: candidate.sourceEventTypes || [],
-    dedupConfidenceSummary: candidate.dedupConfidenceSummary || 'weak',
-    targetVideoUrl: '',
-    targetVideoId: null,
-    targetVideoTitle: '',
+    targetWorkUrl: '',
+    targetWorkId: null,
+    targetWorkTitle: '',
     likeState: 'unknown',
     status: 'blocked',
-    reason: '',
-    commentRequired: false,
-    likeRequired: false,
+    plannedActions: [],
     executeAllowed: false,
-    requiresManualReview: candidate.requiresManualReview !== false,
+    previewOnly: true,
+    reason: null,
   };
+}
+
+export function classifyLikeResult(likeResult) {
+  if (!likeResult || !likeResult.ok) {
+    return { status: 'blocked', likeState: 'unknown', reason: 'LIKE_STATE_UNKNOWN', plannedActions: [] };
+  }
+  if (likeResult.data?.alreadyLiked) {
+    return { status: 'skipped', likeState: 'already_liked', reason: 'already_liked_skip_comment', plannedActions: [] };
+  }
+  return { status: 'pending_review', likeState: 'not_liked', reason: null, plannedActions: ['like_work', 'comment_work'] };
+}
+
+async function processCandidate(page, candidate) {
+  const name = candidate.actorName || 'unknown';
+  const r = createVisitDiscoveryBase(candidate);
 
   console.error(`\n[discover] ${name} [${r.relation}]`);
 
+  if (!FRIENDLY_RELATIONS.has(r.relation)) {
+    r.status = 'blocked';
+    r.reason = 'non_friend_non_mutual';
+    console.error(`[discover]   非好友/互关，跳过`);
+    return r;
+  }
+
   if (!r.actorProfileUrl) {
-    r.reason = '缺少主页 URL';
-    console.error(`[discover]   ${r.reason}`);
+    r.status = 'blocked';
+    r.reason = 'no_actor_profile_url';
+    console.error(`[discover]   缺少主页URL (no_actor_profile_url)`);
     return r;
   }
 
   console.error(`[discover]   主页: ${r.actorProfileUrl.slice(0, 60)}...`);
-  await page.goto(r.actorProfileUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-  await page.waitForTimeout(3000);
+  try {
+    await page.goto(r.actorProfileUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.waitForTimeout(3000);
+  } catch (err) {
+    r.status = 'blocked';
+    r.reason = 'profile_navigation_failed';
+    console.error(`[discover]   主页导航失败: ${err.message}`);
+    return r;
+  }
 
   const videoResult = await findLatestNonPinnedVideo(page);
   if (!videoResult.ok) {
-    r.reason = videoResult.message || '未找到非置顶视频';
+    r.status = 'blocked';
+    r.reason = videoResult.code === RESULT_CODES.BLOCKED ? 'no_non_pinned_video' : videoResult.message || 'no_non_pinned_video';
     console.error(`[discover]   ${r.reason}`);
     return r;
   }
 
-  r.targetVideoUrl = videoResult.data.videoUrl;
-  r.targetVideoId = videoResult.data.videoId || null;
-  console.error(`[discover]   视频: ${r.targetVideoUrl.slice(0, 60)} (id=${r.targetVideoId})`);
+  r.targetWorkUrl = videoResult.data.videoUrl;
+  r.targetWorkId = videoResult.data.videoId || null;
+  console.error(`[discover]   视频: ${r.targetWorkUrl.slice(0, 60)} (id=${r.targetWorkId})`);
 
   await page.waitForTimeout(2000);
 
-  const navResult = await navigateToVideo(page, r.targetVideoUrl);
+  const navResult = await navigateToVideo(page, r.targetWorkUrl);
   if (!navResult.ok) {
-    r.reason = navResult.message || '无法导航到视频页面';
+    r.status = 'blocked';
+    r.reason = 'video_navigation_failed';
     console.error(`[discover]   ${r.reason}`);
     return r;
   }
 
   const likeResult = await checkLikeState(page);
-  if (!likeResult.ok) {
-    r.reason = likeResult.message || '无法确定点赞状态';
-    r.likeState = 'unknown';
-    console.error(`[discover]   ${r.reason}`);
+  const classification = classifyLikeResult(likeResult);
+
+  if (classification.status === 'blocked') {
+    r.status = classification.status;
+    r.likeState = classification.likeState;
+    r.reason = classification.reason;
+    console.error(`[discover]   点赞状态无法确认`);
     return r;
   }
 
-  if (likeResult.data.alreadyLiked) {
-    r.likeState = 'already_liked';
-    r.status = 'skipped';
-    r.reason = '已点赞';
-    console.error('[discover]   已点赞，跳过');
+  if (classification.status === 'skipped') {
+    r.likeState = classification.likeState;
+    r.status = classification.status;
+    r.reason = classification.reason;
+    r.plannedActions = classification.plannedActions;
+    console.error('[discover]   已点赞 → skipped (不评论)');
     return r;
   }
 
-  r.likeState = 'not_liked';
-  r.status = 'planned_preview';
-  r.commentRequired = true;
-  r.likeRequired = true;
-  r.reason = '';
+  r.likeState = classification.likeState;
+  r.status = classification.status;
+  r.plannedActions = classification.plannedActions;
+  r.executeAllowed = false;
+  r.previewOnly = true;
+  r.reason = classification.reason;
 
   const titleResult = await getVideoTitle(page);
   if (titleResult.ok && titleResult.data.title) {
-    r.targetVideoTitle = titleResult.data.title;
+    r.targetWorkTitle = titleResult.data.title;
   }
 
-  console.error(`[discover]   未点赞 → 候选: "${r.targetVideoTitle.slice(0, 40)}"`);
+  console.error(`[discover]   未点赞 → pending_review: "${r.targetWorkTitle.slice(0, 40)}"`);
   return r;
 }
 
@@ -101,20 +136,24 @@ async function main() {
   const useJson = commonArgs.options.json;
   const maxItems = commonArgs.options.maxItems || 10;
 
-  console.error('[discover] 读取好友/互关事件...');
-  const allEvents = getEvents({ status: 'new', limit: 100 });
-  const candidates = generatePlan(allEvents).visitWorkCandidates;
+  console.error('[discover] 读取待处理事件...');
+  const allEvents = getEvents({ status: 'new', limit: 200 });
+  const plan = generatePlan(allEvents);
+  const candidates = plan.visitWorkCandidates;
+  const totalCandidates = candidates.length;
 
   if (candidates.length === 0) {
-    console.error('[discover] 没有好友回访候选。先运行 npm run actions:plan');
+    console.error('[discover] 没有好友回访候选。先运行 npm run interactions:scan 再 npm run actions:plan');
     if (useJson) {
-      printJsonResult('visits:discover', { visitDiscoveries: [] }, { total: 0, planned: 0, skipped: 0, blocked: 0 });
+      printJsonResult('visits:discover', { visitDiscoveries: [] }, {
+        totalCandidates: 0, processed: 0, pendingReview: 0, skipped: 0, blocked: 0,
+      });
     }
     return;
   }
 
   const slice = candidates.slice(0, maxItems);
-  console.error(`[discover] ${candidates.length} 个候选，本轮处理 ${slice.length} 个`);
+  console.error(`[discover] ${totalCandidates} 个候选，本轮最多处理 ${maxItems} 个`);
 
   const run = createRunContext('visits:discover', commonArgs.options);
   let browser = null;
@@ -140,12 +179,13 @@ async function main() {
       const item = await processCandidate(page, slice[i]);
       discoveries.push(item);
       run.scanned++;
-      if (item.status === 'planned_preview') run.planned++;
+      if (item.status === 'pending_review') run.planned++;
       else if (item.status === 'skipped') run.skipped++;
       else run.blocked++;
     }
   } catch (err) {
     console.error('[discover] 处理异常:', err.message);
+    run.hadError = true;
   } finally {
     saveRunSummary(run);
     const shouldClose = resolveBrowserClose(run);
@@ -155,27 +195,31 @@ async function main() {
     }
   }
 
-  const planned = discoveries.filter(d => d.status === 'planned_preview').length;
+  const pendingReview = discoveries.filter(d => d.status === 'pending_review').length;
   const skipped = discoveries.filter(d => d.status === 'skipped').length;
   const blocked = discoveries.filter(d => d.status === 'blocked').length;
+  const processed = discoveries.length;
 
   console.error(`\n===== 汇总 =====`);
-  console.error(`  候选: ${planned} | 跳过: ${skipped} | 阻塞: ${blocked} | 合计: ${discoveries.length}`);
+  console.error(`  候选总数: ${totalCandidates} | 处理: ${processed} | 待审核: ${pendingReview} | 跳过: ${skipped} | 阻塞: ${blocked}`);
   for (const d of discoveries) {
-    if (d.status === 'planned_preview') {
-      console.error(`  [${d.sourceEventIds.join(',')}] ${d.actorName} → ${d.targetVideoUrl}`);
+    if (d.status === 'pending_review') {
+      console.error(`  [${d.sourceEventIds.join(',')}] ${d.actorName} → ${d.targetWorkUrl}`);
     } else if (d.status === 'skipped') {
       console.error(`  - ${d.actorName}: ${d.reason}`);
     } else {
-      console.error(`  x ${d.actorName}: ${d.reason}`);
+      console.error(`  x ${d.actorName}: ${d.reason || '未知'}`);
     }
   }
 
-  const data = { visitDiscoveries: discoveries };
-  const summary = { total: discoveries.length, planned, skipped, blocked };
-
   if (useJson) {
-    printJsonResult('visits:discover', data, summary);
+    printJsonResult('visits:discover', { visitDiscoveries: discoveries }, {
+      totalCandidates,
+      processed,
+      pendingReview,
+      skipped,
+      blocked,
+    });
   }
 }
 

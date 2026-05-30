@@ -19,7 +19,8 @@ description: 礼尚往来 · 抖音创作者互动助手。发现评论与好友
 | "给第 N 条拟回复：xxx" | prepare comment reply，等待确认 |
 | "先预览回复位置" | dry-run 定位目标评论 |
 | "确认发送这一条" | 校验审批 + execute 单条回复 |
-| "看看好友回访候选"、"哪些朋友点赞了" | likes:plan，仅预览 |
+| "看看好友回访候选"、"哪些朋友点赞了" | likes:plan 或 visits:discover，仅预览 |
+| "进入好友主页看看"、"发现回访目标" | visits:discover，进入主页找最新作品并检查点赞 |
 | "自动给好友回赞"、"都回一下" | **拒绝**，提供候选预览和单条审批说明 |
 
 ## 禁止场景
@@ -94,14 +95,30 @@ npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" \
 
 > **旧命令兼容**：`npm run comments:plan` 和 `npm run comments:reply -- --plan <文件>` 仍可用，但不作为 Skill 主流程推荐。
 
-### 回访候选预览（仅预览）
+### 回访候选预览（仅预览，三阶段）
 
 ```bash
-npm run likes:plan -- --json       # 生成回访候选预览（JSON 输出）
-npm run likes:plan                 # 人类可读输出
+# 阶段 1: 候选分流（纯数据，不进主页）
+npm run actions:plan -- --json       # 从 new 事件生成 replyCommentCandidates + visitWorkCandidates
+
+# 阶段 2 (phase3): 主页发现 + 点赞检查（浏览器进入主页/视频页）
+npm run visits:discover -- --json --max-items 5   # 进入好友主页找最新作品，检查点赞状态
+
+# 阶段 3: 真实执行（MVP 阶段硬阻断）
+npm run likes:reciprocate -- --execute   # FEATURE_DISABLED
 ```
 
-> **真实回访点赞**（`likes:reciprocate --execute`）在 MVP 阶段被代码层硬阻断。只会返回 `FEATURE_DISABLED`。Skill 不得尝试绕过。
+> **三阶段说明：**
+> - `actions:plan`：纯数据分流，不进主页，只按 actorProfileKey 合并事件，输出 visitWorkCandidates；
+> - `visits:discover`：phase3，浏览器进入好友/互关主页，找最近非置顶作品，检查点赞状态，输出 pending_review/skipped/blocked；
+> - `likes:reciprocate`：真实点赞继续 `FEATURE_DISABLED` 硬阻断。
+
+### 旧命令兼容
+
+```bash
+npm run likes:plan -- --json       # 旧版浏览器回访计划（不推荐）
+npm run visits:plan -- --json       # 旧版统一回访计划（不推荐）
+```
 
 ## 评论回复完整流程
 
@@ -142,22 +159,41 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
 失败 → 报告原因 + 证据路径
 ```
 
-## 回访候选预览流程
+## 回访候选预览流程（三阶段）
 
 ```text
-用户请求查看好友回访候选
-  ↓
-npm run likes:plan -- --json
-  ↓
-Skill 输出候选清单（仅预览）：
-  - 候选用户昵称
-  - 页面识别关系（friend/mutual/unknown）
-  - 目标主页 URL
-  - 候选视频 URL 和标题
-  - 当前点赞状态
-  - 是否可预览 / 阻断原因
-  ↓
-明确告知：真实回访点赞在 MVP 阶段禁用
+阶段 1: 候选分流 (actions:plan)
+  用户请求查看好友回访候选
+    ↓
+  npm run actions:plan -- --json
+    ↓
+  Skill 展示分流结果：
+    - replyCommentCandidates（评论候选回复）
+    - visitWorkCandidates（好友回访候选，按 actorProfileKey 合并）
+    - skipped（不进入候选的原因）
+
+阶段 2: 主页发现 (visits:discover, phase3)
+  用户说 "进入主页看看"
+    ↓
+  npm run visits:discover -- --json --max-items 5
+    ↓
+  对每个 visitWorkCandidate（仅 friend/mutual）：
+    → page.goto(actorProfileUrl)
+    → findLatestNonPinnedVideo
+    → navigateToVideo
+    → checkLikeState
+    ↓
+  输出 visitDiscoveries：
+    - pending_review: 未点赞 → plannedActions=["like_work","comment_work"], executeAllowed=false
+    - skipped: 已点赞 → reason="already_liked_skip_comment", plannedActions=[]
+    - blocked: 无法确认 → reason 说明原因 (no_actor_profile_url / LIKE_STATE_UNKNOWN / ...)
+
+阶段 3: 真实执行 (likes:reciprocate, MVP 硬阻断)
+  用户说 "给这个候选点赞"
+    ↓
+  npm run likes:reciprocate -- --execute ...
+    ↓
+  FEATURE_DISABLED（代码层硬阻断）
 ```
 
 ## 阻断场景处理
@@ -184,4 +220,7 @@ Skill 输出候选清单（仅预览）：
 ## 当前版本限制
 
 - 评论回复流程：`prepare → approve → dry-run → confirm-execute → execute`
-- 好友回访仅提供候选预览，真实点赞代码层硬阻断
+- 好友回访三阶段：
+  - `actions:plan` — 候选分流，不进主页
+  - `visits:discover` — phase3，进主页发现作品并检查点赞
+  - `likes:reciprocate` — 真实点赞代码层硬阻断
