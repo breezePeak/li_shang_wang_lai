@@ -8,7 +8,7 @@ function parseArgs(argv) {
     if (argv[i] === '--plan' && argv[i + 1]) { args.plan = argv[++i]; }
     else if (argv[i] === '--all') { args.all = true; }
     else if (argv[i] === '--none') { args.none = true; }
-    else if (argv[i] === '--event-id' && argv[i + 1]) { args.eventIds.push(Number(argv[++i])); }
+    else if (argv[i] === '--event-id' && argv[i + 1]) { args.eventIds.push(argv[++i]); }
     else if (argv[i] === '--index' && argv[i + 1]) { args.indices.push(Number(argv[++i])); }
     else if (argv[i] === '--reason' && argv[i + 1]) { args.reason = argv[++i]; }
     else if (argv[i] === '--dry-run') { args.dryRun = true; }
@@ -38,6 +38,10 @@ function resolveMode(args) {
 }
 
 function main() {
+  console.error('[comments:approve-plan] 当前链路：评论回复计划审批');
+  console.error('[comments:approve-plan] 行为：修改 plan.json 中 items[].approved');
+  console.error('[comments:approve-plan] 不会打开浏览器，不会执行回复');
+
   const args = parseArgs(process.argv.slice(2));
 
   if (!args.plan) {

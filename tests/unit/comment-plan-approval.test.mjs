@@ -25,6 +25,17 @@ describe('approveCommentPlan', () => {
     expect(plan.items.every(it => it.approved === true)).toBe(true);
   });
 
+  it('--all half already approved: changed only counts unapproved', () => {
+    const plan = makePlan([
+      { eventId: 1, approved: true, commentText: 'a' },
+      { eventId: 2, approved: false, commentText: 'b' },
+      { eventId: 3, approved: true, commentText: 'c' },
+    ]);
+    const result = approveCommentPlan(plan, { mode: 'all' });
+    expect(result.changed).toBe(1);
+    expect(plan.items.every(it => it.approved === true)).toBe(true);
+  });
+
   it('--none sets all items approved=false', () => {
     const plan = makePlan([
       { eventId: 1, approved: true, commentText: 'a' },
@@ -36,14 +47,44 @@ describe('approveCommentPlan', () => {
     expect(plan.items.every(it => it.approved === false)).toBe(true);
   });
 
-  it('--event-id approves specific eventIds', () => {
+  it('--none all already false: changed = 0', () => {
+    const plan = makePlan([
+      { eventId: 1, approved: false, commentText: 'a' },
+      { eventId: 2, approved: false, commentText: 'b' },
+    ]);
+    const result = approveCommentPlan(plan, { mode: 'none' });
+    expect(result.changed).toBe(0);
+    expect(plan.items.every(it => it.approved === false)).toBe(true);
+  });
+
+  it('--event-id approves specific eventIds (number)', () => {
     const plan = makePlan();
-    const result = approveCommentPlan(plan, { mode: 'selected', eventIds: [1, 3] });
+    const result = approveCommentPlan(plan, { mode: 'selected', eventIds: ['1', '3'] });
     expect(result.ok).toBe(true);
     expect(result.changed).toBe(2);
     expect(plan.items[0].approved).toBe(true);
     expect(plan.items[1].approved).toBe(false);
     expect(plan.items[2].approved).toBe(true);
+  });
+
+  it('--event-id supports string eventId', () => {
+    const plan = makePlan([
+      { eventId: 'evt_001', approved: false, commentText: 'a' },
+      { eventId: 'evt_002', approved: false, commentText: 'b' },
+    ]);
+    const result = approveCommentPlan(plan, { mode: 'selected', eventIds: ['evt_001'] });
+    expect(result.changed).toBe(1);
+    expect(plan.items[0].approved).toBe(true);
+    expect(plan.items[1].approved).toBe(false);
+  });
+
+  it('--event-id string param matches numeric eventId', () => {
+    const plan = makePlan([
+      { eventId: 42, approved: false, commentText: 'a' },
+    ]);
+    const result = approveCommentPlan(plan, { mode: 'selected', eventIds: ['42'] });
+    expect(result.changed).toBe(1);
+    expect(plan.items[0].approved).toBe(true);
   });
 
   it('--index approves specific 1-based indices', () => {
@@ -56,14 +97,33 @@ describe('approveCommentPlan', () => {
     expect(plan.items[2].approved).toBe(false);
   });
 
-  it('--reason writes approvalReason field', () => {
-    const plan = makePlan();
-    const result = approveCommentPlan(plan, { mode: 'all', reason: '人工审核通过' });
-    expect(result.ok).toBe(true);
-    expect(result.changed).toBe(3);
-    for (const item of plan.items) {
-      expect(item.approvalReason).toBe('人工审核通过');
-    }
+  it('--reason changes count as changed', () => {
+    const plan = makePlan([
+      { eventId: 1, approved: false, commentText: 'a' },
+    ]);
+    const result = approveCommentPlan(plan, { mode: 'selected', eventIds: ['1'], reason: '人工审核通过' });
+    expect(result.changed).toBe(1); // approved 从 false→true，reason 从无→有
+    expect(plan.items[0].approvalReason).toBe('人工审核通过');
+  });
+
+  it('same approved + same reason = not changed', () => {
+    const plan = makePlan([
+      { eventId: 1, approved: true, approvalReason: 'ok', commentText: 'a' },
+    ]);
+    const result = approveCommentPlan(plan, { mode: 'all', reason: 'ok' });
+    expect(result.changed).toBe(0); // nothing changed
+    expect(plan.items[0].approved).toBe(true);
+    expect(plan.items[0].approvalReason).toBe('ok');
+  });
+
+  it('same approved + different reason = changed', () => {
+    const plan = makePlan([
+      { eventId: 1, approved: true, approvalReason: 'old', commentText: 'a' },
+    ]);
+    const result = approveCommentPlan(plan, { mode: 'all', reason: 'updated' });
+    expect(result.changed).toBe(1);
+    expect(plan.items[0].approved).toBe(true);
+    expect(plan.items[0].approvalReason).toBe('updated');
   });
 
   it('summary.approved / pendingApproval / total / updatedAt are correct', () => {
@@ -73,7 +133,7 @@ describe('approveCommentPlan', () => {
       { eventId: 3, approved: false, commentText: 'c' },
       { eventId: 4, approved: false, commentText: 'd' },
     ]);
-    const result = approveCommentPlan(plan, { mode: 'selected', eventIds: [1, 3] });
+    const result = approveCommentPlan(plan, { mode: 'selected', eventIds: ['1', '3'] });
     expect(result.approved).toBe(2);
     expect(result.pendingApproval).toBe(2);
     expect(plan.summary.approved).toBe(2);
@@ -107,7 +167,7 @@ describe('approveCommentPlan', () => {
 
   it('no matching eventId yields changed=0 without crashing', () => {
     const plan = makePlan();
-    const result = approveCommentPlan(plan, { mode: 'selected', eventIds: [999] });
+    const result = approveCommentPlan(plan, { mode: 'selected', eventIds: ['999'] });
     expect(result.ok).toBe(true);
     expect(result.changed).toBe(0);
     expect(plan.items.every(it => it.approved === false)).toBe(true);
@@ -124,7 +184,7 @@ describe('approveCommentPlan', () => {
     const plan = makePlan([
       { eventId: 1, approved: false, approvalReason: 'old', commentText: 'a' },
     ]);
-    approveCommentPlan(plan, { mode: 'selected', eventIds: [1] });
+    approveCommentPlan(plan, { mode: 'selected', eventIds: ['1'] });
     expect(plan.items[0].approved).toBe(true);
     expect(plan.items[0].approvalReason).toBeUndefined();
   });

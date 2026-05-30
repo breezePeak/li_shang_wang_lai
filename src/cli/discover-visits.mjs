@@ -171,6 +171,10 @@ async function processCandidate(page, candidate, settleOptions) {
 }
 
 async function main() {
+  console.error('[visits:discover] 当前链路：回访/主页访问');
+  console.error('[visits:discover] 行为：可能打开互动用户主页、用户作品页');
+  console.error('[visits:discover] 这不是评论回复链路；如果要回复评论，请使用 comments:reply');
+
   runMigrations();
 
   const commonArgs = parseCommonArgs(process.argv.slice(2));

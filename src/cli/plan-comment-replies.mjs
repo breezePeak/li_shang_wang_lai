@@ -41,6 +41,10 @@ function getPlanTimestamp() {
 }
 
 async function main() {
+  console.error('[comments:plan] 当前链路：评论回复计划生成');
+  console.error('[comments:plan] 行为：从 interaction_events 读取评论事件 → 生成 plan.json');
+  console.error('[comments:plan] 不会打开浏览器，不会执行回复');
+
   runMigrations();
   const args = parseArgs(process.argv.slice(2));
   const db = getDb();

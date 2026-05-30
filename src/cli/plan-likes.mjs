@@ -138,6 +138,10 @@ async function processOneLikeEvent(page, event) {
 }
 
 async function main() {
+  console.error('[likes:plan] 当前链路：点赞/回赞计划生成');
+  console.error('[likes:plan] 行为：从 interaction_events 读取点赞事件 → 生成 plan');
+  console.error('[likes:plan] 这不是评论回复链路；如果要回复评论，请使用 comments:reply');
+
   runMigrations();
 
   const commonArgs = parseCommonArgs(process.argv.slice(2));

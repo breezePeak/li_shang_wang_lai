@@ -333,6 +333,10 @@ async function executeWorkGroup(page, group, db, run, planId) {
 }
 
 async function main() {
+  console.error('[comments:reply] 当前链路：评论回复');
+  console.error('[comments:reply] 行为：打开评论管理页 → 选择我的作品 → 定位评论 → 回复评论');
+  console.error('[comments:reply] 不会打开好友主页，不会打开好友视频');
+
   runMigrations();
 
   const commonArgs = parseCommonArgs(process.argv.slice(2));

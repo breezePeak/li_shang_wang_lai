@@ -298,3 +298,13 @@ interaction_events → comments:plan → plan.json → comments:reply → reply-
 | `--status` | new | 事件状态过滤 |
 | `--output` | data/plans/<planId>.json | 自定义输出路径 |
 | `--include-missing-work-title` | 无 | 允许缺 workTitle 的事件进入计划 |
+
+### 常用命令区别
+
+| 命令 | 作用 | 是否打开浏览器 |
+|---|---|---|
+| `comments:plan` | 生成评论回复计划 | 不打开浏览器 |
+| `comments:approve-plan` | 审批 plan（修改 `approved`） | 不打开浏览器 |
+| `comments:reply` | 执行评论回复 | 打开评论管理页 |
+| `visits:*` | 回访流程 | 可能打开用户主页/作品 |
+| `likes:*` | 点赞/回赞流程 | 可能打开用户主页/作品 |

@@ -22,7 +22,7 @@ export function approveCommentPlan(plan, options = {}) {
       shouldChange = true;
       newApproved = false;
     } else if (mode === 'selected') {
-      const matchEventId = eventIds.length > 0 && eventIds.includes(item.eventId);
+      const matchEventId = eventIds.length > 0 && eventIds.some(id => String(id) === String(item.eventId));
       const matchIndex = indices.length > 0 && indices.includes(i + 1);
       if (matchEventId || matchIndex) {
         shouldChange = true;
@@ -31,17 +31,24 @@ export function approveCommentPlan(plan, options = {}) {
     }
 
     if (shouldChange) {
+      const beforeApproved = item.approved === true;
+      const beforeReason = item.approvalReason || '';
+
       item.approved = newApproved;
       if (reason) {
         item.approvalReason = reason;
       } else {
         delete item.approvalReason;
       }
-      changed++;
+
+      const afterApproved = item.approved === true;
+      const afterReason = (reason || '');
+      if (beforeApproved !== afterApproved || beforeReason !== afterReason) {
+        changed++;
+      }
     }
   }
 
-  // Update summary
   const approvedCount = plan.items.filter(it => it.approved === true).length;
   plan.summary = {
     ...plan.summary,

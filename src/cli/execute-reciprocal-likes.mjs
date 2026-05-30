@@ -200,6 +200,10 @@ async function processOneItem(page, item, db, run, planId) {
 }
 
 async function main() {
+  console.error('[likes:reciprocate] 当前链路：点赞/回赞');
+  console.error('[likes:reciprocate] 行为：可能打开对方主页和作品页');
+  console.error('[likes:reciprocate] 这不是评论回复链路；如果要回复评论，请使用 comments:reply');
+
   runMigrations();
 
   const commonArgs = parseCommonArgs(process.argv.slice(2));
