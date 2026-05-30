@@ -9,21 +9,7 @@
  * - Panel stability is checked before extraction
  */
 
-import { notificationItemFingerprint } from '../domain/event-fingerprint.mjs';
-
 const SELF_URL = 'https://www.douyin.com/user/self';
-const ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '评论了你的作品', '回复了你的评论'];
-const TIME_PATTERN = /^(\d{2}:\d{2}|\d+[秒分时天周月年]前|\d{2}-\d{2}|\d+月\d+日|昨天\s?\d{2}:\d{2}|星期\S)$/;
-const RELATION_MAP = { '朋友': 'friend', '互相关注': 'mutual' };
-const SKIP_SET = new Set(['互动消息', '全部消息', '点击加载更多', '加载更多', '没有更多了', '暂无消息', '推荐了你的视频']);
-
-export async function ensureNotificationPageReady(page) {
-  await page.goto(SELF_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  console.error('[notify-page] 等待页面加载...');
-  await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-  await page.waitForTimeout(3000);
-  console.error('[notify-page] 页面就绪');
-}
 
 export async function openNotificationPanel(page) {
   try {
@@ -304,6 +290,93 @@ export async function scrollPanelDown(page, { deltaY = 600 } = {}) {
 
 export async function extractVisibleNotifications(page) {
   const result = await page.evaluate(() => {
+    // --- Constants must be inline inside evaluate() ---
+    const ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '评论了你的作品', '回复了你的评论'];
+    const TIME_PATTERN = /^(\d{2}:\d{2}|\d+[秒分时天周月年]前|\d{2}-\d{2}|\d+月\d+日|昨天\s?\d{2}:\d{2}|星期\S)$/;
+    const RELATION_MAP = { '朋友': 'friend', '互相关注': 'mutual' };
+    const SKIP_SET = new Set(['互动消息', '全部消息', '点击加载更多', '加载更多', '没有更多了', '暂无消息', '推荐了你的视频']);
+
+    function findNotificationPanel() {
+      for (const el of document.querySelectorAll('*')) {
+        const t = (el.innerText || '').trim();
+        if (t.startsWith('互动消息') || t.startsWith('全部消息')) {
+          const r = el.getBoundingClientRect();
+          if (r.width < 100 || r.height < 30) continue;
+          let c = el.parentElement;
+          for (let i = 0; i < 6 && c && c !== document.body; i++) {
+            const cr = c.getBoundingClientRect();
+            if (cr.width > 250 && cr.height > 300) return c;
+            c = c.parentElement;
+          }
+        }
+      }
+      return null;
+    }
+
+    function findNotificationItemElements(panel, panelRect) {
+      const selectorItems = panel.querySelectorAll('li, [class*="item"], [class*="row"], [class*="entry"]');
+      const direct = [];
+      for (const el of selectorItems) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 30 || rect.height < 5) continue;
+        const text = (el.innerText || '').trim();
+        for (const pat of ACTION_PATTERNS) {
+          if (text.includes(pat)) { direct.push(el); break; }
+        }
+      }
+      if (direct.length > 0) return direct;
+
+      const allElements = panel.querySelectorAll('*');
+      const singleAction = [];
+      for (const el of allElements) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 30 || rect.height < 20) continue;
+        if (rect.height > panelRect.height * 0.4) continue;
+        if (rect.top < panelRect.top - 5 || rect.bottom > panelRect.bottom + 50) continue;
+        const text = (el.innerText || '').trim();
+        if (text.length < 5) continue;
+        let actionCount = 0;
+        for (const pat of ACTION_PATTERNS) {
+          let idx = text.indexOf(pat);
+          let safety = 0;
+          while (idx !== -1 && safety < 10) { actionCount++; idx = text.indexOf(pat, idx + 1); safety++; }
+        }
+        if (actionCount === 1) {
+          const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+          if (lines.length >= 2) { singleAction.push({ el, lines, rect }); }
+        }
+      }
+      if (singleAction.length === 0) return [];
+
+      const groups = [];
+      for (const candidate of singleAction) {
+        let addedToGroup = false;
+        for (const group of groups) {
+          const memberRect = group[0].rect;
+          const candRect = candidate.rect;
+          const overlapTop = Math.max(memberRect.top, candRect.top);
+          const overlapBottom = Math.min(memberRect.bottom, candRect.bottom);
+          const overlapHeight = overlapBottom - overlapTop;
+          if (overlapHeight > Math.min(memberRect.height, candRect.height) * 0.5) {
+            group.push(candidate);
+            addedToGroup = true;
+            break;
+          }
+        }
+        if (!addedToGroup) groups.push([candidate]);
+      }
+      return groups.map(group => { group.sort((a, b) => b.lines.length - a.lines.length); return group[0].el; });
+    }
+
+    function generateItemKey(d) {
+      const raw = [d.username, d.relation, d.action, (d.content || '').slice(0, 200), d.actorProfileKey || d.actorProfileUrl]
+        .map(s => (s || '').trim()).join('||');
+      let hash = 0;
+      for (let i = 0; i < raw.length; i++) { hash = ((hash << 5) - hash) + raw.charCodeAt(i); hash |= 0; }
+      return Math.abs(hash).toString(36);
+    }
+
+    // --- Main extraction logic ---
     const items = [];
     const panel = findNotificationPanel();
     if (!panel) {
@@ -312,13 +385,14 @@ export async function extractVisibleNotifications(page) {
 
     const panelRect = panel.getBoundingClientRect();
     const notificationElements = findNotificationItemElements(panel, panelRect);
-
     const seenTexts = new Set();
+    const diagSkipped = [];
 
     for (const itemEl of notificationElements) {
       const text = (itemEl.innerText || '').trim();
-      if (text.length < 3 || SKIP_SET.has(text)) continue;
-      if (seenTexts.has(text)) continue;
+      if (text.length < 3) { if (text.length > 0) diagSkipped.push({ reason: 'too_short', text: text.slice(0, 60) }); continue; }
+      if (SKIP_SET.has(text)) { diagSkipped.push({ reason: 'skip_set', text: text.slice(0, 60) }); continue; }
+      if (seenTexts.has(text)) { diagSkipped.push({ reason: 'duplicate_text', text: text.slice(0, 60) }); continue; }
       seenTexts.add(text);
 
       const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
@@ -326,7 +400,10 @@ export async function extractVisibleNotifications(page) {
 
       let idx = 0;
       const username = lines[idx];
-      if (!username || username.length > 40 || TIME_PATTERN.test(username) || RELATION_MAP[username] || SKIP_SET.has(username)) continue;
+      if (!username || username.length > 40 || TIME_PATTERN.test(username) || RELATION_MAP[username] || SKIP_SET.has(username)) {
+        diagSkipped.push({ reason: 'bad_username', text: text.slice(0, 80), username: (username || '').slice(0, 30) });
+        continue;
+      }
       idx++;
 
       let relation = 'unknown';
@@ -348,7 +425,7 @@ export async function extractVisibleNotifications(page) {
         }
         if (eventType) break;
       }
-      if (!eventType) continue;
+      if (!eventType) { diagSkipped.push({ reason: 'no_action', text: text.slice(0, 80) }); continue; }
 
       let timeText = '';
       for (let k = idx; k < lines.length; k++) {
@@ -427,106 +504,7 @@ export async function extractVisibleNotifications(page) {
 
     const hasMore = panel.scrollHeight > panel.clientHeight + panel.scrollTop + 10;
 
-    function findNotificationPanel() {
-      for (const el of document.querySelectorAll('*')) {
-        const t = (el.innerText || '').trim();
-        if (t.startsWith('互动消息') || t.startsWith('全部消息')) {
-          const r = el.getBoundingClientRect();
-          if (r.width < 100 || r.height < 30) continue;
-          let c = el.parentElement;
-          for (let i = 0; i < 6 && c && c !== document.body; i++) {
-            const cr = c.getBoundingClientRect();
-            if (cr.width > 250 && cr.height > 300) return c;
-            c = c.parentElement;
-          }
-        }
-      }
-      return null;
-    }
-
-    function findNotificationItemElements(panel, panelRect) {
-      // Strategy 1: CSS selector-based (works on known DOM structures)
-      const selectorItems = panel.querySelectorAll('li, [class*="item"], [class*="row"], [class*="entry"]');
-      const direct = [];
-      for (const el of selectorItems) {
-        const rect = el.getBoundingClientRect();
-        if (rect.width < 30 || rect.height < 5) continue;
-        const text = (el.innerText || '').trim();
-        for (const pat of ACTION_PATTERNS) {
-          if (text.includes(pat)) { direct.push(el); break; }
-        }
-      }
-      if (direct.length > 0) return direct;
-
-      // Strategy 2: Text-based detection (fallback for obfuscated class names)
-      const allElements = panel.querySelectorAll('*');
-      const singleAction = [];
-
-      for (const el of allElements) {
-        const rect = el.getBoundingClientRect();
-        if (rect.width < 30 || rect.height < 20) continue;
-        if (rect.height > panelRect.height * 0.4) continue;
-        if (rect.top < panelRect.top - 5 || rect.bottom > panelRect.bottom + 50) continue;
-
-        const text = (el.innerText || '').trim();
-        if (text.length < 5) continue;
-
-        let actionCount = 0;
-        for (const pat of ACTION_PATTERNS) {
-          let idx = text.indexOf(pat);
-          let safety = 0;
-          while (idx !== -1 && safety < 10) {
-            actionCount++;
-            idx = text.indexOf(pat, idx + 1);
-            safety++;
-          }
-        }
-
-        if (actionCount === 1) {
-          const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-          if (lines.length >= 2) {
-            singleAction.push({ el, lines, rect });
-          }
-        }
-      }
-
-      if (singleAction.length === 0) return [];
-
-      // Group overlapping elements, keep the one with most context (most lines)
-      const groups = [];
-      for (const candidate of singleAction) {
-        let addedToGroup = false;
-        for (const group of groups) {
-          const memberRect = group[0].rect;
-          const candRect = candidate.rect;
-          const overlapTop = Math.max(memberRect.top, candRect.top);
-          const overlapBottom = Math.min(memberRect.bottom, candRect.bottom);
-          const overlapHeight = overlapBottom - overlapTop;
-          if (overlapHeight > Math.min(memberRect.height, candRect.height) * 0.5) {
-            group.push(candidate);
-            addedToGroup = true;
-            break;
-          }
-        }
-        if (!addedToGroup) groups.push([candidate]);
-      }
-
-      return groups.map(group => {
-        group.sort((a, b) => b.lines.length - a.lines.length);
-        return group[0].el;
-      });
-    }
-
-    function generateItemKey(d) {
-      const raw = [d.username, d.relation, d.action, (d.content || '').slice(0, 200), d.actorProfileKey || d.actorProfileUrl]
-        .map(s => (s || '').trim())
-        .join('||');
-      let hash = 0;
-      for (let i = 0; i < raw.length; i++) { hash = ((hash << 5) - hash) + raw.charCodeAt(i); hash |= 0; }
-      return Math.abs(hash).toString(36);
-    }
-
-    return { ok: true, data: { notifications: items, hasNew: hasMore }, _diag: { panelFound: true, candidateCount: notificationElements.length, parsedCount: items.length } };
+    return { ok: true, data: { notifications: items, hasNew: hasMore }, _diag: { panelFound: true, candidateCount: notificationElements.length, parsedCount: items.length, skipped: diagSkipped.slice(0, 10) } };
   });
 
   const diag = result._diag;
@@ -534,11 +512,14 @@ export async function extractVisibleNotifications(page) {
     if (!diag.panelFound) {
       console.error('[notify-page] 诊断: 未找到通知面板');
     } else {
-      console.error(`[notify-page] 诊断: 候选元素 ${diag.candidateCount}, 解析成功 ${diag.parsedCount}`);
+      console.error(`[notify-page] 诊断: 候选元素 ${diag.candidateCount}, 解析成功 ${diag.parsedCount}, 跳过 ${diag.skipped.length}`);
+      for (const s of diag.skipped.slice(0, 5)) {
+        console.error(`[notify-page]   跳过: ${s.reason} → ${s.text || s.username || ''}`);
+      }
     }
   }
 
-  return result;
+return result;
 }
 
 export async function closeNotificationPanel(page) {
@@ -546,18 +527,10 @@ export async function closeNotificationPanel(page) {
   await page.waitForTimeout(500);
 }
 
-/**
- * Extract ONE batch of notification items from the currently visible panel.
- * Kept for backward compatibility; does NOT scroll.
- */
 export async function extractNotificationsBatch(page) {
   return await extractVisibleNotifications(page);
 }
 
-/**
- * Old extractNotifications — scrolls all then extracts.
- * Deprecated; use the new flow with extractVisibleNotifications + scrollPanelDown.
- */
 export async function extractNotifications(page) {
   const allItems = [];
   const seen = new Set();
@@ -607,8 +580,7 @@ export async function clickLikeProfileLink(page, eventCtx) {
 
     function makeItemKey(d) {
       const raw = [d.username, d.relation, d.action, d.content, d.time, d.profileKey]
-        .map(s => (s || '').trim())
-        .join('||');
+        .map(s => (s || '').trim()).join('||');
       let hash = 0;
       for (let i = 0; i < raw.length; i++) { hash = ((hash << 5) - hash) + raw.charCodeAt(i); hash |= 0; }
       return Math.abs(hash).toString(36);
