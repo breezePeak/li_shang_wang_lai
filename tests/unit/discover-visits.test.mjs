@@ -514,3 +514,86 @@ describe('classifyLikeResult — heuristic signals', () => {
     expect(c.likeState).toBe('not_liked');
   });
 });
+
+// ============================================================
+// 12. Douyin action bar detection (.t5VMknM2 .MinpposV > .AOWKbsTg[0])
+// ============================================================
+describe('classifyLikeResult — douyin action bar signals', () => {
+  it('actionbar-liked (f7caOKG9 class) → skipped', () => {
+    const likeResult = {
+      ok: true,
+      data: {
+        alreadyLiked: true,
+        confidence: 'confirmed',
+        signal: 'douyin-actionbar-liked',
+        countText: '495',
+        actionBarFound: true,
+        actionItemCount: 4,
+      },
+    };
+    const c = classifyLikeResult(likeResult);
+    expect(c.status).toBe('skipped');
+    expect(c.likeState).toBe('already_liked');
+  });
+
+  it('actionbar-neutral (confirmed struct, no liked signal) → pending_review', () => {
+    const likeResult = {
+      ok: true,
+      data: {
+        alreadyLiked: false,
+        confidence: 'confirmed',
+        signal: 'douyin-actionbar-neutral',
+        countText: '436',
+        actionBarFound: true,
+        actionItemCount: 4,
+      },
+    };
+    const c = classifyLikeResult(likeResult);
+    expect(c.status).toBe('pending_review');
+    expect(c.likeState).toBe('not_liked');
+  });
+
+  it('actionbar-liked with likeDiagnostics contains actionBarFound/actionItemCount/countText', () => {
+    const base = createVisitDiscoveryBase({ actorName: 'test' });
+    const likeResult = {
+      ok: true,
+      data: {
+        alreadyLiked: true,
+        confidence: 'confirmed',
+        signal: 'douyin-actionbar-liked',
+        countText: '495',
+        actionBarFound: true,
+        actionItemCount: 4,
+        actionItemsDiag: [
+          { index: 0, className: 'AOWKbsTg f7caOKG9', countText: '495' },
+          { index: 1, className: 'AOWKbsTg', countText: '1994' },
+          { index: 2, className: 'AOWKbsTg', countText: '21' },
+          { index: 3, className: 'cSdvCOAF AOWKbsTg', countText: '23', dataE2e: 'video-share-icon-container' },
+        ],
+      },
+    };
+    base.likeDiagnostics = likeResult.data;
+    base.likeCheckSignal = likeResult.data.signal;
+    base.likeCheckConfidence = likeResult.data.confidence;
+
+    expect(base.likeDiagnostics.actionBarFound).toBe(true);
+    expect(base.likeDiagnostics.actionItemCount).toBe(4);
+    expect(base.likeDiagnostics.countText).toBe('495');
+    expect(base.likeDiagnostics.actionItemsDiag).toHaveLength(4);
+    // comment/share items are NOT the like button
+    expect(base.likeDiagnostics.actionItemsDiag[3].dataE2e).toBe('video-share-icon-container');
+  });
+
+  it('actionbar not found (no .t5VMknM2) → still blocked via LIKE_STATE_UNKNOWN', () => {
+    // Simulate: evaluate returned null from actionBarCheck, then fallthrough to other phases
+    // If all phases fail, blocking with LIKE_STATE_UNKNOWN is returned
+    const likeResult = {
+      ok: false,
+      code: 'LIKE_STATE_UNKNOWN',
+      data: { candidateCount: 0, candidates: [], confidence: 'unknown', pageDiagnostics: null },
+    };
+    const c = classifyLikeResult(likeResult);
+    expect(c.status).toBe('blocked');
+    expect(c.reason).toBe('LIKE_STATE_UNKNOWN');
+  });
+});

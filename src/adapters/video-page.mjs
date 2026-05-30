@@ -215,6 +215,115 @@ export async function checkLikeState(page) {
         };
       }
 
+      // ---- Phase 0: Douyin PC action bar like button detection ----
+      // Real DOM: .t5VMknM2 > .MinpposV > .AOWKbsTg[0] is the like button.
+      // No aria/title/data-e2e=like/digg. Count in span.Z4B2hGGG.
+      // Liked state: class f7caOKG9 appears on the like container.
+      const actionBarCheck = (() => {
+        const container = document.querySelector('.t5VMknM2 .MinpposV');
+        if (!container) return null;
+        const items = Array.from(container.querySelectorAll(':scope > .AOWKbsTg'));
+        if (items.length === 0) return null;
+        const likeItem = items[0];
+
+        const diag = (() => {
+          const tag = likeItem.tagName.toLowerCase();
+          const rect = likeItem.getBoundingClientRect();
+          const cls = (typeof likeItem.className === 'string' ? likeItem.className : '');
+          const countEl = likeItem.querySelector('.Z4B2hGGG');
+          const countText = countEl ? (countEl.innerText || '').trim() : '';
+          const style = window.getComputedStyle(likeItem);
+          let svgFill = '', pathFill = '';
+          const svgs = likeItem.querySelectorAll('svg');
+          for (const svg of svgs) {
+            const f = svg.getAttribute('fill') || '';
+            if (f) svgFill = f;
+            const styleSvg = window.getComputedStyle(svg);
+            if (styleSvg.fill && (styleSvg.fill.includes('rgb(255') || styleSvg.fill.includes('rgb(254') || styleSvg.fill.includes('rgb(251'))) {
+              svgFill = styleSvg.fill;
+            }
+            const paths = svg.querySelectorAll('path');
+            for (const p of paths) {
+              const pf = p.getAttribute('fill') || '';
+              if (pf) pathFill = pf;
+            }
+          }
+          return {
+            tag, className: cls.slice(0, 60),
+            text: ((likeItem.innerText || '').trim()).slice(0, 20),
+            countText,
+            color: style.color || '',
+            backgroundColor: style.backgroundColor || '',
+            svgFill,
+            pathFill,
+            rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+          };
+        })();
+
+        // collect sibling diagnostics
+        const actionItemsDiag = items.slice(0, 4).map((el, i) => {
+          const cls = (typeof el.className === 'string' ? el.className : '').slice(0, 60);
+          const countEl = el.querySelector('.Z4B2hGGG');
+          const countText = countEl ? (countEl.innerText || '').trim() : '';
+          const dataE2e = el.getAttribute('data-e2e') || el.querySelector('[data-e2e]')?.getAttribute?.('data-e2e') || '';
+          let svgFill = '', pathFill = '';
+          const svgs = el.querySelectorAll('svg');
+          for (const svg of svgs) {
+            const f = svg.getAttribute('fill') || ''; if (f) svgFill = f;
+            const paths = svg.querySelectorAll('path');
+            for (const p of paths) { const pf = p.getAttribute('fill') || ''; if (pf) pathFill = pf; }
+          }
+          return {
+            index: i,
+            className: cls,
+            text: ((el.innerText || '').trim()).slice(0, 20),
+            countText,
+            dataE2e,
+            svgFill,
+            pathFill,
+          };
+        });
+
+        return { likeItem, diag, actionItemCount: items.length, actionItemsDiag };
+      })();
+
+      if (actionBarCheck) {
+        const { diag, actionItemCount, actionItemsDiag } = actionBarCheck;
+        // check liked signals
+        const cls = diag.className || '';
+        const isLikedClass = /\bf7caOKG9\b/.test(cls);
+        const svgRed = [diag.svgFill, diag.pathFill].some(f =>
+          f === '#FF0040' || f === '#FE2C55' || f === 'red' ||
+          (f && (f.includes('rgb(255') || f.includes('rgb(254') || f.includes('rgb(251')) && f.includes('rgb'))
+        );
+        const colorRed = diag.color && (diag.color.includes('rgb(255') || diag.color.includes('rgb(254') || diag.color.includes('rgb(251'));
+        const bgRed = diag.backgroundColor && (diag.backgroundColor.includes('rgb(255') || diag.backgroundColor.includes('rgb(254') || diag.backgroundColor.includes('rgb(251'));
+
+        if (isLikedClass || svgRed || colorRed || bgRed) {
+          return {
+            liked: true,
+            confidence: 'confirmed',
+            signal: 'douyin-actionbar-liked',
+            diag,
+            actionBarFound: true,
+            actionItemCount,
+            actionItemsDiag,
+          };
+        }
+
+        // confirmed structure: like button exists, not red → neutral
+        return {
+          liked: false,
+          confidence: 'confirmed',
+          signal: 'douyin-actionbar-neutral',
+          diag,
+          countText: diag.countText,
+          actionBarFound: true,
+          actionItemCount,
+          actionItemsDiag,
+        };
+      }
+
       // ---- Phase 1: targeted candidate search ----
       const candidates = [];
       const seen = new Set();
@@ -446,8 +555,13 @@ export async function checkLikeState(page) {
     return success({
       alreadyLiked: state.liked,
       text: state.diag?.text || '',
+      countText: state.countText || state.diag?.countText || '',
       confidence: state.confidence,
       signal: state.signal,
+      diag: state.diag || null,
+      actionBarFound: state.actionBarFound || false,
+      actionItemCount: state.actionItemCount || 0,
+      actionItemsDiag: state.actionItemsDiag || null,
     });
   } catch (err) {
     return blocking(
