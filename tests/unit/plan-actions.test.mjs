@@ -1,19 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { generatePlan, stripUrlQuery, getMergeKey } from '../../src/cli/plan-actions.mjs';
+import { generatePlan, stripUrlQuery, getMergeKey, resolveEffectiveRelation } from '../../src/cli/plan-actions.mjs';
+import { parseRelationLine } from '../../src/adapters/notification-page.mjs';
 
 function makeEvent(overrides = {}) {
+  const { id, event_type, actor_name, actor_profile_key, actor_profile_url, relation, comment_text, target_work_id, target_work_url, dedup_confidence, ...rest } = overrides;
   return {
-    id: overrides.id || 1,
-    event_type: overrides.event_type || 'like',
-    actor_name: overrides.actor_name || '测试用户',
-    actor_profile_key: overrides.actor_profile_key || null,
-    actor_profile_url: overrides.actor_profile_url || null,
-    relation: overrides.relation || 'unknown',
-    comment_text: overrides.comment_text || null,
-    target_work_id: overrides.target_work_id || null,
-    target_work_url: overrides.target_work_url || null,
-    dedup_confidence: overrides.dedup_confidence || 'weak',
+    id: id || 1,
+    event_type: event_type || 'like',
+    actor_name: actor_name || '测试用户',
+    actor_profile_key: actor_profile_key || null,
+    actor_profile_url: actor_profile_url || null,
+    relation: relation || 'unknown',
+    comment_text: comment_text || null,
+    target_work_id: target_work_id || null,
+    target_work_url: target_work_url || null,
+    dedup_confidence: dedup_confidence || 'weak',
     status: 'new',
+    ...rest,
   };
 }
 
@@ -279,5 +282,151 @@ describe('generatePlan — output field invariants', () => {
       expect(['friend', 'mutual']).toContain(v.relation);
     }
     expect(result.visitWorkCandidates).toHaveLength(2);
+  });
+});
+
+// ============================================================
+// parseRelationLine — 在线识别为 friend
+// ============================================================
+describe('parseRelationLine', () => {
+  it('line "在线" → friend', () => {
+    expect(parseRelationLine('在线')).toBe('friend');
+  });
+
+  it('line "1小时前在线" → friend', () => {
+    expect(parseRelationLine('1小时前在线')).toBe('friend');
+  });
+
+  it('line "27分钟前在线" → friend', () => {
+    expect(parseRelationLine('27分钟前在线')).toBe('friend');
+  });
+
+  it('line "朋友" → friend', () => {
+    expect(parseRelationLine('朋友')).toBe('friend');
+  });
+
+  it('line "互相关注" → mutual', () => {
+    expect(parseRelationLine('互相关注')).toBe('mutual');
+  });
+
+  it('non-relation line "评论了你的作品" → null', () => {
+    expect(parseRelationLine('评论了你的作品')).toBeNull();
+  });
+
+  it('line containing 在线 with extra text → still friend (caller filters by position)', () => {
+    // parseRelationLine is only called on lines[1] (second line after username).
+    // If a comment body "1小时前在线 xxx" appears on lines[2], it's never passed here.
+    expect(parseRelationLine('1小时前在线 xxx')).toBe('friend');
+  });
+
+  it('empty/null → null', () => {
+    expect(parseRelationLine('')).toBeNull();
+    expect(parseRelationLine(null)).toBeNull();
+  });
+});
+
+// ============================================================
+// resolveEffectiveRelation — raw_payload_json 在线兜底
+// ============================================================
+describe('resolveEffectiveRelation — 在线兜底', () => {
+  it('known relation (friend) stays unchanged', () => {
+    const event = makeEvent({ relation: 'friend', raw_payload_json: null });
+    expect(resolveEffectiveRelation(event)).toBe('friend');
+  });
+
+  it('known relation (mutual) stays unchanged', () => {
+    const event = makeEvent({ relation: 'mutual' });
+    expect(resolveEffectiveRelation(event)).toBe('mutual');
+  });
+
+  it('unknown + 在线 rawText → friend', () => {
+    const event = {
+      ...makeEvent({ relation: 'unknown' }),
+      raw_payload_json: JSON.stringify({ rawText: '用户A\n1小时前在线\n赞了你的作品\n10:57' }),
+    };
+    expect(resolveEffectiveRelation(event)).toBe('friend');
+  });
+
+  it('unknown + 在线 rawText (plain 在线) → friend', () => {
+    const event = {
+      ...makeEvent({ relation: 'unknown' }),
+      raw_payload_json: JSON.stringify({ rawText: '用户B\n在线\n赞了你的作品\n08:32' }),
+    };
+    expect(resolveEffectiveRelation(event)).toBe('friend');
+  });
+
+  it('unknown + 27分钟前在线 rawText → friend', () => {
+    const event = {
+      ...makeEvent({ relation: 'unknown' }),
+      raw_payload_json: JSON.stringify({ rawText: '用户C\n27分钟前在线\n回复了你的评论' }),
+    };
+    expect(resolveEffectiveRelation(event)).toBe('friend');
+  });
+
+  it('unknown + 在线 in comment body (3rd line), not 2nd → stays unknown', () => {
+    const event = {
+      ...makeEvent({ relation: 'unknown' }),
+      raw_payload_json: JSON.stringify({ rawText: '用户D\n评论了你的作品\n1小时前在线 来学习' }),
+    };
+    expect(resolveEffectiveRelation(event)).toBe('unknown');
+  });
+
+  it('unknown + no raw_payload_json → stays unknown', () => {
+    const event = makeEvent({ relation: 'unknown', raw_payload_json: null });
+    expect(resolveEffectiveRelation(event)).toBe('unknown');
+  });
+
+  it('unknown + malformed JSON → stays unknown', () => {
+    const event = {
+      ...makeEvent({ relation: 'unknown' }),
+      raw_payload_json: '{broken',
+    };
+    expect(resolveEffectiveRelation(event)).toBe('unknown');
+  });
+});
+
+// ============================================================
+// generatePlan — 在线兜底让 unknown events 进入 visitWorkCandidates
+// ============================================================
+describe('generatePlan — 在线兜底进入 visitWorkCandidates', () => {
+  it('unknown + online rawText + profile → enters visitWorkCandidates as friend', () => {
+    const event = {
+      ...makeEvent({
+        id: 1, event_type: 'like', relation: 'unknown',
+        actor_profile_key: 'k1', actor_profile_url: 'https://www.douyin.com/user/k1',
+      }),
+      raw_payload_json: JSON.stringify({ rawText: '用户X\n在线\n赞了你的作品\n10:57' }),
+    };
+    const result = generatePlan([event]);
+    expect(result.visitWorkCandidates).toHaveLength(1);
+    expect(result.visitWorkCandidates[0].relation).toBe('friend');
+    expect(result.visitWorkCandidates[0].actorProfileKey).toBe('k1');
+  });
+
+  it('unknown + online rawText + no profile → skipped (no_actor_profile_url)', () => {
+    const event = {
+      ...makeEvent({
+        id: 1, event_type: 'like', relation: 'unknown',
+        actor_profile_key: null, actor_profile_url: null,
+      }),
+      raw_payload_json: JSON.stringify({ rawText: '用户Y\n在线\n赞了你的作品\n10:57' }),
+    };
+    const result = generatePlan([event]);
+    expect(result.visitWorkCandidates).toHaveLength(0);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0].reason).toBe('no_actor_profile_url');
+  });
+
+  it('unknown + 在线 in comment body (line 3) + profile → still skipped non_friend', () => {
+    const event = {
+      ...makeEvent({
+        id: 1, event_type: 'like', relation: 'unknown',
+        actor_profile_key: 'k1', actor_profile_url: 'https://www.douyin.com/user/k1',
+      }),
+      raw_payload_json: JSON.stringify({ rawText: '用户Z\n评论了你的作品\n1小时前在线 xxx' }),
+    };
+    const result = generatePlan([event]);
+    expect(result.visitWorkCandidates).toHaveLength(0);
+    expect(result.skipped[0].reason).toBe('non_friend_non_mutual');
   });
 });

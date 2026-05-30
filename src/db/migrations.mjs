@@ -164,8 +164,62 @@ export function runMigrations(dbPath = DB_PATH) {
     }
   }
 
+  // Migrate: backfill relation=friend for events where rawText shows 在线 after username
+  backfillOnlineRelation(db);
   console.error('[db:init] 数据库初始化完成:', dbPath);
   db.close();
+}
+
+function parseRelationLine(line) {
+  if (!line) return null;
+  if (line === '朋友') return 'friend';
+  if (line === '互相关注') return 'mutual';
+  if (line.includes('在线')) return 'friend';
+  return null;
+}
+
+/**
+ * Conservative backfill: upgrade relation=unknown → friend for events
+ * where the rawText shows "在线" in the line immediately after the username.
+ *
+ * - Only upgrades from unknown → friend; never downgrades mutual/friend.
+ * - Only processes events with actor_profile_key or actor_profile_url (avoid test noise).
+ * - Does NOT modify status.
+ */
+function backfillOnlineRelation(db) {
+  const rows = db.prepare(`
+    SELECT id, actor_name, raw_payload_json
+    FROM interaction_events
+    WHERE relation = 'unknown'
+      AND raw_payload_json IS NOT NULL
+      AND (actor_profile_key IS NOT NULL OR actor_profile_url IS NOT NULL)
+  `).all();
+
+  if (rows.length === 0) return;
+
+  let upgraded = 0;
+  const updateStmt = db.prepare(
+    "UPDATE interaction_events SET relation = 'friend', updated_at = ? WHERE id = ?"
+  );
+
+  for (const row of rows) {
+    try {
+      const payload = JSON.parse(row.raw_payload_json);
+      const rawText = payload.rawText || '';
+      const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+      // Username is lines[0], relation/status line is lines[1]
+      if (lines.length >= 2 && parseRelationLine(lines[1]) === 'friend') {
+        updateStmt.run(new Date().toISOString(), row.id);
+        upgraded++;
+      }
+    } catch {
+      // skip malformed JSON
+    }
+  }
+
+  if (upgraded > 0) {
+    console.error(`[db:init] 在线关系回填: ${upgraded} 条 unknown → friend`);
+  }
 }
 
 // Direct execution

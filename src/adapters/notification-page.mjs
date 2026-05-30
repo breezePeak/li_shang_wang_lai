@@ -11,6 +11,14 @@
 
 const SELF_URL = 'https://www.douyin.com/user/self';
 
+export function parseRelationLine(line) {
+  if (!line) return null;
+  if (line === '朋友') return 'friend';
+  if (line === '互相关注') return 'mutual';
+  if (line.includes('在线')) return 'friend';
+  return null;
+}
+
 export function normalizeDouyinUrl(href) {
   if (!href) return '';
   let s = href.trim();
@@ -276,8 +284,15 @@ export async function extractVisibleNotifications(page) {
     // --- Constants must be inline inside evaluate() ---
     const ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '评论了你的作品', '回复了你的评论'];
     const TIME_PATTERN = /^(\d{2}:\d{2}|\d+[秒分时天周月年]前|\d{2}-\d{2}|\d+月\d+日|昨天\s?\d{2}:\d{2}|星期\S)$/;
-    const RELATION_MAP = { '朋友': 'friend', '互相关注': 'mutual' };
     const SKIP_SET = new Set(['互动消息', '全部消息', '点击加载更多', '加载更多', '没有更多了', '暂无消息', '推荐了你的视频']);
+
+    function parseRelationLine(line) {
+      if (!line) return null;
+      if (line === '朋友') return 'friend';
+      if (line === '互相关注') return 'mutual';
+      if (line.includes('在线')) return 'friend';
+      return null;
+    }
 
     function _normUrl(h) {
       if (!h) return '';
@@ -400,16 +415,19 @@ export async function extractVisibleNotifications(page) {
 
       let idx = 0;
       const username = lines[idx];
-      if (!username || username.length > 40 || TIME_PATTERN.test(username) || RELATION_MAP[username] || SKIP_SET.has(username)) {
+      if (!username || username.length > 40 || TIME_PATTERN.test(username) || parseRelationLine(username) || SKIP_SET.has(username)) {
         diagSkipped.push({ reason: 'bad_username', text: text.slice(0, 80), username: (username || '').slice(0, 30) });
         continue;
       }
       idx++;
 
       let relation = 'unknown';
-      if (idx < lines.length && RELATION_MAP[lines[idx]]) {
-        relation = RELATION_MAP[lines[idx]];
-        idx++;
+      if (idx < lines.length) {
+        const parsed = parseRelationLine(lines[idx]);
+        if (parsed) {
+          relation = parsed;
+          idx++;
+        }
       }
 
       let eventType = '', action = '', content = '';
@@ -565,7 +583,15 @@ export async function clickLikeProfileLink(page, eventCtx) {
   const { username, relation, action, timeText, notificationItemKey } = ctx;
   const shortName = (username || '').slice(0, 20);
 
-  const result = await page.evaluate(({ name, rel, act, time, itemKey }) => {
+    const result = await page.evaluate(({ name, rel, act, time, itemKey }) => {
+    function parseRelationLine(line) {
+      if (!line) return null;
+      if (line === '朋友') return 'friend';
+      if (line === '互相关注') return 'mutual';
+      if (line.includes('在线')) return 'friend';
+      return null;
+    }
+
     function findNotificationPanel() {
       for (const el of document.querySelectorAll('*')) {
         const t = (el.innerText || '').trim();
@@ -603,7 +629,10 @@ export async function clickLikeProfileLink(page, eventCtx) {
 
         const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
         const itemUsername = lines[0] || '';
-        const itemRel = ['朋友', '互相关注'].includes(lines[1]) ? lines[1] : '';
+        const itemRel = (() => {
+          const parsed = parseRelationLine(lines[1] || '');
+          return parsed ? lines[1] : '';
+        })();
         const hasAction = act ? text.includes(act) : true;
         const hasTime = time ? text.includes(time) : true;
 

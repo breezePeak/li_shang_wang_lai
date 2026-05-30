@@ -32,13 +32,32 @@ function bestRelation(a, b) {
   return (RELATION_ORDER[b] || 0) > (RELATION_ORDER[a] || 0) ? b : a;
 }
 
+export function resolveEffectiveRelation(event) {
+  const stored = event.relation || 'unknown';
+  if (stored !== 'unknown') return stored;
+
+  try {
+    const raw = event.raw_payload_json;
+    if (!raw) return stored;
+    const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const rawText = payload.rawText || '';
+    const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length >= 2 && lines[1].includes('在线')) {
+      return 'friend';
+    }
+  } catch {
+    // malformed JSON, keep original relation
+  }
+  return stored;
+}
+
 export function generatePlan(events) {
   const replyCommentCandidates = [];
   const visitMap = new Map();
   const skipped = [];
 
   for (const event of events) {
-    const relation = event.relation || 'unknown';
+    const relation = resolveEffectiveRelation(event);
     const dedupConfidence = event.dedup_confidence || 'weak';
     const actorProfileUrl = event.actor_profile_url || '';
     const actorProfileKey = event.actor_profile_key || '';
