@@ -9,8 +9,21 @@ import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose 
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 import { generateVisitCommentCandidates } from '../domain/visit-comment-generator.mjs';
+import { generateAgentCommentCandidates } from '../domain/llm-comment-generator.mjs';
+import { validateSelectedComment, isExecuteAllowed, FORBIDDEN_WORDS } from '../domain/comment-policy.mjs';
 
 export const FRIENDLY_RELATIONS = new Set(['friend', 'mutual']);
+
+const VALID_COMMENT_MODES = new Set(['local', 'agent', 'skill']);
+
+const SKILL_CONSTRAINTS = {
+  maxCandidates: 3,
+  maxLength: 24,
+  forbiddenWords: FORBIDDEN_WORDS,
+  replyMode: 'agent_generated_review_required',
+  riskLevel: 'medium',
+  requiresUserSelection: true,
+};
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 
@@ -32,16 +45,6 @@ export function classifyLikeResult(likeResult) {
   return { status: 'pending_review', likeState: 'not_liked', reason: null, plannedActions: ['like_work', 'comment_work'] };
 }
 
-export function isExecuteAllowedByRisk(candidate, record) {
-  if (!candidate) return false;
-  if (!record || !record.selectedCommentText) return false;
-  if (candidate.riskLevel === 'high') return false;
-  if (candidate.replyMode === 'ignore') return false;
-  if (candidate.riskLevel === 'low' && candidate.replyMode === 'auto_simple' && record.manualReviewMethod === 'user_selected_template') return true;
-  if (candidate.riskLevel === 'medium' && candidate.replyMode === 'agent_generated_review_required' && record.manualReviewMethod === 'user_selected_agent_comment') return true;
-  return false;
-}
-
 function formatTargetWorkId(url, videoId) {
   if (!url && !videoId) return null;
   const u = url || '';
@@ -57,7 +60,7 @@ function formatTargetWorkId(url, videoId) {
   return url || null;
 }
 
-async function processCandidate(page, candidate) {
+async function processCandidate(page, candidate, commentMode) {
   const name = candidate.actorName || 'unknown';
   const record = {
     actorName: name,
@@ -87,9 +90,11 @@ async function processCandidate(page, candidate) {
     generatedCommentCandidates: null,
     usedFallback: false,
     commentContext: null,
+    needsAgentComment: false,
+    commentMode,
   };
 
-  console.error(`\n[live-review] ${name} [${record.relation}]`);
+  console.error(`\n[live-review] ${name} [${record.relation}] (mode=${commentMode})`);
 
   if (!FRIENDLY_RELATIONS.has(record.relation)) {
     record.status = 'blocked';
@@ -165,12 +170,34 @@ async function processCandidate(page, candidate) {
   const commentContext = contextResult.data;
   record.commentContext = commentContext;
 
+  if (commentMode === 'skill') {
+    record.needsAgentComment = true;
+    record.generatedCommentCandidates = null;
+    console.error(`[live-review]   未点赞 → ${record.targetWorkTitle.slice(0, 40)} (skill mode, needsAgentComment=true)`);
+    return record;
+  }
+
+  if (commentMode === 'agent') {
+    const agentResult = await generateAgentCommentCandidates(commentContext);
+    if (!agentResult.ok) {
+      record.status = 'blocked';
+      record.reason = 'agent_mode_disabled';
+      console.error(`[live-review]   agent 模式不可用: ${agentResult.message}`);
+      return record;
+    }
+    record.generatedCommentCandidates = agentResult.data?.candidates || [];
+    record.usedFallback = false;
+    console.error(`[live-review]   未点赞 → ${record.targetWorkTitle.slice(0, 40)} (agent mode, candidates=${record.generatedCommentCandidates.length})`);
+    return record;
+  }
+
+  // local mode
   const { generatedCommentCandidates, usedFallback } = generateVisitCommentCandidates(commentContext);
   record.generatedCommentCandidates = generatedCommentCandidates;
   record.usedFallback = usedFallback;
 
   const isContextual = commentContext.canGenerateContextualComment;
-  console.error(`[live-review]   未点赞 → ${record.targetWorkTitle.slice(0, 40)} (context=${isContextual}, candidates=${generatedCommentCandidates.length}, fallback=${usedFallback})`);
+  console.error(`[live-review]   未点赞 → ${record.targetWorkTitle.slice(0, 40)} (local mode, context=${isContextual}, candidates=${generatedCommentCandidates.length}, fallback=${usedFallback})`);
   return record;
 }
 
@@ -224,20 +251,22 @@ async function interactiveSelect(page, record, isExecute) {
   record.autoExecuteAllowed = false;
   console.error(`[live-review]   选择 #${choice}: "${selected.text}" (risk=${selected.riskLevel}, mode=${selected.replyMode})`);
 
+  return await executeOnPage(page, record, selected, isExecute);
+}
+
+async function executeOnPage(page, record, selected, isExecute) {
   if (!isExecute) {
     console.error(`[live-review]   dry-run 模式，不执行真实操作`);
     return { action: 'selected', selected };
   }
 
-  // risk gate: high or ignore always blocked; also need selectedCommentText + correct manualReviewMethod
-  if (!isExecuteAllowedByRisk(selected, record)) {
+  if (!isExecuteAllowed(selected, record)) {
     record.status = 'blocked';
     record.reason = 'comment_risk_too_high';
-    console.error(`[live-review]   风险等级=${selected.riskLevel}, replyMode=${selected.replyMode}，不允许执行`);
+    console.error(`[live-review]   风险校验不通过，不允许执行`);
     return { action: 'blocked', selected };
   }
 
-  // execute mode: re-check like state on current page, then act
   console.error(`[live-review]   执行模式 — 重新检查点赞状态...`);
   const recheck = await checkLikeState(page);
   const reclass = classifyLikeResult(recheck);
@@ -254,7 +283,6 @@ async function interactiveSelect(page, record, isExecute) {
     return { action: 'skipped', selected };
   }
 
-  // not_liked: execute like + comment
   console.error(`[live-review]   未点赞 — 执行点赞...`);
   const likeExec = await clickLike(page, { execute: true });
   if (!likeExec.ok) {
@@ -273,9 +301,9 @@ async function interactiveSelect(page, record, isExecute) {
   record.actionResults = { like: 'confirmed', comment: null };
   console.error(`[live-review]   点赞成功`);
 
-  // post comment
-  console.error(`[live-review]   发表评论: "${selected.text}"...`);
-  const commentExec = await postVideoComment(page, selected.text, { execute: true });
+  const commentText = record.selectedCommentText || selected.text;
+  console.error(`[live-review]   发表评论: "${commentText}"...`);
+  const commentExec = await postVideoComment(page, commentText, { execute: true });
   if (!commentExec.ok) {
     record.actionResults.comment = commentExec.code;
     console.error(`[live-review]   评论失败: ${commentExec.message}`);
@@ -294,6 +322,46 @@ async function interactiveSelect(page, record, isExecute) {
   return { action: 'executed', selected };
 }
 
+async function handleSkillExecution(page, record, options) {
+  const text = options.selectedCommentText;
+  const replyMode = options.replyMode;
+  const riskLevel = options.riskLevel;
+  const manualReviewMethod = options.manualReviewMethod;
+
+  if (!text) {
+    console.error('[live-review]   skill 模式需要 --selected-comment-text 参数');
+    return { action: 'blocked' };
+  }
+
+  record.selectedCommentText = text;
+  record.replyMode = replyMode || 'agent_generated_review_required';
+  record.riskLevel = riskLevel || 'medium';
+  record.manualReviewMethod = manualReviewMethod || 'user_selected_agent_comment';
+  record.commentCategory = 'contextual_praise';
+  record.generationReason = 'external_agent';
+  record.sourceSignals = ['skill_mode'];
+  record.autoExecuteAllowed = false;
+
+  const validation = validateSelectedComment({
+    text: record.selectedCommentText,
+    replyMode: record.replyMode,
+    riskLevel: record.riskLevel,
+    manualReviewMethod: record.manualReviewMethod,
+  });
+
+  if (!validation.valid) {
+    console.error(`[live-review]   评论校验失败: ${validation.errors.join('; ')}`);
+    record.status = 'blocked';
+    record.reason = 'comment_validation_failed';
+    return { action: 'blocked' };
+  }
+
+  console.error(`[live-review]   skill 执行: "${text}" (risk=${record.riskLevel}, mode=${record.replyMode})`);
+
+  const selected = { text, replyMode: record.replyMode, riskLevel: record.riskLevel };
+  return await executeOnPage(page, record, selected, options.execute);
+}
+
 async function main() {
   runMigrations();
 
@@ -301,8 +369,18 @@ async function main() {
   const useJson = commonArgs.options.json;
   const maxItems = commonArgs.options.maxItems || 10;
   const isExecute = commonArgs.options.execute;
+  const commentMode = commonArgs.options.commentMode || 'skill';
 
-  console.error('[live-review] 读取待处理事件...');
+  if (!VALID_COMMENT_MODES.has(commentMode)) {
+    console.error(`[live-review] 无效 --comment-mode: ${commentMode}，可选: local, agent, skill`);
+    if (useJson) {
+      printJsonError('visits:live-review', RESULT_CODES.INVALID_ARGUMENTS, `invalid --comment-mode: ${commentMode}`);
+    }
+    rl.close();
+    return;
+  }
+
+  console.error(`[live-review] 读取待处理事件... (comment-mode=${commentMode})`);
   const allEvents = getEvents({ status: 'new', limit: 200 });
   const plan = generatePlan(allEvents);
   const candidates = plan.visitWorkCandidates;
@@ -346,7 +424,7 @@ async function main() {
 
   try {
     for (let i = 0; i < slice.length; i++) {
-      const item = await processCandidate(page, slice[i]);
+      const item = await processCandidate(page, slice[i], commentMode);
       discoveries.push(item);
       run.scanned++;
 
@@ -360,9 +438,20 @@ async function main() {
         continue;
       }
 
-      // pending_review: enter interactive selection
+      // pending_review
       run.planned++;
-      const result = await interactiveSelect(page, item, isExecute);
+
+      if (commentMode === 'skill' && !commonArgs.options.selectedCommentText) {
+        // skill mode without selected-comment-text: just output context, don't interact
+        continue;
+      }
+
+      let result;
+      if (commentMode === 'skill' && commonArgs.options.selectedCommentText) {
+        result = await handleSkillExecution(page, item, commonArgs.options);
+      } else {
+        result = await interactiveSelect(page, item, isExecute);
+      }
 
       if (result.action === 'quit') {
         stopped = true;
@@ -411,32 +500,56 @@ async function main() {
   if (useJson) {
     const reviewCandidates = discoveries
       .filter(d => d.status === 'pending_review')
-      .map(d => ({
-        actorName: d.actorName,
-        actorProfileUrl: d.actorProfileUrl,
-        relation: d.relation,
-        sourceEventIds: d.sourceEventIds,
-        sourceEventTypes: d.sourceEventTypes,
-        targetWorkUrl: d.targetWorkUrl,
-        targetWorkId: d.targetWorkId,
-        targetWorkTitle: d.targetWorkTitle,
-        likeState: d.likeState,
-        suggestedActions: d.plannedActions,
-        generatedCommentCandidates: d.generatedCommentCandidates || [],
-        usedFallback: d.usedFallback,
-        selectedCommentText: d.selectedCommentText,
-        commentCategory: d.commentCategory,
-        replyMode: d.replyMode,
-        riskLevel: d.riskLevel,
-        generationReason: d.generationReason,
-        sourceSignals: d.sourceSignals,
-        manualReviewMethod: d.manualReviewMethod,
-        autoExecuteAllowed: d.autoExecuteAllowed,
-        actionResults: d.actionResults,
-        requiresManualReview: true,
-        executeAllowed: false,
-        previewOnly: !isExecute,
-      }));
+      .map(d => {
+        const base = {
+          actorName: d.actorName,
+          actorProfileUrl: d.actorProfileUrl,
+          relation: d.relation,
+          sourceEventIds: d.sourceEventIds,
+          sourceEventTypes: d.sourceEventTypes,
+          targetWorkUrl: d.targetWorkUrl,
+          targetWorkId: d.targetWorkId,
+          targetWorkTitle: d.targetWorkTitle,
+          likeState: d.likeState,
+          suggestedActions: d.plannedActions,
+          commentMode: d.commentMode,
+          selectedCommentText: d.selectedCommentText,
+          commentCategory: d.commentCategory,
+          replyMode: d.replyMode,
+          riskLevel: d.riskLevel,
+          generationReason: d.generationReason,
+          sourceSignals: d.sourceSignals,
+          manualReviewMethod: d.manualReviewMethod,
+          autoExecuteAllowed: d.autoExecuteAllowed,
+          actionResults: d.actionResults,
+          requiresManualReview: true,
+          executeAllowed: false,
+          previewOnly: !isExecute,
+        };
+
+        if (d.commentMode === 'skill' && d.needsAgentComment) {
+          base.needsAgentComment = true;
+          base.commentContext = {
+            actorName: d.actorName,
+            targetWorkUrl: d.targetWorkUrl,
+            targetWorkId: d.targetWorkId,
+            targetWorkTitle: d.targetWorkTitle,
+            captionText: d.commentContext?.captionText || '',
+            hashtags: d.commentContext?.hashtags || [],
+            authorName: d.commentContext?.authorName || '',
+            visibleTextSample: d.commentContext?.visibleTextSample || '',
+            likeCount: d.commentContext?.likeCount ?? null,
+            commentCount: d.commentContext?.commentCount ?? null,
+            shareCount: d.commentContext?.shareCount ?? null,
+          };
+          base.constraints = SKILL_CONSTRAINTS;
+        } else {
+          base.generatedCommentCandidates = d.generatedCommentCandidates || [];
+          base.usedFallback = d.usedFallback;
+        }
+
+        return base;
+      });
 
     printJsonResult('visits:live-review', { reviewCandidates }, {
       totalCandidates,

@@ -380,6 +380,16 @@ async function main() {
     return;
   }
 
+  if (commentMode === 'skill' && commonArgs.options.selectedCommentText && maxItems !== 1) {
+    const msg = 'skill 模式传入 selected-comment-text 时，只允许 --max-items 1，避免同一评论应用到多个作品';
+    console.error(`[live-review] ${msg}`);
+    if (useJson) {
+      printJsonError('visits:live-review', RESULT_CODES.INVALID_ARGUMENTS, msg);
+    }
+    rl.close();
+    return;
+  }
+
   console.error(`[live-review] 读取待处理事件... (comment-mode=${commentMode})`);
   const allEvents = getEvents({ status: 'new', limit: 200 });
   const plan = generatePlan(allEvents);

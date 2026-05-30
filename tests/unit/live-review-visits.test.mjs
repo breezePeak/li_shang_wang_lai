@@ -259,6 +259,12 @@ describe('live-review-visits.mjs — invariants', () => {
     expect(clickLikeIndex).toBeGreaterThan(-1);
     expect(recheckIndex).toBeLessThan(clickLikeIndex);
   });
+
+  it('skill + selected-comment-text requires maxItems=1', () => {
+    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
+    expect(src).toMatch(/skill.*selectedCommentText.*maxItems !== 1/);
+    expect(src).toMatch(/避免同一评论应用到多个作品/);
+  });
 });
 
 // ============================================================
@@ -271,6 +277,49 @@ describe('visits:live-review JSON output', () => {
     expect(parsed).not.toBeNull();
     expect(parsed.ok).toBe(true);
     expect(parsed.command).toBe('visits:live-review');
+  });
+
+  it('skill + selected-comment-text + max-items=5 → INVALID_ARGUMENTS', () => {
+    const result = runCli('live-review-visits.mjs', [
+      '--json', '--comment-mode', 'skill',
+      '--selected-comment-text', '测试评论',
+      '--max-items', '5',
+    ], 15_000);
+    const parsed = parseStdout(result);
+    expect(parsed).not.toBeNull();
+    expect(parsed.ok).toBe(false);
+    expect(parsed.code).toBe('INVALID_ARGUMENTS');
+  });
+
+  it('skill + selected-comment-text + max-items=1 → ok', () => {
+    const result = runCli('live-review-visits.mjs', [
+      '--json', '--comment-mode', 'skill',
+      '--selected-comment-text', '测试评论',
+      '--max-items', '1',
+    ], 15_000);
+    const parsed = parseStdout(result);
+    expect(parsed).not.toBeNull();
+    expect(parsed.ok).toBe(true);
+  });
+
+  it('local mode + max-items=5 → not blocked by skill gate', () => {
+    const result = runCli('live-review-visits.mjs', [
+      '--json', '--comment-mode', 'local',
+      '--max-items', '5',
+    ], 15_000);
+    const parsed = parseStdout(result);
+    expect(parsed).not.toBeNull();
+    expect(parsed.ok).toBe(true);
+  });
+
+  it('skill without selected-comment-text + max-items=5 → ok', () => {
+    const result = runCli('live-review-visits.mjs', [
+      '--json', '--comment-mode', 'skill',
+      '--max-items', '5',
+    ], 15_000);
+    const parsed = parseStdout(result);
+    expect(parsed).not.toBeNull();
+    expect(parsed.ok).toBe(true);
   });
 });
 

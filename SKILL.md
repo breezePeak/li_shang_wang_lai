@@ -404,9 +404,10 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
   local 模式：提取上下文 → generateVisitCommentCandidates → 展示 1/2/3 → 用户选择 → 执行
   agent 模式：预留 LLM 接口，当前 FEATURE_DISABLED
   skill 模式：提取上下文 → 输出 needsAgentComment + commentContext + constraints → 外部 Agent 生成评论
-  skill 执行：npm run visits:live-review -- --selected-comment-text "xxx" --execute
+  skill 执行：npm run visits:live-review -- --selected-comment-text "xxx" --execute --max-items 1
     ↓
   选择或传入 --selected-comment-text 即代表人工审核通过当前条，不需要 YES
+  skill + selected-comment-text 时必须 --max-items 1，一条评论只对应一个作品
   执行前当前页 re-check like state
     ↓
   输出 reviewCandidates（含 generatedCommentCandidates/needsAgentComment/commentContext/constraints/selectedCommentText 等）
