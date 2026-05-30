@@ -1,13 +1,156 @@
-import { getEvents, updateEventStatus } from '../db/interaction-repository.mjs';
+import { getEvents } from '../db/interaction-repository.mjs';
 import { runMigrations } from '../db/migrations.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
+
+export function stripUrlQuery(url) {
+  if (!url) return '';
+  const idx = url.indexOf('?');
+  const base = idx > 0 ? url.slice(0, idx) : url;
+  const hashIdx = base.indexOf('#');
+  return hashIdx > 0 ? base.slice(0, hashIdx) : base;
+}
+
+export function getMergeKey(event) {
+  if (event.actor_profile_key) return event.actor_profile_key;
+  const url = event.actor_profile_url || '';
+  const canonical = stripUrlQuery(url);
+  if (canonical) return canonical;
+  return event.actor_name || '';
+}
+
+function getMergeStrength(event) {
+  if (event.actor_profile_key) return 'strong';
+  if (event.actor_profile_url) return 'medium';
+  return 'weak';
+}
+
+const RELATION_ORDER = { unknown: 0, friend: 1, mutual: 2 };
+const CONFIDENCE_ORDER = { weak: 0, medium: 1, strong: 2 };
+
+function bestRelation(a, b) {
+  return (RELATION_ORDER[b] || 0) > (RELATION_ORDER[a] || 0) ? b : a;
+}
+
+export function generatePlan(events) {
+  const replyCommentCandidates = [];
+  const visitMap = new Map();
+  const skipped = [];
+
+  for (const event of events) {
+    const relation = event.relation || 'unknown';
+    const dedupConfidence = event.dedup_confidence || 'weak';
+    const actorProfileUrl = event.actor_profile_url || '';
+    const actorProfileKey = event.actor_profile_key || '';
+
+    if (event.event_type === 'comment') {
+      replyCommentCandidates.push({
+        eventId: event.id,
+        eventType: 'comment',
+        actorName: event.actor_name,
+        actorProfileUrl,
+        actorProfileKey,
+        relation,
+        commentText: event.comment_text || '',
+        targetWorkId: event.target_work_id || null,
+        targetWorkUrl: event.target_work_url || null,
+        dedupConfidence,
+        replyMode: 'pending_review',
+        actionType: 'reply_comment_candidate',
+        requiresManualReview: dedupConfidence === 'weak',
+      });
+    }
+
+    if (relation === 'friend' || relation === 'mutual') {
+      if (!actorProfileUrl) {
+        skipped.push({
+          eventId: event.id, actorName: event.actor_name,
+          eventType: event.event_type, relation,
+          reason: 'no_actor_profile_url',
+        });
+        continue;
+      }
+
+      const mergeStrength = getMergeStrength(event);
+      if (mergeStrength === 'weak') {
+        skipped.push({
+          eventId: event.id, actorName: event.actor_name,
+          eventType: event.event_type, relation,
+          reason: 'weak_identity',
+        });
+        continue;
+      }
+
+      const key = getMergeKey(event);
+      const canonicalUrl = stripUrlQuery(actorProfileUrl);
+
+      if (visitMap.has(key)) {
+        const existing = visitMap.get(key);
+        if (!existing.sourceEventTypes.includes(event.event_type)) {
+          existing.sourceEventTypes.push(event.event_type);
+        }
+        existing.sourceEventIds.push(event.id);
+        existing.sourceRelations.push(relation);
+        existing.sourceDedupConfidences.push(dedupConfidence);
+        existing.relation = bestRelation(existing.relation, relation);
+        if ((CONFIDENCE_ORDER[dedupConfidence] || 0) > (CONFIDENCE_ORDER[existing.dedupConfidenceSummary] || 0)) {
+          existing.dedupConfidenceSummary = dedupConfidence;
+        }
+        existing.requiresManualReview = existing.dedupConfidenceSummary === 'weak';
+      } else {
+        visitMap.set(key, {
+          actorName: event.actor_name,
+          actorProfileKey,
+          actorProfileUrl,
+          canonicalActorProfileUrl: canonicalUrl,
+          relation,
+          sourceEventIds: [event.id],
+          sourceEventTypes: [event.event_type],
+          sourceRelations: [relation],
+          sourceDedupConfidences: [dedupConfidence],
+          dedupConfidenceSummary: dedupConfidence,
+          status: 'planned_preview',
+          executeAllowed: false,
+          requiresManualReview: dedupConfidence === 'weak',
+        });
+      }
+    } else if (event.event_type !== 'comment') {
+      skipped.push({
+        eventId: event.id, actorName: event.actor_name,
+        eventType: event.event_type, relation,
+        reason: 'non_friend_non_mutual',
+      });
+    }
+  }
+
+  const visitWorkCandidates = Array.from(visitMap.values());
+
+  return {
+    replyCommentCandidates,
+    visitWorkCandidates,
+    skipped,
+    summary: {
+      totalEvents: events.length,
+      replyCommentCandidates: replyCommentCandidates.length,
+      visitWorkCandidates: visitWorkCandidates.length,
+      skippedNonFriend: skipped.filter(s => s.reason === 'non_friend_non_mutual').length,
+      skippedNoProfile: skipped.filter(s => s.reason === 'no_actor_profile_url').length,
+      skippedWeakIdentity: skipped.filter(s => s.reason === 'weak_identity').length,
+      weakCandidates: visitWorkCandidates.filter(v => v.requiresManualReview).length,
+    },
+  };
+}
 
 async function main() {
   runMigrations();
 
   const argv = process.argv.slice(2);
   const useJson = argv.includes('--json');
+  const commitMode = argv.includes('--commit');
+
+  if (commitMode) {
+    console.error('[plan] --commit 模式暂未实现，默认以只读模式运行');
+  }
 
   console.error('[plan] 读取待处理事件...');
   const events = getEvents({ status: 'new', limit: 200 });
@@ -25,131 +168,42 @@ async function main() {
 
   console.error(`[plan] 读取到 ${events.length} 条待处理事件`);
 
-  const replyCommentCandidates = [];
-  const visitMap = new Map();
-  const skipped = [];
-  const weakConfidences = new Set();
+  const data = generatePlan(events);
 
-  for (const event of events) {
-    const ev = {
-      actorName: event.actor_name,
-      actorProfileUrl: event.actor_profile_url || '',
-      relation: event.relation || 'unknown',
-      dedupConfidence: event.dedup_confidence || 'weak',
-    };
-
-    if (ev.dedupConfidence === 'weak') weakConfidences.add(event.id);
-
-    if (event.event_type === 'comment') {
-      replyCommentCandidates.push({
-        eventId: event.id,
-        actorName: ev.actorName,
-        commentText: event.comment_text || '',
-        relation: ev.relation,
-        dedupConfidence: ev.dedupConfidence,
-        replyMode: 'pending_review',
-        actionType: 'reply_comment_candidate',
-      });
-    }
-
-    if (ev.relation === 'friend' || ev.relation === 'mutual') {
-      if (!ev.actorProfileUrl) {
-        skipped.push({
-          eventId: event.id, actorName: ev.actorName,
-          eventType: event.event_type, relation: ev.relation,
-          reason: 'no_actor_profile_url',
-        });
-        continue;
-      }
-
-      const key = ev.actorProfileUrl;
-      if (visitMap.has(key)) {
-        const existing = visitMap.get(key);
-        if (!existing.sourceEventTypes.includes(event.event_type)) {
-          existing.sourceEventTypes.push(event.event_type);
-        }
-        existing.sourceEventIds.push(event.id);
-        const order = { weak: 0, medium: 1, strong: 2 };
-        if ((order[event.dedup_confidence] || 0) > (order[existing.dedupConfidenceSummary] || 0)) {
-          existing.dedupConfidenceSummary = event.dedup_confidence;
-          existing.requiresManualReview = existing.dedupConfidenceSummary === 'weak';
-        }
-      } else {
-        visitMap.set(key, {
-          actorName: ev.actorName,
-          actorProfileUrl: ev.actorProfileUrl,
-          relation: ev.relation,
-          sourceEventTypes: [event.event_type],
-          sourceEventIds: [event.id],
-          dedupConfidenceSummary: event.dedup_confidence || 'weak',
-          status: 'planned_preview',
-          executeAllowed: false,
-          requiresManualReview: (event.dedup_confidence || 'weak') === 'weak',
-        });
-      }
-    } else if (event.event_type !== 'comment') {
-      skipped.push({
-        eventId: event.id, actorName: ev.actorName,
-        eventType: event.event_type, relation: ev.relation,
-        reason: 'non_friend_non_mutual',
-      });
-    }
-  }
-
-  const visitWorkCandidates = Array.from(visitMap.values());
-
-  const plannedIds = new Set();
-  for (const c of replyCommentCandidates) plannedIds.add(c.eventId);
-  for (const v of visitWorkCandidates) {
-    for (const id of v.sourceEventIds) plannedIds.add(id);
-  }
-  for (const s of skipped) plannedIds.add(s.eventId);
-
-  for (const eventId of plannedIds) {
-    updateEventStatus(eventId, 'planned');
-  }
-
-  console.error(`[plan] 回复候选: ${replyCommentCandidates.length}, 回访候选: ${visitWorkCandidates.length}, 跳过: ${skipped.length}`);
-
-  const data = {
-    replyCommentCandidates,
-    visitWorkCandidates,
-    skipped,
-    summary: {
-      totalEvents: events.length,
-      replyCommentCandidates: replyCommentCandidates.length,
-      visitWorkCandidates: visitWorkCandidates.length,
-      skippedNonFriend: skipped.filter(s => s.reason === 'non_friend_non_mutual').length,
-      skippedNoProfile: skipped.filter(s => s.reason === 'no_actor_profile_url').length,
-      weakCandidates: visitWorkCandidates.filter(v => v.requiresManualReview).length,
-    },
-  };
+  console.error(`[plan] 回复候选: ${data.replyCommentCandidates.length}, 回访候选: ${data.visitWorkCandidates.length}, 跳过: ${data.skipped.length}`);
 
   if (useJson) {
     printJsonResult('actions:plan', data, data.summary);
   } else {
     console.error('');
     console.error('===== 回复评论候选 =====');
-    for (const c of replyCommentCandidates) {
-      console.error(`  [${c.eventId}] ${c.actorName} [${c.relation}] ${c.commentText.slice(0, 40)}`);
+    for (const c of data.replyCommentCandidates) {
+      console.error(`  [${c.eventId}] ${c.actorName} [${c.relation}] ${c.dedupConfidence} "${c.commentText.slice(0, 40)}"`);
     }
     console.error('');
     console.error('===== 好友回访候选 =====');
-    for (const v of visitWorkCandidates) {
-      console.error(`  ${v.actorName} [${v.relation}] 来源:${v.sourceEventTypes.join('/')} ${v.requiresManualReview ? '(需人工确认)' : ''}`);
+    for (const v of data.visitWorkCandidates) {
+      const sources = v.sourceEventTypes.join('/');
+      const confs = v.sourceDedupConfidences.join('/');
+      console.error(`  ${v.actorName} [${v.relation}] ${sources} conf:${confs} ${v.requiresManualReview ? '(需人工确认)' : ''}`);
     }
     console.error('');
     console.error('===== 跳过 =====');
-    for (const s of skipped) {
+    for (const s of data.skipped) {
       console.error(`  ${s.actorName} [${s.relation}] ${s.eventType} → ${s.reason}`);
     }
     console.error('');
-    console.error(`总计: ${events.length} 事件 → ${replyCommentCandidates.length} 回复候选 + ${visitWorkCandidates.length} 回访候选 + ${skipped.length} 跳过`);
+    console.error(`总计: ${events.length} 事件 → ${data.replyCommentCandidates.length} 回复候选 + ${data.visitWorkCandidates.length} 回访候选 + ${data.skipped.length} 跳过`);
   }
 }
 
-main().catch(err => {
-  console.error('[plan] 错误:', err.message);
-  printJsonError('actions:plan', RESULT_CODES.UNKNOWN_ERROR, err.message);
-  process.exit(1);
-});
+const isMain = process.argv[1] && (
+  process.argv[1].endsWith('/plan-actions.mjs') || process.argv[1].endsWith('\\plan-actions.mjs')
+);
+if (isMain) {
+  main().catch(err => {
+    console.error('[plan] 错误:', err.message);
+    printJsonError('actions:plan', RESULT_CODES.UNKNOWN_ERROR, err.message);
+    process.exit(1);
+  });
+}
