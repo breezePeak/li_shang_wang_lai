@@ -5,12 +5,13 @@ import {
 } from '../../src/domain/visit-comment-generator.mjs';
 
 describe('FIXED_FALLBACK_TEMPLATES', () => {
-  it('has 3 templates all low risk', () => {
+  it('has 3 templates all low risk, no 互相加油', () => {
     expect(FIXED_FALLBACK_TEMPLATES).toHaveLength(3);
     for (const t of FIXED_FALLBACK_TEMPLATES) {
       expect(t.riskLevel).toBe('low');
       expect(t.replyMode).toBe('auto_simple');
       expect(t.autoExecuteAllowed).toBe(false);
+      expect(t.text).not.toContain('互相加油');
     }
   });
 });

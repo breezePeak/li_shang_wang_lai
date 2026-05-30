@@ -22,8 +22,8 @@ export const FIXED_FALLBACK_TEMPLATES = [
     autoExecuteAllowed: false,
   },
   {
-    text: '互相加油',
-    commentCategory: 'encouragement',
+    text: '挺好的，学习了',
+    commentCategory: 'useful',
     replyMode: 'auto_simple',
     riskLevel: 'low',
     reason: 'fixed_fallback_template',

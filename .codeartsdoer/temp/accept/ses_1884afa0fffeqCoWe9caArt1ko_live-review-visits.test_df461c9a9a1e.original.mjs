@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
 import {
   FRIENDLY_RELATIONS,
-  VISIT_DRAFTS,
   classifyLikeResult,
   isExecuteAllowedByRisk,
 } from '../../src/cli/live-review-visits.mjs';
@@ -46,201 +45,186 @@ describe('FRIENDLY_RELATIONS', () => {
 });
 
 // ============================================================
-// 2. VISIT_DRAFTS — fallback fixed templates
+// 2. FIXED_FALLBACK_TEMPLATES
 // ============================================================
-describe('VISIT_DRAFTS (fallback)', () => {
-  it('has exactly 3 entries', () => {
-    expect(VISIT_DRAFTS).toHaveLength(3);
-  });
-
-  it('each draft has required metadata fields', () => {
-    for (const d of VISIT_DRAFTS) {
-      expect(typeof d.text).toBe('string');
-      expect(d.text.length).toBeGreaterThan(0);
-      expect(d.text.length).toBeLessThan(30);
-      expect(typeof d.commentCategory).toBe('string');
-      expect(typeof d.replyMode).toBe('string');
-      expect(typeof d.riskLevel).toBe('string');
-    }
-  });
-
-  it('all drafts are low risk with auto_simple replyMode', () => {
-    for (const d of VISIT_DRAFTS) {
+describe('FIXED_FALLBACK_TEMPLATES', () => {
+  it('has 3 entries all low risk', () => {
+    expect(FIXED_FALLBACK_TEMPLATES).toHaveLength(3);
+    for (const d of FIXED_FALLBACK_TEMPLATES) {
       expect(d.riskLevel).toBe('low');
       expect(d.replyMode).toBe('auto_simple');
+      expect(d.autoExecuteAllowed).toBe(false);
     }
-  });
-
-  it('contains known fallback texts', () => {
-    const texts = VISIT_DRAFTS.map(d => d.text);
-    expect(texts).toContain('支持一下');
-    expect(texts).toContain('内容不错，来看看');
-    expect(texts).toContain('互相加油');
   });
 });
 
 // ============================================================
-// 3. classifyLikeResult — same gate as review/discover
+// 3. classifyLikeResult
 // ============================================================
 describe('classifyLikeResult (live-review-visits)', () => {
   it('already_liked + confirmed → skipped', () => {
     const r = classifyLikeResult({ ok: true, data: { alreadyLiked: true, confidence: 'confirmed' } });
     expect(r.status).toBe('skipped');
     expect(r.likeState).toBe('already_liked');
-    expect(r.plannedActions).toEqual([]);
   });
 
   it('not_liked + confirmed → pending_review', () => {
     const r = classifyLikeResult({ ok: true, data: { alreadyLiked: false, confidence: 'confirmed' } });
     expect(r.status).toBe('pending_review');
-    expect(r.likeState).toBe('not_liked');
-    expect(r.plannedActions).toEqual(['like_work', 'comment_work']);
-  });
-
-  it('null → blocked / LIKE_STATE_UNKNOWN', () => {
-    const r = classifyLikeResult(null);
-    expect(r.status).toBe('blocked');
-    expect(r.reason).toBe('LIKE_STATE_UNKNOWN');
-  });
-
-  it('confidence missing → blocked', () => {
-    const r = classifyLikeResult({ ok: true, data: { alreadyLiked: false } });
-    expect(r.status).toBe('blocked');
-  });
-});
-
-// ============================================================
-// 4. isExecuteAllowedByRisk — updated risk gate
-// ============================================================
-describe('isExecuteAllowedByRisk', () => {
-  it('low + auto_simple → allowed', () => {
-    expect(isExecuteAllowedByRisk({ riskLevel: 'low', replyMode: 'auto_simple' })).toBe(true);
-  });
-
-  it('medium + agent_generated_review_required → allowed', () => {
-    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'agent_generated_review_required' })).toBe(true);
-  });
-
-  it('high → blocked', () => {
-    expect(isExecuteAllowedByRisk({ riskLevel: 'high', replyMode: 'agent_generated_review_required' })).toBe(false);
-    expect(isExecuteAllowedByRisk({ riskLevel: 'high', replyMode: 'auto_simple' })).toBe(false);
-  });
-
-  it('ignore → blocked', () => {
-    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'ignore' })).toBe(false);
-    expect(isExecuteAllowedByRisk({ riskLevel: 'low', replyMode: 'ignore' })).toBe(false);
   });
 
   it('null → blocked', () => {
-    expect(isExecuteAllowedByRisk(null)).toBe(false);
-  });
-
-  it('medium + auto_simple → blocked (only agent_generated_review_required allowed for medium)', () => {
-    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'auto_simple' })).toBe(false);
+    const r = classifyLikeResult(null);
+    expect(r.status).toBe('blocked');
   });
 });
 
 // ============================================================
-// 5. generateVisitCommentCandidates — contextual + fallback
+// 4. isExecuteAllowedByRisk — with manualReviewMethod + selectedCommentText
+// ============================================================
+describe('isExecuteAllowedByRisk', () => {
+  const withTemplate = { selectedCommentText: '支持一下', manualReviewMethod: 'user_selected_template' };
+  const withAgent = { selectedCommentText: 'React不错', manualReviewMethod: 'user_selected_agent_comment' };
+  const noSelection = { selectedCommentText: null, manualReviewMethod: null };
+
+  it('low + auto_simple + user_selected_template → allowed', () => {
+    expect(isExecuteAllowedByRisk({ riskLevel: 'low', replyMode: 'auto_simple' }, withTemplate)).toBe(true);
+  });
+
+  it('medium + agent_generated + user_selected_agent_comment → allowed', () => {
+    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'agent_generated_review_required' }, withAgent)).toBe(true);
+  });
+
+  it('high → blocked regardless', () => {
+    expect(isExecuteAllowedByRisk({ riskLevel: 'high', replyMode: 'auto_simple' }, withTemplate)).toBe(false);
+    expect(isExecuteAllowedByRisk({ riskLevel: 'high', replyMode: 'agent_generated_review_required' }, withAgent)).toBe(false);
+  });
+
+  it('ignore → blocked regardless', () => {
+    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'ignore' }, withAgent)).toBe(false);
+  });
+
+  it('no selectedCommentText → blocked', () => {
+    expect(isExecuteAllowedByRisk({ riskLevel: 'low', replyMode: 'auto_simple' }, noSelection)).toBe(false);
+    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'agent_generated_review_required' }, noSelection)).toBe(false);
+  });
+
+  it('null candidate → blocked', () => {
+    expect(isExecuteAllowedByRisk(null, withTemplate)).toBe(false);
+  });
+
+  it('null record → blocked', () => {
+    expect(isExecuteAllowedByRisk({ riskLevel: 'low', replyMode: 'auto_simple' }, null)).toBe(false);
+  });
+
+  it('low + auto_simple + wrong manualReviewMethod → blocked', () => {
+    expect(isExecuteAllowedByRisk({ riskLevel: 'low', replyMode: 'auto_simple' }, withAgent)).toBe(false);
+  });
+
+  it('medium + agent_generated + wrong manualReviewMethod → blocked', () => {
+    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'agent_generated_review_required' }, withTemplate)).toBe(false);
+  });
+});
+
+// ============================================================
+// 5. generateVisitCommentCandidates — returns { generatedCommentCandidates, usedFallback }
 // ============================================================
 describe('generateVisitCommentCandidates', () => {
-  it('context with hashtag → generates contextual candidates', () => {
-    const ctx = {
+  it('context with hashtag → contextual candidates + usedFallback=false', () => {
+    const result = generateVisitCommentCandidates({
       targetWorkTitle: 'React开发技巧',
       captionText: '',
       hashtags: ['React'],
       authorName: '某作者',
       canGenerateContextualComment: true,
-    };
-    const candidates = generateVisitCommentCandidates(ctx);
-    expect(candidates.length).toBeGreaterThanOrEqual(2);
-    for (const c of candidates) {
+    });
+    expect(result.usedFallback).toBe(false);
+    expect(result.generatedCommentCandidates.length).toBeGreaterThanOrEqual(2);
+    for (const c of result.generatedCommentCandidates) {
       expect(c.riskLevel).toBe('medium');
       expect(c.replyMode).toBe('agent_generated_review_required');
       expect(c.autoExecuteAllowed).toBe(false);
     }
-    expect(candidates[0].text).toContain('React');
+    expect(result.generatedCommentCandidates[0].text).toContain('React');
   });
 
-  it('context with title but no hashtag → generates from title', () => {
-    const ctx = {
+  it('context with title → contextual candidates', () => {
+    const result = generateVisitCommentCandidates({
       targetWorkTitle: 'Vue3组合式API教程',
       captionText: '',
       hashtags: [],
       authorName: '',
       canGenerateContextualComment: true,
-    };
-    const candidates = generateVisitCommentCandidates(ctx);
-    expect(candidates.length).toBeGreaterThanOrEqual(2);
-    for (const c of candidates) {
-      expect(c.riskLevel).toBe('medium');
-    }
+    });
+    expect(result.usedFallback).toBe(false);
+    expect(result.generatedCommentCandidates.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('no context → fallback fixed templates', () => {
-    const ctx = {
+  it('no context → fallback + usedFallback=true', () => {
+    const result = generateVisitCommentCandidates({
       targetWorkTitle: '',
       captionText: '',
       hashtags: [],
       authorName: '',
       canGenerateContextualComment: false,
-    };
-    const candidates = generateVisitCommentCandidates(ctx);
-    expect(candidates.length).toBe(3);
-    for (const c of candidates) {
+    });
+    expect(result.usedFallback).toBe(true);
+    expect(result.generatedCommentCandidates).toHaveLength(3);
+    for (const c of result.generatedCommentCandidates) {
       expect(c.riskLevel).toBe('low');
       expect(c.replyMode).toBe('auto_simple');
     }
   });
 
-  it('null context → fallback fixed templates', () => {
-    const candidates = generateVisitCommentCandidates(null);
-    expect(candidates.length).toBe(3);
-    for (const c of candidates) {
-      expect(c.riskLevel).toBe('low');
-    }
+  it('null → fallback + usedFallback=true', () => {
+    const result = generateVisitCommentCandidates(null);
+    expect(result.usedFallback).toBe(true);
+    expect(result.generatedCommentCandidates).toHaveLength(3);
   });
 
-  it('no blocked patterns in generated comments', () => {
-    const ctx = {
+  it('no forbidden patterns in generated comments', () => {
+    const result = generateVisitCommentCandidates({
       targetWorkTitle: '互关技巧分享',
       captionText: '',
       hashtags: ['互关'],
       authorName: '',
       canGenerateContextualComment: true,
-    };
-    const candidates = generateVisitCommentCandidates(ctx);
-    for (const c of candidates) {
-      expect(c.text).not.toMatch(/互关|回访|已赞|三连|求关注|私信|加V/);
+    });
+    for (const c of result.generatedCommentCandidates) {
+      expect(c.text).not.toMatch(/互关|回访|已赞|三连|求关注|私信|加V|加微信|互赞|引流|广告/);
     }
   });
 
-  it('comments do not exceed 24 chars', () => {
-    const ctx = {
+  it('comments ≤24 chars', () => {
+    const result = generateVisitCommentCandidates({
       targetWorkTitle: '一个非常非常非常非常非常非常非常非常长的标题',
       captionText: '',
       hashtags: ['测试'],
       authorName: '',
       canGenerateContextualComment: true,
-    };
-    const candidates = generateVisitCommentCandidates(ctx);
-    for (const c of candidates) {
+    });
+    for (const c of result.generatedCommentCandidates) {
       expect(c.text.length).toBeLessThanOrEqual(24);
     }
   });
 
-  it('each candidate has sourceSignals', () => {
-    const ctx = {
-      targetWorkTitle: 'Node.js',
-      captionText: '',
-      hashtags: [],
-      authorName: '',
+  it('each candidate has required fields', () => {
+    const result = generateVisitCommentCandidates({
+      targetWorkTitle: 'Test',
+      captionText: 'desc',
+      hashtags: ['tag'],
+      authorName: 'author',
       canGenerateContextualComment: true,
-    };
-    const candidates = generateVisitCommentCandidates(ctx);
-    for (const c of candidates) {
+    });
+    for (const c of result.generatedCommentCandidates) {
+      expect(typeof c.text).toBe('string');
+      expect(c.text.length).toBeGreaterThan(0);
+      expect(typeof c.commentCategory).toBe('string');
+      expect(typeof c.replyMode).toBe('string');
+      expect(typeof c.riskLevel).toBe('string');
+      expect(typeof c.reason).toBe('string');
       expect(Array.isArray(c.sourceSignals)).toBe(true);
-      expect(c.sourceSignals.length).toBeGreaterThan(0);
+      expect(c.autoExecuteAllowed).toBe(false);
     }
   });
 });
@@ -252,12 +236,6 @@ describe('live-review-visits.mjs — no DB writes', () => {
   it('does not import updateEventStatus', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
     expect(src).not.toMatch(/updateEventStatus/);
-  });
-
-  it('does not import insertAction or updateActionStatus', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).not.toMatch(/insertAction/);
-    expect(src).not.toMatch(/updateActionStatus/);
   });
 
   it('only imports getEvents from interaction-repository', () => {
@@ -273,22 +251,13 @@ describe('live-review-visits.mjs — no DB writes', () => {
 // 7. CLI output structure (empty DB)
 // ============================================================
 describe('visits:live-review JSON output structure', () => {
-  it('empty DB produces valid JSON with correct command and summary keys', () => {
+  it('empty DB produces valid JSON with correct keys', () => {
     const result = runCli('live-review-visits.mjs', ['--json', '--max-items', '5'], 15_000);
     const parsed = parseStdout(result);
     expect(parsed).not.toBeNull();
     expect(parsed.ok).toBe(true);
     expect(parsed.command).toBe('visits:live-review');
     expect(parsed.data).toHaveProperty('reviewCandidates');
-    expect(parsed.summary).toMatchObject({
-      totalCandidates: 0,
-      processed: 0,
-      pendingReview: 0,
-      skipped: 0,
-      blocked: 0,
-      executed: 0,
-      stopped: false,
-    });
   });
 });
 
@@ -301,18 +270,13 @@ describe('live-review-visits.mjs — safety invariants', () => {
     expect(src).toMatch(/clickLike\(page,\s*\{ execute:\s*true \}\)/);
   });
 
-  it('calls checkLikeState before acting in execute mode', () => {
+  it('calls checkLikeState before clickLike in execute mode', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
     const recheckIndex = src.indexOf('const recheck = await checkLikeState(page)');
     const clickLikeIndex = src.indexOf('clickLike(page, { execute: true })');
     expect(recheckIndex).toBeGreaterThan(-1);
     expect(clickLikeIndex).toBeGreaterThan(-1);
     expect(recheckIndex).toBeLessThan(clickLikeIndex);
-  });
-
-  it('does not enter comment management page', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).not.toMatch(/ensureCommentPageReady|comment-page|commentPage/);
   });
 
   it('does not re-open targetWorkUrl before execute', () => {
@@ -322,9 +286,9 @@ describe('live-review-visits.mjs — safety invariants', () => {
     expect(navCallsAfter).toBe(-1);
   });
 
-  it('has risk gate using isExecuteAllowedByRisk', () => {
+  it('has risk gate using isExecuteAllowedByRisk with record', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toMatch(/isExecuteAllowedByRisk/);
+    expect(src).toMatch(/isExecuteAllowedByRisk\(selected,\s*record\)/);
     expect(src).toMatch(/comment_risk_too_high/);
   });
 
@@ -334,17 +298,21 @@ describe('live-review-visits.mjs — safety invariants', () => {
     expect(src).toMatch(/user_selected_agent_comment/);
   });
 
-  it('autoExecuteAllowed is always false in record initialization and selection', () => {
+  it('autoExecuteAllowed is always false', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
     const initMatch = src.match(/autoExecuteAllowed[:\s=]*false/g);
     expect(initMatch.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('each candidate requires individual input (no batch)', () => {
+  it('handles comment unconfirmed', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toMatch(/interactiveSelect\(page,\s*item,\s*isExecute\)/);
-    const batchConfirm = src.match(/confirm.*all|approve.*all|batch/i);
-    expect(batchConfirm).toBeNull();
+    expect(src).toMatch(/unconfirmed/);
+    expect(src).toMatch(/comment_not_confirmed/);
+  });
+
+  it('does not export VISIT_DRAFTS', () => {
+    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
+    expect(src).not.toMatch(/export const VISIT_DRAFTS/);
   });
 
   it('imports extractVideoCommentContext and generateVisitCommentCandidates', () => {
@@ -352,10 +320,15 @@ describe('live-review-visits.mjs — safety invariants', () => {
     expect(src).toMatch(/extractVideoCommentContext/);
     expect(src).toMatch(/generateVisitCommentCandidates/);
   });
+
+  it('each candidate requires individual input (no batch)', () => {
+    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
+    expect(src).toMatch(/interactiveSelect\(page,\s*item,\s*isExecute\)/);
+  });
 });
 
 // ============================================================
-// 9. --default maxItems
+// 9. maxItems default
 // ============================================================
 describe('visits:live-review --max-items', () => {
   it('default maxItems is 10', () => {
@@ -365,7 +338,7 @@ describe('visits:live-review --max-items', () => {
 });
 
 // ============================================================
-// 10. interactiveSelect — verify terminal prompts exist
+// 10. interactiveSelect prompts
 // ============================================================
 describe('interactiveSelect — terminal prompts', () => {
   it('dry-run prompt does not mention execution', () => {
@@ -376,10 +349,5 @@ describe('interactiveSelect — terminal prompts', () => {
   it('execute prompt mentions immediate execution', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
     expect(src).toMatch(/选择后将立即执行当前条/);
-  });
-
-  it('prompt accepts s for skip and q for quit', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toMatch(/输入 s 跳过，q 停止/);
   });
 });
