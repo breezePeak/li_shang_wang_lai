@@ -207,4 +207,94 @@ npm run comments:reply -- --plan data/plans/xxx.json --execute --max-items 2 --k
 
 # 查看 evidence
 ls data/runs/<runId>/evidence/
+
+# 生成回复计划
+npm run comments:plan -- --max-items 20
+
+# 指定待处理状态（默认 new）
+npm run comments:plan -- --status new
+
+# 允许包含缺 workTitle 的事件
+npm run comments:plan -- --include-missing-work-title
+
+# 指定输出路径
+npm run comments:plan -- --output data/plans/my-plan.json
 ```
+
+## 11. comments:plan
+
+入口文件：`src/cli/plan-comment-replies.mjs`
+
+### 链路位置
+
+```
+interaction_events → comments:plan → plan.json → comments:reply → reply-result.json
+```
+
+`comments:plan` 读取数据库中状态为 `new`（可配置）的评论事件，生成 `plan.json`，供 `comments:reply` 消费。
+
+### 筛选逻辑
+
+1. 只读 `event_type = 'comment'` 的事件
+2. 默认只读 `status = 'new'`（通过 `--status` 可配置）
+3. 排除已成功回复的事件（`actions` 表中存在 `action_type = 'reply_comment'` 且 `status = 'succeeded'`）
+4. 排除没有 `comment_text` 的事件
+5. 默认排除没有 `my_work_title` 的事件（`comments:reply` 选择作品依赖 `workTitle`）
+6. 传 `--include-missing-work-title` 可允许缺标题的事件进入计划，但 `warnings` 中注明
+
+### 模板回复
+
+`src/domain/reply-template.mjs`：
+
+| 条件 | replyText | reason |
+|---|---|---|
+| 含疑问词（怎么/如何/为什么/啥/什么/?/？） | 这个问题挺关键，后面我可以单独展开讲一下。 | template:question |
+| 含表扬词（支持/不错/厉害/学到了/有用/赞/干货等） | 感谢支持，一起交流。 | template:praise |
+| 文本极短（<=3 字）或主要为 emoji | 感谢支持。 | template:short |
+| 默认 | 感谢评论，一起交流。 | template:default |
+
+### plan 文件结构
+
+```json
+{
+  "planId": "comment-reply-plan-2026-05-30_21-30-00",
+  "type": "comment_reply",
+  "createdAt": "2026-05-30T21:30:00.000Z",
+  "source": "interaction_events",
+  "items": [
+    {
+      "eventId": 42,
+      "approved": false,
+      "workId": "w123",
+      "workTitle": "我的视频作品",
+      "workUrl": "https://...",
+      "actorName": "张三",
+      "actorProfileUrl": "https://...",
+      "commentText": "写得不错",
+      "eventTimeText": "05-30 14:00",
+      "replyText": "感谢支持，一起交流。",
+      "reason": "template:praise"
+    }
+  ],
+  "summary": {
+    "totalCandidates": 10,
+    "planned": 8,
+    "skipped": 2,
+    "maxItems": 20
+  }
+}
+```
+
+关键约束：
+- `approved` 默认 **false**，必须人工审核后才设为 `true`
+- `replyText` 是模板建议值，人工可修改
+- `comments:reply` 只处理 `approved: true` 的 item
+
+### CLI 参数
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--max-items N` | 20 | 最多生成计划条数 |
+| `--status` | new | 事件状态过滤 |
+| `--output` | data/plans/<planId>.json | 自定义输出路径 |
+| `--include-missing-work-title` | 无 | 允许缺 workTitle 的事件进入计划 |

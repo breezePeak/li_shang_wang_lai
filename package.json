@@ -22,7 +22,7 @@
     "db:init": "node ./src/db/migrations.mjs",
     "interactions:scan": "node ./src/cli/scan-interactions.mjs",
     "actions:pending": "node ./src/cli/report-pending.mjs",
-    "comments:plan": "node ./src/cli/plan-comments.mjs",
+    "comments:plan": "node ./src/cli/plan-comment-replies.mjs",
     "comments:prepare": "node ./src/cli/prepare-comment-reply.mjs",
     "comments:execute": "node ./src/cli/execute-comment-reply.mjs",
     "comments:reply": "node ./src/cli/execute-comment-replies.mjs",
