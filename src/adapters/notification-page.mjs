@@ -11,6 +11,16 @@
 
 const SELF_URL = 'https://www.douyin.com/user/self';
 
+export function normalizeDouyinUrl(href) {
+  if (!href) return '';
+  const s = href.trim();
+  if (!s) return '';
+  if (s.startsWith('https://') || s.startsWith('http://')) return s;
+  if (s.startsWith('//')) return 'https:' + s;
+  if (s.startsWith('/')) return 'https://www.douyin.com' + s;
+  return 'https://' + s;
+}
+
 export async function ensureNotificationPageReady(page) {
   await page.goto(SELF_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
   console.error('[notify-page] 等待页面加载...');
@@ -262,6 +272,16 @@ export async function extractVisibleNotifications(page) {
     const RELATION_MAP = { '朋友': 'friend', '互相关注': 'mutual' };
     const SKIP_SET = new Set(['互动消息', '全部消息', '点击加载更多', '加载更多', '没有更多了', '暂无消息', '推荐了你的视频']);
 
+    function _normUrl(h) {
+      if (!h) return '';
+      const s = h.trim();
+      if (!s) return '';
+      if (s.startsWith('https://') || s.startsWith('http://')) return s;
+      if (s.startsWith('//')) return 'https:' + s;
+      if (s.startsWith('/')) return 'https://www.douyin.com' + s;
+      return 'https://' + s;
+    }
+
     function findNotificationPanel() {
       for (const el of document.querySelectorAll('*')) {
         const t = (el.innerText || '').trim();
@@ -404,7 +424,7 @@ export async function extractVisibleNotifications(page) {
         const href = link.getAttribute('href') || '';
         const match = href.match(/\/user\/([A-Za-z0-9_.-]+)/);
         if (match) {
-          actorProfileUrl = href.startsWith('http') ? href : `https://www.douyin.com${href}`;
+          actorProfileUrl = _normUrl(href);
           actorProfileKey = match[1];
           profileResolveMethod = 'dom_href';
           break;
@@ -418,7 +438,7 @@ export async function extractVisibleNotifications(page) {
             const href = el.getAttribute('href') || '';
             const match = href.match(/\/user\/([A-Za-z0-9_.-]+)/);
             if (match) {
-              actorProfileUrl = href.startsWith('http') ? href : `https://www.douyin.com${href}`;
+              actorProfileUrl = _normUrl(href);
               actorProfileKey = match[1];
               profileResolveMethod = 'dom_avatar_href';
               break;
@@ -434,9 +454,9 @@ export async function extractVisibleNotifications(page) {
       for (const link of allLinks) {
         const href = link.getAttribute('href') || '';
         const videoMatch = href.match(/\/video\/(\d+)/);
-        if (videoMatch) { workUrl = href; workId = 'video-' + videoMatch[1]; break; }
+        if (videoMatch) { workUrl = _normUrl(href); workId = 'video-' + videoMatch[1]; break; }
         const noteMatch = href.match(/\/note\/(\d+)/);
-        if (noteMatch) { workUrl = href; workId = 'note-' + noteMatch[1]; break; }
+        if (noteMatch) { workUrl = _normUrl(href); workId = 'note-' + noteMatch[1]; break; }
       }
 
       let platformEventId = '';
