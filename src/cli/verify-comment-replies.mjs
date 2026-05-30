@@ -402,35 +402,39 @@ async function main() {
 
     console.log('[verify] 导航到评论管理页...');
     let pageReady = true;
+    let pageReadyError = null;
     const navResult = await ensureCommentPageReady(page);
     if (!navResult.ok) {
       console.log(`[verify] 导航失败: [${navResult.code}] ${navResult.message}`);
       pageReady = false;
+      pageReadyError = navResult;
       run.hadBlocked = true;
     } else {
       const areaResult = await waitForCommentsArea(page);
       if (!areaResult.ok) {
         console.log(`[verify] 评论区域检测: [${areaResult.code}] ${areaResult.message}`);
         pageReady = false;
+        pageReadyError = areaResult;
         run.hadBlocked = true;
       }
     }
 
     if (!pageReady) {
-      const navError = navResult.ok ? '评论区域未就绪' : (navResult.message || '导航失败');
+      const pageErrorReason = pageReadyError?.message || '页面未就绪';
+      const pageErrorCode = pageReadyError?.code || RESULT_CODES.NAVIGATION_TIMEOUT;
       for (const item of validItems) {
         results.push({
           eventId: item.eventId,
           actorName: item.actorName,
           workTitle: item.workTitle || '',
           status: 'blocked',
-          reason: `页面未就绪: ${navError}`,
+          reason: `页面未就绪: ${pageErrorReason}`,
           step: 'navigate',
-          code: navResult.code || RESULT_CODES.NAVIGATION_TIMEOUT,
+          code: pageErrorCode,
         });
         blockedCount++;
         try {
-          recordAction(db, item.eventId, sourcePlanId, item.workTitle || '', item.replyText || '', 'blocked', `页面未就绪: ${navError}`, null, null);
+          recordAction(db, item.eventId, sourcePlanId, item.workTitle || '', item.replyText || '', 'blocked', `页面未就绪: ${pageErrorReason}`, null, null);
         } catch {}
       }
     } else {
