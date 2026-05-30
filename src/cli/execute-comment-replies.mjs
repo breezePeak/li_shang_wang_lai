@@ -57,7 +57,13 @@ function updateEventStatus(db, eventId, status) {
 }
 
 export function getWorkGroupKey(item) {
-  return item.workId || item.workUrl || item.workTitle || '__unknown_work__';
+  const workId = (item.workId != null ? String(item.workId).trim() : '');
+  const workUrl = (item.workUrl != null ? String(item.workUrl).trim() : '');
+  const workTitle = (item.workTitle != null ? String(item.workTitle).trim() : '');
+  if (workId) return `workId:${workId}`;
+  if (workUrl) return `workUrl:${workUrl}`;
+  if (workTitle) return `workTitle:${workTitle}`;
+  return '__unknown_work__';
 }
 
 export function groupApprovedItemsByWork(items) {
@@ -69,22 +75,28 @@ export function groupApprovedItemsByWork(items) {
     if (!groupMap.has(key)) {
       const group = {
         key,
-        workTitle: item.workTitle || null,
-        workId: item.workId || null,
-        workUrl: item.workUrl || null,
+        workTitle: (item.workTitle != null ? String(item.workTitle).trim() : '') || null,
+        workId: (item.workId != null ? String(item.workId).trim() : '') || null,
+        workUrl: (item.workUrl != null ? String(item.workUrl).trim() : '') || null,
         items: [],
       };
       groupMap.set(key, group);
       groupOrder.push(key);
     }
-    groupMap.get(key).items.push(item);
+    const group = groupMap.get(key);
+    group.items.push(item);
+    if (!group.workTitle && item.workTitle) {
+      group.workTitle = String(item.workTitle).trim();
+    }
   }
 
   return groupOrder.map(key => groupMap.get(key));
 }
 
 async function selectWorkForGroup(page, group) {
-  if (!group.workTitle) return success();
+  if (!group.workTitle) {
+    return blocking(RESULT_CODES.BLOCKED, '作品缺少 workTitle，无法确认当前作品是否正确', { recoverable: false });
+  }
 
   try {
     const currentTitle = await getSelectedWorkTitle(page);
@@ -97,7 +109,19 @@ async function selectWorkForGroup(page, group) {
   }
 
   console.log(`[reply]   切换作品: "${group.workTitle}"`);
-  return await selectWorkByTitle(page, group.workTitle);
+  const selectResult = await selectWorkByTitle(page, group.workTitle);
+  if (!selectResult.ok) return selectResult;
+
+  try {
+    const verifyTitle = await getSelectedWorkTitle(page);
+    if (!verifyTitle.ok || verifyTitle.data?.title !== group.workTitle) {
+      return blocking(RESULT_CODES.BLOCKED, `作品选择后校验失败: 选中标题 "${verifyTitle.data?.title || ''}" 不匹配 "${group.workTitle}"`, { recoverable: false });
+    }
+  } catch (err) {
+    return blocking(RESULT_CODES.BLOCKED, `作品选择后校验异常: ${err.message}`, { recoverable: false });
+  }
+
+  return success();
 }
 
 async function executeOneItemInCurrentWork(page, item, db, run, planId) {
@@ -140,14 +164,16 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     r.step = 'dry-run-locate';
     const locateResult = await openReplyBox(page, item.commentText);
     if (locateResult.ok) {
-      r.status = 'dry-run-ok';
+      r.status = 'dry_run_ok';
       r.reason = 'dry-run 定位成功，未实际发送';
       console.log(`[reply]     ✓ dry-run 定位成功`);
+      recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText, 'dry_run_ok', r.reason, null, null);
     } else {
       r.status = 'blocked';
       r.reason = locateResult.message;
       r.code = locateResult.code;
       console.log(`[reply]     ✗ [${locateResult.code}] ${locateResult.message}`);
+      recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText, 'blocked', r.reason, null, null);
     }
     return r;
   }

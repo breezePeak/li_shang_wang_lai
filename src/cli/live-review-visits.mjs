@@ -11,6 +11,7 @@ import { RESULT_CODES } from '../domain/result-codes.mjs';
 import { generateVisitCommentCandidates } from '../domain/visit-comment-generator.mjs';
 import { generateAgentCommentCandidates } from '../domain/llm-comment-generator.mjs';
 import { validateSelectedComment, isExecuteAllowed, FORBIDDEN_WORDS } from '../domain/comment-policy.mjs';
+import { waitForProfileSettled, waitForVideoSettled, waitForHumanObservation } from '../browser/page-settle.mjs';
 
 export const FRIENDLY_RELATIONS = new Set(['friend', 'mutual']);
 
@@ -60,8 +61,9 @@ function formatTargetWorkId(url, videoId) {
   return url || null;
 }
 
-async function processCandidate(page, candidate, commentMode) {
+async function processCandidate(page, candidate, commentMode, settleOptions) {
   const name = candidate.actorName || 'unknown';
+  const { observeMs, profileSettleMs, videoSettleMs } = settleOptions;
   const record = {
     actorName: name,
     actorProfileKey: candidate.actorProfileKey || '',
@@ -113,13 +115,22 @@ async function processCandidate(page, candidate, commentMode) {
   console.error(`[live-review]   主页: ${record.actorProfileUrl.slice(0, 60)}...`);
   try {
     await page.goto(record.actorProfileUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-    await page.waitForTimeout(3000);
   } catch (err) {
     record.status = 'blocked';
     record.reason = 'profile_navigation_failed';
     console.error(`[live-review]   主页导航失败: ${err.message}`);
     return record;
   }
+
+  const profileSettled = await waitForProfileSettled(page, { profileSettleMs });
+  if (!profileSettled.ok) {
+    record.status = 'blocked';
+    record.reason = profileSettled.message;
+    console.error(`[live-review]   ${record.reason}`);
+    return record;
+  }
+
+  await waitForHumanObservation(page, '[live-review]   主页已打开', observeMs);
 
   const videoResult = await findLatestNonPinnedVideo(page);
   if (!videoResult.ok) {
@@ -133,7 +144,7 @@ async function processCandidate(page, candidate, commentMode) {
   record.targetWorkId = formatTargetWorkId(videoResult.data.videoUrl, videoResult.data.videoId);
   console.error(`[live-review]   视频: ${record.targetWorkUrl.slice(0, 60)} (${record.targetWorkId})`);
 
-  await page.waitForTimeout(2000);
+  await waitForHumanObservation(page, '[live-review]   候选作品已找到', Math.min(observeMs, 3000));
 
   const navResult = await navigateToVideo(page, record.targetWorkUrl);
   if (!navResult.ok) {
@@ -142,6 +153,17 @@ async function processCandidate(page, candidate, commentMode) {
     console.error(`[live-review]   ${record.reason}`);
     return record;
   }
+
+  const videoSettled = await waitForVideoSettled(page, { videoSettleMs });
+  if (!videoSettled.ok) {
+    record.status = 'blocked';
+    record.reason = videoSettled.message;
+    console.error(`[live-review]   ${record.reason}`);
+    return record;
+  }
+
+  await waitForHumanObservation(page, '[live-review]   视频页已打开', observeMs);
+  await page.waitForTimeout(1500);
 
   const likeResult = await checkLikeState(page);
   const classification = classifyLikeResult(likeResult);
@@ -371,6 +393,16 @@ async function main() {
   const isExecute = commonArgs.options.execute;
   const commentMode = commonArgs.options.commentMode || 'skill';
 
+  if (!useJson) {
+    commonArgs.options.keepOpen = true;
+  }
+
+  const settleOptions = {
+    observeMs: commonArgs.options.observeMs,
+    profileSettleMs: commonArgs.options.profileSettleMs,
+    videoSettleMs: commonArgs.options.videoSettleMs,
+  };
+
   if (!VALID_COMMENT_MODES.has(commentMode)) {
     console.error(`[live-review] 无效 --comment-mode: ${commentMode}，可选: local, agent, skill`);
     if (useJson) {
@@ -434,7 +466,7 @@ async function main() {
 
   try {
     for (let i = 0; i < slice.length; i++) {
-      const item = await processCandidate(page, slice[i], commentMode);
+      const item = await processCandidate(page, slice[i], commentMode, settleOptions);
       discoveries.push(item);
       run.scanned++;
 

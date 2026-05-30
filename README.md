@@ -204,15 +204,7 @@ FEATURE_DISABLED
 
 后续如果项目要脱离 Hermes / OpenClaw 独立运行，可以在这个模式里接入大模型。
 
-## comments:reply 按作品分组处理
-
-`comments:reply` 执行评论回复时，会按作品分组处理：
-
-- 同一作品下的评论聚合为一组，只切换一次作品选中状态；
-- 分组键优先级：`workId` → `workUrl` → `workTitle` → `__unknown_work__`；
-- 作品选择失败时，该组所有评论标记为 blocked；
-- 同一 eventId 的回复只执行一次（防重复）；
-- 支持 `--dry-run` 定位和 `--execute` 真实发送，`--max-items` 限制总执行数。
+`comments:reply` 会复用同一个浏览器和评论管理页，并按作品分组处理；同一作品下多条评论只切换作品一次。
 
 ## 常用命令
 
