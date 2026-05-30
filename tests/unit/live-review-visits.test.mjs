@@ -41,26 +41,57 @@ describe('FRIENDLY_RELATIONS', () => {
 });
 
 // ============================================================
-// 2. VISIT_DRAFTS — exactly 3, natural language
+// 2. VISIT_DRAFTS — exactly 3, structured with metadata
 // ============================================================
 describe('VISIT_DRAFTS', () => {
   it('has exactly 3 entries', () => {
     expect(VISIT_DRAFTS).toHaveLength(3);
   });
 
-  it('drafts are natural and non-marketing', () => {
+  it('each draft has required metadata fields', () => {
     for (const d of VISIT_DRAFTS) {
-      expect(typeof d).toBe('string');
-      expect(d.length).toBeGreaterThan(0);
-      expect(d).not.toMatch(/[!！?？]+$/);
-      expect(d.length).toBeLessThan(30);
+      expect(typeof d.text).toBe('string');
+      expect(d.text.length).toBeGreaterThan(0);
+      expect(d.text.length).toBeLessThan(30);
+      expect(d.text).not.toMatch(/[!！?？]+$/);
+      expect(typeof d.commentCategory).toBe('string');
+      expect(typeof d.replyMode).toBe('string');
+      expect(typeof d.riskLevel).toBe('string');
+      expect(typeof d.templateId).toBe('string');
     }
   });
 
-  it('contains known drafts', () => {
-    expect(VISIT_DRAFTS).toContain('支持一下');
-    expect(VISIT_DRAFTS).toContain('内容不错，来看看');
-    expect(VISIT_DRAFTS).toContain('互相加油');
+  it('all drafts are low risk with auto_simple replyMode', () => {
+    for (const d of VISIT_DRAFTS) {
+      expect(d.riskLevel).toBe('low');
+      expect(d.replyMode).toBe('auto_simple');
+    }
+  });
+
+  it('contains known draft texts', () => {
+    const texts = VISIT_DRAFTS.map(d => d.text);
+    expect(texts).toContain('支持一下');
+    expect(texts).toContain('内容不错，来看看');
+    expect(texts).toContain('互相加油');
+  });
+
+  it('has correct commentCategory mapping', () => {
+    const support = VISIT_DRAFTS.find(d => d.text === '支持一下');
+    expect(support.commentCategory).toBe('support');
+    expect(support.templateId).toBe('visit-support-1');
+
+    const praise = VISIT_DRAFTS.find(d => d.text === '内容不错，来看看');
+    expect(praise.commentCategory).toBe('praise');
+    expect(praise.templateId).toBe('visit-praise-1');
+
+    const encouragement = VISIT_DRAFTS.find(d => d.text === '互相加油');
+    expect(encouragement.commentCategory).toBe('encouragement');
+    expect(encouragement.templateId).toBe('visit-encouragement-1');
+  });
+
+  it('templateIds are unique', () => {
+    const ids = VISIT_DRAFTS.map(d => d.templateId);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
 
@@ -208,6 +239,23 @@ describe('live-review-visits.mjs — safety invariants', () => {
     const navInInteractive = src.indexOf('interactiveSelect');
     const navCallsAfter = src.indexOf('navigateToVideo', navInInteractive);
     expect(navCallsAfter).toBe(-1);
+  });
+
+  it('has risk gate: blocks non-low risk or non-auto_simple drafts from execute', () => {
+    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
+    expect(src).toMatch(/draft\.riskLevel !== ['"]low['"] \|\| draft\.replyMode !== ['"]auto_simple['"]/);
+    expect(src).toMatch(/comment_risk_too_high/);
+  });
+
+  it('sets manualReviewMethod to user_selected_template on draft selection', () => {
+    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
+    expect(src).toMatch(/manualReviewMethod.*user_selected_template/);
+  });
+
+  it('autoExecuteAllowed is always false in record initialization and selection', () => {
+    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
+    const initMatch = src.match(/autoExecuteAllowed[:\s=]*false/g);
+    expect(initMatch.length).toBeGreaterThanOrEqual(2);
   });
 
   it('each candidate requires individual input (no batch)', () => {

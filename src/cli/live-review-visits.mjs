@@ -12,9 +12,27 @@ import { RESULT_CODES } from '../domain/result-codes.mjs';
 export const FRIENDLY_RELATIONS = new Set(['friend', 'mutual']);
 
 export const VISIT_DRAFTS = [
-  '支持一下',
-  '内容不错，来看看',
-  '互相加油',
+  {
+    text: '支持一下',
+    commentCategory: 'support',
+    replyMode: 'auto_simple',
+    riskLevel: 'low',
+    templateId: 'visit-support-1',
+  },
+  {
+    text: '内容不错，来看看',
+    commentCategory: 'praise',
+    replyMode: 'auto_simple',
+    riskLevel: 'low',
+    templateId: 'visit-praise-1',
+  },
+  {
+    text: '互相加油',
+    commentCategory: 'encouragement',
+    replyMode: 'auto_simple',
+    riskLevel: 'low',
+    templateId: 'visit-encouragement-1',
+  },
 ];
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -71,6 +89,12 @@ async function processCandidate(page, candidate) {
     previewOnly: true,
     reason: null,
     selectedCommentDraft: null,
+    commentCategory: null,
+    replyMode: null,
+    riskLevel: null,
+    templateId: null,
+    manualReviewMethod: null,
+    autoExecuteAllowed: false,
     actionResults: null,
   };
 
@@ -159,7 +183,7 @@ async function interactiveSelect(page, record, isExecute) {
   console.error(`  评论草稿:`);
   for (let i = 0; i < VISIT_DRAFTS.length; i++) {
     const marker = i === 0 ? '>' : ' ';
-    console.error(`  ${marker} ${i + 1}. "${VISIT_DRAFTS[i]}"`);
+    console.error(`  ${marker} ${i + 1}. "${VISIT_DRAFTS[i].text}"`);
   }
 
   const promptText = isExecute
@@ -186,12 +210,26 @@ async function interactiveSelect(page, record, isExecute) {
   }
 
   const draft = VISIT_DRAFTS[choice - 1];
-  record.selectedCommentDraft = draft;
-  console.error(`[live-review]   选择草稿 #${choice}: "${draft}"`);
+  record.selectedCommentDraft = draft.text;
+  record.commentCategory = draft.commentCategory;
+  record.replyMode = draft.replyMode;
+  record.riskLevel = draft.riskLevel;
+  record.templateId = draft.templateId;
+  record.manualReviewMethod = 'user_selected_template';
+  record.autoExecuteAllowed = false;
+  console.error(`[live-review]   选择草稿 #${choice}: "${draft.text}" (risk=${draft.riskLevel}, category=${draft.commentCategory})`);
 
   if (!isExecute) {
     console.error(`[live-review]   dry-run 模式，不执行真实操作`);
     return { action: 'selected', draft };
+  }
+
+  // risk gate: only low + auto_simple allowed for execute
+  if (draft.riskLevel !== 'low' || draft.replyMode !== 'auto_simple') {
+    record.status = 'blocked';
+    record.reason = 'comment_risk_too_high';
+    console.error(`[live-review]   草稿风险等级=${draft.riskLevel}, replyMode=${draft.replyMode}，不允许执行`);
+    return { action: 'blocked', draft };
   }
 
   // execute mode: re-check like state on current page, then act
@@ -231,8 +269,8 @@ async function interactiveSelect(page, record, isExecute) {
   console.error(`[live-review]   点赞成功`);
 
   // post comment
-  console.error(`[live-review]   发表评论: "${draft}"...`);
-  const commentExec = await postVideoComment(page, draft, { execute: true });
+  console.error(`[live-review]   发表评论: "${draft.text}"...`);
+  const commentExec = await postVideoComment(page, draft.text, { execute: true });
   if (!commentExec.ok) {
     record.actionResults.comment = commentExec.code;
     console.error(`[live-review]   评论失败: ${commentExec.message}`);
@@ -372,8 +410,14 @@ async function main() {
         targetWorkTitle: d.targetWorkTitle,
         likeState: d.likeState,
         suggestedActions: d.plannedActions,
-        commentDrafts: VISIT_DRAFTS,
+        commentDrafts: VISIT_DRAFTS.map(dt => dt.text),
         selectedCommentDraft: d.selectedCommentDraft,
+        commentCategory: d.commentCategory,
+        replyMode: d.replyMode,
+        riskLevel: d.riskLevel,
+        templateId: d.templateId,
+        manualReviewMethod: d.manualReviewMethod,
+        autoExecuteAllowed: d.autoExecuteAllowed,
         actionResults: d.actionResults,
         requiresManualReview: true,
         executeAllowed: false,

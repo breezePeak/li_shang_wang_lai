@@ -119,7 +119,7 @@ npm run likes:reciprocate -- --execute   # FEATURE_DISABLED
 > - `actions:plan`：纯数据分流，不进主页，只按 actorProfileKey 合并事件，输出 visitWorkCandidates；
 > - `visits:discover`：phase3，浏览器进入好友/互关主页，找最近非置顶作品，检查点赞状态，输出 pending_review/skipped/blocked；
 > - `visits:review`：phase4，复用 visits:discover 的浏览器流程，仅输出 pending_review 候选，每条附带 3 条评论草稿（不点赞、不评论、不落库）；
-> - `visits:live-review`：phase5，交互式终端，逐条展示候选和草稿，用户选择 1/2/3 确认当前条；dry-run 只记录不执行，execute 模式立即点赞+评论；
+> - `visits:live-review`：phase5，交互式终端，逐条展示候选和草稿，用户选择 1/2/3 确认当前条（即代表对该条模板审核通过）；dry-run 只记录不执行，execute 模式经风险校验（仅 low+auto_simple）后点赞+评论；medium/high 或自由文本评论不能走此快捷执行链路；
 > - `likes:reciprocate`：真实点赞继续 `FEATURE_DISABLED` 硬阻断。
 
 ### 旧命令兼容
@@ -214,15 +214,18 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
   npm run visits:live-review -- --max-items 5                    # dry-run 预览
   npm run visits:live-review -- --execute --max-items 5          # 执行模式
     ↓
-  逐条展示候选 + 3 条评论草稿
+  逐条展示候选 + 3 条 low-risk 评论草稿（带元数据：commentCategory, replyMode, riskLevel, templateId）
     ↓
-  dry-run 模式：选择 1/2/3 仅记录 selectedCommentDraft，不执行
-  execute 模式：选择 1/2/3 → 重新检查点赞状态 → 点赞 → 评论
+  dry-run 模式：选择 1/2/3 仅记录 selectedCommentDraft + 元数据，不执行
+  execute 模式：选择 1/2/3 → 风险校验（仅 low + auto_simple 允许）→ 重新检查点赞状态 → 点赞 → 评论
     ↓
   输入 s 跳过当前条，输入 q 停止本轮
   每条必须单独选择，不能批量确认
     ↓
-  输出 reviewCandidates（含 selectedCommentDraft, actionResults）
+  输出 reviewCandidates（含 selectedCommentDraft, commentCategory, replyMode, riskLevel, templateId, manualReviewMethod, autoExecuteAllowed=false, actionResults）
+    ↓
+  注意：用户选择 1/2/3 即代表对该条模板的人工审核通过（manualReviewMethod=user_selected_template）
+  medium/high 风险或自由文本评论不能走此快捷执行链路
 
 阶段 5: 旧版真实执行保留 (likes:reciprocate, MVP 硬阻断)
   用户说 "给这个候选点赞"
@@ -260,5 +263,5 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
   - `actions:plan` — 候选分流，不进主页
   - `visits:discover` — phase3，进主页发现作品并检查点赞
   - `visits:review` — phase4，生成待审核回访候选（含评论草稿，不点赞、不评论、不落库）
-  - `visits:live-review` — phase5，交互式审核，逐条选择草稿并执行（dry-run / execute）
+  - `visits:live-review` — phase5，交互式审核，逐条选择草稿并执行（dry-run / execute）；使用固定 low-risk 模板，选择即审核通过；medium/high 或自由文本不能走此快捷链路
   - `likes:reciprocate` — 真实点赞代码层硬阻断
