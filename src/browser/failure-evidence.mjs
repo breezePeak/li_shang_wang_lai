@@ -1,4 +1,4 @@
-﻿import {
+import {
   capturePageDiagnostics,
   extractVisibleText,
   captureFullScreenshot,
@@ -81,5 +81,11 @@ export async function captureEvidence(page, {
   console.error(`[evidence]   错误码: ${code}`);
   console.error(`[evidence]   可恢复: ${recoverable ? '是' : '否'}`);
 
-  return { evidenceDir, evidenceInfo };
+  return {
+    evidenceDir,
+    evidenceInfo,
+    screenshotPath: path.join(evidenceDir, 'screenshot.png'),
+    htmlPath: path.join(evidenceDir, 'page.html'),
+    metaPath: path.join(evidenceDir, 'failure.json'),
+  };
 }

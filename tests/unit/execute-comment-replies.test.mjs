@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   getWorkGroupKey,
   groupApprovedItemsByWork,
+  buildItemEvidenceData,
 } from '../../src/cli/execute-comment-replies.mjs';
 
 describe('getWorkGroupKey', () => {
@@ -204,5 +205,79 @@ describe('groupApprovedItemsByWork', () => {
       workUrl: 'u1',
       items: [items[0]],
     });
+  });
+});
+
+describe('buildItemEvidenceData', () => {
+  const item = {
+    eventId: 'evt_001',
+    actorName: '张三',
+    workTitle: '我的作品标题',
+    workId: 'w123',
+    workUrl: 'https://example.com/work/123',
+    commentText: '这是一条很长很长的评论内容超过八十个字，用来测试截断功能是否正常工作，应只保留前八十个字',
+    replyText: '这是一条很长很长的回复内容超过八十个字，用来测试截断功能是否正常工作，应只保留前八十个字',
+  };
+
+  it('includes all item fields with correct preview truncation', () => {
+    const result = buildItemEvidenceData(item, 'test-step', { code: 'ERR', message: '测试错误' });
+    expect(result.eventId).toBe('evt_001');
+    expect(result.actorName).toBe('张三');
+    expect(result.workTitle).toBe('我的作品标题');
+    expect(result.step).toBe('test-step');
+    expect(result.code).toBe('ERR');
+    expect(result.message).toBe('测试错误');
+  });
+
+  it('truncates workTitle to 60 chars', () => {
+    const result = buildItemEvidenceData(item, 'step', { code: 'E', message: 'm' });
+    expect(result.workTitle.length).toBeLessThanOrEqual(60);
+    expect(result.workTitle).toBe(item.workTitle); // still fits
+  });
+
+  it('truncates commentText to 80 chars', () => {
+    const longComment = { ...item, commentText: 'a'.repeat(200) };
+    const result = buildItemEvidenceData(longComment, 'step', { code: 'E', message: 'm' });
+    expect(result.commentText.length).toBe(80);
+    expect(result.commentText).toBe('a'.repeat(80));
+  });
+
+  it('truncates replyText to 80 chars', () => {
+    const longReply = { ...item, replyText: 'b'.repeat(200) };
+    const result = buildItemEvidenceData(longReply, 'step', { code: 'E', message: 'm' });
+    expect(result.replyText.length).toBe(80);
+    expect(result.replyText).toBe('b'.repeat(80));
+  });
+
+  it('truncates workUrl to 120 chars', () => {
+    const longUrl = { ...item, workUrl: 'https://example.com/' + 'x'.repeat(200) };
+    const result = buildItemEvidenceData(longUrl, 'step', { code: 'E', message: 'm' });
+    expect(result.workUrl.length).toBe(120);
+  });
+
+  it('truncates message to 200 chars', () => {
+    const result = buildItemEvidenceData(item, 'step', { code: 'E', message: 'x'.repeat(500) });
+    expect(result.message.length).toBe(200);
+  });
+
+  it('falls back to resultOrError.reason when message is absent', () => {
+    const result = buildItemEvidenceData(item, 'step', { code: 'E2', reason: '来自reason字段' });
+    expect(result.message).toBe('来自reason字段');
+  });
+
+  it('returns empty strings for missing item fields', () => {
+    const sparse = { eventId: 'e1' };
+    const result = buildItemEvidenceData(sparse, 's', { code: 'X', message: 'm' });
+    expect(result.workTitle).toBe('');
+    expect(result.commentText).toBe('');
+    expect(result.replyText).toBe('');
+    expect(result.workId).toBe('');
+    expect(result.workUrl).toBe('');
+  });
+
+  it('includes workId and workUrl', () => {
+    const result = buildItemEvidenceData(item, 'step', { code: 'E', message: 'm' });
+    expect(result.workId).toBe('w123');
+    expect(result.workUrl).toBe('https://example.com/work/123');
   });
 });

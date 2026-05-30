@@ -58,6 +58,49 @@ function updateEventStatus(db, eventId, status) {
     .run(status, new Date().toISOString(), eventId);
 }
 
+export function buildItemEvidenceData(item, step, resultOrError) {
+  return {
+    eventId: item.eventId,
+    actorName: item.actorName,
+    workTitle: item.workTitle ? String(item.workTitle).slice(0, 60) : '',
+    workId: item.workId ? String(item.workId) : '',
+    workUrl: item.workUrl ? String(item.workUrl).slice(0, 120) : '',
+    commentText: item.commentText ? String(item.commentText).slice(0, 80) : '',
+    replyText: item.replyText ? String(item.replyText).slice(0, 80) : '',
+    step,
+    code: resultOrError.code || '',
+    message: (resultOrError.message || resultOrError.reason || '').slice(0, 200),
+  };
+}
+
+async function captureItemEvidence(page, run, item, step, resultOrError) {
+  try {
+    const extra = buildItemEvidenceData(item, step, resultOrError);
+    const code = resultOrError.code || RESULT_CODES.UNKNOWN_ERROR;
+    const message = resultOrError.message || resultOrError.reason || '';
+
+    const result = await captureEvidence(page, {
+      outputDir: run.outputDir,
+      step,
+      code,
+      message,
+      recoverable: resultOrError.recoverable !== false,
+      extra,
+    });
+
+    run.evidenceDirectories.push(result.evidenceDir);
+
+    return {
+      evidenceDir: result.evidenceDir,
+      screenshotPath: result.screenshotPath,
+      evidenceJson: result.evidenceInfo ? JSON.stringify(result.evidenceInfo) : null,
+    };
+  } catch (err) {
+    console.warn(`[reply]     ⚠ 证据采集失败: ${err.message}`);
+    return { evidenceDir: null, screenshotPath: null, evidenceJson: null };
+  }
+}
+
 export function getWorkGroupKey(item) {
   const workId = (item.workId != null ? String(item.workId).trim() : '');
   const workUrl = (item.workUrl != null ? String(item.workUrl).trim() : '');
@@ -176,7 +219,10 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
       r.reason = locateResult.message;
       r.code = locateResult.code;
       console.log(`[reply]     ✗ [${locateResult.code}] ${locateResult.message}`);
-      recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText, 'blocked', r.reason, null, null);
+      const itemEvidence = await captureItemEvidence(page, run, item, 'dry-run-locate', locateResult);
+      r.evidenceDir = itemEvidence.evidenceDir;
+      r.screenshotPath = itemEvidence.screenshotPath;
+      recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText, 'blocked', r.reason, itemEvidence.evidenceJson, itemEvidence.screenshotPath);
     }
     return r;
   }
@@ -188,7 +234,10 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     r.reason = `打开回复框失败: ${openResult.message}`;
     r.code = openResult.code;
     console.log(`[reply]     ✗ [${openResult.code}] ${openResult.message}`);
-    recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText, 'blocked', r.reason, null, null);
+    const itemEvidence = await captureItemEvidence(page, run, item, 'open-reply-box', openResult);
+    r.evidenceDir = itemEvidence.evidenceDir;
+    r.screenshotPath = itemEvidence.screenshotPath;
+    recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText, 'blocked', r.reason, itemEvidence.evidenceJson, itemEvidence.screenshotPath);
     run.hadBlocked = true;
     return r;
   }
@@ -201,7 +250,10 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     r.reason = replyResult.message;
     r.code = replyResult.code;
     console.log(`[reply]     ✗ [${replyResult.code}] ${replyResult.message}`);
-    recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText, 'blocked', replyResult.message, null, null);
+    const itemEvidence = await captureItemEvidence(page, run, item, 'execute-reply', replyResult);
+    r.evidenceDir = itemEvidence.evidenceDir;
+    r.screenshotPath = itemEvidence.screenshotPath;
+    recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText, 'blocked', replyResult.message, itemEvidence.evidenceJson, itemEvidence.screenshotPath);
     run.hadBlocked = true;
     return r;
   }
@@ -214,7 +266,10 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     r.reason = verifyResult.message;
     r.code = verifyResult.code;
     console.log(`[reply]     ⚠ 发送后未确认: ${verifyResult.message}`);
-    recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText, 'sent_unverified', verifyResult.message, null, null);
+    const itemEvidence = await captureItemEvidence(page, run, item, 'verify-reply', verifyResult);
+    r.evidenceDir = itemEvidence.evidenceDir;
+    r.screenshotPath = itemEvidence.screenshotPath;
+    recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText, 'sent_unverified', verifyResult.message, itemEvidence.evidenceJson, itemEvidence.screenshotPath);
     run.hadBlocked = true;
     return r;
   }
@@ -244,6 +299,7 @@ async function executeWorkGroup(page, group, db, run, planId) {
   const selectResult = await selectWorkForGroup(page, group);
   if (!selectResult.ok) {
     console.log(`[reply]   ✗ 作品选择失败: [${selectResult.code}] ${selectResult.message}`);
+    const groupEvidence = await captureItemEvidence(page, run, group.items[0], 'select-work', selectResult);
     for (const item of group.items) {
       const r = {
         eventId: item.eventId,
@@ -252,8 +308,10 @@ async function executeWorkGroup(page, group, db, run, planId) {
         reason: `作品选择失败: ${selectResult.message}`,
         step: 'select-work',
         code: selectResult.code,
+        evidenceDir: groupEvidence.evidenceDir,
+        screenshotPath: groupEvidence.screenshotPath,
       };
-      recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText || '', 'blocked', r.reason, null, null);
+      recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText || '', 'blocked', r.reason, groupEvidence.evidenceJson, groupEvidence.screenshotPath);
       results.push(r);
       run.hadBlocked = true;
     }
@@ -392,6 +450,7 @@ async function main() {
         sentUnverified: sentUnverifiedCount,
         skipped: skipCount,
         blocked: blockedCount,
+        evidenceCount: run.evidenceDirectories.length,
         maxItems: commonArgs.options.maxItems,
       },
     });
