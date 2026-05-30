@@ -10,6 +10,7 @@ const KEY_FIELD_MAP = [
   { dbCol: 'target_work_url', inKey: 'targetWorkUrl' },
   { dbCol: 'dedup_confidence', inKey: 'dedupConfidence' },
   { dbCol: 'profile_resolution_status', inKey: 'profileResolutionStatus' },
+  { dbCol: 'my_work_title', inKey: 'myWorkTitle' },
 ];
 
 function _isRelationUpgrade(existingRelation, newRelation) {
@@ -58,6 +59,7 @@ export function upsertNotificationEvent({
   platformEventId, notificationItemKey, workId, workUrl,
   action, content, rawPayloadJson,
   targetWorkId, targetWorkUrl, profileResolutionStatus,
+  myWorkTitle,
 }) {
   const db = getDb();
   const scannedAt = new Date().toISOString();
@@ -74,6 +76,7 @@ export function upsertNotificationEvent({
     targetWorkId: targetWorkId || (workId || null),
     targetWorkUrl: normalizedTargetUrl || normalizedWorkUrl || null,
     dedupConfidence, profileResolutionStatus,
+    myWorkTitle,
   };
 
   // ---- Step 1: Match by platformEventId ----
@@ -140,15 +143,16 @@ export function upsertNotificationEvent({
   // ---- Step 4: Insert new event ----
   const stmt = db.prepare(`
     INSERT INTO interaction_events
-      (event_type, actor_name, actor_profile_key, actor_profile_url, relation, comment_text, event_time_text,
+      (event_type, actor_name, actor_profile_key, actor_profile_url, relation, my_work_title, comment_text, event_time_text,
        platform_event_id, fingerprint, notification_item_key,
        target_work_id, target_work_url, dedup_confidence, profile_resolution_status,
        raw_payload_json, scanned_at, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     eventType, actorName,
     actorProfileKey || null, normalizedActorUrl || null, relation || 'unknown',
+    myWorkTitle || null,
     commentText || null, eventTimeText || null,
     platformEventId || null, fingerprint, notificationItemKey || null,
     incoming.targetWorkId, incoming.targetWorkUrl,
@@ -166,7 +170,8 @@ export function upsertNotificationEvent({
  * Only updates fields that are actually new or upgraded.
  */
 function _applyEnrich(existing, { actorProfileUrl, actorProfileKey, platformEventId, fingerprint,
-  rawPayloadJson, relation, targetWorkId, targetWorkUrl, dedupConfidence, profileResolutionStatus }) {
+  rawPayloadJson, relation, targetWorkId, targetWorkUrl, dedupConfidence, profileResolutionStatus,
+  myWorkTitle }) {
   const db = getDb();
   const updates = [];
   const params = [];
@@ -198,6 +203,10 @@ function _applyEnrich(existing, { actorProfileUrl, actorProfileKey, platformEven
   if (targetWorkUrl && !existing.target_work_url) {
     updates.push('target_work_url = ?');
     params.push(targetWorkUrl);
+  }
+  if (myWorkTitle && !existing.my_work_title) {
+    updates.push('my_work_title = ?');
+    params.push(myWorkTitle);
   }
   if (dedupConfidence && _isConfidenceUpgrade(existing.dedup_confidence, dedupConfidence)) {
     updates.push('dedup_confidence = ?');

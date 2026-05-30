@@ -6,6 +6,7 @@ import {
   getSelectedWorkTitle,
 } from '../adapters/comment-page.mjs';
 import { commentFingerprint, commentInitialStatus, normalizeTimeText, notificationFingerprint } from '../domain/event-fingerprint.mjs';
+import { normalizeCommentEvent, buildRawPayloadJson } from '../domain/comment-event-normalization.mjs';
 import { insertEvent, getEventCounts, findUnstableEvent, promoteUnstableEvent, enrichEvent, upsertNotificationEvent } from '../db/interaction-repository.mjs';
 import logger from '../utils/logger.mjs';
 import { runMigrations } from '../db/migrations.mjs';
@@ -223,6 +224,24 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0) {
         if (!wantComments && n.eventType === 'comment') continue;
         if (!wantLikes && n.eventType === 'like') continue;
 
+        if (n.eventType === 'comment') {
+          const normResult = normalizeCommentEvent({
+            actorName: n.username,
+            actorProfileUrl: n.actorProfileUrl || '',
+            commentText: n.content || '',
+            eventTimeText: n.timeText || '',
+            workTitle: n.workTitle || '',
+            workId: n.workId || '',
+            workUrl: n.workUrl || '',
+            rawText: n.rawText || '',
+            notificationItemKey: n.notificationItemKey || '',
+          });
+          if (!normResult.valid) {
+            batchDuplicate++;
+            continue;
+          }
+        }
+
         const profileResolutionStatus = n.actorProfileUrl
           ? (n.profileResolveMethod || 'resolved') : 'unresolved';
 
@@ -247,9 +266,27 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0) {
           profileResolveMethod: profileResolutionStatus,
           workId: n.workId || null,
           workUrl: n.workUrl || null,
+          workTitle: n.workTitle || null,
           dedupConfidence: confidence,
           profileResolutionStatus,
         };
+
+        if (n.eventType === 'comment') {
+          const normResult = normalizeCommentEvent({
+            actorName: n.username,
+            actorProfileUrl: n.actorProfileUrl || '',
+            commentText: n.content || '',
+            eventTimeText: n.timeText || '',
+            workTitle: n.workTitle || '',
+            workId: n.workId || '',
+            workUrl: n.workUrl || '',
+            rawText: n.rawText || '',
+            notificationItemKey: n.notificationItemKey || '',
+          });
+          if (normResult.warnings && normResult.warnings.length > 0) {
+            rawPayload.warnings = normResult.warnings;
+          }
+        }
 
         const result = upsertNotificationEvent({
           eventType: n.eventType, actorName: n.username,
@@ -270,6 +307,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0) {
           targetWorkId: n.workId || null,
           targetWorkUrl: n.workUrl || null,
           profileResolutionStatus,
+          myWorkTitle: n.workTitle || null,
         });
 
         if (result.action === 'inserted') {

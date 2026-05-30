@@ -477,14 +477,14 @@ export async function extractVisibleNotifications(page) {
         }
       }
 
-      let workUrl = '', workId = '';
+      let workUrl = '', workId = '', workTitle = '';
       const allLinks = itemEl.querySelectorAll('a[href]');
       for (const link of allLinks) {
         const href = link.getAttribute('href') || '';
         const videoMatch = href.match(/\/video\/(\d+)/);
-        if (videoMatch) { workUrl = _normUrl(href); workId = 'video-' + videoMatch[1]; break; }
+        if (videoMatch) { workUrl = _normUrl(href); workId = 'video-' + videoMatch[1]; workTitle = (link.getAttribute('title') || '').trim() || (link.innerText || '').trim(); break; }
         const noteMatch = href.match(/\/note\/(\d+)/);
-        if (noteMatch) { workUrl = _normUrl(href); workId = 'note-' + noteMatch[1]; break; }
+        if (noteMatch) { workUrl = _normUrl(href); workId = 'note-' + noteMatch[1]; workTitle = (link.getAttribute('title') || '').trim() || (link.innerText || '').trim(); break; }
       }
 
       let platformEventId = '';
@@ -510,6 +510,7 @@ export async function extractVisibleNotifications(page) {
         profileResolveMethod,
         workUrl,
         workId,
+        workTitle: workTitle.slice(0, 120),
         platformEventId,
       };
       itemData.notificationItemKey = generateItemKey(itemData);
