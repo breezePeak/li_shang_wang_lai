@@ -223,7 +223,7 @@ async function verifyWorkGroup(page, group, db, run, planId, isDryRun) {
     console.log(`[verify]   ✗ 作品选择失败: [${selectResult.code}] ${selectResult.message}`);
     const groupEvidence = await captureItemEvidence(page, run, group.items[0], 'select-work', selectResult);
     for (const item of group.items) {
-      results.push({
+      const r = {
         eventId: item.eventId,
         actorName: item.actorName,
         workTitle: item.workTitle || '',
@@ -233,7 +233,11 @@ async function verifyWorkGroup(page, group, db, run, planId, isDryRun) {
         code: selectResult.code,
         evidenceDir: groupEvidence.evidenceDir,
         screenshotPath: groupEvidence.screenshotPath,
-      });
+      };
+      results.push(r);
+      try {
+        recordAction(db, item.eventId, planId, item.workTitle || '', item.replyText || '', 'blocked', r.reason, groupEvidence.evidenceJson, groupEvidence.screenshotPath);
+      } catch {}
       run.hadBlocked = true;
     }
     return results;
@@ -296,11 +300,13 @@ async function main() {
   }
 
   let planItems = [];
+  let sourcePlanId = null;
   const planPath = replyResult.plan;
   if (planPath && existsSync(planPath)) {
     try {
       const plan = JSON.parse(readFileSync(planPath, 'utf8'));
       planItems = plan.items || [];
+      sourcePlanId = plan.planId || null;
     } catch {
       console.error(`[verify] 原计划文件读取失败: ${planPath}`);
     }
@@ -316,6 +322,55 @@ async function main() {
 
   console.log(`[verify] 模式: ${mode}`);
   console.log(`[verify] 待确认: ${verifyItems.length} 条 / ${groups.length} 个作品`);
+
+  if (isDryRun) {
+    for (const item of validItems) {
+      console.log(`[verify]   (dry-run) ${item.actorName} "${item.commentText.slice(0, 40)}" → 作品: ${item.workTitle || '(未知)'}`);
+    }
+    const dryResults = validItems.map(item => ({
+      eventId: item.eventId,
+      actorName: item.actorName,
+      workTitle: item.workTitle || '',
+      status: 'skipped',
+      reason: 'dry-run 模式，仅列出待确认项',
+      step: 'verify-reply',
+      code: RESULT_CODES.DRY_RUN_REQUIRED,
+    }));
+    for (const si of skippedItems) {
+      dryResults.push({
+        eventId: si.eventId,
+        actorName: si.actorName || '',
+        workTitle: si.workTitle || '',
+        status: 'skipped',
+        reason: si._skipReason || 'plan item not found',
+        step: 'verify-reply',
+        code: '',
+      });
+    }
+    const plansDir = path.resolve('data', 'plans');
+    ensureDir(plansDir);
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const resultPath = path.join(plansDir, `verify-result-${ts}.json`);
+    writeJSON(resultPath, {
+      sourceResult: cmdArgs.result,
+      sourcePlan: replyResult.plan || null,
+      mode,
+      results: dryResults,
+      summary: {
+        total: verifyItems.length,
+        workGroups: groups.length,
+        processed: 0,
+        succeeded: 0,
+        sentUnverified: 0,
+        skipped: dryResults.length,
+        blocked: 0,
+        evidenceCount: 0,
+        maxItems: commonArgs.options.maxItems,
+      },
+    });
+    console.log(`[verify] 结果已保存: ${resultPath}`);
+    return;
+  }
 
   const db = getDb();
   let browser = null;
@@ -346,32 +401,54 @@ async function main() {
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
 
     console.log('[verify] 导航到评论管理页...');
+    let pageReady = true;
     const navResult = await ensureCommentPageReady(page);
     if (!navResult.ok) {
       console.log(`[verify] 导航失败: [${navResult.code}] ${navResult.message}`);
+      pageReady = false;
       run.hadBlocked = true;
     } else {
       const areaResult = await waitForCommentsArea(page);
       if (!areaResult.ok) {
         console.log(`[verify] 评论区域检测: [${areaResult.code}] ${areaResult.message}`);
+        pageReady = false;
         run.hadBlocked = true;
       }
     }
 
-    for (const group of groups) {
-      const groupResults = await verifyWorkGroup(page, group, db, run, null, isDryRun);
-      results.push(...groupResults);
-
-      for (const r of groupResults) {
-        if (r.status === 'succeeded') successCount++;
-        else if (r.status === 'sent_unverified') sentUnverifiedCount++;
-        else if (r.status === 'skipped') skipCount++;
-        else if (r.status === 'blocked') blockedCount++;
+    if (!pageReady) {
+      const navError = navResult.ok ? '评论区域未就绪' : (navResult.message || '导航失败');
+      for (const item of validItems) {
+        results.push({
+          eventId: item.eventId,
+          actorName: item.actorName,
+          workTitle: item.workTitle || '',
+          status: 'blocked',
+          reason: `页面未就绪: ${navError}`,
+          step: 'navigate',
+          code: navResult.code || RESULT_CODES.NAVIGATION_TIMEOUT,
+        });
+        blockedCount++;
+        try {
+          recordAction(db, item.eventId, sourcePlanId, item.workTitle || '', item.replyText || '', 'blocked', `页面未就绪: ${navError}`, null, null);
+        } catch {}
       }
+    } else {
+      for (const group of groups) {
+        const groupResults = await verifyWorkGroup(page, group, db, run, sourcePlanId, false);
+        results.push(...groupResults);
 
-      if (run.processed >= commonArgs.options.maxItems) {
-        console.log(`[verify] 已达到本轮最大执行数量 ${commonArgs.options.maxItems}, 停止。`);
-        break;
+        for (const r of groupResults) {
+          if (r.status === 'succeeded') successCount++;
+          else if (r.status === 'sent_unverified') sentUnverifiedCount++;
+          else if (r.status === 'skipped') skipCount++;
+          else if (r.status === 'blocked') blockedCount++;
+        }
+
+        if (run.processed >= commonArgs.options.maxItems) {
+          console.log(`[verify] 已达到本轮最大执行数量 ${commonArgs.options.maxItems}, 停止。`);
+          break;
+        }
       }
     }
 
