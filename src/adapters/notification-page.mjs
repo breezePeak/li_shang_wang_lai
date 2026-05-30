@@ -750,30 +750,86 @@ export async function debugDumpNotificationItems(page, debugDir) {
 
   const debugData = await page.evaluate((ACTION_PATTERNS) => {
     function findNotificationPanel() {
-      const candidates = document.querySelectorAll('[class*="notification"], [class*="message"], [class*="inform"], [data-e2e*="notify"], [data-e2e*="message"]');
-      for (const el of candidates) {
-        if (el.offsetHeight > 100 && el.offsetWidth > 100) return el;
+      for (const el of document.querySelectorAll('*')) {
+        const t = (el.innerText || '').trim();
+        if (t.startsWith('互动消息') || t.startsWith('全部消息')) {
+          const r = el.getBoundingClientRect();
+          if (r.width < 100 || r.height < 30) continue;
+          let c = el.parentElement;
+          for (let i = 0; i < 6 && c && c !== document.body; i++) {
+            const cr = c.getBoundingClientRect();
+            if (cr.width > 250 && cr.height > 300) return c;
+            c = c.parentElement;
+          }
+        }
       }
       return null;
+    }
+
+    function findNotificationItemElements(panel, panelRect) {
+      const selectorItems = panel.querySelectorAll('li, [class*="item"], [class*="row"], [class*="entry"]');
+      const direct = [];
+      for (const el of selectorItems) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 30 || rect.height < 5) continue;
+        const text = (el.innerText || '').trim();
+        for (const pat of ACTION_PATTERNS) {
+          if (text.includes(pat)) { direct.push(el); break; }
+        }
+      }
+      if (direct.length > 0) return direct;
+
+      const allElements = panel.querySelectorAll('*');
+      const singleAction = [];
+      for (const el of allElements) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 30 || rect.height < 20) continue;
+        if (rect.height > panelRect.height * 0.4) continue;
+        if (rect.top < panelRect.top - 5 || rect.bottom > panelRect.bottom + 50) continue;
+        const text = (el.innerText || '').trim();
+        if (text.length < 5) continue;
+        let actionCount = 0;
+        for (const pat of ACTION_PATTERNS) {
+          let idx = text.indexOf(pat);
+          let safety = 0;
+          while (idx !== -1 && safety < 10) { actionCount++; idx = text.indexOf(pat, idx + 1); safety++; }
+        }
+        if (actionCount === 1) {
+          const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+          if (lines.length >= 2) { singleAction.push({ el, lines, rect }); }
+        }
+      }
+      if (singleAction.length === 0) return [];
+
+      const groups = [];
+      for (const candidate of singleAction) {
+        let addedToGroup = false;
+        for (const group of groups) {
+          const memberRect = group[0].rect;
+          const candRect = candidate.rect;
+          const overlapTop = Math.max(memberRect.top, candRect.top);
+          const overlapBottom = Math.min(memberRect.bottom, candRect.bottom);
+          const overlapHeight = overlapBottom - overlapTop;
+          if (overlapHeight > Math.min(memberRect.height, candRect.height) * 0.5) {
+            group.push(candidate);
+            addedToGroup = true;
+            break;
+          }
+        }
+        if (!addedToGroup) groups.push([candidate]);
+      }
+      return groups.map(group => { group.sort((a, b) => b.lines.length - a.lines.length); return group[0].el; });
     }
 
     const panel = findNotificationPanel();
     if (!panel) return { error: 'panel not found', items: [] };
 
-    const allElements = panel.querySelectorAll('*');
-    const itemEls = [];
-    for (const el of allElements) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 30 || rect.height < 5) continue;
-      const text = (el.innerText || '').trim();
-      for (const pat of ACTION_PATTERNS) {
-        if (text.includes(pat)) { itemEls.push(el); break; }
-      }
-    }
+    const panelRect = panel.getBoundingClientRect();
+    const notificationElements = findNotificationItemElements(panel, panelRect);
 
     const seen = new Set();
     const items = [];
-    for (const itemEl of itemEls) {
+    for (const itemEl of notificationElements) {
       const text = (itemEl.innerText || '').trim();
       if (seen.has(text)) continue;
       seen.add(text);
