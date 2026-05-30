@@ -249,3 +249,133 @@ describe('interactiveSelect — terminal prompts', () => {
     expect(src).toMatch(/输入 s 跳过，q 停止/);
   });
 });
+
+// ============================================================
+// 10. findDouyinActionBarLikeItem — exports and structure
+// ============================================================
+describe('findDouyinActionBarLikeItem (from video-page.mjs)', () => {
+  it('exports findDouyinActionBarLikeItem function', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    expect(src).toMatch(/export async function findDouyinActionBarLikeItem/);
+  });
+
+  it('uses action bar DOM selectors (.t5VMknM2 .MinpposV)', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    expect(src).toMatch(/\.t5VMknM2 \.MinpposV/);
+  });
+
+  it('checks f7caOKG9 class for liked state', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    expect(src).toMatch(/f7caOKG9/);
+  });
+
+  it('checks strict Douyin red on visible path elements', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    expect(src).toMatch(/isVisibleEl\(p\)/);
+    expect(src).toMatch(/isDouyinRedColor/);
+  });
+
+  it('returns found=false when action bar missing', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    // The evaluate returns null when container missing
+    expect(src).toMatch(/if \(!container\) return null/);
+  });
+});
+
+// ============================================================
+// 11. clickLike — uses action bar, pre-check
+// ============================================================
+describe('clickLike (rewritten, from video-page.mjs)', () => {
+  it('calls findDouyinActionBarLikeItem to find button', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    const clickFn = src.indexOf('export async function clickLike');
+    const findCall = src.indexOf('findDouyinActionBarLikeItem(page)', clickFn);
+    expect(findCall).toBeGreaterThan(clickFn);
+  });
+
+  it('returns ALREADY_LIKED when barResult.data.isLiked is true', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    expect(src).toMatch(/barResult\.data\.isLiked/);
+    expect(src).toMatch(/ALREADY_LIKED/);
+  });
+
+  it('does NOT use text-based startsWith(赞/点赞) for finding button', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    const clickFn = src.indexOf('export async function clickLike');
+    const afterClick = src.slice(clickFn);
+    // The old text-based selection should NOT appear inside clickLike anymore
+    expect(afterClick).not.toMatch(/text\.startsWith\('点赞/);
+    expect(afterClick).not.toMatch(/text\.startsWith\('赞/);
+  });
+
+  it('uses Playwright locator .first() to click the action bar item', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    const clickFn = src.indexOf('export async function clickLike');
+    const afterClick = src.slice(clickFn);
+    expect(afterClick).toMatch(/\.AOWKbsTg/);
+    expect(afterClick).toMatch(/\.first\(\)/);
+    expect(afterClick).toMatch(/\.click\(\)/);
+  });
+});
+
+// ============================================================
+// 12. confirmLikeSucceeded — uses action bar
+// ============================================================
+describe('confirmLikeSucceeded (rewritten, from video-page.mjs)', () => {
+  it('calls findDouyinActionBarLikeItem to check state', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    const confirmFn = src.indexOf('export async function confirmLikeSucceeded');
+    const findCall = src.indexOf('findDouyinActionBarLikeItem(page)', confirmFn);
+    expect(findCall).toBeGreaterThan(confirmFn);
+  });
+
+  it('checks isLiked from barResult.data', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    expect(src).toMatch(/info\.isLiked/);
+  });
+
+  it('returns success with liked-class signal when f7caOKG9 found', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    expect(src).toMatch(/liked-class/);
+  });
+
+  it('returns success with red-fill signal when path is Douyin red', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    expect(src).toMatch(/red-fill/);
+  });
+
+  it('does NOT check non-action-bar elements', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    const confirmFn = src.indexOf('export async function confirmLikeSucceeded');
+    const afterConfirm = src.slice(confirmFn);
+    // Should not have the old general querySelectorAll pattern
+    expect(afterConfirm).not.toMatch(/querySelectorAll\('span, div, \[role/);
+  });
+});
+
+// ============================================================
+// 13. postVideoComment — uses locator+keyboard.type, unconfirmed flag
+// ============================================================
+describe('postVideoComment updated behavior (from video-page.mjs)', () => {
+  it('uses Playwright locator (.first()) and keyboard.type for input', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    const pvcFn = src.indexOf('export async function postVideoComment');
+    const afterPvc = src.slice(pvcFn);
+    expect(afterPvc).toMatch(/\.first\(\)/);
+    expect(afterPvc).toMatch(/keyboard\.type/);
+  });
+
+  it('has unconfirmed flag in success response when input not cleared', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    expect(src).toMatch(/unconfirmed:\s*true/);
+  });
+
+  it('does NOT use evaluate + textContent for input', () => {
+    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
+    const pvcFn = src.indexOf('export async function postVideoComment');
+    const afterPvc = src.slice(pvcFn);
+    // Should not use page.evaluate with dispatchEvent for input
+    expect(afterPvc).not.toMatch(/dispatchEvent/);
+    expect(afterPvc).not.toMatch(/textContent = commentText/);
+  });
+});
