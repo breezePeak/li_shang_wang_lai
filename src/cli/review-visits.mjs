@@ -11,9 +11,9 @@ import { RESULT_CODES } from '../domain/result-codes.mjs';
 export const FRIENDLY_RELATIONS = new Set(['friend', 'mutual']);
 
 export const VISIT_DRAFTS = [
-  '支持一下',
-  '内容不错，来看看',
-  '互相加油',
+  { text: '支持一下', commentCategory: 'support', replyMode: 'auto_simple', riskLevel: 'low', templateId: 'visit-support-1' },
+  { text: '内容不错，来看看', commentCategory: 'praise', replyMode: 'auto_simple', riskLevel: 'low', templateId: 'visit-praise-1' },
+  { text: '互相加油', commentCategory: 'encouragement', replyMode: 'auto_simple', riskLevel: 'low', templateId: 'visit-encouragement-1' },
 ];
 
 export function buildReviewRecord(discovery) {
@@ -30,6 +30,12 @@ export function buildReviewRecord(discovery) {
     suggestedActions: discovery.plannedActions,
     commentDrafts: VISIT_DRAFTS,
     selectedCommentDraft: null,
+    commentCategory: null,
+    replyMode: null,
+    riskLevel: null,
+    templateId: null,
+    manualReviewMethod: null,
+    autoExecuteAllowed: false,
     requiresManualReview: true,
     executeAllowed: false,
     previewOnly: true,
@@ -253,7 +259,7 @@ async function main() {
     console.error(`\n----- 待审核回访候选 (${reviewCandidates.length}) -----`);
     for (const c of reviewCandidates) {
       console.error(`  ${c.actorName} [${c.relation}] → ${c.targetWorkUrl}`);
-      console.error(`    草稿: ${c.commentDrafts.join(' | ')}`);
+      console.error(`    草稿: ${c.commentDrafts.map(d => d.text).join(' | ')}`);
       console.error(`    需人工选择草稿后确认`);
     }
   }

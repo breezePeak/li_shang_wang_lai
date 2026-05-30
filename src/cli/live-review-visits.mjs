@@ -12,9 +12,9 @@ import { RESULT_CODES } from '../domain/result-codes.mjs';
 export const FRIENDLY_RELATIONS = new Set(['friend', 'mutual']);
 
 export const VISIT_DRAFTS = [
-  '支持一下',
-  '内容不错，来看看',
-  '互相加油',
+  { text: '支持一下', commentCategory: 'support', replyMode: 'auto_simple', riskLevel: 'low', templateId: 'visit-support-1' },
+  { text: '内容不错，来看看', commentCategory: 'praise', replyMode: 'auto_simple', riskLevel: 'low', templateId: 'visit-praise-1' },
+  { text: '互相加油', commentCategory: 'encouragement', replyMode: 'auto_simple', riskLevel: 'low', templateId: 'visit-encouragement-1' },
 ];
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -71,6 +71,12 @@ async function processCandidate(page, candidate) {
     previewOnly: true,
     reason: null,
     selectedCommentDraft: null,
+    commentCategory: null,
+    replyMode: null,
+    riskLevel: null,
+    templateId: null,
+    manualReviewMethod: null,
+    autoExecuteAllowed: false,
     actionResults: null,
   };
 
@@ -156,10 +162,10 @@ async function interactiveSelect(page, record, isExecute) {
   console.error(`  作品: ${record.targetWorkTitle.slice(0, 60) || record.targetWorkUrl.slice(0, 60)}`);
   console.error(`  ID: ${record.targetWorkId}`);
   console.error(`====================================================`);
-  console.error(`  评论草稿:`);
+  console.error(`  评论草稿 (固定 low-risk 模板):`);
   for (let i = 0; i < VISIT_DRAFTS.length; i++) {
     const marker = i === 0 ? '>' : ' ';
-    console.error(`  ${marker} ${i + 1}. "${VISIT_DRAFTS[i]}"`);
+    console.error(`  ${marker} ${i + 1}. "${VISIT_DRAFTS[i].text}"`);
   }
 
   const promptText = isExecute
@@ -186,12 +192,25 @@ async function interactiveSelect(page, record, isExecute) {
   }
 
   const draft = VISIT_DRAFTS[choice - 1];
-  record.selectedCommentDraft = draft;
-  console.error(`[live-review]   选择草稿 #${choice}: "${draft}"`);
+  record.selectedCommentDraft = draft.text;
+  record.commentCategory = draft.commentCategory;
+  record.replyMode = draft.replyMode;
+  record.riskLevel = draft.riskLevel;
+  record.templateId = draft.templateId;
+  record.manualReviewMethod = 'user_selected_template';
+  record.autoExecuteAllowed = false;
+  console.error(`[live-review]   选择草稿 #${choice}: "${draft.text}" [${draft.riskLevel}/${draft.replyMode}]`);
 
   if (!isExecute) {
     console.error(`[live-review]   dry-run 模式，不执行真实操作`);
-    return { action: 'selected', draft };
+    return { action: 'selected', draft: draft.text };
+  }
+
+  // execute mode: validate risk before proceeding
+  if (draft.riskLevel !== 'low' || draft.replyMode !== 'auto_simple') {
+    record.actionResults = { like: 'blocked', comment: null, reason: 'risk_level_not_low', riskLevel: draft.riskLevel, replyMode: draft.replyMode };
+    console.error(`[live-review]   草稿风险等级不符 (${draft.riskLevel}/${draft.replyMode})，跳过执行`);
+    return { action: 'risk_blocked', draft: draft.text };
   }
 
   // execute mode: re-check like state on current page, then act
@@ -202,13 +221,13 @@ async function interactiveSelect(page, record, isExecute) {
   if (reclass.status === 'blocked') {
     record.actionResults = { like: 'blocked', comment: null, reason: 'LIKE_STATE_UNKNOWN' };
     console.error(`[live-review]   re-check 点赞状态未知，跳过执行`);
-    return { action: 'blocked', draft };
+    return { action: 'blocked', draft: draft.text };
   }
 
   if (reclass.status === 'skipped') {
     record.actionResults = { like: 'skipped', comment: null, reason: 'already_liked' };
     console.error(`[live-review]   re-check 已点赞，跳过评论`);
-    return { action: 'skipped', draft };
+    return { action: 'skipped', draft: draft.text };
   }
 
   // not_liked: execute like + comment
@@ -217,31 +236,31 @@ async function interactiveSelect(page, record, isExecute) {
   if (!likeExec.ok) {
     record.actionResults = { like: likeExec.code, comment: null, reason: likeExec.message };
     console.error(`[live-review]   点赞失败: ${likeExec.message}`);
-    return { action: 'like_failed', draft };
+    return { action: 'like_failed', draft: draft.text };
   }
 
   const confirm = await confirmLikeSucceeded(page);
   if (!confirm.ok) {
     record.actionResults = { like: 'clicked_but_unconfirmed', comment: null };
     console.error(`[live-review]   点赞后无法确认`);
-    return { action: 'like_unconfirmed', draft };
+    return { action: 'like_unconfirmed', draft: draft.text };
   }
 
   record.actionResults = { like: 'confirmed', comment: null };
   console.error(`[live-review]   点赞成功`);
 
   // post comment
-  console.error(`[live-review]   发表评论: "${draft}"...`);
-  const commentExec = await postVideoComment(page, draft, { execute: true });
+  console.error(`[live-review]   发表评论: "${draft.text}"...`);
+  const commentExec = await postVideoComment(page, draft.text, { execute: true });
   if (!commentExec.ok) {
     record.actionResults.comment = commentExec.code;
     console.error(`[live-review]   评论失败: ${commentExec.message}`);
-    return { action: 'comment_failed', draft };
+    return { action: 'comment_failed', draft: draft.text };
   }
 
   record.actionResults.comment = 'confirmed';
   console.error(`[live-review]   评论成功`);
-  return { action: 'executed', draft };
+  return { action: 'executed', draft: draft.text };
 }
 
 async function main() {
@@ -349,8 +368,9 @@ async function main() {
   for (const d of discoveries) {
     if (d.status === 'pending_review') {
       const draftInfo = d.selectedCommentDraft ? ` 草稿: "${d.selectedCommentDraft}"` : ' 未选择';
+      const riskInfo = d.riskLevel ? ` [${d.riskLevel}/${d.replyMode}]` : '';
       const actionInfo = d.actionResults ? ` 执行结果: ${JSON.stringify(d.actionResults)}` : '';
-      console.error(`  [${d.sourceEventIds.join(',')}] ${d.actorName} → ${d.targetWorkUrl}${draftInfo}${actionInfo}`);
+      console.error(`  [${d.sourceEventIds.join(',')}] ${d.actorName} → ${d.targetWorkUrl}${draftInfo}${riskInfo}${actionInfo}`);
     } else if (d.status === 'skipped') {
       console.error(`  - ${d.actorName}: ${d.reason}`);
     } else {
@@ -374,6 +394,12 @@ async function main() {
         suggestedActions: d.plannedActions,
         commentDrafts: VISIT_DRAFTS,
         selectedCommentDraft: d.selectedCommentDraft,
+        commentCategory: d.commentCategory,
+        replyMode: d.replyMode,
+        riskLevel: d.riskLevel,
+        templateId: d.templateId,
+        manualReviewMethod: d.manualReviewMethod,
+        autoExecuteAllowed: false,
         actionResults: d.actionResults,
         requiresManualReview: true,
         executeAllowed: false,

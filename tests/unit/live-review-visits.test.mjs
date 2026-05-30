@@ -50,17 +50,30 @@ describe('VISIT_DRAFTS', () => {
 
   it('drafts are natural and non-marketing', () => {
     for (const d of VISIT_DRAFTS) {
-      expect(typeof d).toBe('string');
-      expect(d.length).toBeGreaterThan(0);
-      expect(d).not.toMatch(/[!！?？]+$/);
-      expect(d.length).toBeLessThan(30);
+      expect(d).toHaveProperty('text');
+      expect(typeof d.text).toBe('string');
+      expect(d.text.length).toBeGreaterThan(0);
+      expect(d.text).not.toMatch(/[!！?？]+$/);
+      expect(d.text.length).toBeLessThan(30);
     }
   });
 
-  it('contains known drafts', () => {
-    expect(VISIT_DRAFTS).toContain('支持一下');
-    expect(VISIT_DRAFTS).toContain('内容不错，来看看');
-    expect(VISIT_DRAFTS).toContain('互相加油');
+  it('contains known draft texts', () => {
+    const texts = VISIT_DRAFTS.map(d => d.text);
+    expect(texts).toContain('支持一下');
+    expect(texts).toContain('内容不错，来看看');
+    expect(texts).toContain('互相加油');
+  });
+
+  it('all drafts have metadata fields', () => {
+    for (const d of VISIT_DRAFTS) {
+      expect(d).toHaveProperty('commentCategory');
+      expect(d).toHaveProperty('replyMode');
+      expect(d).toHaveProperty('riskLevel');
+      expect(d).toHaveProperty('templateId');
+      expect(d.replyMode).toBe('auto_simple');
+      expect(d.riskLevel).toBe('low');
+    }
   });
 });
 
