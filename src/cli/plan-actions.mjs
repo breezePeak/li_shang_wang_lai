@@ -1,6 +1,7 @@
 import { getEvents } from '../db/interaction-repository.mjs';
 import { runMigrations } from '../db/migrations.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
+import { normalizeDouyinUrl } from '../utils/douyin-url.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 
 export function stripUrlQuery(url) {
@@ -59,7 +60,7 @@ export function generatePlan(events) {
   for (const event of events) {
     const relation = resolveEffectiveRelation(event);
     const dedupConfidence = event.dedup_confidence || 'weak';
-    const actorProfileUrl = event.actor_profile_url || '';
+    const actorProfileUrl = normalizeDouyinUrl(event.actor_profile_url || '');
     const actorProfileKey = event.actor_profile_key || '';
 
     if (event.event_type === 'comment') {
@@ -72,7 +73,7 @@ export function generatePlan(events) {
         relation,
         commentText: event.comment_text || '',
         targetWorkId: event.target_work_id || null,
-        targetWorkUrl: event.target_work_url || null,
+        targetWorkUrl: normalizeDouyinUrl(event.target_work_url),
         dedupConfidence,
         replyMode: 'pending_review',
         actionType: 'reply_comment_candidate',

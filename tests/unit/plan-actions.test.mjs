@@ -430,3 +430,55 @@ describe('generatePlan — 在线兜底进入 visitWorkCandidates', () => {
     expect(result.skipped[0].reason).toBe('non_friend_non_mutual');
   });
 });
+
+// ============================================================
+// generatePlan — URL normalization output
+// ============================================================
+describe('generatePlan — URL normalization', () => {
+  it('dirty double-domain actor_profile_url → canonicalActorProfileUrl is clean', () => {
+    const event = makeEvent({
+      id: 1, event_type: 'like', relation: 'friend',
+      actor_profile_key: 'k1',
+      actor_profile_url: 'https://www.douyin.com//www.douyin.com/user/k1?enter_from=interact_cell',
+      dedup_confidence: 'strong',
+    });
+    const result = generatePlan([event]);
+    expect(result.visitWorkCandidates).toHaveLength(1);
+    const v = result.visitWorkCandidates[0];
+    expect(v.actorProfileUrl).toBe('https://www.douyin.com/user/k1');
+    expect(v.canonicalActorProfileUrl).toBe('https://www.douyin.com/user/k1');
+  });
+
+  it('dirty target_work_url in replyCommentCandidates is normalized', () => {
+    const event = makeEvent({
+      id: 1, event_type: 'comment', relation: 'friend',
+      actor_profile_key: null, actor_profile_url: null,
+      target_work_url: 'https://www.douyin.com//www.douyin.com/video/12345?tab=like',
+      comment_text: '好作品',
+    });
+    const result = generatePlan([event]);
+    expect(result.replyCommentCandidates).toHaveLength(1);
+    expect(result.replyCommentCandidates[0].targetWorkUrl).toBe('https://www.douyin.com/video/12345');
+  });
+
+  it('dirty actor_profile_url in replyCommentCandidates is normalized', () => {
+    const event = makeEvent({
+      id: 1, event_type: 'comment', relation: 'friend',
+      actor_profile_url: 'https://www.douyin.com/https://www.douyin.com/user/k1',
+      comment_text: '不错',
+    });
+    const result = generatePlan([event]);
+    expect(result.replyCommentCandidates[0].actorProfileUrl).toBe('https://www.douyin.com/user/k1');
+  });
+
+  it('does not change interaction_events.status (read-only)', () => {
+    const event = makeEvent({
+      id: 1, event_type: 'like', relation: 'friend',
+      actor_profile_key: 'k1',
+      actor_profile_url: 'https://www.douyin.com//www.douyin.com/user/k1',
+    });
+    const beforeStatus = event.status;
+    generatePlan([event]);
+    expect(event.status).toBe(beforeStatus);
+  });
+});

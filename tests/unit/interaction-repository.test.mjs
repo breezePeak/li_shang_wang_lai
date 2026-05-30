@@ -63,31 +63,31 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
       relation: 'friend', commentText: null, eventTimeText: '10:30',
       fingerprint: fp1, dedupConfidence: 'medium',
       platformEventId: null, notificationItemKey: 'ni-1',
-      workId: 'video-100', workUrl: 'https://douyin.com/video/100',
+      workId: 'video-100', workUrl: 'https://www.douyin.com/video/100',
       action: '赞了你的作品', content: null,
       rawPayloadJson: '{"rawText":"张三\\n朋友\\n赞了你的作品\\n10:30"}',
-      targetWorkId: 'video-100', targetWorkUrl: 'https://douyin.com/video/100',
+      targetWorkId: 'video-100', targetWorkUrl: 'https://www.douyin.com/video/100',
       profileResolutionStatus: 'unresolved',
     });
     expect(r1.action).toBe('inserted');
 
     const r2 = upsertNotificationEvent({
       eventType: 'like', actorName: '张三',
-      actorProfileKey: 'user_key_zs', actorProfileUrl: 'https://douyin.com/user/user_key_zs',
+      actorProfileKey: 'user_key_zs', actorProfileUrl: 'https://www.douyin.com/user/user_key_zs',
       relation: 'friend', commentText: null, eventTimeText: '10:30',
       fingerprint: fp1, dedupConfidence: 'strong',
       platformEventId: 'pid-001', notificationItemKey: 'ni-1',
-      workId: 'video-100', workUrl: 'https://douyin.com/video/100',
+      workId: 'video-100', workUrl: 'https://www.douyin.com/video/100',
       action: '赞了你的作品', content: null,
       rawPayloadJson: '{"rawText":"张三\\n朋友\\n赞了你的作品\\n10:30","profileResolveMethod":"dom_href"}',
-      targetWorkId: 'video-100', targetWorkUrl: 'https://douyin.com/video/100',
+      targetWorkId: 'video-100', targetWorkUrl: 'https://www.douyin.com/video/100',
       profileResolutionStatus: 'dom_href',
     });
     expect(r2.action).toBe('enriched');
 
     const events = getEvents({ limit: 10 });
     expect(events.length).toBe(1);
-    expect(events[0].actor_profile_url).toBe('https://douyin.com/user/user_key_zs');
+    expect(events[0].actor_profile_url).toBe('https://www.douyin.com/user/user_key_zs');
     expect(events[0].actor_profile_key).toBe('user_key_zs');
     expect(events[0].platform_event_id).toBe('pid-001');
   });
@@ -97,28 +97,28 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
 
     const r1 = upsertNotificationEvent({
       eventType: 'like', actorName: '李四',
-      actorProfileKey: 'key_ls', actorProfileUrl: 'https://douyin.com/user/key_ls',
+      actorProfileKey: 'key_ls', actorProfileUrl: 'https://www.douyin.com/user/key_ls',
       relation: 'mutual', commentText: null, eventTimeText: '11:00',
       fingerprint: fp, dedupConfidence: 'strong',
       platformEventId: 'pid-002', notificationItemKey: 'ni-2',
-      workId: 'video-200', workUrl: 'https://douyin.com/video/200',
+      workId: 'video-200', workUrl: 'https://www.douyin.com/video/200',
       action: '赞了你的作品', content: null,
       rawPayloadJson: '{"rawText":"...first..."}',
-      targetWorkId: 'video-200', targetWorkUrl: 'https://douyin.com/video/200',
+      targetWorkId: 'video-200', targetWorkUrl: 'https://www.douyin.com/video/200',
       profileResolutionStatus: 'dom_href',
     });
     expect(r1.action).toBe('inserted');
 
     const r2 = upsertNotificationEvent({
       eventType: 'like', actorName: '李四',
-      actorProfileKey: 'key_ls', actorProfileUrl: 'https://douyin.com/user/key_ls',
+      actorProfileKey: 'key_ls', actorProfileUrl: 'https://www.douyin.com/user/key_ls',
       relation: 'mutual', commentText: null, eventTimeText: '11:00',
       fingerprint: fp, dedupConfidence: 'strong',
       platformEventId: 'pid-002', notificationItemKey: 'ni-2',
-      workId: 'video-200', workUrl: 'https://douyin.com/video/200',
+      workId: 'video-200', workUrl: 'https://www.douyin.com/video/200',
       action: '赞了你的作品', content: null,
       rawPayloadJson: '{"rawText":"...rescan same event..."}',
-      targetWorkId: 'video-200', targetWorkUrl: 'https://douyin.com/video/200',
+      targetWorkId: 'video-200', targetWorkUrl: 'https://www.douyin.com/video/200',
       profileResolutionStatus: 'dom_href',
     });
     expect(r2.action).toBe('duplicate');
@@ -135,31 +135,31 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
       relation: 'unknown', commentText: null, eventTimeText: '12:00',
       fingerprint: fp, dedupConfidence: 'medium',
       platformEventId: 'pid-003', notificationItemKey: 'ni-3',
-      workId: 'video-300', workUrl: 'https://douyin.com/video/300',
+      workId: 'video-300', workUrl: 'https://www.douyin.com/video/300',
       action: '赞了你的作品', content: null,
       rawPayloadJson: '{"v":1}',
-      targetWorkId: 'video-300', targetWorkUrl: 'https://douyin.com/video/300',
+      targetWorkId: 'video-300', targetWorkUrl: 'https://www.douyin.com/video/300',
       profileResolutionStatus: 'unresolved',
     });
     expect(r1.action).toBe('inserted');
 
     const r2 = upsertNotificationEvent({
       eventType: 'like', actorName: '王五',
-      actorProfileKey: 'key_ww', actorProfileUrl: 'https://douyin.com/user/key_ww',
+      actorProfileKey: 'key_ww', actorProfileUrl: 'https://www.douyin.com/user/key_ww',
       relation: 'friend', commentText: null, eventTimeText: '12:00',
       fingerprint: fp, dedupConfidence: 'strong',
       platformEventId: 'pid-003', notificationItemKey: 'ni-3',
-      workId: 'video-300', workUrl: 'https://douyin.com/video/300',
+      workId: 'video-300', workUrl: 'https://www.douyin.com/video/300',
       action: '赞了你的作品', content: null,
       rawPayloadJson: '{"v":2}',
-      targetWorkId: 'video-300', targetWorkUrl: 'https://douyin.com/video/300',
+      targetWorkId: 'video-300', targetWorkUrl: 'https://www.douyin.com/video/300',
       profileResolutionStatus: 'dom_href',
     });
     expect(r2.action).toBe('enriched');
 
     const ev = getEvent(r1.eventId);
     expect(ev.relation).toBe('friend');
-    expect(ev.actor_profile_url).toBe('https://douyin.com/user/key_ww');
+    expect(ev.actor_profile_url).toBe('https://www.douyin.com/user/key_ww');
   });
 
   it('无 workId 的 weak like 不得错误合并', () => {
@@ -182,7 +182,7 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
 
     const r2 = upsertNotificationEvent({
       eventType: 'like', actorName: '赵六',
-      actorProfileKey: 'key_zl', actorProfileUrl: 'https://douyin.com/user/key_zl',
+      actorProfileKey: 'key_zl', actorProfileUrl: 'https://www.douyin.com/user/key_zl',
       relation: 'friend', commentText: null, eventTimeText: '13:05',
       fingerprint: fp2, dedupConfidence: 'weak',
       platformEventId: null, notificationItemKey: 'ni-5',
@@ -208,10 +208,10 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
       relation: 'unknown', commentText: '你好', eventTimeText: '14:00',
       fingerprint: fp1, dedupConfidence: 'medium',
       platformEventId: null, notificationItemKey: 'ni-6',
-      workId: 'video-400', workUrl: 'https://douyin.com/video/400',
+      workId: 'video-400', workUrl: 'https://www.douyin.com/video/400',
       action: '评论了你的作品', content: '你好',
       rawPayloadJson: '{}',
-      targetWorkId: 'video-400', targetWorkUrl: 'https://douyin.com/video/400',
+      targetWorkId: 'video-400', targetWorkUrl: 'https://www.douyin.com/video/400',
       profileResolutionStatus: 'unresolved',
     });
 
@@ -221,23 +221,23 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
       relation: 'unknown', commentText: '再见', eventTimeText: '14:05',
       fingerprint: fp2, dedupConfidence: 'medium',
       platformEventId: null, notificationItemKey: 'ni-7',
-      workId: 'video-400', workUrl: 'https://douyin.com/video/400',
+      workId: 'video-400', workUrl: 'https://www.douyin.com/video/400',
       action: '评论了你的作品', content: '再见',
       rawPayloadJson: '{}',
-      targetWorkId: 'video-400', targetWorkUrl: 'https://douyin.com/video/400',
+      targetWorkId: 'video-400', targetWorkUrl: 'https://www.douyin.com/video/400',
       profileResolutionStatus: 'unresolved',
     });
 
     const r3 = upsertNotificationEvent({
       eventType: 'comment', actorName: '钱七',
-      actorProfileKey: 'key_qq', actorProfileUrl: 'https://douyin.com/user/key_qq',
+      actorProfileKey: 'key_qq', actorProfileUrl: 'https://www.douyin.com/user/key_qq',
       relation: 'friend', commentText: null, eventTimeText: '14:10',
       fingerprint: fp3, dedupConfidence: 'medium',
       platformEventId: null, notificationItemKey: 'ni-8',
-      workId: 'video-400', workUrl: 'https://douyin.com/video/400',
+      workId: 'video-400', workUrl: 'https://www.douyin.com/video/400',
       action: '评论了你的作品', content: null,
       rawPayloadJson: '{"v":3}',
-      targetWorkId: 'video-400', targetWorkUrl: 'https://douyin.com/video/400',
+      targetWorkId: 'video-400', targetWorkUrl: 'https://www.douyin.com/video/400',
       profileResolutionStatus: 'dom_href',
     });
     expect(r3.action).toBe('ambiguous');
@@ -248,21 +248,21 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
 
     const r = upsertNotificationEvent({
       eventType: 'like', actorName: '孙八',
-      actorProfileKey: 'key_sb', actorProfileUrl: 'https://douyin.com/user/key_sb',
+      actorProfileKey: 'key_sb', actorProfileUrl: 'https://www.douyin.com/user/key_sb',
       relation: 'mutual', commentText: null, eventTimeText: '15:00',
       fingerprint: fp, dedupConfidence: 'strong',
       platformEventId: 'pid-004', notificationItemKey: 'ni-9',
-      workId: 'video-500', workUrl: 'https://douyin.com/video/500',
+      workId: 'video-500', workUrl: 'https://www.douyin.com/video/500',
       action: '赞了你的作品', content: null,
       rawPayloadJson: '{"v":1}',
-      targetWorkId: 'video-500', targetWorkUrl: 'https://douyin.com/video/500',
+      targetWorkId: 'video-500', targetWorkUrl: 'https://www.douyin.com/video/500',
       profileResolutionStatus: 'dom_href',
     });
     expect(r.action).toBe('inserted');
 
     const ev = getEvent(r.eventId);
     expect(ev.target_work_id).toBe('video-500');
-    expect(ev.target_work_url).toBe('https://douyin.com/video/500');
+    expect(ev.target_work_url).toBe('https://www.douyin.com/video/500');
     expect(ev.dedup_confidence).toBe('strong');
     expect(ev.profile_resolution_status).toBe('dom_href');
   });
@@ -278,10 +278,10 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
       relation: 'unknown', commentText: '你好啊', eventTimeText: '16:00',
       fingerprint: fp1, dedupConfidence: 'medium',
       platformEventId: null, notificationItemKey: 'ni-10',
-      workId: 'video-600', workUrl: 'https://douyin.com/video/600',
+      workId: 'video-600', workUrl: 'https://www.douyin.com/video/600',
       action: '评论了你的作品', content: '你好啊',
       rawPayloadJson: '{}',
-      targetWorkId: 'video-600', targetWorkUrl: 'https://douyin.com/video/600',
+      targetWorkId: 'video-600', targetWorkUrl: 'https://www.douyin.com/video/600',
       profileResolutionStatus: 'unresolved',
     });
 
@@ -291,23 +291,23 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
       relation: 'unknown', commentText: '再来一条', eventTimeText: '16:05',
       fingerprint: fp2, dedupConfidence: 'medium',
       platformEventId: null, notificationItemKey: 'ni-11',
-      workId: 'video-600', workUrl: 'https://douyin.com/video/600',
+      workId: 'video-600', workUrl: 'https://www.douyin.com/video/600',
       action: '评论了你的作品', content: '再来一条',
       rawPayloadJson: '{}',
-      targetWorkId: 'video-600', targetWorkUrl: 'https://douyin.com/video/600',
+      targetWorkId: 'video-600', targetWorkUrl: 'https://www.douyin.com/video/600',
       profileResolutionStatus: 'unresolved',
     });
 
     const r3 = upsertNotificationEvent({
       eventType: 'comment', actorName: '孙九',
-      actorProfileKey: 'key_sj', actorProfileUrl: 'https://douyin.com/user/key_sj',
+      actorProfileKey: 'key_sj', actorProfileUrl: 'https://www.douyin.com/user/key_sj',
       relation: 'friend', commentText: null, eventTimeText: '16:10',
       fingerprint: fp3, dedupConfidence: 'medium',
       platformEventId: null, notificationItemKey: 'ni-12',
-      workId: 'video-600', workUrl: 'https://douyin.com/video/600',
+      workId: 'video-600', workUrl: 'https://www.douyin.com/video/600',
       action: '评论了你的作品', content: null,
       rawPayloadJson: '{"v":3}',
-      targetWorkId: 'video-600', targetWorkUrl: 'https://douyin.com/video/600',
+      targetWorkId: 'video-600', targetWorkUrl: 'https://www.douyin.com/video/600',
       profileResolutionStatus: 'dom_href',
     });
 
@@ -340,7 +340,7 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
     const fp2 = 'fp-pid-no-guess-new';
     const r = upsertNotificationEvent({
       eventType: 'like', actorName: '周十',
-      actorProfileKey: 'key_zs10', actorProfileUrl: 'https://douyin.com/user/key_zs10',
+      actorProfileKey: 'key_zs10', actorProfileUrl: 'https://www.douyin.com/user/key_zs10',
       relation: 'friend', commentText: null, eventTimeText: '17:05',
       fingerprint: fp2, dedupConfidence: 'strong',
       platformEventId: 'pid-new-100', notificationItemKey: 'ni-14',
@@ -365,10 +365,10 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
       relation: 'unknown', commentText: null, eventTimeText: '19:00',
       fingerprint: fp, dedupConfidence: 'weak',
       platformEventId: null, notificationItemKey: 'ni-16',
-      workId: 'video-800', workUrl: 'https://douyin.com/video/800',
+      workId: 'video-800', workUrl: 'https://www.douyin.com/video/800',
       action: '赞了你的作品', content: null,
       rawPayloadJson: '{"v":1}',
-      targetWorkId: 'video-800', targetWorkUrl: 'https://douyin.com/video/800',
+      targetWorkId: 'video-800', targetWorkUrl: 'https://www.douyin.com/video/800',
       profileResolutionStatus: 'unresolved',
     });
     expect(r1.action).toBe('inserted');
@@ -381,33 +381,33 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
     // 拿到了 profile + medium confidence
     const r2 = upsertNotificationEvent({
       eventType: 'like', actorName: '郑十二',
-      actorProfileKey: 'key_zse', actorProfileUrl: 'https://douyin.com/user/key_zse',
+      actorProfileKey: 'key_zse', actorProfileUrl: 'https://www.douyin.com/user/key_zse',
       relation: 'friend', commentText: null, eventTimeText: '19:00',
       fingerprint: fp, dedupConfidence: 'medium',
       platformEventId: null, notificationItemKey: 'ni-16',
-      workId: 'video-800', workUrl: 'https://douyin.com/video/800',
+      workId: 'video-800', workUrl: 'https://www.douyin.com/video/800',
       action: '赞了你的作品', content: null,
       rawPayloadJson: '{"v":2}',
-      targetWorkId: 'video-800', targetWorkUrl: 'https://douyin.com/video/800',
+      targetWorkId: 'video-800', targetWorkUrl: 'https://www.douyin.com/video/800',
       profileResolutionStatus: 'dom_href',
     });
     expect(r2.action).toBe('enriched');
     ev = getEvent(r1.eventId);
     expect(ev.dedup_confidence).toBe('medium');
     expect(ev.relation).toBe('friend');
-    expect(ev.actor_profile_url).toBe('https://douyin.com/user/key_zse');
+    expect(ev.actor_profile_url).toBe('https://www.douyin.com/user/key_zse');
 
     // 第三轮：同一事件第三次扫描 → fingerprint match → enrichment with strong confidence + platformEventId
     const r3 = upsertNotificationEvent({
       eventType: 'like', actorName: '郑十二',
-      actorProfileKey: 'key_zse', actorProfileUrl: 'https://douyin.com/user/key_zse',
+      actorProfileKey: 'key_zse', actorProfileUrl: 'https://www.douyin.com/user/key_zse',
       relation: 'friend', commentText: null, eventTimeText: '19:00',
       fingerprint: fp, dedupConfidence: 'strong',
       platformEventId: 'pid-strong-001', notificationItemKey: 'ni-16',
-      workId: 'video-800', workUrl: 'https://douyin.com/video/800',
+      workId: 'video-800', workUrl: 'https://www.douyin.com/video/800',
       action: '赞了你的作品', content: null,
       rawPayloadJson: '{"v":3}',
-      targetWorkId: 'video-800', targetWorkUrl: 'https://douyin.com/video/800',
+      targetWorkId: 'video-800', targetWorkUrl: 'https://www.douyin.com/video/800',
       profileResolutionStatus: 'dom_href',
     });
     expect(r3.action).toBe('enriched');
@@ -421,14 +421,14 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
 
     const r = upsertNotificationEvent({
       eventType: 'like', actorName: '何十三',
-      actorProfileKey: 'key_hs13', actorProfileUrl: 'https://douyin.com/user/key_hs13',
+      actorProfileKey: 'key_hs13', actorProfileUrl: 'https://www.douyin.com/user/key_hs13',
       relation: 'friend', commentText: null, eventTimeText: '20:00',
       fingerprint: fp, dedupConfidence: 'strong',
       platformEventId: 'pid-json-test', notificationItemKey: 'ni-19',
-      workId: 'video-900', workUrl: 'https://douyin.com/video/900',
+      workId: 'video-900', workUrl: 'https://www.douyin.com/video/900',
       action: '赞了你的作品', content: null,
       rawPayloadJson: '{}',
-      targetWorkId: 'video-900', targetWorkUrl: 'https://douyin.com/video/900',
+      targetWorkId: 'video-900', targetWorkUrl: 'https://www.douyin.com/video/900',
       profileResolutionStatus: 'dom_href',
     });
     expect(r.action).toBe('inserted');
@@ -436,7 +436,7 @@ describe('interaction-repository — upsert + enrich + dedup', () => {
     const ev = getEvent(r.eventId);
     expect(ev.platform_event_id).toBe('pid-json-test');
     expect(ev.target_work_id).toBe('video-900');
-    expect(ev.target_work_url).toBe('https://douyin.com/video/900');
+    expect(ev.target_work_url).toBe('https://www.douyin.com/video/900');
     expect(ev.dedup_confidence).toBe('strong');
     expect(ev.profile_resolution_status).toBe('dom_href');
   });

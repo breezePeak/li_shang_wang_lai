@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { normalizeDouyinUrl } from '../utils/douyin-url.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.LISHANGWANGLAI_DB_PATH || resolve(__dirname, '../../data/lishangwanglai.db');
@@ -166,6 +167,10 @@ export function runMigrations(dbPath = DB_PATH) {
 
   // Migrate: backfill relation=friend for events where rawText shows 在线 after username
   backfillOnlineRelation(db);
+
+  // Migrate: normalize historical dirty URLs (double-domain, query params, etc.)
+  backfillNormalizeUrls(db);
+
   console.error('[db:init] 数据库初始化完成:', dbPath);
   db.close();
 }
@@ -219,6 +224,50 @@ function backfillOnlineRelation(db) {
 
   if (upgraded > 0) {
     console.error(`[db:init] 在线关系回填: ${upgraded} 条 unknown → friend`);
+  }
+}
+
+/**
+ * Backfill: normalize dirty historical URLs (double-domain, query params, etc.)
+ * Only UPDATES when the normalized value differs from the stored value.
+ * Does NOT modify status, relation, or delete events.
+ */
+function backfillNormalizeUrls(db) {
+  let actorCount = 0;
+  let targetCount = 0;
+
+  const updateActor = db.prepare(
+    "UPDATE interaction_events SET actor_profile_url = ?, updated_at = ? WHERE id = ?"
+  );
+  const updateTarget = db.prepare(
+    "UPDATE interaction_events SET target_work_url = ?, updated_at = ? WHERE id = ?"
+  );
+
+  const rows = db.prepare(
+    "SELECT id, actor_profile_url, target_work_url FROM interaction_events"
+  ).all();
+
+  const now = new Date().toISOString();
+
+  for (const row of rows) {
+    if (row.actor_profile_url) {
+      const normalized = normalizeDouyinUrl(row.actor_profile_url);
+      if (normalized && normalized !== row.actor_profile_url) {
+        updateActor.run(normalized, now, row.id);
+        actorCount++;
+      }
+    }
+    if (row.target_work_url) {
+      const normalized = normalizeDouyinUrl(row.target_work_url);
+      if (normalized && normalized !== row.target_work_url) {
+        updateTarget.run(normalized, now, row.id);
+        targetCount++;
+      }
+    }
+  }
+
+  if (actorCount > 0 || targetCount > 0) {
+    console.error(`[db:init] URL 归一化回填: actor_profile_url ${actorCount} 条, target_work_url ${targetCount} 条`);
   }
 }
 

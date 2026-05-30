@@ -1,4 +1,5 @@
 import { getDb } from './database.mjs';
+import { normalizeDouyinUrl } from '../utils/douyin-url.mjs';
 
 const KEY_FIELD_MAP = [
   { dbCol: 'actor_profile_url', inKey: 'actorProfileUrl' },
@@ -60,11 +61,18 @@ export function upsertNotificationEvent({
 }) {
   const db = getDb();
   const scannedAt = new Date().toISOString();
+
+  // Normalize incoming URLs to clean form before writing
+  const normalizedActorUrl = normalizeDouyinUrl(actorProfileUrl);
+  const normalizedWorkUrl = normalizeDouyinUrl(workUrl);
+  const normalizedTargetUrl = normalizeDouyinUrl(targetWorkUrl);
+
   const incoming = {
-    actorProfileUrl, actorProfileKey, platformEventId, fingerprint,
+    actorProfileUrl: normalizedActorUrl,
+    actorProfileKey, platformEventId, fingerprint,
     relation: relation || 'unknown',
     targetWorkId: targetWorkId || (workId || null),
-    targetWorkUrl: targetWorkUrl || (workUrl || null),
+    targetWorkUrl: normalizedTargetUrl || normalizedWorkUrl || null,
     dedupConfidence, profileResolutionStatus,
   };
 
@@ -140,7 +148,7 @@ export function upsertNotificationEvent({
   `);
   const result = stmt.run(
     eventType, actorName,
-    actorProfileKey || null, actorProfileUrl || null, relation || 'unknown',
+    actorProfileKey || null, normalizedActorUrl || null, relation || 'unknown',
     commentText || null, eventTimeText || null,
     platformEventId || null, fingerprint, notificationItemKey || null,
     incoming.targetWorkId, incoming.targetWorkUrl,
