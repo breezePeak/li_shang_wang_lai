@@ -14,14 +14,17 @@ export function assessCandidateLikeState(diag) {
   }
 
   // color-based detection
-  function _isRed(val) {
+  function _isDouyinRed(val) {
     if (!val) return false;
-    const m = val.match(/rgb[va]?\(\s*(\d+)/);
+    const m = val.match(/rgb[va]?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
     if (!m) return false;
-    return parseInt(m[1], 10) >= 230;
+    const r = parseInt(m[1], 10);
+    const g = parseInt(m[2], 10);
+    const b = parseInt(m[3], 10);
+    return r >= 230 && g <= 90 && b <= 130;
   }
-  if (_isRed(diag.color)) return { liked: true, confidence: 'confirmed', signal: 'red-color:' + diag.tag };
-  if (_isRed(diag.backgroundColor)) return { liked: true, confidence: 'confirmed', signal: 'red-bg:' + diag.tag };
+  if (_isDouyinRed(diag.color)) return { liked: true, confidence: 'confirmed', signal: 'red-color:' + diag.tag };
+  if (_isDouyinRed(diag.backgroundColor)) return { liked: true, confidence: 'confirmed', signal: 'red-bg:' + diag.tag };
 
   // SVG-based detection
   if ([diag.svgFill, diag.pathFill].some(f => f === '#FF0040' || f === '#FE2C55' || f === 'red')) {
@@ -77,12 +80,23 @@ export async function checkLikeState(page) {
   try {
     const state = await page.evaluate(() => {
       // ---- helpers ----
-      function isRedColor(val) {
+      function isDouyinRedColor(val) {
         if (!val) return false;
-        const m = val.match(/rgb[va]?\(\s*(\d+)/);
+        const m = val.match(/rgb[va]?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
         if (!m) return false;
         const r = parseInt(m[1], 10);
-        return r >= 230;
+        const g = parseInt(m[2], 10);
+        const b = parseInt(m[3], 10);
+        return r >= 230 && g <= 90 && b <= 130;
+      }
+
+      function isVisibleEl(el) {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 5 || rect.height < 5) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        return true;
       }
 
       function hasLikedClass(cls) {
@@ -93,10 +107,11 @@ export async function checkLikeState(page) {
         // check SVGs inside this element or itself
         const svgs = (el.tagName === 'svg' || el.tagName === 'path') ? [el] : el.querySelectorAll('svg, path');
         for (const svg of svgs) {
+          if (!isVisibleEl(svg)) continue;
           const fill = svg.getAttribute('fill') || '';
           if (fill === '#FF0040' || fill === '#FE2C55' || fill === 'red') return true;
           const style = window.getComputedStyle(svg);
-          if (isRedColor(style.fill)) return true;
+          if (isDouyinRedColor(style.fill)) return true;
         }
         return false;
       }
@@ -236,16 +251,20 @@ export async function checkLikeState(page) {
           let svgFill = '', pathFill = '';
           const svgs = likeItem.querySelectorAll('svg');
           for (const svg of svgs) {
+            if (!isVisibleEl(svg)) continue;
             const f = svg.getAttribute('fill') || '';
             if (f) svgFill = f;
-            const styleSvg = window.getComputedStyle(svg);
-            if (styleSvg.fill && (styleSvg.fill.includes('rgb(255') || styleSvg.fill.includes('rgb(254') || styleSvg.fill.includes('rgb(251'))) {
-              svgFill = styleSvg.fill;
-            }
+            const cs = window.getComputedStyle(svg);
+            if (isDouyinRedColor(cs.fill)) svgFill = cs.fill;
             const paths = svg.querySelectorAll('path');
             for (const p of paths) {
+              if (!isVisibleEl(p)) continue;
               const pf = p.getAttribute('fill') || '';
-              if (pf) pathFill = pf;
+              if (pf && isDouyinRedColor(pf)) pathFill = pf;
+              const pcs = window.getComputedStyle(p);
+              if (isDouyinRedColor(pcs.fill)) pathFill = pcs.fill;
+              const pstroke = p.getAttribute('stroke') || '';
+              if (pstroke === '#FF0040' || pstroke === '#FE2C55' || pstroke === 'red') pathFill = pstroke;
             }
           }
           return {
@@ -289,17 +308,15 @@ export async function checkLikeState(page) {
 
       if (actionBarCheck) {
         const { diag, actionItemCount, actionItemsDiag } = actionBarCheck;
-        // check liked signals
+        // check liked signals — f7caOKG9 class OR douyin red via isDouyinRedColor
         const cls = diag.className || '';
-        const isLikedClass = /\bf7caOKG9\b/.test(cls);
-        const svgRed = [diag.svgFill, diag.pathFill].some(f =>
-          f === '#FF0040' || f === '#FE2C55' || f === 'red' ||
-          (f && (f.includes('rgb(255') || f.includes('rgb(254') || f.includes('rgb(251')) && f.includes('rgb'))
-        );
-        const colorRed = diag.color && (diag.color.includes('rgb(255') || diag.color.includes('rgb(254') || diag.color.includes('rgb(251'));
-        const bgRed = diag.backgroundColor && (diag.backgroundColor.includes('rgb(255') || diag.backgroundColor.includes('rgb(254') || diag.backgroundColor.includes('rgb(251'));
+        const hasLikedClass = /\bf7caOKG9\b/.test(cls);
+        const svgRed = diag.svgFill && isDouyinRedColor(diag.svgFill);
+        const pathRed = diag.pathFill && isDouyinRedColor(diag.pathFill);
+        const colorRed = isDouyinRedColor(diag.color);
+        const bgRed = isDouyinRedColor(diag.backgroundColor);
 
-        if (isLikedClass || svgRed || colorRed || bgRed) {
+        if (hasLikedClass || svgRed || pathRed || colorRed || bgRed) {
           return {
             liked: true,
             confidence: 'confirmed',
@@ -441,10 +458,11 @@ export async function checkLikeState(page) {
           const svgs = el.querySelectorAll('svg');
           if (svgs.length === 0) continue;
           const anyRed = Array.from(svgs).some(svg => {
+            if (!isVisibleEl(svg)) return false;
             const fill = svg.getAttribute('fill') || '';
             const style = window.getComputedStyle(svg);
             return fill === '#FF0040' || fill === '#FE2C55' || fill === 'red' ||
-              (style.fill && (style.fill.includes('rgb(255') || style.fill.includes('rgb(254') || style.fill.includes('rgb(251')));
+              isDouyinRedColor(style.fill);
           });
           const text = (el.innerText || '').trim();
           panel.push({ el, rect, anyRed, text: text.slice(0, 10) });
@@ -479,10 +497,10 @@ export async function checkLikeState(page) {
         }
 
         // 2b: color-based liked detection
-        if (isRedColor(diag.color)) {
+        if (isDouyinRedColor(diag.color)) {
           return { liked: true, confidence: 'confirmed', signal: 'red-color:' + diag.tag, diag };
         }
-        if (isRedColor(diag.backgroundColor)) {
+        if (isDouyinRedColor(diag.backgroundColor)) {
           return { liked: true, confidence: 'confirmed', signal: 'red-bg:' + diag.tag, diag };
         }
 

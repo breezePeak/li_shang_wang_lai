@@ -152,6 +152,36 @@ describe('assessCandidateLikeState — not liked', () => {
     const r = assessCandidateLikeState(d);
     expect(r.liked).toBe(false);
   });
+
+  it('white color rgb(255,255,255) → NOT red → not liked', () => {
+    const d = makeDiag({ tag: 'span', text: '赞', color: 'rgb(255, 255, 255)' });
+    const r = assessCandidateLikeState(d);
+    expect(r.liked).toBe(false);
+  });
+
+  it('white backgroundColor rgb(255,255,255) → NOT red → not liked', () => {
+    const d = makeDiag({ tag: 'button', text: '点赞', backgroundColor: 'rgb(255, 255, 255)' });
+    const r = assessCandidateLikeState(d);
+    expect(r.liked).toBe(false);
+  });
+
+  it('white SVG fill rgb(255,255,255) → NOT red → not liked', () => {
+    const d = makeDiag({ tag: 'span', text: '赞', svgFill: 'rgb(255, 255, 255)' });
+    const r = assessCandidateLikeState(d);
+    expect(r.liked).toBe(false);
+  });
+
+  it('near-red but g>90 (rgb(255, 100, 100)) → NOT douyin red → not liked', () => {
+    const d = makeDiag({ tag: 'span', text: '赞', color: 'rgb(255, 100, 100)' });
+    const r = assessCandidateLikeState(d);
+    expect(r.liked).toBe(false);
+  });
+
+  it('near-red but b>130 (rgb(254, 44, 140)) → NOT douyin red → not liked', () => {
+    const d = makeDiag({ tag: 'span', text: '点赞', color: 'rgb(254, 44, 140)' });
+    const r = assessCandidateLikeState(d);
+    expect(r.liked).toBe(false);
+  });
 });
 
 // ============================================================
