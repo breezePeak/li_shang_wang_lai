@@ -23,3 +23,7 @@ npm test && git add -A && git commit -m "<描述>"
 
 - 提交信息用中文，简洁描述改动原因
 - 不提交 `.env`、`config/local.json`、`.playwright/`、`data/` 下的内容（已在 .gitignore）
+
+## TODO
+
+- `clickLike` 后续必须复用 `checkLikeState` 的 action bar 定位（`.t5VMknM2 .MinpposV > .AOWKbsTg` 第一个），先确认已赞态再决定是否点击。暂不实现真实 clickLike。

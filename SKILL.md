@@ -95,7 +95,7 @@ npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" \
 
 > **旧命令兼容**：`npm run comments:plan` 和 `npm run comments:reply -- --plan <文件>` 仍可用，但不作为 Skill 主流程推荐。
 
-### 回访候选预览（仅预览，三阶段）
+### 回访候选预览（仅预览，四阶段）
 
 ```bash
 # 阶段 1: 候选分流（纯数据，不进主页）
@@ -104,13 +104,17 @@ npm run actions:plan -- --json       # 从 new 事件生成 replyCommentCandidat
 # 阶段 2 (phase3): 主页发现 + 点赞检查（浏览器进入主页/视频页）
 npm run visits:discover -- --json --max-items 5   # 进入好友主页找最新作品，检查点赞状态
 
-# 阶段 3: 真实执行（MVP 阶段硬阻断）
+# 阶段 3 (phase4): 待审核回访候选预览（与 visits:discover 同样进浏览器，仅输出未点赞候选 + 评论草稿）
+npm run visits:review -- --json --max-items 5    # 输出 reviewCandidates，包含 commentDrafts
+
+# 阶段 4: 真实执行（MVP 阶段硬阻断）
 npm run likes:reciprocate -- --execute   # FEATURE_DISABLED
 ```
 
-> **三阶段说明：**
+> **四阶段说明：**
 > - `actions:plan`：纯数据分流，不进主页，只按 actorProfileKey 合并事件，输出 visitWorkCandidates；
 > - `visits:discover`：phase3，浏览器进入好友/互关主页，找最近非置顶作品，检查点赞状态，输出 pending_review/skipped/blocked；
+> - `visits:review`：phase4，复用 visits:discover 的浏览器流程，仅输出 pending_review 候选，每条附带 3 条评论草稿（不点赞、不评论、不落库）；
 > - `likes:reciprocate`：真实点赞继续 `FEATURE_DISABLED` 硬阻断。
 
 ### 旧命令兼容
@@ -159,7 +163,7 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
 失败 → 报告原因 + 证据路径
 ```
 
-## 回访候选预览流程（三阶段）
+## 回访候选预览流程（四阶段）
 
 ```text
 阶段 1: 候选分流 (actions:plan)
@@ -188,7 +192,22 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
     - skipped: 已点赞 → reason="already_liked_skip_comment", plannedActions=[]
     - blocked: 无法确认 → reason 说明原因 (no_actor_profile_url / LIKE_STATE_UNKNOWN / ...)
 
-阶段 3: 真实执行 (likes:reciprocate, MVP 硬阻断)
+阶段 3: 待审核候选 (visits:review, phase4)
+  用户说 "看看哪些需要回复"、"生成回访审核列表"
+    ↓
+  npm run visits:review -- --json --max-items 5
+    ↓
+  复用 visits:discover 的浏览器流程（进入主页→找作品→检查点赞）
+    ↓
+  仅输出 pending_review 候选，每条附带 3 条评论草稿
+    ↓
+  输出 reviewCandidates：
+    - 每个候选包含 actorName, actorProfileUrl, relation, targetWorkUrl, targetWorkId, likeState="not_liked"
+    - commentDrafts: ["支持一下", "内容不错，来看看", "互相加油"]
+    - selectedCommentDraft: null（待人工选择）
+    - executeAllowed=false, previewOnly=true
+
+阶段 4: 真实执行 (likes:reciprocate, MVP 硬阻断)
   用户说 "给这个候选点赞"
     ↓
   npm run likes:reciprocate -- --execute ...
@@ -220,7 +239,8 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
 ## 当前版本限制
 
 - 评论回复流程：`prepare → approve → dry-run → confirm-execute → execute`
-- 好友回访三阶段：
+- 好友回访四阶段：
   - `actions:plan` — 候选分流，不进主页
   - `visits:discover` — phase3，进主页发现作品并检查点赞
+  - `visits:review` — phase4，生成待审核回访候选（含评论草稿，不点赞、不评论、不落库）
   - `likes:reciprocate` — 真实点赞代码层硬阻断

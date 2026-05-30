@@ -65,7 +65,7 @@ Node.js + Playwright + SQLite 执行引擎（本仓库）
 | 评论审批闭环 | 开发验证中 | `prepare → approve → dry-run → confirm-execute → execute` |
 | 单条评论真实发送 | 实验可用 | 需双确认 + dry-run，每轮最多 1 条 |
 | JSON Agent 契约 | 修复中 | 大部分命令已实现纯净 stdout JSON |
-| 好友回访候选 | 开发验证中 | `actions:plan --json` + `visits:discover --json` 三阶段预览 |
+| 好友回访候选 | 开发验证中 | `actions:plan --json` + `visits:discover --json` + `visits:review --json` 四阶段预览 |
 | 真实回访点赞 | **默认禁用** | MVP 代码层硬阻断，`FEATURE_DISABLED` |
 
 ---
@@ -264,7 +264,7 @@ npm run interactions:scan -- --type all
 
 当前通知扫描能力主要用于页面验证和事件采集。
 
-### 好友回访候选预览（三阶段）
+### 好友回访候选预览（四阶段）
 
 ```bash
 # 阶段 1: 候选分流（纯数据，不进主页）
@@ -273,13 +273,17 @@ npm run actions:plan -- --json
 # 阶段 2 (phase3): 主页发现（浏览器进入主页/视频页）
 npm run visits:discover -- --json --max-items 5
 
-# 阶段 3: 真实执行（MVP 阶段硬阻断）
+# 阶段 3 (phase4): 待审核回访候选（浏览器流程，仅输出未点赞候选 + 评论草稿）
+npm run visits:review -- --json --max-items 5
+
+# 阶段 4: 真实执行（MVP 阶段硬阻断）
 npm run likes:reciprocate -- --execute
 ```
 
-> **三阶段说明：**
+> **四阶段说明：**
 > - `actions:plan`：只做候选分流，不进主页；从 new 事件生成 replyCommentCandidates + visitWorkCandidates；
 > - `visits:discover`：phase3，浏览器进入好友/互关主页，找最近非置顶作品，检查点赞状态；
+> - `visits:review`：phase4，复用 visits:discover 的浏览器流程，仅输出 pending_review 候选，每条附带 3 条评论草稿（不点赞、不评论、不落库）；
 > - `likes:reciprocate`：真实点赞继续 `FEATURE_DISABLED` 硬阻断。
 
 ### 真实回访点赞（默认禁用）
@@ -303,6 +307,7 @@ npm run likes:reciprocate -- --execute
 | `npm run comments:reply -- --plan <路径> --execute --max-items 1` | 真实发送单条回复（需审批） | 实验可用 |
 | `npm run actions:plan` | 候选分流：从 new 事件生成评论候选 + 回访候选 | 只读 |
 | `npm run visits:discover` | phase3：进入好友主页，发现最新作品并检查点赞状态 | 只读预览 |
+| `npm run visits:review` | phase4：生成待审核回访候选（含评论草稿，不点赞不评论不落库） | 只读预览 |
 | `npm run likes:plan` | 旧版浏览器回访计划 | 不推荐 |
 | `npm run likes:reciprocate` | 好友回赞执行 | **默认禁用** |
 | `npm test` | 运行测试 | 已配置 |
@@ -364,7 +369,7 @@ interactions-output/
 
 - 抖音页面结构可能更新，导致文本定位或通知解析失效；
 - 评论回复默认 dry-run，真实发送需 `--execute --max-items 1` 且通过审批；
-- 好友回访仅支持候选预览，真实点赞在 MVP 阶段默认禁用；
+- 好友回访仅支持候选预览（visits:review 输出含评论草稿），真实点赞在 MVP 阶段默认禁用；
 - **相对时间限制**：当评论仅显示相对时间（如"3分钟前"）且页面 DOM 未提供稳定评论 ID（`data-comment-id` 等属性）时，同一用户同作品下相同文本的评论可能被保守合并为一条事件。时间稳定后重新扫描可自动拆分；
 - **审批策略**：`comments:prepare` 要求 Agent 先完成评论决策（`--decision reply`、`--risk-level low`），仅低风险可进入候选流程；高风险或需人工审核的评论必须阻断；
 - 暂无可视化管理界面；
@@ -389,7 +394,8 @@ interactions-output/
 | S1 | `SKILL.md` + JSON 结构化输出 | ✅ 完成 |
 | S2 | 只读互动收件箱 + `actions:pending` | ✅ 完成 |
 | S3 | 评论审批闭环（prepare→approve→dry-run→confirm→execute） | ✅ 完成 |
-| S4 | 好友回访候选预览（三阶段） | ✅ 完成 |
+| S4 | 好友回访候选预览（三阶段 → 四阶段） | ✅ 完成 |
+| S5 | 待审核回访候选队列（visits:review + 评论草稿） | ✅ 完成 |
 
 ### 已完成
 
@@ -402,11 +408,11 @@ interactions-output/
 - [x] 评论审批闭环：prepare → approve → dry-run → confirm-execute → execute
 - [x] 代码层双确认（`execute_confirmed` 状态机）
 - [x] 评论唯一定位（多字段匹配防错配）
-- [x] 点赞回访候选预览（三阶段：actions:plan + visits:discover + likes:reciprocate 硬阻断）
+- [x] 点赞回访候选预览（四阶段：actions:plan + visits:discover + visits:review + likes:reciprocate 硬阻断）
 
 ### 下一步
 
-- [ ] S5: 实验性单条回访验证（需身份核验 + 实验开关）
+- [ ] S6: 实验性单条回访验证（需身份核验 + 实验开关）
 
 ---
 
