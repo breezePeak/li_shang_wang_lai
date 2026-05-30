@@ -28,6 +28,7 @@
     "comments:execute": "node ./src/cli/execute-comment-reply.mjs",
     "comments:reply": "node ./src/cli/execute-comment-replies.mjs",
     "comments:verify": "node ./src/cli/verify-comment-replies.mjs",
+    "comments:resume": "node ./src/cli/resume-comment-replies.mjs",
     "actions:approve": "node ./src/cli/approve-action.mjs",
     "actions:plan": "node ./src/cli/plan-actions.mjs",
     "actions:confirm-execute": "node ./src/cli/confirm-execute.mjs",
