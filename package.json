@@ -35,6 +35,7 @@
     "visits:plan": "node ./src/cli/plan-visits.mjs",
     "visits:discover": "node ./src/cli/discover-visits.mjs",
     "visits:review": "node ./src/cli/review-visits.mjs",
+    "visits:live-review": "node ./src/cli/live-review-visits.mjs",
     "notify:inspect": "node ./src/cli/inspect-notifications.mjs",
     "icon:profile": "node ./.sisyphus/icon-profile.mjs",
     "history": "node ./src/cli/show-history.mjs",

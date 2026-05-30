@@ -707,3 +707,80 @@ export async function confirmLikeSucceeded(page) {
     );
   }
 }
+
+export async function postVideoComment(page, text, { execute = false } = {}) {
+  try {
+    if (!text || !text.trim()) {
+      return blocking(
+        RESULT_CODES.EMPTY_REPLY_TEXT,
+        '评论内容为空',
+        { recoverable: false }
+      );
+    }
+
+    if (!execute) {
+      return blocking(
+        RESULT_CODES.ACTION_NOT_APPROVED,
+        '非 execute 模式，拒绝真实评论操作',
+        { recoverable: false }
+      );
+    }
+
+    const typed = await page.evaluate((commentText) => {
+      const input = document.querySelector(
+        '[contenteditable="true"][data-placeholder*="评"], ' +
+        '[contenteditable="true"][placeholder*="评"], ' +
+        'textarea[placeholder*="评"], ' +
+        'input[placeholder*="评"]'
+      );
+      if (!input) return { posted: false, reason: 'input-not-found' };
+
+      input.focus();
+      input.textContent = commentText;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return { posted: true };
+    }, text.trim());
+
+    if (!typed.posted) {
+      return blocking(
+        RESULT_CODES.COMMENT_INPUT_NOT_FOUND,
+        '找不到视频评论区输入框',
+        { data: {} }
+      );
+    }
+
+    await page.waitForTimeout(500);
+
+    const sent = await page.evaluate(() => {
+      const btns = document.querySelectorAll('button, [role="button"], div[class]');
+      for (const btn of btns) {
+        const t = (btn.innerText || '').trim();
+        if (t === '发送' || t === '发布') {
+          btn.click();
+          return { sent: true };
+        }
+      }
+      return { sent: false };
+    });
+
+    if (!sent.sent) {
+      return blocking(
+        RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND,
+        '找不到发送/发布按钮',
+        { data: {} }
+      );
+    }
+
+    console.error('[video-page] 已提交评论');
+    await page.waitForTimeout(2000);
+
+    return success({ text: text.trim() });
+  } catch (err) {
+    return blocking(
+      RESULT_CODES.BLOCKED,
+      `发表评论异常: ${err.message}`,
+      { data: { error: err.message } }
+    );
+  }
+}
