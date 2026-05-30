@@ -1,352 +1,232 @@
-# 礼尚往来
+# li_shang_wang_lai
 
-面向抖音创作者的 **OpenClaw 互动助手 Skill 执行引擎**。
+给 Agent 用的抖音互动处理 Skill。
 
-它用于扫描真实评论与互动通知、生成处理建议，并在本人明确确认后执行单条评论回复。好友回访功能目前仅提供候选预览，真实点赞仍处于实验禁用状态。
+不是刷互动，而是帮你从通知中心里找到值得回应的人，避免漏掉评论、点赞、好友/互关用户的互动。
 
-> 本项目定位为 OpenClaw Skill 的执行引擎层。Skill 负责理解用户意图、组织流程、展示候选、请求审批；执行引擎（本仓库）负责浏览器操作、页面采集、本地记录和经批准后的最小动作执行。
+## 项目是什么
 
----
+`li_shang_wang_lai` 是一个抖音互动处理工具，主要给 Hermes / OpenClaw 这类 Agent 使用。
 
-## 两层架构
+## 解决什么问题
 
-```text
-用户（自然语言）
-  ↓
-OpenClaw Agent + SKILL.md（待新增）
-  ├── 理解意图、调用命令、展示候选
-  ├── 收集明确审批
-  └── 限制真实动作范围
-        ↓ 调用本地命令
-Node.js + Playwright + SQLite 执行引擎（本仓库）
-  ├── 浏览器登录态复用
-  ├── 页面读取与元素定位
-  ├── 事件入库与去重
-  ├── dry-run 定位
-  ├── 经批准后的单条动作
-  └── 证据与审计记录
-```
+抖音通知中心信息多，人工处理容易漏。
 
----
+尤其是：
 
-## 功能定位
+- 有人评论了你的作品；
+- 好友/互关用户给你点赞或评论；
+- 你想回访，但不想一个个手动找主页；
+- 你不想复制粘贴同一句评论；
+- 你不想批量刷互动，只想回应值得回应的人。
 
-你可能每天都会遇到这些情况：
-
-- 有人给作品留言，但容易漏回；
-- 有好友给作品点赞，想回访对方最近的视频；
-- 互动数量多了以后，不记得哪些已经处理过；
-- 不希望把账号交给完全自动、不可控的脚本。
-
-**礼尚往来**遵循以下原则：
+这个项目的目标是：
 
 ```text
-默认只观察和定位 → 不默认执行真实互动
-真实动作必须审批 → 可验证、可追溯、可停止
-页面状态不明确时 → 必须阻断
-单轮真实执行 → 默认最多 1 条
+不漏掉值得回应的人
 ```
-
----
-
-## 当前版本状态
-
-当前版本：`0.1.0`
-
-| 功能 | 状态 | 说明 |
-|---|---|---|
-| 浏览器登录态复用 | 已实现 | 使用 Playwright 持久化 Profile |
-| 页面诊断采集 | 已实现 | 可保存页面文本、DOM、截图等诊断材料 |
-| 评论扫描与入库 | 初版可用 | 从通知中心统一采集评论和点赞、入库去重 |
-| 点赞/通知扫描 | 初版验证中 | 通知面板 hover 铃铛、滚动提取点赞事件 |
-| 待处理摘要 | 初版可用 | `actions:pending --json` 支持结构化输出 + blocked 明细 |
-| 评论候选回复 | 初版可用 | 通过 `comments:prepare` 创建单条候选 |
-| 评论 dry-run | 已有逻辑 | 定位目标评论但不发送（默认 `dryRun: true`） |
-| 评论审批闭环 | 开发验证中 | `prepare → approve → dry-run → confirm-execute → execute` |
-| 单条评论真实发送 | 实验可用 | 需双确认 + dry-run，每轮最多 1 条 |
-| JSON Agent 契约 | 修复中 | 大部分命令已实现纯净 stdout JSON |
-| 好友回访候选 | 开发验证中 | `actions:plan --json` + `visits:discover --json` + `visits:review --json` + `visits:live-review` 五阶段预览 |
-| 真实回访点赞 | **默认禁用** | MVP 代码层硬阻断，`FEATURE_DISABLED` |
-
----
-
-## 技术栈
-
-- [Node.js](https://nodejs.org/) `>= 20`
-- [Playwright](https://playwright.dev/)：控制浏览器、复用登录态、页面采集与互动操作
-- [better-sqlite3](https://github.com/WiseLibs/better-sqlite3)：本地数据持久化
-- [Vitest](https://vitest.dev/)：测试框架
-
----
 
 ## 安装
 
-### 1. 克隆项目
+需要 Node.js 24+。
 
 ```bash
 git clone https://github.com/breezePeak/li_shang_wang_lai.git
 cd li_shang_wang_lai
-```
-
-### 2. 安装依赖
-
-```bash
 npm install
-```
-
-### 3. 安装 Playwright 浏览器
-
-```bash
 npx playwright install chromium
 ```
 
-### 4. 初始化本地数据库
+初始化数据库：
 
 ```bash
 npm run db:init
 ```
 
-数据库默认保存在：
-
-```text
-data/lishangwanglai.db
-```
-
----
-
-## 快速开始
-
-### 第一步：登录抖音创作者中心
+首次登录抖音：
 
 ```bash
 npm run auth
 ```
 
-命令会打开浏览器。请在浏览器中完成扫码登录。
+运行测试：
 
-登录状态将保存在本地目录：
+```bash
+npm test
+```
+
+## 主流程怎么跑
+
+### 1. 扫描通知中心
+
+```bash
+npm run interactions:scan -- --type all --json --debug
+```
+
+这一步会打开抖音通知中心，采集评论和点赞通知，并写入本地数据库。
+
+### 2. 生成候选计划
+
+```bash
+npm run actions:plan -- --json
+```
+
+这一步会生成两类候选：
 
 ```text
-.playwright/douyin-profile/
+replyCommentCandidates：评论回复候选
+visitWorkCandidates：好友/互关用户作品回访候选
 ```
 
-下次执行扫描时会复用该登录状态，无需反复扫码。
+### 3. 获取作品上下文
 
-> 请勿将 `.playwright/` 目录上传到公开仓库，其中可能包含账号登录状态信息。
-
----
-
-### 第二步：探测页面结构
-
-在正式扫描之前，建议先使用页面探测命令检查当前账号页面是否能够被识别。
-
-#### 探测评论页面
+默认使用 `skill` 模式，适合 Hermes / OpenClaw 调用：
 
 ```bash
-npm run interactions:inspect -- --page comment
+npm run visits:live-review -- --comment-mode skill --json --max-items 1
 ```
 
-#### 探测点赞/通知相关页面
-
-```bash
-npm run interactions:inspect -- --page like
-```
-
-或：
-
-```bash
-npm run interactions:inspect -- --page notice
-```
-
-探测过程会打开浏览器，等待你进入目标页面后开始采集。输出结果位于：
+这一步会：
 
 ```text
-interactions-output/inspect/
+进入好友/互关主页
+→ 找最近非置顶作品
+→ 打开作品
+→ 检查点赞状态
+→ 已点赞：跳过
+→ 未点赞：输出 commentContext 给 Agent
+→ 状态未知：阻断
 ```
 
-通常包含：
-
-```text
-page-info.json
-visible-text.txt
-keyword-elements.json
-clickable-users.json
-screenshot-full.png
-dom-fragment.html
-```
-
-这些文件用于分析页面结构变化、元素定位失败等问题。
-
----
-
-### 第三步：扫描评论和点赞
-
-所有新互动统一从通知中心采集：
-
-```bash
-npm run interactions:scan -- --type all --json    # 采集评论和点赞
-npm run interactions:scan -- --type comment --json # 只采集评论
-npm run interactions:scan -- --type like --json    # 只采集点赞
-```
-
-程序打开通知中心，滚动加载通知列表，逐批解析并去重入库。评论管理页面**不再**承担发现新评论的职责，仅用于后续定位原评论并执行回复。
-
----
-
-### 第四步：生成评论回复计划
-
-```bash
-npm run comments:plan
-```
-
-程序会读取尚未回复的评论，生成计划文件：
-
-```text
-data/plans/comments-plan-<时间戳>.json
-```
-
-计划中的每条评论结构类似：
+如果发现未点赞作品，会输出类似结构：
 
 ```json
 {
-  "eventId": 1,
-  "actorName": "用户昵称",
-  "workTitle": "作品标题",
-  "commentText": "写得不错",
-  "commentTime": "05-28",
-  "replyText": "",
-  "approved": false
+  "needsAgentComment": true,
+  "commentMode": "skill",
+  "commentContext": {
+    "actorName": "用户昵称",
+    "targetWorkUrl": "https://www.douyin.com/video/xxx",
+    "targetWorkId": "video-xxx",
+    "targetWorkTitle": "作品标题",
+    "captionText": "页面文案",
+    "hashtags": ["话题"],
+    "authorName": "作者名",
+    "visibleTextSample": "页面可见文本片段"
+  }
 }
 ```
 
-你需要手动完成两件事：
+Hermes / OpenClaw 根据 `SKILL.md` 和 `commentContext` 生成评论候选，并让用户选择。
 
-1. 在 `replyText` 中填写希望发送的回复；
-2. 只将确认要执行的条目修改为：
+### 4. 执行用户选中的评论
 
-```json
-"approved": true
-```
-
----
-
-### 第五步：执行已确认的评论回复
+用户选好评论后，再调用：
 
 ```bash
-npm run comments:reply -- --plan data/plans/comments-plan-<时间戳>.json
+npm run visits:live-review -- --comment-mode skill --execute --max-items 1 \
+  --selected-comment-text "这个主题挺温柔的～" \
+  --reply-mode agent_generated_review_required \
+  --risk-level medium \
+  --manual-review-method user_selected_agent_comment
 ```
 
-程序只会处理计划文件中：
+注意：
 
-```json
-"approved": true
+```text
+skill 模式传入 --selected-comment-text 时，必须 --max-items 1。
+一条评论只能对应一个作品上下文，不能批量套用到多个作品。
 ```
 
-的评论条目。
+## 三种 comment-mode 怎么选
 
-> **重要提醒：** 评论真实回复前，请务必先使用 `--dry-run` 定位目标评论并人工核对结果。当前默认模式为 dry-run（不发送），使用 `--execute` 才会触发真实发送，且每轮最多 1 条。已成功回复过的评论不会重复发送。
+`visits:live-review` 支持三种评论模式：
 
----
+| 模式 | 用途 | 评论来源 | 状态 |
+|---|---|---|---|
+| `skill` | 给 Hermes / OpenClaw 使用 | 外部 Agent 根据 `SKILL.md` 生成 | 推荐默认 |
+| `local` | 本地调试 | 本地规则生成器 | 可用 |
+| `agent` | 项目自己调用大模型 | 内置 LLM provider | 预留，暂未实现 |
 
-## 通知与点赞扫描
+### skill 模式
 
-可以尝试扫描点赞类通知：
+推荐给 Hermes / OpenClaw 使用。
 
 ```bash
-npm run interactions:scan -- --type like
+npm run visits:live-review -- --comment-mode skill --json --max-items 1
 ```
 
-也可以同时尝试扫描评论和点赞通知：
+特点：
+
+- CLI 不生成评论；
+- CLI 只提取作品上下文；
+- 外部 Agent 根据 `SKILL.md` 生成评论；
+- 用户选择后，Agent 把评论传回 CLI；
+- CLI 做安全校验和当前页执行。
+
+### local 模式
+
+本地规则生成器模式，适合调试。
 
 ```bash
-npm run interactions:scan -- --type all
+npm run visits:live-review -- --comment-mode local --max-items 5
 ```
 
-当前通知扫描能力主要用于页面验证和事件采集。
+特点：
 
-### 好友回访候选预览（五阶段）
+- 不依赖 Hermes / OpenClaw；
+- 不调用大模型；
+- CLI 根据标题、话题、文案生成评论候选；
+- 适合测试页面打开、点赞状态识别、评论输入框定位。
+
+执行模式：
 
 ```bash
-# 阶段 1: 候选分流（纯数据，不进主页）
-npm run actions:plan -- --json
-
-# 阶段 2 (phase3): 主页发现（浏览器进入主页/视频页）
-npm run visits:discover -- --json --max-items 5
-
-# 阶段 3 (phase4): 待审核回访候选（浏览器流程，仅输出未点赞候选 + 评论草稿）
-npm run visits:review -- --json --max-items 5
-
-# 阶段 4 (phase5): 现场审核（交互式终端，逐条选择 + 执行）
-npm run visits:live-review -- --max-items 5                # dry-run 预览
-npm run visits:live-review -- --execute --max-items 5      # 执行模式
-
-# 阶段 5: 真实执行（MVP 阶段硬阻断）
-npm run likes:reciprocate -- --execute
+npm run visits:live-review -- --comment-mode local --execute --max-items 5
 ```
 
-> **五阶段说明：**
-> - `actions:plan`：只做候选分流，不进主页；从 new 事件生成 replyCommentCandidates + visitWorkCandidates；
-> - `visits:discover`：phase3，浏览器进入好友/互关主页，找最近非置顶作品，检查点赞状态；
-> - `visits:review`：phase4，复用 visits:discover 的浏览器流程，仅输出 pending_review 候选，每条附带 3 条评论草稿（不点赞、不评论、不落库）；
-> - `visits:live-review`：phase5，交互式终端，逐条展示候选和草稿，用户选择 1/2/3 确认当前条；dry-run 只记录不执行，execute 模式立即点赞+评论；
-> - `likes:reciprocate`：真实点赞继续 `FEATURE_DISABLED` 硬阻断。
+每条仍然需要用户手动选择 `1/2/3`，不允许批量确认。
 
-### 真实回访点赞（默认禁用）
+### agent 模式
 
-> **⚠️ 真实回访点赞在 MVP 阶段默认禁用。** 该功能需要实验开关 + 身份核验 + 审批 + dry-run 全部通过后才允许执行。当前阶段任何 `likes:reciprocate --execute` 调用都应被拦截。
+项目内置大语言模型模式，当前只是预留。
 
----
+```bash
+npm run visits:live-review -- --comment-mode agent --max-items 5
+```
+
+当前会返回：
+
+```text
+FEATURE_DISABLED
+```
+
+后续如果项目要脱离 Hermes / OpenClaw 独立运行，可以在这个模式里接入大模型。
 
 ## 常用命令
 
-| 命令 | 说明 | 当前状态 |
-|---|---|---|
-| `npm run auth` | 打开浏览器扫码登录并保存登录态 | 可用 |
-| `npm run db:init` | 初始化 SQLite 数据库 | 可用 |
-| `npm run interactions:inspect -- --page comment` | 采集评论页诊断信息 | 可用 |
-| `npm run interactions:inspect -- --page like` | 采集点赞相关页面诊断信息 | 可用 |
-| `npm run interactions:scan -- --type comment` | 扫描评论并写入数据库 | 初版可用 |
-| `npm run interactions:scan -- --type like` | 扫描点赞通知 | 验证阶段 |
-| `npm run comments:plan` | 生成待回复评论计划（JSON） | 初版可用 |
-| `npm run comments:reply -- --plan <路径> --dry-run` | 定位目标评论，不发送 | 已有逻辑 |
-| `npm run comments:reply -- --plan <路径> --execute --max-items 1` | 真实发送单条回复（需审批） | 实验可用 |
-| `npm run actions:plan` | 候选分流：从 new 事件生成评论候选 + 回访候选 | 只读 |
-| `npm run visits:discover` | phase3：进入好友主页，发现最新作品并检查点赞状态 | 只读预览 |
-| `npm run visits:review` | phase4：生成待审核回访候选（含评论草稿，不点赞不评论不落库） | 只读预览 |
-| `npm run visits:live-review` | phase5：交互式现场审核，逐条选择草稿，dry-run/execute 双模式 | 交互式 |
-| `npm run likes:plan` | 旧版浏览器回访计划 | 不推荐 |
-| `npm run likes:reciprocate` | 好友回赞执行 | **默认禁用** |
-| `npm test` | 运行测试 | 已配置 |
+| 命令 | 说明 |
+|---|---|
+| `npm run auth` | 打开浏览器扫码登录抖音 |
+| `npm run db:init` | 初始化 SQLite 数据库 |
+| `npm run interactions:scan -- --type all --json --debug` | 扫描通知中心 |
+| `npm run actions:plan -- --json` | 生成评论回复和作品回访候选 |
+| `npm run visits:discover -- --json --max-items 5` | 发现好友作品并检查点赞状态 |
+| `npm run visits:live-review -- --comment-mode skill --json --max-items 1` | Skill 模式，输出作品上下文 |
+| `npm run visits:live-review -- --comment-mode local --max-items 5` | Local 模式，本地生成评论候选 |
+| `npm test` | 运行测试 |
 
-> **⚠️ 点赞回访**：`likes:reciprocate --execute` 在 MVP 阶段默认禁用。`visits:live-review --execute` 是唯一的逐条执行入口（用户逐条输入 1/2/3 选择草稿后，在当前页面执行点赞+评论，不允许批量确认）。
+## Skill 入口
 
----
-
-## 本地数据目录
-
-项目运行后可能产生以下本地数据：
+外部 Agent 请读取：
 
 ```text
-.playwright/
-  douyin-profile/          # 浏览器登录态，敏感数据
-
-data/
-  lishangwanglai.db        # SQLite 数据库
-  plans/                   # 评论或互动处理计划
-
-interactions-output/
-  inspect/                 # 页面诊断截图、文本与 DOM
+SKILL.md
 ```
 
-这些目录默认用于本地调试和记录，不建议提交到公开仓库。
+`SKILL.md` 里定义了 Agent 生成评论时必须遵守的规则。
 
----
-
-## 使用边界与安全提醒
-
-本项目定位为创作者互动助手，不鼓励无审核、无边界的批量自动操作。
-
-### 安全规则
+## 安全规则
 
 | 规则 | 约束 |
 |---|---|
@@ -358,78 +238,15 @@ interactions-output/
 | 防重复 | 已成功执行过的事件或目标不得重复操作 |
 | 可追溯 | 保存计划、执行结果、运行摘要和异常证据 |
 | 风控停止 | 遇到验证码、登录失效、页面异常时立刻停止 |
+| skill + maxItems=1 | skill 模式传入 selected-comment-text 时必须 max-items 1 |
 
-请遵守以下原则：
+## 使用边界
 
 - 首次使用只进行页面探测和少量评论扫描；
 - 执行回复前，人工核对目标评论与回复内容；
 - 不要将浏览器登录态目录分享给他人；
 - 页面定位异常时立即停止真实操作；
 - 出现登录校验、验证码、页面结构变化时，不要继续批量执行；
-- **MVP 阶段禁止真实点赞回访**（代码层需 `FEATURE_DISABLED` 硬阻断）；
+- MVP 阶段禁止真实点赞回访（代码层 `FEATURE_DISABLED` 硬阻断）；
+- skill 模式一条 selected-comment-text 只能对应一个作品上下文；
 - 使用者应自行确认并遵守平台规则及账号安全要求。
-
----
-
-## 当前已知限制
-
-- 抖音页面结构可能更新，导致文本定位或通知解析失效；
-- 评论回复默认 dry-run，真实发送需 `--execute --max-items 1` 且通过审批；
-- 好友回访支持候选预览和现场审核（visits:live-review 交互式逐条确认），真实点赞在 MVP 阶段默认禁用；
-- **相对时间限制**：当评论仅显示相对时间（如"3分钟前"）且页面 DOM 未提供稳定评论 ID（`data-comment-id` 等属性）时，同一用户同作品下相同文本的评论可能被保守合并为一条事件。时间稳定后重新扫描可自动拆分；
-- **审批策略**：`comments:prepare` 要求 Agent 先完成评论决策（`--decision reply`、`--risk-level low`），仅低风险可进入候选流程；高风险或需人工审核的评论必须阻断；
-- 暂无可视化管理界面；
-- 暂无完整运行历史查看能力；
-
-## 相关文档
-
-| 文档 | 说明 |
-|---|---|
-| `docs/SKILL_PRODUCT_PLAN.md` | 产品定位、MVP 范围与路线图 |
-| `docs/PROJECT_SKILL_REFACTOR_PLAN.md` | Skill 化改造实施计划与 PR 策略 |
-| `礼尚往来-详细开发计划与执行边界.md` | 执行引擎细则、安全门、状态机、错误码 |
-
----
-
-## 开发路线
-
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| S0 | 文档与能力状态统一 | ✅ 完成 |
-| S0.5 | 真实点赞代码层硬阻断 | ✅ 完成 |
-| S1 | `SKILL.md` + JSON 结构化输出 | ✅ 完成 |
-| S2 | 只读互动收件箱 + `actions:pending` | ✅ 完成 |
-| S3 | 评论审批闭环（prepare→approve→dry-run→confirm→execute） | ✅ 完成 |
-| S4 | 好友回访候选预览（三阶段 → 五阶段） | ✅ 完成 |
-| S5 | 待审核回访候选队列（visits:review + 评论草稿） | ✅ 完成 |
-| S6 | 现场审核交互模式（visits:live-review，交互式逐条确认） | ✅ 完成 |
-
-### 已完成
-
-- [x] 浏览器登录态复用、评论/通知扫描与去重
-- [x] dry-run / execute 模式隔离、防重复执行
-- [x] 真实点赞 `FEATURE_DISABLED` 硬阻断
-- [x] 根目录 `SKILL.md` 入口
-- [x] 核心命令 `--json` 输出（Agent 可解析）
-- [x] `actions:pending` 待处理报告（关联 action 状态）
-- [x] 评论审批闭环：prepare → approve → dry-run → confirm-execute → execute
-- [x] 代码层双确认（`execute_confirmed` 状态机）
-- [x] 评论唯一定位（多字段匹配防错配）
-- [x] 点赞回访候选预览（五阶段：actions:plan + visits:discover + visits:review + visits:live-review + likes:reciprocate 硬阻断）
-- [x] 现场审核模式（visits:live-review，交互式逐条确认，dry-run/execute 双模式）
-
-### 下一步
-
-- [ ] S7: 实验性单条回访验证（需身份核验 + 实验开关）
-
----
-
-## 项目说明
-
-“礼尚往来”是一款面向抖音创作者的 OpenClaw 互动助手 Skill 执行引擎。
-
-> 别人认真评论了你，你不想漏回；  
-> 好友给你点了赞，你也想回访一下；  
-> 但所有互动都应该看得见、控得住、查得到。
-
-项目的价值是"不漏掉值得回应的人"，而非"自动刷互动"。建议从页面探测和评论扫描开始使用。
