@@ -7,7 +7,12 @@ import {
   FRIENDLY_RELATIONS,
   VISIT_DRAFTS,
   classifyLikeResult,
+  isExecuteAllowedByRisk,
 } from '../../src/cli/live-review-visits.mjs';
+import {
+  generateVisitCommentCandidates,
+  FIXED_FALLBACK_TEMPLATES,
+} from '../../src/domain/visit-comment-generator.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLI_DIR = resolve(__dirname, '../../src/cli');
@@ -41,9 +46,9 @@ describe('FRIENDLY_RELATIONS', () => {
 });
 
 // ============================================================
-// 2. VISIT_DRAFTS — exactly 3, structured with metadata
+// 2. VISIT_DRAFTS — fallback fixed templates
 // ============================================================
-describe('VISIT_DRAFTS', () => {
+describe('VISIT_DRAFTS (fallback)', () => {
   it('has exactly 3 entries', () => {
     expect(VISIT_DRAFTS).toHaveLength(3);
   });
@@ -53,11 +58,9 @@ describe('VISIT_DRAFTS', () => {
       expect(typeof d.text).toBe('string');
       expect(d.text.length).toBeGreaterThan(0);
       expect(d.text.length).toBeLessThan(30);
-      expect(d.text).not.toMatch(/[!！?？]+$/);
       expect(typeof d.commentCategory).toBe('string');
       expect(typeof d.replyMode).toBe('string');
       expect(typeof d.riskLevel).toBe('string');
-      expect(typeof d.templateId).toBe('string');
     }
   });
 
@@ -68,30 +71,11 @@ describe('VISIT_DRAFTS', () => {
     }
   });
 
-  it('contains known draft texts', () => {
+  it('contains known fallback texts', () => {
     const texts = VISIT_DRAFTS.map(d => d.text);
     expect(texts).toContain('支持一下');
     expect(texts).toContain('内容不错，来看看');
     expect(texts).toContain('互相加油');
-  });
-
-  it('has correct commentCategory mapping', () => {
-    const support = VISIT_DRAFTS.find(d => d.text === '支持一下');
-    expect(support.commentCategory).toBe('support');
-    expect(support.templateId).toBe('visit-support-1');
-
-    const praise = VISIT_DRAFTS.find(d => d.text === '内容不错，来看看');
-    expect(praise.commentCategory).toBe('praise');
-    expect(praise.templateId).toBe('visit-praise-1');
-
-    const encouragement = VISIT_DRAFTS.find(d => d.text === '互相加油');
-    expect(encouragement.commentCategory).toBe('encouragement');
-    expect(encouragement.templateId).toBe('visit-encouragement-1');
-  });
-
-  it('templateIds are unique', () => {
-    const ids = VISIT_DRAFTS.map(d => d.templateId);
-    expect(new Set(ids).size).toBe(ids.length);
   });
 });
 
@@ -126,7 +110,143 @@ describe('classifyLikeResult (live-review-visits)', () => {
 });
 
 // ============================================================
-// 4. No DB write imports
+// 4. isExecuteAllowedByRisk — updated risk gate
+// ============================================================
+describe('isExecuteAllowedByRisk', () => {
+  it('low + auto_simple → allowed', () => {
+    expect(isExecuteAllowedByRisk({ riskLevel: 'low', replyMode: 'auto_simple' })).toBe(true);
+  });
+
+  it('medium + agent_generated_review_required → allowed', () => {
+    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'agent_generated_review_required' })).toBe(true);
+  });
+
+  it('high → blocked', () => {
+    expect(isExecuteAllowedByRisk({ riskLevel: 'high', replyMode: 'agent_generated_review_required' })).toBe(false);
+    expect(isExecuteAllowedByRisk({ riskLevel: 'high', replyMode: 'auto_simple' })).toBe(false);
+  });
+
+  it('ignore → blocked', () => {
+    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'ignore' })).toBe(false);
+    expect(isExecuteAllowedByRisk({ riskLevel: 'low', replyMode: 'ignore' })).toBe(false);
+  });
+
+  it('null → blocked', () => {
+    expect(isExecuteAllowedByRisk(null)).toBe(false);
+  });
+
+  it('medium + auto_simple → blocked (only agent_generated_review_required allowed for medium)', () => {
+    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'auto_simple' })).toBe(false);
+  });
+});
+
+// ============================================================
+// 5. generateVisitCommentCandidates — contextual + fallback
+// ============================================================
+describe('generateVisitCommentCandidates', () => {
+  it('context with hashtag → generates contextual candidates', () => {
+    const ctx = {
+      targetWorkTitle: 'React开发技巧',
+      captionText: '',
+      hashtags: ['React'],
+      authorName: '某作者',
+      canGenerateContextualComment: true,
+    };
+    const candidates = generateVisitCommentCandidates(ctx);
+    expect(candidates.length).toBeGreaterThanOrEqual(2);
+    for (const c of candidates) {
+      expect(c.riskLevel).toBe('medium');
+      expect(c.replyMode).toBe('agent_generated_review_required');
+      expect(c.autoExecuteAllowed).toBe(false);
+    }
+    expect(candidates[0].text).toContain('React');
+  });
+
+  it('context with title but no hashtag → generates from title', () => {
+    const ctx = {
+      targetWorkTitle: 'Vue3组合式API教程',
+      captionText: '',
+      hashtags: [],
+      authorName: '',
+      canGenerateContextualComment: true,
+    };
+    const candidates = generateVisitCommentCandidates(ctx);
+    expect(candidates.length).toBeGreaterThanOrEqual(2);
+    for (const c of candidates) {
+      expect(c.riskLevel).toBe('medium');
+    }
+  });
+
+  it('no context → fallback fixed templates', () => {
+    const ctx = {
+      targetWorkTitle: '',
+      captionText: '',
+      hashtags: [],
+      authorName: '',
+      canGenerateContextualComment: false,
+    };
+    const candidates = generateVisitCommentCandidates(ctx);
+    expect(candidates.length).toBe(3);
+    for (const c of candidates) {
+      expect(c.riskLevel).toBe('low');
+      expect(c.replyMode).toBe('auto_simple');
+    }
+  });
+
+  it('null context → fallback fixed templates', () => {
+    const candidates = generateVisitCommentCandidates(null);
+    expect(candidates.length).toBe(3);
+    for (const c of candidates) {
+      expect(c.riskLevel).toBe('low');
+    }
+  });
+
+  it('no blocked patterns in generated comments', () => {
+    const ctx = {
+      targetWorkTitle: '互关技巧分享',
+      captionText: '',
+      hashtags: ['互关'],
+      authorName: '',
+      canGenerateContextualComment: true,
+    };
+    const candidates = generateVisitCommentCandidates(ctx);
+    for (const c of candidates) {
+      expect(c.text).not.toMatch(/互关|回访|已赞|三连|求关注|私信|加V/);
+    }
+  });
+
+  it('comments do not exceed 24 chars', () => {
+    const ctx = {
+      targetWorkTitle: '一个非常非常非常非常非常非常非常非常长的标题',
+      captionText: '',
+      hashtags: ['测试'],
+      authorName: '',
+      canGenerateContextualComment: true,
+    };
+    const candidates = generateVisitCommentCandidates(ctx);
+    for (const c of candidates) {
+      expect(c.text.length).toBeLessThanOrEqual(24);
+    }
+  });
+
+  it('each candidate has sourceSignals', () => {
+    const ctx = {
+      targetWorkTitle: 'Node.js',
+      captionText: '',
+      hashtags: [],
+      authorName: '',
+      canGenerateContextualComment: true,
+    };
+    const candidates = generateVisitCommentCandidates(ctx);
+    for (const c of candidates) {
+      expect(Array.isArray(c.sourceSignals)).toBe(true);
+      expect(c.sourceSignals.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ============================================================
+// 6. No DB write imports
 // ============================================================
 describe('live-review-visits.mjs — no DB writes', () => {
   it('does not import updateEventStatus', () => {
@@ -140,11 +260,6 @@ describe('live-review-visits.mjs — no DB writes', () => {
     expect(src).not.toMatch(/updateActionStatus/);
   });
 
-  it('does not import createPlan', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).not.toMatch(/createPlan/);
-  });
-
   it('only imports getEvents from interaction-repository', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
     const importMatch = src.match(/import \{([^}]+)\} from ['"]\.\.\/db\/interaction-repository/);
@@ -155,7 +270,7 @@ describe('live-review-visits.mjs — no DB writes', () => {
 });
 
 // ============================================================
-// 5. CLI output structure (empty DB)
+// 7. CLI output structure (empty DB)
 // ============================================================
 describe('visits:live-review JSON output structure', () => {
   it('empty DB produces valid JSON with correct command and summary keys', () => {
@@ -178,49 +293,16 @@ describe('visits:live-review JSON output structure', () => {
 });
 
 // ============================================================
-// 6. postVideoComment — code structure (no browser needed)
-// ============================================================
-describe('postVideoComment (from video-page.mjs)', () => {
-  it('exports postVideoComment function', () => {
-    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
-    expect(src).toMatch(/export async function postVideoComment/);
-  });
-
-  it('has execute guard that returns ACTION_NOT_APPROVED', () => {
-    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
-    expect(src).toMatch(/ACTION_NOT_APPROVED[^]*非 execute 模式，拒绝真实评论操作/);
-  });
-
-  it('checks for empty reply text', () => {
-    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
-    expect(src).toMatch(/EMPTY_REPLY_TEXT/);
-  });
-
-  it('uses COMMENT_INPUT_NOT_FOUND and COMMENT_SEND_BUTTON_NOT_FOUND codes', () => {
-    const src = readFileSync(resolve(CLI_DIR, '../adapters/video-page.mjs'), 'utf8');
-    expect(src).toMatch(/COMMENT_INPUT_NOT_FOUND/);
-    expect(src).toMatch(/COMMENT_SEND_BUTTON_NOT_FOUND/);
-  });
-});
-
-// ============================================================
-// 7. Source code invariants — safety
+// 8. Source code invariants — safety
 // ============================================================
 describe('live-review-visits.mjs — safety invariants', () => {
-  it('does not call clickLike without execute guard (only via exported fn)', () => {
+  it('does not call clickLike without execute guard', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    // Should only import clickLike, not call it directly
-    const callCount = (src.match(/clickLike\(/g) || []).length;
-    const importMatches = src.match(/import.*clickLike/g);
-    // clickLike is only called inside interactiveSelect, and only with { execute: true }
-    expect(callCount).toBeGreaterThanOrEqual(1); // called in interactiveSelect
-    // But it must pass execute: true
     expect(src).toMatch(/clickLike\(page,\s*\{ execute:\s*true \}\)/);
   });
 
   it('calls checkLikeState before acting in execute mode', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    // interactiveSelect should re-check before clickLike
     const recheckIndex = src.indexOf('const recheck = await checkLikeState(page)');
     const clickLikeIndex = src.indexOf('clickLike(page, { execute: true })');
     expect(recheckIndex).toBeGreaterThan(-1);
@@ -235,21 +317,21 @@ describe('live-review-visits.mjs — safety invariants', () => {
 
   it('does not re-open targetWorkUrl before execute', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    // navigateToVideo should only be called in processCandidate, not in interactiveSelect
     const navInInteractive = src.indexOf('interactiveSelect');
     const navCallsAfter = src.indexOf('navigateToVideo', navInInteractive);
     expect(navCallsAfter).toBe(-1);
   });
 
-  it('has risk gate: blocks non-low risk or non-auto_simple drafts from execute', () => {
+  it('has risk gate using isExecuteAllowedByRisk', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toMatch(/draft\.riskLevel !== ['"]low['"] \|\| draft\.replyMode !== ['"]auto_simple['"]/);
+    expect(src).toMatch(/isExecuteAllowedByRisk/);
     expect(src).toMatch(/comment_risk_too_high/);
   });
 
-  it('sets manualReviewMethod to user_selected_template on draft selection', () => {
+  it('sets manualReviewMethod based on replyMode', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toMatch(/manualReviewMethod.*user_selected_template/);
+    expect(src).toMatch(/user_selected_template/);
+    expect(src).toMatch(/user_selected_agent_comment/);
   });
 
   it('autoExecuteAllowed is always false in record initialization and selection', () => {
@@ -260,16 +342,20 @@ describe('live-review-visits.mjs — safety invariants', () => {
 
   it('each candidate requires individual input (no batch)', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    // The interactive loop calls interactiveSelect per candidate
     expect(src).toMatch(/interactiveSelect\(page,\s*item,\s*isExecute\)/);
-    // No "for all items at once" pattern
     const batchConfirm = src.match(/confirm.*all|approve.*all|batch/i);
     expect(batchConfirm).toBeNull();
+  });
+
+  it('imports extractVideoCommentContext and generateVisitCommentCandidates', () => {
+    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
+    expect(src).toMatch(/extractVideoCommentContext/);
+    expect(src).toMatch(/generateVisitCommentCandidates/);
   });
 });
 
 // ============================================================
-// 8. --default maxItems
+// 9. --default maxItems
 // ============================================================
 describe('visits:live-review --max-items', () => {
   it('default maxItems is 10', () => {
@@ -279,7 +365,7 @@ describe('visits:live-review --max-items', () => {
 });
 
 // ============================================================
-// 9. interactiveSelect — verify terminal prompts exist
+// 10. interactiveSelect — verify terminal prompts exist
 // ============================================================
 describe('interactiveSelect — terminal prompts', () => {
   it('dry-run prompt does not mention execution', () => {

@@ -747,6 +747,96 @@ export async function confirmLikeSucceeded(page) {
   }
 }
 
+export async function extractVideoCommentContext(page) {
+  try {
+    const ctx = await page.evaluate(() => {
+      const titleEl = document.querySelector('title');
+      const targetWorkTitle = titleEl ? titleEl.innerText.trim() : '';
+
+      const captionEl = document.querySelector('[data-e2e="video-desc"], .caption, .desc');
+      const captionText = captionEl ? captionEl.innerText.trim().slice(0, 500) : '';
+
+      const hashtagEls = document.querySelectorAll('a[href*="/tag/"], [data-e2e="search-common"] a');
+      const hashtags = [];
+      for (const el of hashtagEls) {
+        const t = (el.innerText || '').trim().replace(/^#/, '');
+        if (t && t.length <= 30 && hashtags.length < 10) hashtags.push(t);
+      }
+
+      const authorEl = document.querySelector('[data-e2e="video-author"], .author-name, a[data-e2e="video-user-name"]');
+      const authorName = authorEl ? authorEl.innerText.trim().slice(0, 50) : '';
+
+      const bodyText = (document.body?.innerText || '').slice(0, 3000);
+      const visibleTextSample = bodyText.slice(0, 500);
+
+      function parseCount(text) {
+        if (!text) return null;
+        const s = text.replace(/[,\s]/g, '');
+        const m = s.match(/^([\d.]+)([万wW]?)/);
+        if (!m) return null;
+        let v = parseFloat(m[1]);
+        if (m[2] === '万' || m[2] === 'w' || m[2] === 'W') v *= 10000;
+        return Math.round(v);
+      }
+
+      let likeCount = null;
+      let commentCount = null;
+      let shareCount = null;
+
+      const actionItems = document.querySelectorAll('.t5VMknM2 .MinpposV > .AOWKbsTg');
+      if (actionItems.length >= 3) {
+        const countEls = actionItems[0].querySelectorAll('span');
+        for (const sp of countEls) {
+          const t = sp.innerText.trim();
+          if (/\d/.test(t) && likeCount === null) { likeCount = parseCount(t); break; }
+        }
+        const commentCountEls = actionItems[1].querySelectorAll('span');
+        for (const sp of commentCountEls) {
+          const t = sp.innerText.trim();
+          if (/\d/.test(t) && commentCount === null) { commentCount = parseCount(t); break; }
+        }
+        const shareCountEls = actionItems[2].querySelectorAll('span');
+        for (const sp of shareCountEls) {
+          const t = sp.innerText.trim();
+          if (/\d/.test(t) && shareCount === null) { shareCount = parseCount(t); break; }
+        }
+      }
+
+      const hasTitle = targetWorkTitle.length > 0;
+      const hasCaption = captionText.length > 10;
+      const hasHashtags = hashtags.length > 0;
+      const canGenerateContextualComment = hasTitle || hasCaption || hasHashtags;
+
+      return {
+        targetWorkTitle,
+        captionText,
+        hashtags,
+        authorName,
+        visibleTextSample,
+        likeCount,
+        commentCount,
+        shareCount,
+        canGenerateContextualComment,
+      };
+    });
+
+    console.error(`[video-page] 上下文提取: title="${ctx.targetWorkTitle.slice(0, 40)}" hashtags=${ctx.hashtags.length} canGen=${ctx.canGenerateContextualComment}`);
+    return success(ctx);
+  } catch (err) {
+    return success({
+      targetWorkTitle: '',
+      captionText: '',
+      hashtags: [],
+      authorName: '',
+      visibleTextSample: '',
+      likeCount: null,
+      commentCount: null,
+      shareCount: null,
+      canGenerateContextualComment: false,
+    });
+  }
+}
+
 export async function postVideoComment(page, text, { execute = false } = {}) {
   try {
     if (!text || !text.trim()) {
