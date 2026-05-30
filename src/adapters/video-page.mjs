@@ -1,4 +1,42 @@
-﻿import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
+import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
+
+/**
+ * Pure function: determine like state from a single candidate's diagnostic info.
+ * Returns { liked: true|false|null, confidence, signal } or null if can't determine.
+ * Used by checkLikeState's page.evaluate and also testable standalone.
+ */
+export function assessCandidateLikeState(diag) {
+  if (!diag) return null;
+
+  // class-based detection
+  if (/active|liked|selected|checked|hasLiked/i.test(diag.className || '')) {
+    return { liked: true, confidence: 'confirmed', signal: 'liked-class:' + diag.tag };
+  }
+
+  // color-based detection
+  function _isRed(val) {
+    if (!val) return false;
+    const m = val.match(/rgb[va]?\(\s*(\d+)/);
+    if (!m) return false;
+    return parseInt(m[1], 10) >= 230;
+  }
+  if (_isRed(diag.color)) return { liked: true, confidence: 'confirmed', signal: 'red-color:' + diag.tag };
+  if (_isRed(diag.backgroundColor)) return { liked: true, confidence: 'confirmed', signal: 'red-bg:' + diag.tag };
+
+  // SVG-based detection
+  if ([diag.svgFill, diag.pathFill].some(f => f === '#FF0040' || f === '#FE2C55' || f === 'red')) {
+    return { liked: true, confidence: 'confirmed', signal: 'red-svg:' + diag.tag };
+  }
+
+  // neutral unlike button
+  const hasLikeText = diag.text && (diag.text.startsWith('点赞') || diag.text.startsWith('赞'));
+  const hasLikeAria = (diag.ariaLabel || '').includes('赞');
+  if (hasLikeText || hasLikeAria) {
+    return { liked: false, confidence: 'confirmed', signal: 'neutral-like-btn' };
+  }
+
+  return null;
+}
 
 export async function navigateToVideo(page, videoUrl, options = {}) {
   const { timeoutMs = 15000 } = options;
@@ -38,71 +76,177 @@ export async function navigateToVideo(page, videoUrl, options = {}) {
 export async function checkLikeState(page) {
   try {
     const state = await page.evaluate(() => {
-      // Find like/heart elements
-      const all = document.querySelectorAll('span, div, [role="button"], button');
+      // ---- helpers ----
+      function isRedColor(val) {
+        if (!val) return false;
+        const m = val.match(/rgb[va]?\(\s*(\d+)/);
+        if (!m) return false;
+        const r = parseInt(m[1], 10);
+        return r >= 230;
+      }
 
-      for (const el of all) {
+      function hasLikedClass(cls) {
+        return /active|liked|selected|checked|hasLiked/i.test(cls);
+      }
+
+      function hasLikedSvg(el) {
+        // check SVGs inside this element or itself
+        const svgs = (el.tagName === 'svg' || el.tagName === 'path') ? [el] : el.querySelectorAll('svg, path');
+        for (const svg of svgs) {
+          const fill = svg.getAttribute('fill') || '';
+          if (fill === '#FF0040' || fill === '#FE2C55' || fill === 'red') return true;
+          const style = window.getComputedStyle(svg);
+          if (isRedColor(style.fill)) return true;
+        }
+        return false;
+      }
+
+      // ---- Phase 1: broad candidate search ----
+      const candidates = [];
+      const seen = new Set();
+
+      const QUERIES = [
+        // text-based
+        ...Array.from(document.querySelectorAll('span, div, [role="button"], button')),
+        // aria / title
+        ...Array.from(document.querySelectorAll('[aria-label*="赞"]')),
+        ...Array.from(document.querySelectorAll('[title*="赞"]')),
+        // data-e2e
+        ...Array.from(document.querySelectorAll('[data-e2e*="like"]')),
+        ...Array.from(document.querySelectorAll('[data-e2e*="digg"]')),
+        // class
+        ...Array.from(document.querySelectorAll('[class*="like"]')),
+        ...Array.from(document.querySelectorAll('[class*="digg"]')),
+        // structures
+        ...Array.from(document.querySelectorAll('button, [role="button"]')),
+      ];
+
+      for (const el of QUERIES) {
+        if (seen.has(el)) continue;
+        seen.add(el);
+
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 10 || rect.height < 10) continue;
+
         const text = (el.innerText || '').trim();
+        const tag = el.tagName.toLowerCase();
+        const ariaLabel = el.getAttribute('aria-label') || '';
+        const title = el.getAttribute('title') || '';
+        const dataE2e = el.getAttribute('data-e2e') || '';
+        const cls = (typeof el.className === 'string') ? el.className : '';
 
-        // Look for like-related UI patterns
-        if (text.startsWith('点赞') || text.startsWith('赞')) {
-          const rect = el.getBoundingClientRect();
-          // Check if the like icon/parent is in "liked" state (red color, filled, active class)
-          let liked = false;
+        // check if this is like-related
+        const isLikeRelated =
+          text.startsWith('点赞') || text.startsWith('赞') ||
+          ariaLabel.includes('赞') ||
+          title.includes('赞') ||
+          /like|digg/i.test(dataE2e) ||
+          /like|digg/i.test(cls);
 
-          const parent = el.parentElement;
-          if (parent) {
-            const parentCls = parent.className || '';
-            const parentStyle = window.getComputedStyle(parent);
-            // Check if parent or its child has red/pink color (liked state)
-            if (parentStyle.color && (parentStyle.color.includes('rgb(255') || parentStyle.color.includes('rgb(254'))) {
-              liked = true;
-            }
-            if (/active|liked|selected|checked/i.test(parentCls)) {
-              liked = true;
-            }
+        if (!isLikeRelated) continue;
+
+        const style = window.getComputedStyle(el);
+        const diag = {
+          tag, text: text.slice(0, 20),
+          ariaLabel: ariaLabel.slice(0, 30),
+          title: title.slice(0, 30),
+          className: cls.slice(0, 60),
+          dataE2e: dataE2e.slice(0, 30),
+          color: style.color || '',
+          backgroundColor: style.backgroundColor || '',
+          svgFill: '',
+          pathFill: '',
+          rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+          visible: rect.width > 10 && rect.height > 10,
+        };
+
+        // collect svg/path fill info
+        const svgs = el.querySelectorAll('svg');
+        for (const svg of svgs) {
+          const f = svg.getAttribute('fill') || '';
+          if (f) diag.svgFill = f;
+          const paths = svg.querySelectorAll('path');
+          for (const p of paths) {
+            const pf = p.getAttribute('fill') || '';
+            if (pf) diag.pathFill = pf;
           }
+        }
 
-          // Also check SVG fill for red color
-          const svgs = (parent || el).querySelectorAll('svg');
-          for (const svg of svgs) {
-            const fill = svg.getAttribute('fill') || '';
-            if (fill === '#FF0040' || fill === 'red' || fill === '#FE2C55') {
-              liked = true;
-            }
-            const paths = svg.querySelectorAll('path');
-            for (const path of paths) {
-              const pf = path.getAttribute('fill') || '';
-              if (pf === '#FF0040' || pf === '#FE2C55' || pf === 'currentColor') {
-                const style = window.getComputedStyle(path);
-                if (style.fill && (style.fill.includes('rgb(255') || style.fill.includes('rgb(254'))) {
-                  liked = true;
-                }
-              }
-            }
-          }
+        candidates.push({ el, diag, rect, fullText: text });
+        if (candidates.length >= 20) break; // safety limit
+      }
 
-          return { liked, text };
+      // ---- Phase 2: determine like state ----
+      if (candidates.length === 0) {
+        return { liked: null, confidence: 'none', signal: 'no-candidates', candidates: [] };
+      }
+
+      for (const c of candidates) {
+        const { diag, fullText } = c;
+
+        // 2a: class-based liked detection
+        if (hasLikedClass(diag.className)) {
+          return { liked: true, confidence: 'confirmed', signal: 'liked-class:' + diag.tag, diag };
+        }
+
+        // 2b: color-based liked detection
+        if (isRedColor(diag.color)) {
+          return { liked: true, confidence: 'confirmed', signal: 'red-color:' + diag.tag, diag };
+        }
+        if (isRedColor(diag.backgroundColor)) {
+          return { liked: true, confidence: 'confirmed', signal: 'red-bg:' + diag.tag, diag };
+        }
+
+        // 2c: SVG fill-based liked detection
+        if (diag.svgFill && (diag.svgFill === '#FF0040' || diag.svgFill === '#FE2C55' || diag.svgFill === 'red')) {
+          return { liked: true, confidence: 'confirmed', signal: 'red-svg-fill:' + diag.tag, diag };
+        }
+        if (diag.pathFill && (diag.pathFill === '#FF0040' || diag.pathFill === '#FE2C55' || diag.pathFill === 'red')) {
+          return { liked: true, confidence: 'confirmed', signal: 'red-path-fill:' + diag.tag, diag };
+        }
+
+        // 2d: explicit like button with count → neutral (already checked for red)
+        const t = fullText || diag.text || '';
+        if (/[赞]\s*\d/.test(t)) {
+          return { liked: false, confidence: 'confirmed', signal: 'like-count-neutral', diag };
         }
       }
 
-      return null;
+      // ---- Phase 3: find a clear unlike button ----
+      for (const c of candidates) {
+        const { diag } = c;
+        const hasText = diag.text && (diag.text.startsWith('点赞') || diag.text.startsWith('赞'));
+        const hasAria = (diag.ariaLabel || '').includes('赞');
+        if (hasText || hasAria) {
+          return { liked: false, confidence: 'confirmed', signal: 'neutral-like-btn', diag };
+        }
+      }
+
+      // ---- Phase 4: unclear → return diagnostics ----
+      const top10 = candidates.slice(0, 10).map(c => c.diag);
+      return {
+        liked: null,
+        confidence: 'unknown',
+        signal: 'ambiguous',
+        candidateCount: candidates.length,
+        candidates: top10,
+      };
     });
 
-    if (!state) {
+    if (state.liked === null) {
       return blocking(
         RESULT_CODES.LIKE_STATE_UNKNOWN,
-        '无法判断点赞状态',
-        { data: {} }
+        state.signal === 'no-candidates' ? '页面上未找到任何点赞相关元素' : '无法明确判断点赞状态',
+        { data: { candidateCount: state.candidateCount || 0, candidates: state.candidates || [], confidence: state.confidence } }
       );
     }
 
-    console.error(`[video-page] 点赞状态: ${state.liked ? '已赞' : '未赞'}`);
+    console.error(`[video-page] 点赞状态: ${state.liked ? '已赞' : '未赞'} (${state.signal})`);
     return success({
       alreadyLiked: state.liked,
-      text: state.text,
-      confidence: 'confirmed',
-      signal: state.liked ? 'red-fill-or-active-class' : 'neutral-state',
+      text: state.diag?.text || '',
+      confidence: state.confidence,
+      signal: state.signal,
     });
   } catch (err) {
     return blocking(
