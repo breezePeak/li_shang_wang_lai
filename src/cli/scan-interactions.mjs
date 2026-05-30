@@ -113,10 +113,14 @@ async function runCommentScan(page, run) {
   return success({ commentCount: newCount, duplicateCount, parseFailedCount, step: 'comment-scan' });
 }
 
-async function runNotificationScan(page, run, type) {
+async function runNotificationScan(page, run, type, pauseAfterOpen = 0) {
   console.error('[scan] === 通知面板扫描（增量逐批采集） ===');
 
-  const { ensureNotificationPageReady, openNotificationPanel, closeNotificationPanel, extractNotificationsBatch } = await import('../adapters/notification-page.mjs');
+  const {
+    ensureNotificationPageReady, openNotificationPanel, closeNotificationPanel,
+    extractVisibleNotifications, scrollPanelDown,
+    waitForNotificationPanelStable, moveMouseIntoPanel,
+  } = await import('../adapters/notification-page.mjs');
 
   try {
     await ensureNotificationPageReady(page);
@@ -137,9 +141,32 @@ async function runNotificationScan(page, run, type) {
     );
   }
 
-  const { waitForPanelItems } = await import('../adapters/notification-page.mjs');
-  await waitForPanelItems(page);
-  console.error('[scan] 通知面板项目已就绪，开始采集...');
+  const { stable, empty, panelBox } = await waitForNotificationPanelStable(page);
+  if (!stable || empty) {
+    if (!stable) {
+      return blocking(
+        RESULT_CODES.NOTIFICATION_PANEL_NOT_FOUND,
+        '通知面板未稳定或已消失',
+        { data: { step: 'notify-panel-unstable' } }
+      );
+    }
+    console.error('[scan] 通知面板为空（暂无消息）');
+    await closeNotificationPanel(page);
+    return success({
+      inserted: 0, duplicateCount: 0, enriched: 0, ambiguousCount: 0,
+      profileResolved: 0, profileUnresolved: 0, parseFailed: 0,
+      scrollRounds: 0, events: [], ambiguousEvents: [], failedEvents: [],
+      empty: true, step: 'notify-scan',
+    });
+  }
+
+  await moveMouseIntoPanel(page, panelBox);
+  console.error('[scan] 通知面板已就绪，鼠标保持在面板内');
+
+  if (pauseAfterOpen > 0) {
+    console.error(`[scan] --pause-after-open: 暂停 ${pauseAfterOpen}ms，可人工确认面板...`);
+    await page.waitForTimeout(pauseAfterOpen);
+  }
 
   const wantComments = (type === 'all' || type === 'comment');
   const wantLikes = (type === 'all' || type === 'like');
@@ -156,12 +183,13 @@ async function runNotificationScan(page, run, type) {
   const allEvents = [];
   const ambiguousEvents = [];
   const failedEvents = [];
+  const seenItemKeys = new Set();
+  let consecutiveEmptyRounds = 0;
 
-  console.error('[scan] 通知面板已打开，开始逐批采集...');
+  console.error('[scan] 开始逐批采集通知...');
 
-  // Incremental batch: parse → dedup/enrich → scroll → repeat
   while (scrollRounds < maxScrolls) {
-    const batchResult = await extractNotificationsBatch(page);
+    const batchResult = await extractVisibleNotifications(page);
     if (!batchResult || !batchResult.ok) {
       if (scrollRounds === 0) {
         return blocking(
@@ -173,17 +201,21 @@ async function runNotificationScan(page, run, type) {
       break;
     }
 
-    const { notifications, hasNew } = batchResult.data;
-    if (!notifications || notifications.length === 0) break;
-
+    const notifications = batchResult.data.notifications || [];
     let batchInserted = 0;
     let batchEnriched = 0;
     let batchDuplicate = 0;
     let batchAmbiguous = 0;
     let batchProfileResolved = 0;
     let batchProfileUnresolved = 0;
+    let newInBatch = 0;
 
     for (const n of notifications) {
+      const itemKey = n.notificationItemKey || (n.username + '||' + n.action + '||' + (n.content || ''));
+      if (seenItemKeys.has(itemKey)) continue;
+      seenItemKeys.add(itemKey);
+      newInBatch++;
+
       try {
         if (!wantComments && n.eventType === 'comment') continue;
         if (!wantLikes && n.eventType === 'like') continue;
@@ -296,12 +328,28 @@ async function runNotificationScan(page, run, type) {
     run.scanned += notifications.length;
     run.enriched = totalEnrichedCount;
 
-    console.error(`[scan]   轮次 ${scrollRounds}: +${batchInserted}条 (${batchDuplicate}重复, ${batchEnriched}补全, ${batchAmbiguous}歧义, ${batchProfileResolved}主页解析)`);
+    console.error(`[scan]   轮次 ${scrollRounds}: +${batchInserted}条 (${batchDuplicate}重复, ${batchEnriched}补全, ${batchAmbiguous}歧义, ${batchProfileResolved}主页解析, ${newInBatch}新)`);
 
-    if (!hasNew) break;
+    if (newInBatch === 0) {
+      consecutiveEmptyRounds++;
+      if (consecutiveEmptyRounds >= 2) {
+        console.error('[scan] 连续 2 轮无新通知，停止采集');
+        break;
+      }
+    } else {
+      consecutiveEmptyRounds = 0;
+    }
+
+    const scrollResult = await scrollPanelDown(page, { deltaY: 600 });
+    if (!scrollResult.scrolled || scrollResult.reachedBottom) {
+      console.error('[scan] 已到达通知面板底部或无法滚动');
+      break;
+    }
   }
 
-  await closeNotificationPanel(page);
+  if (!run.options?.keepOpen) {
+    await closeNotificationPanel(page);
+  }
 
   console.error(`[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalAmbiguousCount} 歧义 | ${totalProfileResolved} 主页已解析 | ${totalProfileUnresolved} 主页未解析 | ${parseFailedCount} 条解析失败 | ${scrollRounds} 轮滚动`);
   return success({
@@ -323,6 +371,8 @@ async function main() {
 
   const typeIdx = remaining.indexOf('--type');
   const type = typeIdx >= 0 ? remaining[typeIdx + 1] : 'all';
+  const pauseIdx = remaining.indexOf('--pause-after-open');
+  const pauseAfterOpen = pauseIdx >= 0 ? parseInt(remaining[pauseIdx + 1], 10) || 0 : 0;
   const validTypes = ['all', 'comment', 'like'];
   if (!validTypes.includes(type)) {
     if (options.json) {
@@ -353,7 +403,7 @@ async function main() {
     // All new interaction collection flows through the notification center.
     // runCommentScan() is preserved only for reply execution positioning,
     // NOT for new event collection.
-    const notifResult = await runPhaseWithRecovery(page, run, 'notification', () => runNotificationScan(page, run, type), options);
+    const notifResult = await runPhaseWithRecovery(page, run, 'notification', () => runNotificationScan(page, run, type, pauseAfterOpen), options);
     if (!notifResult.ok) {
       if (options.json) {
         printJsonError('interactions:scan', notifResult.code || RESULT_CODES.BLOCKED,
