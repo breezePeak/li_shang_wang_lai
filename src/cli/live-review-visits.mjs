@@ -4,18 +4,27 @@ import { generatePlan } from './plan-actions.mjs';
 import { runMigrations } from '../db/migrations.mjs';
 import { createBrowserContext } from '../browser/browser-context.mjs';
 import { findLatestNonPinnedVideo } from '../adapters/user-profile-page.mjs';
-import { navigateToVideo, checkLikeState, getVideoTitle, clickLike, confirmLikeSucceeded, postVideoComment } from '../adapters/video-page.mjs';
+import { navigateToVideo, checkLikeState, getVideoTitle, clickLike, confirmLikeSucceeded, postVideoComment, extractVideoCommentContext } from '../adapters/video-page.mjs';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
+import { generateVisitCommentCandidates } from '../domain/visit-comment-generator.mjs';
+import { generateAgentCommentCandidates } from '../domain/llm-comment-generator.mjs';
+import { validateSelectedComment, isExecuteAllowed, FORBIDDEN_WORDS } from '../domain/comment-policy.mjs';
+import { waitForProfileSettled, waitForVideoSettled, waitForHumanObservation } from '../browser/page-settle.mjs';
 
 export const FRIENDLY_RELATIONS = new Set(['friend', 'mutual']);
 
-export const VISIT_DRAFTS = [
-  { text: '支持一下', commentCategory: 'support', replyMode: 'auto_simple', riskLevel: 'low', templateId: 'visit-support-1' },
-  { text: '内容不错，来看看', commentCategory: 'praise', replyMode: 'auto_simple', riskLevel: 'low', templateId: 'visit-praise-1' },
-  { text: '互相加油', commentCategory: 'encouragement', replyMode: 'auto_simple', riskLevel: 'low', templateId: 'visit-encouragement-1' },
-];
+const VALID_COMMENT_MODES = new Set(['local', 'agent', 'skill']);
+
+const SKILL_CONSTRAINTS = {
+  maxCandidates: 3,
+  maxLength: 24,
+  forbiddenWords: FORBIDDEN_WORDS,
+  replyMode: 'agent_generated_review_required',
+  riskLevel: 'medium',
+  requiresUserSelection: true,
+};
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 
@@ -52,8 +61,9 @@ function formatTargetWorkId(url, videoId) {
   return url || null;
 }
 
-async function processCandidate(page, candidate) {
+async function processCandidate(page, candidate, commentMode, settleOptions) {
   const name = candidate.actorName || 'unknown';
+  const { observeMs, profileSettleMs, videoSettleMs } = settleOptions;
   const record = {
     actorName: name,
     actorProfileKey: candidate.actorProfileKey || '',
@@ -70,17 +80,23 @@ async function processCandidate(page, candidate) {
     executeAllowed: false,
     previewOnly: true,
     reason: null,
-    selectedCommentDraft: null,
+    selectedCommentText: null,
     commentCategory: null,
     replyMode: null,
     riskLevel: null,
-    templateId: null,
+    generationReason: null,
+    sourceSignals: null,
     manualReviewMethod: null,
     autoExecuteAllowed: false,
     actionResults: null,
+    generatedCommentCandidates: null,
+    usedFallback: false,
+    commentContext: null,
+    needsAgentComment: false,
+    commentMode,
   };
 
-  console.error(`\n[live-review] ${name} [${record.relation}]`);
+  console.error(`\n[live-review] ${name} [${record.relation}] (mode=${commentMode})`);
 
   if (!FRIENDLY_RELATIONS.has(record.relation)) {
     record.status = 'blocked';
@@ -99,13 +115,22 @@ async function processCandidate(page, candidate) {
   console.error(`[live-review]   主页: ${record.actorProfileUrl.slice(0, 60)}...`);
   try {
     await page.goto(record.actorProfileUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-    await page.waitForTimeout(3000);
   } catch (err) {
     record.status = 'blocked';
     record.reason = 'profile_navigation_failed';
     console.error(`[live-review]   主页导航失败: ${err.message}`);
     return record;
   }
+
+  const profileSettled = await waitForProfileSettled(page, { profileSettleMs });
+  if (!profileSettled.ok) {
+    record.status = 'blocked';
+    record.reason = profileSettled.message;
+    console.error(`[live-review]   ${record.reason}`);
+    return record;
+  }
+
+  await waitForHumanObservation(page, '[live-review]   主页已打开', observeMs);
 
   const videoResult = await findLatestNonPinnedVideo(page);
   if (!videoResult.ok) {
@@ -119,7 +144,7 @@ async function processCandidate(page, candidate) {
   record.targetWorkId = formatTargetWorkId(videoResult.data.videoUrl, videoResult.data.videoId);
   console.error(`[live-review]   视频: ${record.targetWorkUrl.slice(0, 60)} (${record.targetWorkId})`);
 
-  await page.waitForTimeout(2000);
+  await waitForHumanObservation(page, '[live-review]   候选作品已找到', Math.min(observeMs, 3000));
 
   const navResult = await navigateToVideo(page, record.targetWorkUrl);
   if (!navResult.ok) {
@@ -128,6 +153,17 @@ async function processCandidate(page, candidate) {
     console.error(`[live-review]   ${record.reason}`);
     return record;
   }
+
+  const videoSettled = await waitForVideoSettled(page, { videoSettleMs });
+  if (!videoSettled.ok) {
+    record.status = 'blocked';
+    record.reason = videoSettled.message;
+    console.error(`[live-review]   ${record.reason}`);
+    return record;
+  }
+
+  await waitForHumanObservation(page, '[live-review]   视频页已打开', observeMs);
+  await page.waitForTimeout(1500);
 
   const likeResult = await checkLikeState(page);
   const classification = classifyLikeResult(likeResult);
@@ -152,25 +188,60 @@ async function processCandidate(page, candidate) {
     record.targetWorkTitle = titleResult.data.title;
   }
 
-  console.error(`[live-review]   未点赞 → ${record.targetWorkTitle.slice(0, 40)}`);
+  const contextResult = await extractVideoCommentContext(page);
+  const commentContext = contextResult.data;
+  record.commentContext = commentContext;
+
+  if (commentMode === 'skill') {
+    record.needsAgentComment = true;
+    record.generatedCommentCandidates = null;
+    console.error(`[live-review]   未点赞 → ${record.targetWorkTitle.slice(0, 40)} (skill mode, needsAgentComment=true)`);
+    return record;
+  }
+
+  if (commentMode === 'agent') {
+    const agentResult = await generateAgentCommentCandidates(commentContext);
+    if (!agentResult.ok) {
+      record.status = 'blocked';
+      record.reason = 'agent_mode_disabled';
+      console.error(`[live-review]   agent 模式不可用: ${agentResult.message}`);
+      return record;
+    }
+    record.generatedCommentCandidates = agentResult.data?.candidates || [];
+    record.usedFallback = false;
+    console.error(`[live-review]   未点赞 → ${record.targetWorkTitle.slice(0, 40)} (agent mode, candidates=${record.generatedCommentCandidates.length})`);
+    return record;
+  }
+
+  // local mode
+  const { generatedCommentCandidates, usedFallback } = generateVisitCommentCandidates(commentContext);
+  record.generatedCommentCandidates = generatedCommentCandidates;
+  record.usedFallback = usedFallback;
+
+  const isContextual = commentContext.canGenerateContextualComment;
+  console.error(`[live-review]   未点赞 → ${record.targetWorkTitle.slice(0, 40)} (local mode, context=${isContextual}, candidates=${generatedCommentCandidates.length}, fallback=${usedFallback})`);
   return record;
 }
 
 async function interactiveSelect(page, record, isExecute) {
+  const candidates = record.generatedCommentCandidates || [];
+
   console.error(`\n==================== 待审核候选 ====================`);
   console.error(`  用户: ${record.actorName} [${record.relation}]`);
   console.error(`  作品: ${record.targetWorkTitle.slice(0, 60) || record.targetWorkUrl.slice(0, 60)}`);
   console.error(`  ID: ${record.targetWorkId}`);
   console.error(`====================================================`);
-  console.error(`  评论草稿 (固定 low-risk 模板):`);
-  for (let i = 0; i < VISIT_DRAFTS.length; i++) {
-    const marker = i === 0 ? '>' : ' ';
-    console.error(`  ${marker} ${i + 1}. "${VISIT_DRAFTS[i].text}"`);
+  console.error(`  评论候选:`);
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
+    const riskTag = c.riskLevel === 'low' ? '[low]' : '[med]';
+    const modeTag = c.replyMode === 'auto_simple' ? '固定' : '生成';
+    console.error(`  ${i === 0 ? '>' : ' '} ${i + 1}. "${c.text}" ${riskTag} ${modeTag}`);
   }
 
   const promptText = isExecute
-    ? '\n请选择评论草稿，选择后将立即执行当前条；输入 s 跳过，q 停止。\n> '
-    : '\n请选择评论草稿用于预览；当前为 dry-run，不会执行真实点赞/评论。\n> ';
+    ? '\n请选择评论候选，选择后将立即执行当前条；输入 s 跳过，q 停止。\n> '
+    : '\n请选择评论候选用于预览；当前为 dry-run，不会执行真实点赞/评论。\n> ';
 
   const answer = await ask(promptText);
   const trimmed = answer.trim().toLowerCase();
@@ -186,34 +257,38 @@ async function interactiveSelect(page, record, isExecute) {
   }
 
   const choice = parseInt(trimmed, 10);
-  if (isNaN(choice) || choice < 1 || choice > VISIT_DRAFTS.length) {
+  if (isNaN(choice) || choice < 1 || choice > candidates.length) {
     console.error(`[live-review]   无效输入 "${answer}"，跳过当前条`);
     return { action: 'skip' };
   }
 
-  const draft = VISIT_DRAFTS[choice - 1];
-  record.selectedCommentDraft = draft.text;
-  record.commentCategory = draft.commentCategory;
-  record.replyMode = draft.replyMode;
-  record.riskLevel = draft.riskLevel;
-  record.templateId = draft.templateId;
-  record.manualReviewMethod = 'user_selected_template';
+  const selected = candidates[choice - 1];
+  record.selectedCommentText = selected.text;
+  record.commentCategory = selected.commentCategory;
+  record.replyMode = selected.replyMode;
+  record.riskLevel = selected.riskLevel;
+  record.generationReason = selected.reason;
+  record.sourceSignals = selected.sourceSignals;
+  record.manualReviewMethod = selected.replyMode === 'auto_simple' ? 'user_selected_template' : 'user_selected_agent_comment';
   record.autoExecuteAllowed = false;
-  console.error(`[live-review]   选择草稿 #${choice}: "${draft.text}" [${draft.riskLevel}/${draft.replyMode}]`);
+  console.error(`[live-review]   选择 #${choice}: "${selected.text}" (risk=${selected.riskLevel}, mode=${selected.replyMode})`);
 
+  return await executeOnPage(page, record, selected, isExecute);
+}
+
+async function executeOnPage(page, record, selected, isExecute) {
   if (!isExecute) {
     console.error(`[live-review]   dry-run 模式，不执行真实操作`);
-    return { action: 'selected', draft: draft.text };
+    return { action: 'selected', selected };
   }
 
-  // execute mode: validate risk before proceeding
-  if (draft.riskLevel !== 'low' || draft.replyMode !== 'auto_simple') {
-    record.actionResults = { like: 'blocked', comment: null, reason: 'risk_level_not_low', riskLevel: draft.riskLevel, replyMode: draft.replyMode };
-    console.error(`[live-review]   草稿风险等级不符 (${draft.riskLevel}/${draft.replyMode})，跳过执行`);
-    return { action: 'risk_blocked', draft: draft.text };
+  if (!isExecuteAllowed(selected, record)) {
+    record.status = 'blocked';
+    record.reason = 'comment_risk_too_high';
+    console.error(`[live-review]   风险校验不通过，不允许执行`);
+    return { action: 'blocked', selected };
   }
 
-  // execute mode: re-check like state on current page, then act
   console.error(`[live-review]   执行模式 — 重新检查点赞状态...`);
   const recheck = await checkLikeState(page);
   const reclass = classifyLikeResult(recheck);
@@ -221,46 +296,92 @@ async function interactiveSelect(page, record, isExecute) {
   if (reclass.status === 'blocked') {
     record.actionResults = { like: 'blocked', comment: null, reason: 'LIKE_STATE_UNKNOWN' };
     console.error(`[live-review]   re-check 点赞状态未知，跳过执行`);
-    return { action: 'blocked', draft: draft.text };
+    return { action: 'blocked', selected };
   }
 
   if (reclass.status === 'skipped') {
     record.actionResults = { like: 'skipped', comment: null, reason: 'already_liked' };
     console.error(`[live-review]   re-check 已点赞，跳过评论`);
-    return { action: 'skipped', draft: draft.text };
+    return { action: 'skipped', selected };
   }
 
-  // not_liked: execute like + comment
   console.error(`[live-review]   未点赞 — 执行点赞...`);
   const likeExec = await clickLike(page, { execute: true });
   if (!likeExec.ok) {
     record.actionResults = { like: likeExec.code, comment: null, reason: likeExec.message };
     console.error(`[live-review]   点赞失败: ${likeExec.message}`);
-    return { action: 'like_failed', draft: draft.text };
+    return { action: 'like_failed', selected };
   }
 
   const confirm = await confirmLikeSucceeded(page);
   if (!confirm.ok) {
     record.actionResults = { like: 'clicked_but_unconfirmed', comment: null };
     console.error(`[live-review]   点赞后无法确认`);
-    return { action: 'like_unconfirmed', draft: draft.text };
+    return { action: 'like_unconfirmed', selected };
   }
 
   record.actionResults = { like: 'confirmed', comment: null };
   console.error(`[live-review]   点赞成功`);
 
-  // post comment
-  console.error(`[live-review]   发表评论: "${draft.text}"...`);
-  const commentExec = await postVideoComment(page, draft.text, { execute: true });
+  const commentText = record.selectedCommentText || selected.text;
+  console.error(`[live-review]   发表评论: "${commentText}"...`);
+  const commentExec = await postVideoComment(page, commentText, { execute: true });
   if (!commentExec.ok) {
     record.actionResults.comment = commentExec.code;
     console.error(`[live-review]   评论失败: ${commentExec.message}`);
-    return { action: 'comment_failed', draft: draft.text };
+    return { action: 'comment_failed', selected };
+  }
+
+  if (commentExec.data?.unconfirmed) {
+    record.actionResults.comment = 'unconfirmed';
+    record.actionResults.commentReason = 'comment_not_confirmed';
+    console.error(`[live-review]   评论已发送但未确认`);
+    return { action: 'comment_unconfirmed', selected };
   }
 
   record.actionResults.comment = 'confirmed';
   console.error(`[live-review]   评论成功`);
-  return { action: 'executed', draft: draft.text };
+  return { action: 'executed', selected };
+}
+
+async function handleSkillExecution(page, record, options) {
+  const text = options.selectedCommentText;
+  const replyMode = options.replyMode;
+  const riskLevel = options.riskLevel;
+  const manualReviewMethod = options.manualReviewMethod;
+
+  if (!text) {
+    console.error('[live-review]   skill 模式需要 --selected-comment-text 参数');
+    return { action: 'blocked' };
+  }
+
+  record.selectedCommentText = text;
+  record.replyMode = replyMode || 'agent_generated_review_required';
+  record.riskLevel = riskLevel || 'medium';
+  record.manualReviewMethod = manualReviewMethod || 'user_selected_agent_comment';
+  record.commentCategory = 'contextual_praise';
+  record.generationReason = 'external_agent';
+  record.sourceSignals = ['skill_mode'];
+  record.autoExecuteAllowed = false;
+
+  const validation = validateSelectedComment({
+    text: record.selectedCommentText,
+    replyMode: record.replyMode,
+    riskLevel: record.riskLevel,
+    manualReviewMethod: record.manualReviewMethod,
+  });
+
+  if (!validation.valid) {
+    console.error(`[live-review]   评论校验失败: ${validation.errors.join('; ')}`);
+    record.status = 'blocked';
+    record.reason = 'comment_validation_failed';
+    return { action: 'blocked' };
+  }
+
+  console.error(`[live-review]   skill 执行: "${text}" (risk=${record.riskLevel}, mode=${record.replyMode})`);
+
+  const selected = { text, replyMode: record.replyMode, riskLevel: record.riskLevel };
+  return await executeOnPage(page, record, selected, options.execute);
 }
 
 async function main() {
@@ -270,8 +391,38 @@ async function main() {
   const useJson = commonArgs.options.json;
   const maxItems = commonArgs.options.maxItems || 10;
   const isExecute = commonArgs.options.execute;
+  const commentMode = commonArgs.options.commentMode || 'skill';
 
-  console.error('[live-review] 读取待处理事件...');
+  if (!useJson) {
+    commonArgs.options.keepOpen = true;
+  }
+
+  const settleOptions = {
+    observeMs: commonArgs.options.observeMs,
+    profileSettleMs: commonArgs.options.profileSettleMs,
+    videoSettleMs: commonArgs.options.videoSettleMs,
+  };
+
+  if (!VALID_COMMENT_MODES.has(commentMode)) {
+    console.error(`[live-review] 无效 --comment-mode: ${commentMode}，可选: local, agent, skill`);
+    if (useJson) {
+      printJsonError('visits:live-review', RESULT_CODES.INVALID_ARGUMENTS, `invalid --comment-mode: ${commentMode}`);
+    }
+    rl.close();
+    return;
+  }
+
+  if (commentMode === 'skill' && commonArgs.options.selectedCommentText && maxItems !== 1) {
+    const msg = 'skill 模式传入 selected-comment-text 时，只允许 --max-items 1，避免同一评论应用到多个作品';
+    console.error(`[live-review] ${msg}`);
+    if (useJson) {
+      printJsonError('visits:live-review', RESULT_CODES.INVALID_ARGUMENTS, msg);
+    }
+    rl.close();
+    return;
+  }
+
+  console.error(`[live-review] 读取待处理事件... (comment-mode=${commentMode})`);
   const allEvents = getEvents({ status: 'new', limit: 200 });
   const plan = generatePlan(allEvents);
   const candidates = plan.visitWorkCandidates;
@@ -315,7 +466,7 @@ async function main() {
 
   try {
     for (let i = 0; i < slice.length; i++) {
-      const item = await processCandidate(page, slice[i]);
+      const item = await processCandidate(page, slice[i], commentMode, settleOptions);
       discoveries.push(item);
       run.scanned++;
 
@@ -329,16 +480,27 @@ async function main() {
         continue;
       }
 
-      // pending_review: enter interactive selection
+      // pending_review
       run.planned++;
-      const result = await interactiveSelect(page, item, isExecute);
+
+      if (commentMode === 'skill' && !commonArgs.options.selectedCommentText) {
+        // skill mode without selected-comment-text: just output context, don't interact
+        continue;
+      }
+
+      let result;
+      if (commentMode === 'skill' && commonArgs.options.selectedCommentText) {
+        result = await handleSkillExecution(page, item, commonArgs.options);
+      } else {
+        result = await interactiveSelect(page, item, isExecute);
+      }
 
       if (result.action === 'quit') {
         stopped = true;
         break;
       }
 
-      if (result.action === 'executed' || result.action === 'comment_failed' || result.action === 'like_failed' || result.action === 'like_unconfirmed') {
+      if (result.action === 'executed' || result.action === 'comment_failed' || result.action === 'comment_unconfirmed' || result.action === 'like_failed' || result.action === 'like_unconfirmed') {
         run.executed++;
         if (result.action === 'executed') run.succeeded++;
         else run.failed++;
@@ -367,10 +529,9 @@ async function main() {
   console.error(`  候选总数: ${totalCandidates} | 处理: ${processed} | 待审核: ${pendingReview} | 跳过: ${skipped} | 阻塞: ${blocked} | 已执行: ${executed}`);
   for (const d of discoveries) {
     if (d.status === 'pending_review') {
-      const draftInfo = d.selectedCommentDraft ? ` 草稿: "${d.selectedCommentDraft}"` : ' 未选择';
-      const riskInfo = d.riskLevel ? ` [${d.riskLevel}/${d.replyMode}]` : '';
+      const draftInfo = d.selectedCommentText ? ` 评论: "${d.selectedCommentText}"` : ' 未选择';
       const actionInfo = d.actionResults ? ` 执行结果: ${JSON.stringify(d.actionResults)}` : '';
-      console.error(`  [${d.sourceEventIds.join(',')}] ${d.actorName} → ${d.targetWorkUrl}${draftInfo}${riskInfo}${actionInfo}`);
+      console.error(`  [${d.sourceEventIds.join(',')}] ${d.actorName} → ${d.targetWorkUrl}${draftInfo}${actionInfo}`);
     } else if (d.status === 'skipped') {
       console.error(`  - ${d.actorName}: ${d.reason}`);
     } else {
@@ -381,30 +542,56 @@ async function main() {
   if (useJson) {
     const reviewCandidates = discoveries
       .filter(d => d.status === 'pending_review')
-      .map(d => ({
-        actorName: d.actorName,
-        actorProfileUrl: d.actorProfileUrl,
-        relation: d.relation,
-        sourceEventIds: d.sourceEventIds,
-        sourceEventTypes: d.sourceEventTypes,
-        targetWorkUrl: d.targetWorkUrl,
-        targetWorkId: d.targetWorkId,
-        targetWorkTitle: d.targetWorkTitle,
-        likeState: d.likeState,
-        suggestedActions: d.plannedActions,
-        commentDrafts: VISIT_DRAFTS,
-        selectedCommentDraft: d.selectedCommentDraft,
-        commentCategory: d.commentCategory,
-        replyMode: d.replyMode,
-        riskLevel: d.riskLevel,
-        templateId: d.templateId,
-        manualReviewMethod: d.manualReviewMethod,
-        autoExecuteAllowed: false,
-        actionResults: d.actionResults,
-        requiresManualReview: true,
-        executeAllowed: false,
-        previewOnly: !isExecute,
-      }));
+      .map(d => {
+        const base = {
+          actorName: d.actorName,
+          actorProfileUrl: d.actorProfileUrl,
+          relation: d.relation,
+          sourceEventIds: d.sourceEventIds,
+          sourceEventTypes: d.sourceEventTypes,
+          targetWorkUrl: d.targetWorkUrl,
+          targetWorkId: d.targetWorkId,
+          targetWorkTitle: d.targetWorkTitle,
+          likeState: d.likeState,
+          suggestedActions: d.plannedActions,
+          commentMode: d.commentMode,
+          selectedCommentText: d.selectedCommentText,
+          commentCategory: d.commentCategory,
+          replyMode: d.replyMode,
+          riskLevel: d.riskLevel,
+          generationReason: d.generationReason,
+          sourceSignals: d.sourceSignals,
+          manualReviewMethod: d.manualReviewMethod,
+          autoExecuteAllowed: d.autoExecuteAllowed,
+          actionResults: d.actionResults,
+          requiresManualReview: true,
+          executeAllowed: false,
+          previewOnly: !isExecute,
+        };
+
+        if (d.commentMode === 'skill' && d.needsAgentComment) {
+          base.needsAgentComment = true;
+          base.commentContext = {
+            actorName: d.actorName,
+            targetWorkUrl: d.targetWorkUrl,
+            targetWorkId: d.targetWorkId,
+            targetWorkTitle: d.targetWorkTitle,
+            captionText: d.commentContext?.captionText || '',
+            hashtags: d.commentContext?.hashtags || [],
+            authorName: d.commentContext?.authorName || '',
+            visibleTextSample: d.commentContext?.visibleTextSample || '',
+            likeCount: d.commentContext?.likeCount ?? null,
+            commentCount: d.commentContext?.commentCount ?? null,
+            shareCount: d.commentContext?.shareCount ?? null,
+          };
+          base.constraints = SKILL_CONSTRAINTS;
+        } else {
+          base.generatedCommentCandidates = d.generatedCommentCandidates || [];
+          base.usedFallback = d.usedFallback;
+        }
+
+        return base;
+      });
 
     printJsonResult('visits:live-review', { reviewCandidates }, {
       totalCandidates,

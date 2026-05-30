@@ -10,6 +10,14 @@ const DEFAULT_OPTIONS = {
   keepOpenOnError: true,
   pauseOnError: true,
   maxItems: 1,
+  commentMode: 'skill',
+  selectedCommentText: null,
+  replyMode: null,
+  riskLevel: null,
+  manualReviewMethod: null,
+  observeMs: 5000,
+  profileSettleMs: 6000,
+  videoSettleMs: 5000,
 };
 
 export function chinaTimestamp() {
@@ -58,6 +66,40 @@ export function parseCommonArgs(argv) {
       continue;
     }
 
+    const stringFlags = {
+      '--comment-mode': 'commentMode',
+      '--selected-comment-text': 'selectedCommentText',
+      '--reply-mode': 'replyMode',
+      '--risk-level': 'riskLevel',
+      '--manual-review-method': 'manualReviewMethod',
+    };
+
+    if (stringFlags[arg] && i + 1 < argv.length) {
+      options[stringFlags[arg]] = argv[++i];
+      continue;
+    }
+
+    const intFlags = {
+      '--observe-ms': 'observeMs',
+      '--profile-settle-ms': 'profileSettleMs',
+      '--video-settle-ms': 'videoSettleMs',
+    };
+
+    if (intFlags[arg] && i + 1 < argv.length) {
+      const n = parseInt(argv[++i]);
+      options[intFlags[arg]] = isNaN(n) || n < 0 ? DEFAULT_OPTIONS[intFlags[arg]] : n;
+      continue;
+    }
+
+    if (arg === '--safe-observe') {
+      options.observeMs = 5000;
+      options.profileSettleMs = 8000;
+      options.videoSettleMs = 8000;
+      options.keepOpen = true;
+      options.maxItems = 1;
+      continue;
+    }
+
     remaining.push(arg);
   }
 
@@ -66,6 +108,9 @@ export function parseCommonArgs(argv) {
     options.keepOpen = false;
     options.keepOpenOnError = false;
     options.pauseOnError = false;
+    options.observeMs = Math.min(options.observeMs, 1000);
+    options.profileSettleMs = Math.max(Math.min(options.profileSettleMs, 3000), 3000);
+    options.videoSettleMs = Math.max(Math.min(options.videoSettleMs, 3000), 3000);
   }
 
   return { options, remaining };

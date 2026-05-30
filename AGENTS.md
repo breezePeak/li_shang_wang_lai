@@ -18,11 +18,12 @@ npm run auth                # 浏览器扫码登录
 写完代码后，**确认测试通过**再提交：
 
 ```bash
-npm test && git add -A && git commit -m "<描述>"
+npm test && git add -A && git commit -m "<描述>" && git push
 ```
 
 - 提交信息用中文，简洁描述改动原因
 - 不提交 `.env`、`config/local.json`、`.playwright/`、`data/` 下的内容（已在 .gitignore）
+- **每次改动完成后自动提交并 push，不需要用户提醒**
 
 ## TODO
 

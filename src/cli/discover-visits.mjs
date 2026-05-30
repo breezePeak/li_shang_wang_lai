@@ -7,6 +7,7 @@ import { navigateToVideo, checkLikeState, getVideoTitle } from '../adapters/vide
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
+import { waitForProfileSettled, waitForVideoSettled, waitForHumanObservation } from '../browser/page-settle.mjs';
 
 export const FRIENDLY_RELATIONS = new Set(['friend', 'mutual']);
 
@@ -62,9 +63,10 @@ export function formatTargetWorkId(url, videoId) {
   return url || null;
 }
 
-async function processCandidate(page, candidate) {
+async function processCandidate(page, candidate, settleOptions) {
   const name = candidate.actorName || 'unknown';
   const r = createVisitDiscoveryBase(candidate);
+  const { observeMs, profileSettleMs, videoSettleMs } = settleOptions;
 
   console.error(`\n[discover] ${name} [${r.relation}]`);
 
@@ -85,13 +87,22 @@ async function processCandidate(page, candidate) {
   console.error(`[discover]   主页: ${r.actorProfileUrl.slice(0, 60)}...`);
   try {
     await page.goto(r.actorProfileUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-    await page.waitForTimeout(3000);
   } catch (err) {
     r.status = 'blocked';
     r.reason = 'profile_navigation_failed';
     console.error(`[discover]   主页导航失败: ${err.message}`);
     return r;
   }
+
+  const profileSettled = await waitForProfileSettled(page, { profileSettleMs });
+  if (!profileSettled.ok) {
+    r.status = 'blocked';
+    r.reason = profileSettled.message;
+    console.error(`[discover]   ${r.reason}`);
+    return r;
+  }
+
+  await waitForHumanObservation(page, '[discover]   主页已打开', observeMs);
 
   const videoResult = await findLatestNonPinnedVideo(page);
   if (!videoResult.ok) {
@@ -105,7 +116,7 @@ async function processCandidate(page, candidate) {
   r.targetWorkId = formatTargetWorkId(videoResult.data.videoUrl, videoResult.data.videoId);
   console.error(`[discover]   视频: ${r.targetWorkUrl.slice(0, 60)} (${r.targetWorkId})`);
 
-  await page.waitForTimeout(2000);
+  await waitForHumanObservation(page, '[discover]   候选作品已找到', Math.min(observeMs, 3000));
 
   const navResult = await navigateToVideo(page, r.targetWorkUrl);
   if (!navResult.ok) {
@@ -114,6 +125,17 @@ async function processCandidate(page, candidate) {
     console.error(`[discover]   ${r.reason}`);
     return r;
   }
+
+  const videoSettled = await waitForVideoSettled(page, { videoSettleMs });
+  if (!videoSettled.ok) {
+    r.status = 'blocked';
+    r.reason = videoSettled.message;
+    console.error(`[discover]   ${r.reason}`);
+    return r;
+  }
+
+  await waitForHumanObservation(page, '[discover]   视频页已打开', observeMs);
+  await page.waitForTimeout(1500);
 
   const likeResult = await checkLikeState(page);
 
@@ -155,6 +177,16 @@ async function main() {
   const useJson = commonArgs.options.json;
   const maxItems = commonArgs.options.maxItems || 10;
 
+  if (!useJson) {
+    commonArgs.options.keepOpen = true;
+  }
+
+  const settleOptions = {
+    observeMs: commonArgs.options.observeMs,
+    profileSettleMs: commonArgs.options.profileSettleMs,
+    videoSettleMs: commonArgs.options.videoSettleMs,
+  };
+
   console.error('[discover] 读取待处理事件...');
   const allEvents = getEvents({ status: 'new', limit: 200 });
   const plan = generatePlan(allEvents);
@@ -195,7 +227,7 @@ async function main() {
 
   try {
     for (let i = 0; i < slice.length; i++) {
-      const item = await processCandidate(page, slice[i]);
+      const item = await processCandidate(page, slice[i], settleOptions);
       discoveries.push(item);
       run.scanned++;
       if (item.status === 'pending_review') run.planned++;

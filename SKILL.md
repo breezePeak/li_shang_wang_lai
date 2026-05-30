@@ -119,7 +119,191 @@ npm run likes:reciprocate -- --execute   # FEATURE_DISABLED
 > - `actions:plan`：纯数据分流，不进主页，只按 actorProfileKey 合并事件，输出 visitWorkCandidates；
 > - `visits:discover`：phase3，浏览器进入好友/互关主页，找最近非置顶作品，检查点赞状态，输出 pending_review/skipped/blocked；
 > - `visits:review`：phase4，复用 visits:discover 的浏览器流程，仅输出 pending_review 候选，每条附带 3 条评论草稿（不点赞、不评论、不落库）；
-> - `visits:live-review`：phase5，交互式终端，逐条展示候选和草稿，用户选择 1/2/3 确认当前条；dry-run 只记录不执行，execute 模式立即点赞+评论；草稿为固定 low-risk 模板（riskLevel=low, replyMode=auto_simple），用户选择即代表对当前条模板审核通过；<br/>**注意**：medium/high 或自由文本评论不能走此快捷执行链路；
+> - `visits:live-review`：phase5，支持三种评论模式（`--comment-mode local|agent|skill`，默认 skill）；local 用本地规则生成候选，agent 预留 LLM 接口（当前 FEATURE_DISABLED），skill 给外部 Agent 使用只输出 commentContext+constraints；用户选择或传 `--selected-comment-text` 即代表人工审核通过；
+
+### Agent 生成回访评论要求
+
+visits:live-review 在发现好友/互关用户的作品处于 not_liked 状态后，可以由 Agent 根据当前作品内容生成评论候选。Agent 生成评论的目标不是"刷存在感"，而是基于作品上下文给出自然、克制、像真人的回应。
+
+#### 生成输入
+
+Agent 只能基于当前页面已提取到的作品上下文生成评论，包括：
+
+- `targetWorkTitle`
+- `captionText`
+- `hashtags`
+- `authorName`
+- `visibleTextSample`
+- 页面可见的作品描述、话题、标题、计数信息
+
+禁止基于不存在的信息发挥。没有看到的内容不能假装看到了；没有明确出现的画面、人物、地点、情绪、产品、事件，不得编造。
+
+#### 评论生成原则
+
+Agent 每次最多生成 3 条评论候选。
+
+评论要求：
+
+- 8~24 个中文字符为宜；
+- 语气自然，像普通用户评论；
+- 尽量贴合作品标题、文案、话题；
+- 不要太营销，不要像机器人；
+- 不要连续使用感叹号；
+- 不要强行夸张；
+- 不要生成"万能废话"；
+- 不要提"我是 AI"；
+- 不要提"回访""互关""互赞""已赞""三连""求关注"；
+- 不要出现联系方式、私聊、加 V、引流类内容；
+- 不要对敏感、争议、医疗、金融、法律等内容做判断或建议；
+- 不要生成可能引战、冒犯、暧昧、低俗、攻击性的评论。
+
+#### 风险等级
+
+Agent 生成的评论默认不是固定模板，因此默认归类为：
+
+```json
+{
+  "replyMode": "agent_generated_review_required",
+  "riskLevel": "medium",
+  "autoExecuteAllowed": false
+}
+```
+
+含义：
+
+- Agent 可以生成候选；
+- 不允许自动执行；
+- 必须由用户现场选择 1/2/3；
+- 用户选择某一条后，才视为当前条评论已人工审核通过。
+
+如果作品上下文不足，Agent 应退回固定低风险模板，例如：
+
+- 支持一下
+- 内容不错
+- 挺好的
+
+固定模板可归类为：
+
+```json
+{
+  "replyMode": "auto_simple",
+  "riskLevel": "low",
+  "autoExecuteAllowed": false
+}
+```
+
+即使是 low risk，也不能自动执行，仍需用户选择。
+
+#### 阻断规则
+
+出现以下情况时，Agent 不得生成可执行评论，应返回 blocked 或要求人工处理：
+
+- 作品上下文为空或严重不足；
+- 页面内容疑似加载失败；
+- 作品涉及争议、攻击、隐私、违法、医疗、金融、法律等高风险话题；
+- Agent 无法判断评论是否合适；
+- 生成内容包含平台风险词；
+- 生成内容可能被理解为广告、引流、骚扰或批量互动；
+- 点赞状态为 unknown；
+- 当前用户关系不是 friend 或 mutual。
+
+#### 输出结构
+
+Agent 生成评论候选时，应输出结构化数据：
+
+```json
+{
+  "generatedCommentCandidates": [
+    {
+      "text": "这个主题挺温柔的～",
+      "commentCategory": "contextual_praise",
+      "replyMode": "agent_generated_review_required",
+      "riskLevel": "medium",
+      "reason": "基于作品标题和话题生成",
+      "sourceSignals": ["targetWorkTitle", "hashtags"],
+      "autoExecuteAllowed": false
+    }
+  ]
+}
+```
+
+如果使用固定模板 fallback：
+
+```json
+{
+  "generatedCommentCandidates": [
+    {
+      "text": "内容不错",
+      "commentCategory": "generic_support",
+      "replyMode": "auto_simple",
+      "riskLevel": "low",
+      "reason": "作品上下文不足，使用固定低风险模板",
+      "sourceSignals": ["fallback_template"],
+      "autoExecuteAllowed": false
+    }
+  ]
+}
+```
+
+#### 用户选择即审核
+
+在 `visits:live-review --execute` 模式下：
+
+- Agent 展示 1/2/3 三条候选；
+- 用户输入 1、2 或 3，即表示人工审核通过当前条；
+- 不需要再输入 YES；
+- 只能执行当前打开的视频页；
+- 每条候选都必须单独选择；
+- 不允许批量确认；
+- 用户输入 s 表示跳过当前条；
+- 用户输入 q 表示停止本轮。
+
+#### 执行前复查
+
+即使用户已选择评论，执行前仍必须在当前页面重新检查点赞状态：
+
+```text
+re-check like state
+  ├── already_liked → skipped，不评论
+  ├── not_liked → 点赞 + 评论
+  └── unknown → blocked，不执行
+```
+
+禁止重新打开目标视频；必须复用当前已经打开的视频页。
+
+#### 结果记录
+
+执行结果必须记录：
+
+```json
+{
+  "selectedCommentText": "这个主题挺温柔的～",
+  "commentCategory": "contextual_praise",
+  "replyMode": "agent_generated_review_required",
+  "riskLevel": "medium",
+  "manualReviewMethod": "user_selected_agent_comment",
+  "autoExecuteAllowed": false,
+  "actionResults": {
+    "like": "confirmed",
+    "comment": "confirmed"
+  }
+}
+```
+
+如果评论发送后无法确认成功，应记录为：
+
+```json
+{
+  "actionResults": {
+    "like": "confirmed",
+    "comment": "unconfirmed",
+    "commentReason": "comment_not_confirmed"
+  }
+}
+```
+
+不得把未确认评论记为 confirmed。
+
 > - `likes:reciprocate`：真实点赞继续 `FEATURE_DISABLED` 硬阻断。
 
 ### 旧命令兼容
@@ -211,22 +395,22 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
 阶段 4: 现场审核 (visits:live-review, phase5)
   用户说 "逐条审核回访候选"、"现场确认回访"
     ↓
-  npm run visits:live-review -- --max-items 5                    # dry-run 预览
-  npm run visits:live-review -- --execute --max-items 5          # 执行模式
+  三种评论模式：--comment-mode local|agent|skill（默认 skill）
     ↓
-  逐条展示候选 + 3 条 low-risk 评论草稿
+  local:  npm run visits:live-review -- --comment-mode local --execute --max-items 5
+  agent:  npm run visits:live-review -- --comment-mode agent --max-items 5  (当前 FEATURE_DISABLED)
+  skill:  npm run visits:live-review -- --comment-mode skill --json --max-items 1
     ↓
-  草稿为固定模板，元数据：riskLevel=low, replyMode=auto_simple, templateId=visit-*-1
-  用户选择 1/2/3 即代表对当前条模板审核通过
-  medium/high 风险草稿或自由文本不能走此快捷执行链路
+  local 模式：提取上下文 → generateVisitCommentCandidates → 展示 1/2/3 → 用户选择 → 执行
+  agent 模式：预留 LLM 接口，当前 FEATURE_DISABLED
+  skill 模式：提取上下文 → 输出 needsAgentComment + commentContext + constraints → 外部 Agent 生成评论
+  skill 执行：npm run visits:live-review -- --selected-comment-text "xxx" --execute --max-items 1
     ↓
-  dry-run 模式：选择 1/2/3 仅记录 selectedCommentDraft，不执行
-  execute 模式：校验 riskLevel=low + replyMode=auto_simple → 通过后重新检查点赞状态 → 点赞 → 评论
+  选择或传入 --selected-comment-text 即代表人工审核通过当前条，不需要 YES
+  skill + selected-comment-text 时必须 --max-items 1，一条评论只对应一个作品
+  执行前当前页 re-check like state
     ↓
-  输入 s 跳过当前条，输入 q 停止本轮
-  每条必须单独选择，不能批量确认
-    ↓
-  输出 reviewCandidates（含 selectedCommentDraft, commentCategory, replyMode, riskLevel, templateId, manualReviewMethod="user_selected_template", autoExecuteAllowed=false, actionResults）
+  输出 reviewCandidates（含 generatedCommentCandidates/needsAgentComment/commentContext/constraints/selectedCommentText 等）
 
 阶段 5: 旧版真实执行保留 (likes:reciprocate, MVP 硬阻断)
   用户说 "给这个候选点赞"
@@ -264,5 +448,5 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
   - `actions:plan` — 候选分流，不进主页
   - `visits:discover` — phase3，进主页发现作品并检查点赞
   - `visits:review` — phase4，生成待审核回访候选（含评论草稿，不点赞、不评论、不落库）
-  - `visits:live-review` — phase5，交互式审核，逐条选择草稿并执行（dry-run / execute）；草稿为固定 low-risk 模板（riskLevel=low, replyMode=auto_simple），用户选择 1/2/3 即代表对当前条模板审核通过；medium/high 风险草稿不走此链路
+  - `visits:live-review` — phase5，交互式审核，根据作品上下文生成评论候选（Agent=medium, 固定模板=low fallback），选择 1/2/3 即审核通过；high/ignore 阻断
   - `likes:reciprocate` — 真实点赞代码层硬阻断
