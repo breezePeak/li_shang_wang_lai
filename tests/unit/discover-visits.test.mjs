@@ -402,3 +402,90 @@ describe('discovered item — likeDiagnostics pass-through', () => {
     expect(base.likeCheckConfidence).toBe('confirmed');
   });
 });
+
+// ============================================================
+// 10. pageDiagnostics pass-through
+// ============================================================
+describe('discovered item — pageDiagnostics pass-through', () => {
+  it('candidateCount=0 → likeDiagnostics.pageDiagnostics populated', () => {
+    const base = createVisitDiscoveryBase({ actorName: 'test' });
+    const likeResult = {
+      ok: false,
+      code: 'LIKE_STATE_UNKNOWN',
+      data: {
+        candidateCount: 0,
+        candidates: [],
+        confidence: 'none',
+        pageDiagnostics: {
+          url: 'https://www.douyin.com/video/123',
+          title: '测试视频 - 抖音',
+          bodyTextLength: 500,
+          bodyTextSample: '正文...',
+          viewport: { w: 1920, h: 1080 },
+          scrollY: 0,
+          interactiveCount: 15,
+          buttonCount: 5,
+          svgCount: 12,
+          roleButtonCount: 3,
+          rightSideElements: [{ tag: 'span', text: '点赞', rect: { x: 1400, y: 500, w: 60, h: 24 } }],
+          visibleInteractiveElements: [],
+          visibleSvgParents: [],
+        },
+      },
+    };
+    base.likeDiagnostics = likeResult.data;
+    base.likeCheckSignal = likeResult.data.confidence;
+    base.likeCheckConfidence = likeResult.data.confidence;
+
+    expect(base.likeDiagnostics.pageDiagnostics).not.toBeNull();
+    expect(base.likeDiagnostics.pageDiagnostics.url).toContain('/video/123');
+    expect(base.likeDiagnostics.pageDiagnostics.buttonCount).toBe(5);
+    expect(base.likeDiagnostics.pageDiagnostics.rightSideElements).toHaveLength(1);
+  });
+
+  it('likeDiagnostics.pageDiagnostics has all required keys', () => {
+    const base = createVisitDiscoveryBase({ actorName: 'test' });
+    base.likeDiagnostics = {
+      candidateCount: 0,
+      confidence: 'none',
+      pageDiagnostics: {
+        url: 'https://www.douyin.com/video/1',
+        title: 'test',
+        bodyTextLength: 0,
+        bodyTextSample: '',
+        viewport: { w: 0, h: 0 },
+        scrollY: 0,
+        interactiveCount: 0,
+        buttonCount: 0,
+        svgCount: 0,
+        roleButtonCount: 0,
+        rightSideElements: [],
+        visibleInteractiveElements: [],
+        visibleSvgParents: [],
+      },
+    };
+
+    const pd = base.likeDiagnostics.pageDiagnostics;
+    const requiredKeys = ['url', 'title', 'bodyTextLength', 'bodyTextSample', 'viewport', 'scrollY', 'interactiveCount', 'buttonCount', 'svgCount', 'roleButtonCount', 'rightSideElements', 'visibleInteractiveElements', 'visibleSvgParents'];
+    for (const k of requiredKeys) {
+      expect(pd).toHaveProperty(k);
+    }
+  });
+
+  it('likeResult with candidates > 0 has pageDiagnostics=null (only for no-candidates)', () => {
+    const base = createVisitDiscoveryBase({ actorName: 'test' });
+    const likeResult = {
+      ok: false,
+      code: 'LIKE_STATE_UNKNOWN',
+      data: {
+        candidateCount: 5,
+        candidates: [{ tag: 'span', text: '赞', color: 'rgb(50,50,50)' }],
+        confidence: 'unknown',
+        pageDiagnostics: null,
+      },
+    };
+    base.likeDiagnostics = likeResult.data;
+    expect(base.likeDiagnostics.pageDiagnostics).toBeNull();
+    expect(base.likeDiagnostics.candidates).toHaveLength(1);
+  });
+});

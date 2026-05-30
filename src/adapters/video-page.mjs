@@ -101,6 +101,120 @@ export async function checkLikeState(page) {
         return false;
       }
 
+      function elementInfo(el, maxTextLen) {
+        const tag = (el.tagName || '').toLowerCase();
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        const svgEls = el.querySelectorAll('svg');
+        let svgFill = '', pathFill = '';
+        for (const svg of svgEls) {
+          const f = svg.getAttribute('fill') || '';
+          if (f) svgFill = f;
+          const paths = svg.querySelectorAll('path');
+          for (const p of paths) { const pf = p.getAttribute('fill') || ''; if (pf) pathFill = pf; }
+        }
+        return {
+          tag,
+          text: ((el.innerText || '') + '').slice(0, maxTextLen || 20).trim(),
+          ariaLabel: (el.getAttribute('aria-label') || '').slice(0, 40),
+          title: (el.getAttribute('title') || '').slice(0, 40),
+          className: ((typeof el.className === 'string' ? el.className : '') + '').slice(0, 60),
+          dataE2e: (el.getAttribute('data-e2e') || '').slice(0, 30),
+          href: (el.getAttribute('href') || el.closest('a')?.getAttribute?.('href') || '').slice(0, 100),
+          role: el.getAttribute('role') || '',
+          cursor: style.cursor || '',
+          color: style.color || '',
+          backgroundColor: style.backgroundColor || '',
+          svgFill,
+          pathFill,
+          rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+        };
+      }
+
+      function collectPageDiagnostics() {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const bodyText = (document.body?.innerText || '').slice(0, 2000);
+
+        // right side (x > 55% of viewport)
+        const rightSide = [];
+        const interactive = [];
+        const svgParents = [];
+        const seenEI = new Set();
+
+        const allEls = document.querySelectorAll('button, [role="button"], a, svg, [tabindex], div, span');
+
+        for (const el of allEls) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width < 8 || rect.height < 8) continue;
+
+          const tag = el.tagName.toLowerCase();
+          const role = el.getAttribute('role') || '';
+          const style = window.getComputedStyle(el);
+          const hasPointer = style.cursor === 'pointer';
+          const isInteractive = tag === 'button' || role === 'button' || tag === 'a' || tag === 'svg' || el.hasAttribute('tabindex') || hasPointer;
+
+          if (!isInteractive) continue;
+
+          const info = elementInfo(el, 30);
+          if (interactive.length < 50) {
+            if (!seenEI.has(el)) { seenEI.add(el); interactive.push(info); }
+          }
+          if (rightSide.length < 50 && rect.x > vw * 0.55) {
+            rightSide.push(info);
+          }
+        }
+
+        // visible SVG parents
+        const allSvgs = document.querySelectorAll('svg');
+        for (const svg of allSvgs) {
+          const rect = svg.getBoundingClientRect();
+          if (rect.width < 8 || rect.height < 8) continue;
+          let parent = svg.parentElement;
+          for (let i = 0; i < 3 && parent; i++) {
+            const tag = parent.tagName.toLowerCase();
+            if (tag === 'body' || tag === 'html') break;
+            const pr = parent.getBoundingClientRect();
+            if (pr.width < 10) { parent = parent.parentElement; continue; }
+            svgParents.push({
+              level: i + 1,
+              ...elementInfo(parent, 60),
+              svgTag: svg.tagName.toLowerCase(),
+              hasChildren: (parent.querySelectorAll?.('*')?.length || 0),
+            });
+            parent = parent.parentElement;
+          }
+          if (svgParents.length >= 50) break;
+        }
+
+        const buttons = document.querySelectorAll('button');
+        const svgs = document.querySelectorAll('svg');
+        const roleBtns = document.querySelectorAll('[role="button"]');
+
+        return {
+          liked: null,
+          confidence: 'none',
+          signal: 'no-candidates',
+          candidates: [],
+          candidateCount: 0,
+          pageDiagnostics: {
+            url: window.location.href,
+            title: (document.title || '').slice(0, 200),
+            bodyTextLength: bodyText.length,
+            bodyTextSample: bodyText.slice(0, 500),
+            viewport: { w: vw, h: vh },
+            scrollY: Math.round(window.scrollY),
+            interactiveCount: interactive.length,
+            buttonCount: buttons.length,
+            svgCount: svgs.length,
+            roleButtonCount: roleBtns.length,
+            rightSideElements: rightSide,
+            visibleInteractiveElements: interactive,
+            visibleSvgParents: svgParents.slice(0, 50),
+          },
+        };
+      }
+
       // ---- Phase 1: targeted candidate search ----
       const candidates = [];
       const seen = new Set();
@@ -204,7 +318,8 @@ export async function checkLikeState(page) {
 
       // ---- Phase 2: determine like state ----
       if (candidates.length === 0) {
-        return { liked: null, confidence: 'none', signal: 'no-candidates', candidates: [] };
+        // Collect page diagnostics to help debug why no candidates found
+        return collectPageDiagnostics();
       }
 
       for (const c of candidates) {
@@ -268,13 +383,23 @@ export async function checkLikeState(page) {
           const classInfo = c.className ? ` class=${c.className.slice(0, 40)}` : '';
           console.error(`  <${c.tag}> text="${c.text}" aria="${c.ariaLabel}" svgFill="${c.svgFill}" pathFill="${c.pathFill}"${colorInfo}${classInfo}`);
         }
+      } else if (state.pageDiagnostics) {
+        const pd = state.pageDiagnostics;
+        console.error(`[video-page] 点赞候选=0，页面诊断:`);
+        console.error(`  url=${pd.url} title="${pd.title.slice(0, 60)}"`);
+        console.error(`  bodyText=${pd.bodyTextLength} viewport=${pd.viewport.w}x${pd.viewport.h}`);
+        console.error(`  buttons=${pd.buttonCount} svgs=${pd.svgCount} roleBtns=${pd.roleButtonCount}`);
+        console.error(`  rightSide=${pd.rightSideElements.length} interactive=${pd.visibleInteractiveElements.length} svgParents=${pd.visibleSvgParents.length}`);
+        if (pd.bodyTextSample) {
+          console.error(`  bodySample: ${pd.bodyTextSample.slice(0, 200)}`);
+        }
       } else {
         console.error(`[video-page] 点赞状态无法确认: ${state.signal === 'no-candidates' ? '页面上未找到任何点赞相关元素' : `找到 ${state.candidateCount} 个候选但无法判定`}`);
       }
       return blocking(
         RESULT_CODES.LIKE_STATE_UNKNOWN,
         state.signal === 'no-candidates' ? '页面上未找到任何点赞相关元素' : '无法明确判断点赞状态',
-        { data: { candidateCount: state.candidateCount || 0, candidates: state.candidates || [], confidence: state.confidence } }
+        { data: { candidateCount: state.candidateCount || 0, candidates: state.candidates || [], confidence: state.confidence, pageDiagnostics: state.pageDiagnostics || null } }
       );
     }
 
