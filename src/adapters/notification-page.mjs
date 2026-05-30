@@ -852,6 +852,32 @@ export async function debugDumpNotificationItems(page, debugDir) {
         });
       });
 
+      const imgs = [];
+      const allImgs = itemEl.querySelectorAll('img');
+      allImgs.forEach((img, index) => {
+        imgs.push({
+          index,
+          src: (img.getAttribute('src') || '').slice(0, 500),
+          className: img.className || '',
+          alt: img.getAttribute('alt') || '',
+          width: img.naturalWidth || img.width || 0,
+          height: img.naturalHeight || img.height || 0,
+        });
+      });
+
+      const itemDataset = {};
+      for (const key of Object.keys(itemEl.dataset || {})) {
+        itemDataset[key] = itemEl.dataset[key];
+      }
+      const cardAttrs = {
+        tagName: itemEl.tagName,
+        className: itemEl.className || '',
+        role: itemEl.getAttribute('role') || '',
+        dataE2e: itemEl.getAttribute('data-e2e') || '',
+        dataset: itemDataset,
+        onclick: !!itemEl.onclick,
+      };
+
       const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
       let actorName = '';
       if (lines.length > 0) actorName = lines[0];
@@ -893,6 +919,8 @@ export async function debugDumpNotificationItems(page, debugDir) {
         outerHtml: itemEl.outerHTML,
         innerText: text,
         links,
+        imgs,
+        cardAttrs,
         meta: {
           actorName: actorName.slice(0, 50),
           commentText: content.slice(0, 300),
@@ -926,6 +954,8 @@ export async function debugDumpNotificationItems(page, debugDir) {
     writeFileSync(resolve(debugDir, `item-${idx}.html`), item.outerHtml, 'utf8');
     writeFileSync(resolve(debugDir, `item-${idx}.txt`), item.innerText, 'utf8');
     writeJSON(resolve(debugDir, `item-${idx}-links.json`), item.links);
+    writeJSON(resolve(debugDir, `item-${idx}-imgs.json`), item.imgs);
+    writeJSON(resolve(debugDir, `item-${idx}-card.json`), item.cardAttrs);
     writeJSON(resolve(debugDir, `item-${idx}-meta.json`), item.meta);
   }
 }
