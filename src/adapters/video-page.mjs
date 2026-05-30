@@ -101,25 +101,51 @@ export async function checkLikeState(page) {
         return false;
       }
 
-      // ---- Phase 1: broad candidate search ----
+      // ---- Phase 1: targeted candidate search ----
       const candidates = [];
       const seen = new Set();
+      let processedCount = 0;
+      const MAX_PROCESS = 2000;
 
       const QUERIES = [
-        // text-based
-        ...Array.from(document.querySelectorAll('span, div, [role="button"], button')),
-        // aria / title
+        // high-signal attributes
         ...Array.from(document.querySelectorAll('[aria-label*="赞"]')),
         ...Array.from(document.querySelectorAll('[title*="赞"]')),
-        // data-e2e
         ...Array.from(document.querySelectorAll('[data-e2e*="like"]')),
         ...Array.from(document.querySelectorAll('[data-e2e*="digg"]')),
-        // class
+        // class-based
         ...Array.from(document.querySelectorAll('[class*="like"]')),
         ...Array.from(document.querySelectorAll('[class*="digg"]')),
-        // structures
+        // interactive elements (limited — only check visible ones)
         ...Array.from(document.querySelectorAll('button, [role="button"]')),
       ];
+
+      // Also check spans/divs with like-related text (use TreeWalker for efficiency)
+      const walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_ELEMENT,
+        {
+          acceptNode: function(node) {
+            if (node.nodeType !== 1) return NodeFilter.FILTER_SKIP;
+            const tag = node.tagName;
+            if (tag !== 'SPAN' && tag !== 'DIV' && tag !== 'BUTTON') return NodeFilter.FILTER_SKIP;
+            const rect = node.getBoundingClientRect();
+            if (rect.width < 10 || rect.height < 10) return NodeFilter.FILTER_SKIP;
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
+      );
+
+      while (walker.nextNode() && processedCount < MAX_PROCESS) {
+        const el = walker.currentNode;
+        const text = (el.innerText || '').trim();
+        if (text.startsWith('点赞') || text.startsWith('赞')) {
+          if (!seen.has(el)) {
+            QUERIES.push(el);
+          }
+        }
+        processedCount++;
+      }
 
       for (const el of QUERIES) {
         if (seen.has(el)) continue;
@@ -234,6 +260,17 @@ export async function checkLikeState(page) {
     });
 
     if (state.liked === null) {
+      // Log diagnostics to stderr for human debugging
+      if (state.candidates && state.candidates.length > 0) {
+        console.error(`[video-page] 点赞状态无法确认，候选元素诊断 (前${state.candidates.length}个):`);
+        for (const c of state.candidates) {
+          const colorInfo = c.color ? ` color=${c.color}` : '';
+          const classInfo = c.className ? ` class=${c.className.slice(0, 40)}` : '';
+          console.error(`  <${c.tag}> text="${c.text}" aria="${c.ariaLabel}" svgFill="${c.svgFill}" pathFill="${c.pathFill}"${colorInfo}${classInfo}`);
+        }
+      } else {
+        console.error(`[video-page] 点赞状态无法确认: ${state.signal === 'no-candidates' ? '页面上未找到任何点赞相关元素' : `找到 ${state.candidateCount} 个候选但无法判定`}`);
+      }
       return blocking(
         RESULT_CODES.LIKE_STATE_UNKNOWN,
         state.signal === 'no-candidates' ? '页面上未找到任何点赞相关元素' : '无法明确判断点赞状态',
