@@ -597,7 +597,10 @@ export async function openReplyBoxForComment(page, item) {
   const actorName = item && item.actorName;
   const commentText = (item && item.commentText) || '';
 
+  console.error(`[comment-page] openReplyBoxForComment: actorName="${actorName || ''}" commentText="${commentText.slice(0, 40)}"`);
+
   if (!actorName) {
+    console.error(`[comment-page] openReplyBoxForComment: 无 actorName，fallback 到纯 commentText 匹配`);
     return openReplyBox(page, commentText);
   }
 
@@ -607,25 +610,23 @@ export async function openReplyBoxForComment(page, item) {
 export async function verifyReplyVisible(page, item, replyText, { timeoutMs = 5000 } = {}) {
   const actorName = item && item.actorName;
   const commentText = (item && item.commentText) || '';
+  const replyNeedle = replyText.trim();
+  const replyPrefix = replyNeedle.slice(0, 20);
+
+  console.error(`[comment-page] verifyReplyVisible: 查找回复文本 "${replyNeedle.slice(0, 40)}"`);
 
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const found = await page.evaluate(({ actorName, commentText, replyText }) => {
-      // Strategy: find the target comment container by matching commentText + actorName,
-      // then verify replyText is within that same container.
-      // This scopes the check to the comment card, avoiding false positives from
-      // global document.body text matching.
-
-      // Primary: use comment-item containers
+    const found = await page.evaluate(({ actorName, commentText, replyNeedle, replyPrefix }) => {
       const containers = document.querySelectorAll('[class*="comment-item"], [class*="commentItem"]');
       for (const container of containers) {
         const text = (container.innerText || '').trim();
         if (!text.includes(commentText)) continue;
         if (actorName && !text.includes(actorName)) continue;
-        if (text.includes(replyText)) return { verified: true };
+        if (text.includes(replyNeedle)) return { verified: true, method: 'full' };
+        if (replyPrefix.length >= 5 && text.includes(replyPrefix)) return { verified: true, method: 'prefix' };
       }
 
-      // Fallback: from comment-content elements, walk up to find a container with replyText
       const contentEls = document.querySelectorAll('[class*="comment-content"]');
       for (const el of contentEls) {
         if (el.offsetHeight === 0) continue;
@@ -636,18 +637,23 @@ export async function verifyReplyVisible(page, item, replyText, { timeoutMs = 50
           const ct = (container.innerText || '').trim();
           if (!ct.includes(commentText)) break;
           if (actorName && !ct.includes(actorName)) break;
-          if (ct.includes(replyText)) return { verified: true };
+          if (ct.includes(replyNeedle)) return { verified: true, method: 'full-walkup' };
+          if (replyPrefix.length >= 5 && ct.includes(replyPrefix)) return { verified: true, method: 'prefix-walkup' };
           container = container.parentElement;
         }
       }
 
       return { verified: false };
-    }, { actorName, commentText, replyText });
+    }, { actorName, commentText, replyNeedle, replyPrefix });
 
-    if (found.verified) return success({ verified: true });
+    if (found.verified) {
+      console.error(`[comment-page] verifyReplyVisible: 确认成功 method=${found.method}`);
+      return success({ verified: true });
+    }
     await new Promise(r => setTimeout(r, 500));
   }
 
+  console.error(`[comment-page] verifyReplyVisible: 超时未确认`);
   return blocking(
     RESULT_CODES.COMMENT_SEND_UNCONFIRMED,
     '回复发送后未能在目标评论下确认回复内容',
@@ -835,13 +841,27 @@ export async function confirmReplySucceeded(page) {
 }
 
 export async function sendReply(page, replyText) {
+  console.error(`[comment-page] sendReply: 填写回复文字...`);
   const fillResult = await fillReplyText(page, replyText);
-  if (!fillResult.ok) return fillResult;
+  if (!fillResult.ok) {
+    console.error(`[comment-page] sendReply: 填写失败 [${fillResult.code}] ${fillResult.message}`);
+    return fillResult;
+  }
 
+  console.error(`[comment-page] sendReply: 点击发送按钮...`);
   const clickResult = await clickSendReply(page);
-  if (!clickResult.ok) return clickResult;
+  if (!clickResult.ok) {
+    console.error(`[comment-page] sendReply: 点击发送失败 [${clickResult.code}] ${clickResult.message}`);
+    return clickResult;
+  }
 
+  console.error(`[comment-page] sendReply: 确认回复结果...`);
   const confirmResult = await confirmReplySucceeded(page);
+  if (!confirmResult.ok) {
+    console.error(`[comment-page] sendReply: 确认失败 [${confirmResult.code}] ${confirmResult.message}`);
+  } else {
+    console.error(`[comment-page] sendReply: 确认成功 signal=${confirmResult.data?.signal || ''}`);
+  }
   return confirmResult;
 }
 

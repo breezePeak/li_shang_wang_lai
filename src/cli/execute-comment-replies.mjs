@@ -207,6 +207,7 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
   console.log(`[reply]   处理: ${item.actorName} "${item.commentText.slice(0, 40)}"`);
 
   if (run.options.dryRun) {
+    console.log(`[reply]   dry-run mode — 只定位不发送`);
     r.step = 'dry-run-locate';
     const locateResult = await openReplyBoxForComment(page, item);
     if (locateResult.ok) {
@@ -227,13 +228,20 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     return r;
   }
 
+  console.log(`[reply]   execute mode confirmed`);
+  console.log(`[reply]   will send replyText: "${item.replyText.slice(0, 60)}"`);
+
   r.step = 'open-reply-box';
+  console.log(`[reply]   before openReplyBoxForComment`);
   const openResult = await openReplyBoxForComment(page, item);
   if (!openResult.ok) {
     r.status = 'blocked';
     r.reason = `打开回复框失败: ${openResult.message}`;
     r.code = openResult.code;
     console.log(`[reply]     ✗ [${openResult.code}] ${openResult.message}`);
+    console.log(`[reply] ❌ 未完成真实回复`);
+    console.log(`[reply]   failedStep: open-reply-box`);
+    console.log(`[reply]   reason: ${openResult.message}`);
     const itemEvidence = await captureItemEvidence(page, run, item, 'open-reply-box', openResult);
     r.evidenceDir = itemEvidence.evidenceDir;
     r.screenshotPath = itemEvidence.screenshotPath;
@@ -244,12 +252,17 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
   console.log(`[reply]     ✓ 回复框已打开`);
 
   r.step = 'execute-reply';
+  console.log(`[reply]   before sendReply`);
   const replyResult = await sendReply(page, item.replyText);
+  console.log(`[reply]   after sendReply ok=${replyResult.ok}`);
   if (!replyResult.ok) {
     r.status = 'blocked';
     r.reason = replyResult.message;
     r.code = replyResult.code;
     console.log(`[reply]     ✗ [${replyResult.code}] ${replyResult.message}`);
+    console.log(`[reply] ❌ 未完成真实回复`);
+    console.log(`[reply]   failedStep: execute-reply`);
+    console.log(`[reply]   reason: ${replyResult.message}`);
     const itemEvidence = await captureItemEvidence(page, run, item, 'execute-reply', replyResult);
     r.evidenceDir = itemEvidence.evidenceDir;
     r.screenshotPath = itemEvidence.screenshotPath;
@@ -258,14 +271,18 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     return r;
   }
 
-  // Verify the reply text appears on the page before marking succeeded
   r.step = 'verify-reply';
+  console.log(`[reply]   before verifyReplyVisible`);
   const verifyResult = await verifyReplyVisible(page, item, item.replyText);
+  console.log(`[reply]   after verifyReplyVisible ok=${verifyResult.ok}`);
   if (!verifyResult.ok) {
     r.status = 'sent_unverified';
     r.reason = verifyResult.message;
     r.code = verifyResult.code;
     console.log(`[reply]     ⚠ 发送后未确认: ${verifyResult.message}`);
+    console.log(`[reply] ❌ 未完成真实回复`);
+    console.log(`[reply]   failedStep: verify-reply`);
+    console.log(`[reply]   reason: ${verifyResult.message}`);
     const itemEvidence = await captureItemEvidence(page, run, item, 'verify-reply', verifyResult);
     r.evidenceDir = itemEvidence.evidenceDir;
     r.screenshotPath = itemEvidence.screenshotPath;
@@ -284,6 +301,11 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     updateEventStatus(db, item.eventId, 'succeeded');
     run.executed++;
     run.succeeded++;
+    console.log(`[reply] ✅ 已真实发送 1 条评论回复`);
+    console.log(`[reply]   actorName: ${item.actorName}`);
+    console.log(`[reply]   workTitle: ${item.workTitle || workTitle}`);
+    console.log(`[reply]   replyText: ${item.replyText}`);
+    console.log(`[reply]   database: succeeded`);
   } catch (err) {
     console.log(`[reply]     动作记录写入失败: ${err.message}`);
   }
@@ -369,6 +391,7 @@ async function main() {
   const actionMode = commonArgs.options.execute ? 'execute' : 'dry-run';
   const groups = groupApprovedItemsByWork(approvedItems);
   console.log(`[reply] 模式: ${actionMode}`);
+  console.log(`[reply] dryRun=${commonArgs.options.dryRun} execute=${commonArgs.options.execute}`);
   console.log(`[reply] ~ ${approvedItems.length} 条待处理 / ${groups.length} 个作品, 最大执行 ${commonArgs.options.maxItems} 条`);
 
   const db = getDb();
