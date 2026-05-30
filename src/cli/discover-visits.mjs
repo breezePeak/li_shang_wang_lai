@@ -27,6 +27,9 @@ export function createVisitDiscoveryBase(candidate) {
     executeAllowed: false,
     previewOnly: true,
     reason: null,
+    likeDiagnostics: null,
+    likeCheckSignal: null,
+    likeCheckConfidence: null,
   };
 }
 
@@ -34,10 +37,29 @@ export function classifyLikeResult(likeResult) {
   if (!likeResult || !likeResult.ok) {
     return { status: 'blocked', likeState: 'unknown', reason: 'LIKE_STATE_UNKNOWN', plannedActions: [] };
   }
+  const confidence = likeResult.data?.confidence;
+  if (confidence !== 'confirmed') {
+    return { status: 'blocked', likeState: 'unknown', reason: 'LIKE_STATE_UNKNOWN', plannedActions: [] };
+  }
   if (likeResult.data?.alreadyLiked) {
     return { status: 'skipped', likeState: 'already_liked', reason: 'already_liked_skip_comment', plannedActions: [] };
   }
   return { status: 'pending_review', likeState: 'not_liked', reason: null, plannedActions: ['like_work', 'comment_work'] };
+}
+
+export function formatTargetWorkId(url, videoId) {
+  if (!url && !videoId) return null;
+  const u = url || '';
+  if (u.includes('/video/')) {
+    const m = u.match(/\/video\/(\d+)/);
+    if (m) return 'video-' + m[1];
+  }
+  if (u.includes('/note/')) {
+    const m = u.match(/\/note\/(\d+)/);
+    if (m) return 'note-' + m[1];
+  }
+  if (videoId) return 'video-' + videoId;
+  return url || null;
 }
 
 async function processCandidate(page, candidate) {
@@ -80,8 +102,8 @@ async function processCandidate(page, candidate) {
   }
 
   r.targetWorkUrl = videoResult.data.videoUrl;
-  r.targetWorkId = videoResult.data.videoId || null;
-  console.error(`[discover]   视频: ${r.targetWorkUrl.slice(0, 60)} (id=${r.targetWorkId})`);
+  r.targetWorkId = formatTargetWorkId(videoResult.data.videoUrl, videoResult.data.videoId);
+  console.error(`[discover]   视频: ${r.targetWorkUrl.slice(0, 60)} (${r.targetWorkId})`);
 
   await page.waitForTimeout(2000);
 
@@ -94,31 +116,28 @@ async function processCandidate(page, candidate) {
   }
 
   const likeResult = await checkLikeState(page);
+
+  // Always pass diagnostics through to JSON output
+  r.likeDiagnostics = likeResult?.data || null;
+  r.likeCheckSignal = likeResult?.data?.signal || likeResult?.data?.confidence || null;
+  r.likeCheckConfidence = likeResult?.data?.confidence || null;
+
   const classification = classifyLikeResult(likeResult);
 
+  r.status = classification.status;
+  r.likeState = classification.likeState;
+  r.reason = classification.reason;
+  r.plannedActions = classification.plannedActions;
+
   if (classification.status === 'blocked') {
-    r.status = classification.status;
-    r.likeState = classification.likeState;
-    r.reason = classification.reason;
-    console.error(`[discover]   点赞状态无法确认`);
+    console.error(`[discover]   点赞状态无法确认 (${r.likeCheckConfidence || 'none'})`);
     return r;
   }
 
   if (classification.status === 'skipped') {
-    r.likeState = classification.likeState;
-    r.status = classification.status;
-    r.reason = classification.reason;
-    r.plannedActions = classification.plannedActions;
     console.error('[discover]   已点赞 → skipped (不评论)');
     return r;
   }
-
-  r.likeState = classification.likeState;
-  r.status = classification.status;
-  r.plannedActions = classification.plannedActions;
-  r.executeAllowed = false;
-  r.previewOnly = true;
-  r.reason = classification.reason;
 
   const titleResult = await getVideoTitle(page);
   if (titleResult.ok && titleResult.data.title) {

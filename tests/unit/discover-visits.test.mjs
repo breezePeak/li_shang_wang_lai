@@ -7,6 +7,7 @@ import {
   FRIENDLY_RELATIONS,
   createVisitDiscoveryBase,
   classifyLikeResult,
+  formatTargetWorkId,
 } from '../../src/cli/discover-visits.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -66,6 +67,13 @@ describe('createVisitDiscoveryBase', () => {
     expect(base.plannedActions).toEqual([]);
   });
 
+  it('has diagnostic fields defaulting to null', () => {
+    const base = createVisitDiscoveryBase({ actorName: '张三' });
+    expect(base.likeDiagnostics).toBeNull();
+    expect(base.likeCheckSignal).toBeNull();
+    expect(base.likeCheckConfidence).toBeNull();
+  });
+
   it('has all required fields', () => {
     const base = createVisitDiscoveryBase({
       actorName: '张三',
@@ -99,19 +107,19 @@ describe('createVisitDiscoveryBase', () => {
 });
 
 // ============================================================
-// 3. classifyLikeResult — 3 output states
+// 3. classifyLikeResult — confidence gate + 3 output states
 // ============================================================
 describe('classifyLikeResult', () => {
-  it('already_liked → skipped, plannedActions=[]', () => {
-    const result = classifyLikeResult({ ok: true, data: { alreadyLiked: true } });
+  it('already_liked + confirmed → skipped, plannedActions=[]', () => {
+    const result = classifyLikeResult({ ok: true, data: { alreadyLiked: true, confidence: 'confirmed' } });
     expect(result.status).toBe('skipped');
     expect(result.likeState).toBe('already_liked');
     expect(result.reason).toBe('already_liked_skip_comment');
     expect(result.plannedActions).toEqual([]);
   });
 
-  it('not_liked → pending_review, plannedActions=["like_work","comment_work"]', () => {
-    const result = classifyLikeResult({ ok: true, data: { alreadyLiked: false } });
+  it('not_liked + confirmed → pending_review, plannedActions=["like_work","comment_work"]', () => {
+    const result = classifyLikeResult({ ok: true, data: { alreadyLiked: false, confidence: 'confirmed' } });
     expect(result.status).toBe('pending_review');
     expect(result.likeState).toBe('not_liked');
     expect(result.reason).toBeNull();
@@ -133,9 +141,28 @@ describe('classifyLikeResult', () => {
     expect(classifyLikeResult(undefined).reason).toBe('LIKE_STATE_UNKNOWN');
   });
 
-  it('not_liked → executeAllowed is false (tested via createVisitDiscoveryBase + classify)', () => {
+  // confidence gate
+  it('confidence missing → blocked', () => {
+    const result = classifyLikeResult({ ok: true, data: { alreadyLiked: false } });
+    expect(result.status).toBe('blocked');
+    expect(result.reason).toBe('LIKE_STATE_UNKNOWN');
+  });
+
+  it('confidence !== confirmed → blocked', () => {
+    const result = classifyLikeResult({ ok: true, data: { alreadyLiked: false, confidence: 'unknown' } });
+    expect(result.status).toBe('blocked');
+    expect(result.likeState).toBe('unknown');
+  });
+
+  it('alreadyLiked=true but confidence unknown → blocked', () => {
+    const result = classifyLikeResult({ ok: true, data: { alreadyLiked: true, confidence: 'unknown' } });
+    expect(result.status).toBe('blocked');
+    expect(result.reason).toBe('LIKE_STATE_UNKNOWN');
+  });
+
+  it('not_liked → existing executeAllowed/pending_review invariant still holds', () => {
     const base = createVisitDiscoveryBase({ actorName: '测试' });
-    const classification = classifyLikeResult({ ok: true, data: { alreadyLiked: false } });
+    const classification = classifyLikeResult({ ok: true, data: { alreadyLiked: false, confidence: 'confirmed' } });
     Object.assign(base, {
       likeState: classification.likeState,
       status: classification.status,
@@ -148,7 +175,7 @@ describe('classifyLikeResult', () => {
   });
 
   it('skipped → plannedActions does NOT include comment_work or like_work', () => {
-    const result = classifyLikeResult({ ok: true, data: { alreadyLiked: true } });
+    const result = classifyLikeResult({ ok: true, data: { alreadyLiked: true, confidence: 'confirmed' } });
     expect(result.plannedActions).not.toContain('comment_work');
     expect(result.plannedActions).not.toContain('like_work');
     expect(result.plannedActions).toEqual([]);
@@ -185,7 +212,7 @@ describe('discover-visits.mjs — no updateEventStatus', () => {
 describe('discovered item invariants', () => {
   it('pending_review item has executeAllowed=false and previewOnly=true', () => {
     const base = createVisitDiscoveryBase({ actorName: '测试' });
-    const c = classifyLikeResult({ ok: true, data: { alreadyLiked: false } });
+    const c = classifyLikeResult({ ok: true, data: { alreadyLiked: false, confidence: 'confirmed' } });
     Object.assign(base, {
       likeState: c.likeState,
       status: c.status,
@@ -199,7 +226,7 @@ describe('discovered item invariants', () => {
 
   it('skipped item has empty plannedActions', () => {
     const base = createVisitDiscoveryBase({ actorName: '测试' });
-    const c = classifyLikeResult({ ok: true, data: { alreadyLiked: true } });
+    const c = classifyLikeResult({ ok: true, data: { alreadyLiked: true, confidence: 'confirmed' } });
     Object.assign(base, {
       likeState: c.likeState,
       status: c.status,
@@ -267,5 +294,111 @@ describe('visits:discover --max-items', () => {
   it('default maxItems is 10', () => {
     const src = readFileSync(resolve(CLI_DIR, 'discover-visits.mjs'), 'utf8');
     expect(src).toContain("options.maxItems || 10");
+  });
+});
+
+// ============================================================
+// 8. formatTargetWorkId — video-xxx / note-xxx prefix
+// ============================================================
+describe('formatTargetWorkId', () => {
+  it('video URL → video-<id>', () => {
+    expect(formatTargetWorkId('https://www.douyin.com/video/7645548152535502004')).toBe('video-7645548152535502004');
+  });
+
+  it('video URL with query params → video-<id>', () => {
+    expect(formatTargetWorkId('https://www.douyin.com/video/123?tab=like')).toBe('video-123');
+  });
+
+  it('note URL → note-<id>', () => {
+    expect(formatTargetWorkId('https://www.douyin.com/note/456')).toBe('note-456');
+  });
+
+  it('falls back to videoId arg if URL has no /video/ match', () => {
+    expect(formatTargetWorkId(null, '999')).toBe('video-999');
+  });
+
+  it('returns null for empty inputs', () => {
+    expect(formatTargetWorkId('')).toBeNull();
+    expect(formatTargetWorkId(null, null)).toBeNull();
+  });
+
+  it('returns url as-is if no /video/ or /note/ match', () => {
+    expect(formatTargetWorkId('https://www.douyin.com/other/123')).toBe('https://www.douyin.com/other/123');
+  });
+});
+
+// ============================================================
+// 9. Diagnostics pass-through from checkLikeState
+// ============================================================
+describe('discovered item — likeDiagnostics pass-through', () => {
+  it('blocked likeResult → likeDiagnostics populated with candidates', () => {
+    const base = createVisitDiscoveryBase({ actorName: 'test' });
+    const likeResult = {
+      ok: false,
+      code: 'LIKE_STATE_UNKNOWN',
+      data: {
+        candidateCount: 3,
+        confidence: 'unknown',
+        candidates: [{ tag: 'span', text: '赞', color: 'rgb(100,100,100)' }],
+      },
+    };
+    base.likeDiagnostics = likeResult.data;
+    base.likeCheckSignal = likeResult.data.confidence;
+    base.likeCheckConfidence = likeResult.data.confidence;
+
+    const classification = classifyLikeResult(likeResult);
+    Object.assign(base, {
+      status: classification.status,
+      likeState: classification.likeState,
+      reason: classification.reason,
+      plannedActions: classification.plannedActions,
+    });
+
+    expect(base.status).toBe('blocked');
+    expect(base.likeDiagnostics).not.toBeNull();
+    expect(base.likeDiagnostics.candidates).toHaveLength(1);
+    expect(base.likeDiagnostics.candidateCount).toBe(3);
+    expect(base.likeCheckConfidence).toBe('unknown');
+  });
+
+  it('confirmed + alreadyLiked → likeDiagnostics still populated', () => {
+    const base = createVisitDiscoveryBase({ actorName: 'test' });
+    const likeResult = { ok: true, data: { alreadyLiked: true, confidence: 'confirmed', signal: 'liked-class:span' } };
+    base.likeDiagnostics = likeResult.data;
+    base.likeCheckSignal = likeResult.data.signal;
+    base.likeCheckConfidence = likeResult.data.confidence;
+
+    const classification = classifyLikeResult(likeResult);
+    Object.assign(base, {
+      status: classification.status,
+      likeState: classification.likeState,
+      reason: classification.reason,
+      plannedActions: classification.plannedActions,
+    });
+
+    expect(base.status).toBe('skipped');
+    expect(base.likeDiagnostics).not.toBeNull();
+    expect(base.likeCheckConfidence).toBe('confirmed');
+    expect(base.likeCheckSignal).toBe('liked-class:span');
+  });
+
+  it('confirmed + not_liked → likeDiagnostics populated', () => {
+    const base = createVisitDiscoveryBase({ actorName: 'test' });
+    const likeResult = { ok: true, data: { alreadyLiked: false, confidence: 'confirmed', signal: 'neutral-like-btn' } };
+    base.likeDiagnostics = likeResult.data;
+    base.likeCheckSignal = likeResult.data.signal;
+    base.likeCheckConfidence = likeResult.data.confidence;
+
+    const classification = classifyLikeResult(likeResult);
+    Object.assign(base, {
+      status: classification.status,
+      likeState: classification.likeState,
+      reason: classification.reason,
+      plannedActions: classification.plannedActions,
+    });
+
+    expect(base.status).toBe('pending_review');
+    expect(base.likeDiagnostics).not.toBeNull();
+    expect(base.likeCheckConfidence).toBe('confirmed');
   });
 });
