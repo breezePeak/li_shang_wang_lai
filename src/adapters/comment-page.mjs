@@ -601,15 +601,7 @@ export async function openReplyBoxForComment(page, item) {
     return openReplyBox(page, commentText);
   }
 
-  const result = await openReplyBox(page, item);
-  if (result.ok) return result;
-
-  if (result.code === RESULT_CODES.ACTOR_NAME_NOT_VERIFIED) {
-    console.error('[comment] actorName + commentText 定位失败，fallback 到 commentText 定位');
-    return openReplyBox(page, commentText);
-  }
-
-  return result;
+  return openReplyBox(page, item);
 }
 
 async function scrollPage(page) {

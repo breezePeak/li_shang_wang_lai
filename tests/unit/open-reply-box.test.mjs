@@ -230,4 +230,33 @@ describe('openReplyBox - adapter level', () => {
 
     expect(result.ok).toBe(true);
   });
+
+  it('openReplyBoxForComment blocks when actorName does not match any comment (no fallback)', async () => {
+    await setComments([
+      { author: '张三', time: '05-29 10:00', text: '求教程' },
+    ]);
+
+    const result = await openReplyBoxForComment(page, {
+      actorName: '李四',
+      commentText: '求教程',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('ACTOR_NAME_NOT_VERIFIED');
+  });
+
+  it('openReplyBoxForComment blocks when actorName is wrong even with duplicate commentText', async () => {
+    await setComments([
+      { author: '张三', time: '05-29 10:00', text: '支持' },
+      { author: '王五', time: '05-29 11:00', text: '支持' },
+    ]);
+
+    const result = await openReplyBoxForComment(page, {
+      actorName: '李四',
+      commentText: '支持',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('ACTOR_NAME_NOT_VERIFIED');
+  });
 });
