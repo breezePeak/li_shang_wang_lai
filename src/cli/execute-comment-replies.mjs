@@ -2,7 +2,7 @@ import { createBrowserContext } from '../browser/browser-context.mjs';
 import {
   ensureCommentPageReady,
   waitForCommentsArea,
-  openReplyBox,
+  openReplyBoxForComment,
   sendReply,
   getSelectedWorkTitle,
   selectWorkByTitle,
@@ -164,7 +164,7 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
 
   if (run.options.dryRun) {
     r.step = 'dry-run-locate';
-    const locateResult = await openReplyBox(page, item.commentText);
+    const locateResult = await openReplyBoxForComment(page, item);
     if (locateResult.ok) {
       r.status = 'dry_run_ok';
       r.reason = 'dry-run 定位成功，未实际发送';
@@ -181,7 +181,7 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
   }
 
   r.step = 'open-reply-box';
-  const openResult = await openReplyBox(page, item.commentText);
+  const openResult = await openReplyBoxForComment(page, item);
   if (!openResult.ok) {
     r.status = 'blocked';
     r.reason = `打开回复框失败: ${openResult.message}`;

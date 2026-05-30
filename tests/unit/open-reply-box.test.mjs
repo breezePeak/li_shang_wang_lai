@@ -6,12 +6,14 @@ let page = null;
 
 // Dynamic import for ESM
 let openReplyBox = null;
+let openReplyBoxForComment = null;
 
 beforeAll(async () => {
   browser = await chromium.launch({ headless: true });
   page = await browser.newPage();
   const mod = await import('../../src/adapters/comment-page.mjs');
   openReplyBox = mod.openReplyBox;
+  openReplyBoxForComment = mod.openReplyBoxForComment;
 });
 
 afterAll(async () => {
@@ -202,4 +204,30 @@ describe('openReplyBox - adapter level', () => {
     expect(result.ok).toBe(false);
     expect(result.code).toBe('COMMENT_MATCH_NOT_UNIQUE');
   }, 40000);
+
+  it('openReplyBoxForComment uses actorName for unique match', async () => {
+    await setComments([
+      { author: '张三', time: '05-29 10:00', text: '求教程' },
+      { author: '李四', time: '05-29 11:00', text: '求教程' },
+    ]);
+
+    const result = await openReplyBoxForComment(page, {
+      actorName: '李四',
+      commentText: '求教程',
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('openReplyBoxForComment works with commentText alone (no actorName)', async () => {
+    await setComments([
+      { author: '张三', time: '05-29 10:00', text: '写得不错' },
+    ]);
+
+    const result = await openReplyBoxForComment(page, {
+      commentText: '写得不错',
+    });
+
+    expect(result.ok).toBe(true);
+  });
 });

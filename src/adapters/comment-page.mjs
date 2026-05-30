@@ -593,6 +593,25 @@ export async function openReplyBox(page, match) {
   }
 }
 
+export async function openReplyBoxForComment(page, item) {
+  const actorName = item && item.actorName;
+  const commentText = (item && item.commentText) || '';
+
+  if (!actorName) {
+    return openReplyBox(page, commentText);
+  }
+
+  const result = await openReplyBox(page, item);
+  if (result.ok) return result;
+
+  if (result.code === RESULT_CODES.ACTOR_NAME_NOT_VERIFIED) {
+    console.error('[comment] actorName + commentText 定位失败，fallback 到 commentText 定位');
+    return openReplyBox(page, commentText);
+  }
+
+  return result;
+}
+
 async function scrollPage(page) {
   await page.evaluate(() => {
     const all = document.querySelectorAll('*');
