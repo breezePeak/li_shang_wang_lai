@@ -829,13 +829,34 @@ export async function selectWorkByTitle(page, workTitle) {
   console.error('[comment-page] 等待作品选择面板出现...');
   await page.waitForTimeout(2000);
 
-  // Step 3: Find and click the target work in the panel
+  // Step 3: Detect the popup/overlay first, then search only within it
   const clickResult = await page.evaluate((target) => {
-    // Look for elements whose text matches the target title.
-    // Prefer elements that are in popup/overlay/modal panels (higher z-index or position).
-    const candidates = [];
-    const all = document.querySelectorAll('*');
+    // Find the work selector popup: a visible container with high z-index
+    // that appeared after clicking "选择作品" (antd-based popup/overlay)
+    function findPopupContainer() {
+      const candidates = [];
+      const all = document.querySelectorAll('*');
+      for (const el of all) {
+        if (el.offsetHeight === 0 || el.offsetWidth === 0) continue;
+        if (el.children.length > 20) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 200 || rect.height < 100) continue;
+        const style = window.getComputedStyle(el);
+        const zIndex = parseInt(style.zIndex) || 0;
+        if (zIndex < 100) continue;
+        const text = (el.innerText || '').trim();
+        if (text.length < 10 || text.length > 10000) continue;
+        candidates.push({ el, z: zIndex, w: rect.width, h: rect.height });
+      }
+      candidates.sort((a, b) => b.z - a.z);
+      return candidates.length > 0 ? candidates[0].el : null;
+    }
 
+    const popup = findPopupContainer();
+    const scope = popup || document.body;
+
+    const candidates = [];
+    const all = scope.querySelectorAll('*');
     for (const el of all) {
       if (el.offsetHeight === 0 || el.offsetWidth === 0) continue;
       const text = (el.innerText || '').trim();
@@ -843,11 +864,10 @@ export async function selectWorkByTitle(page, workTitle) {
       if (el.children.length > 10) continue;
       if (!text.includes(target)) continue;
 
+      // Reject elements in the left sidebar or header (navigation area)
       const rect = el.getBoundingClientRect();
-      // Skip elements in the main header area (y < 60)
+      if (rect.x < 200) continue;
       if (rect.y < 60 && rect.height < 40) continue;
-
-      // Skip elements that are too small (likely icons)
       if (rect.width < 50 && rect.height < 20) continue;
 
       const style = window.getComputedStyle(el);
@@ -865,7 +885,9 @@ export async function selectWorkByTitle(page, workTitle) {
       });
     }
 
-    if (candidates.length === 0) return { found: false, total: 0 };
+    if (candidates.length === 0) {
+      return { found: false, total: 0, inPopup: !!popup };
+    }
 
     // Sort by: prefer clickable elements with higher z-index (popup panels)
     candidates.sort((a, b) => {
@@ -879,19 +901,18 @@ export async function selectWorkByTitle(page, workTitle) {
       const el = document.elementFromPoint(c.x + Math.min(c.w / 2, 80), c.y + Math.min(c.h / 2, 15));
       if (!el) continue;
 
-      // Walk up to find clickable container
       let clickTarget = el;
       for (let i = 0; i < 8 && clickTarget; i++) {
         const ct = (clickTarget.innerText || '').trim();
         if (ct.includes(target) && ct.length > 3 && ct.length < 500) {
           clickTarget.click();
-          return { found: true, text: ct.slice(0, 60), tag: clickTarget.tagName, total: candidates.length };
+          return { found: true, text: ct.slice(0, 60), tag: clickTarget.tagName, total: candidates.length, inPopup: !!popup };
         }
         clickTarget = clickTarget.parentElement;
       }
     }
 
-    return { found: false, total: candidates.length, sample: candidates.slice(0, 3) };
+    return { found: false, total: candidates.length, sample: candidates.slice(0, 3), inPopup: !!popup };
   }, shortTitle);
 
   console.error(`[comment-page] 面板扫描结果: ${JSON.stringify(clickResult)}`);
@@ -900,7 +921,21 @@ export async function selectWorkByTitle(page, workTitle) {
     console.error(`[comment-page] 已点击目标作品: ${clickResult.tag} "${clickResult.text}"`);
     await page.waitForTimeout(3000);
 
-    // Verify
+    // CRITICAL: After clicking, verify we haven't navigated away from comment page.
+    // A wrong click (e.g. on a navigation link) would change the URL and make
+    // subsequent operations unsafe.
+    const urlAfter = page.url();
+    if (!urlAfter.includes('creator.douyin.com/creator-micro/interactive')) {
+      console.error(`[comment-page] 点击后页面已离开评论管理页 (${urlAfter.slice(0, 80)})，重新导航...`);
+      await page.goto(COMMENT_PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.waitForTimeout(2000);
+      return blocking(
+        RESULT_CODES.BLOCKED,
+        `点击 "${workTitle.slice(0, 40)}" 后页面导航到了其他页面，已自动返回。可能是面板中误点了非作品链接。`,
+        { data: { step: 'select-work', redirectedUrl: urlAfter } }
+      );
+    }
+
     const verifyResult = await getSelectedWorkTitle(page);
     if (verifyResult.ok && verifyResult.data.found) {
       console.error(`[comment-page] 切换后作品: "${verifyResult.data.title.slice(0, 50)}"`);
@@ -910,7 +945,6 @@ export async function selectWorkByTitle(page, workTitle) {
     return success({ switchedTo: 'clicked' });
   }
 
-  // Failed: dump visible text around the click area for debugging
   if (clickResult.total > 0) {
     console.error(`[comment-page] 面板中找到 ${clickResult.total} 个文本匹配候选，但点击失败`);
     console.error(`[comment-page] 候选样本: ${JSON.stringify(clickResult.sample)}`);

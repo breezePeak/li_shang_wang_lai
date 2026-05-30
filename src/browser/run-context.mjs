@@ -78,11 +78,11 @@ export function validateOptions(options, command) {
   }
 }
 
-export function createRunContext(command, commonArgs) {
+export function createRunContext(command, options) {
   const ts = chinaTimestamp();
   const runId = `${ts}_${command}`;
 
-  validateOptions(commonArgs, command);
+  validateOptions(options, command);
 
   const outputDir = path.resolve(process.cwd(), 'data', 'runs', runId);
   ensureDir(outputDir);
@@ -92,13 +92,14 @@ export function createRunContext(command, commonArgs) {
     command,
     startedAt: new Date().toISOString(),
     finishedAt: null,
-    options: { ...commonArgs },
+    options: { ...options },
     hadError: false,
     hadBlocked: false,
     outputDir,
     scanned: 0,
     planned: 0,
     executed: 0,
+    processed: 0,
     succeeded: 0,
     failed: 0,
     blocked: 0,
@@ -113,7 +114,7 @@ export function createRunContext(command, commonArgs) {
   console.error(`[run] 运行 ID: ${runId}`);
   console.error(`[run] 命令: ${command}`);
   console.error(`[run] 输出目录: ${outputDir}`);
-  console.error(`[run] 参数: debug=${commonArgs.debug} dry-run=${commonArgs.dryRun} execute=${commonArgs.execute} max-items=${commonArgs.maxItems}`);
+  console.error(`[run] 参数: debug=${options.debug} dry-run=${options.dryRun} execute=${options.execute} max-items=${options.maxItems}`);
 
   return run;
 }
@@ -129,6 +130,7 @@ export function saveRunSummary(run) {
     scanned: run.scanned,
     planned: run.planned,
     executed: run.executed,
+    processed: run.processed,
     succeeded: run.succeeded,
     failed: run.failed,
     blocked: run.blocked,

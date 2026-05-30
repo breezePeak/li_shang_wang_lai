@@ -12,9 +12,39 @@ import { runMigrations } from '../db/migrations.mjs';
 import { getDb } from '../db/database.mjs';
 import path from 'path';
 import { existsSync, readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
 import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
+
+export function getWorkGroupKey(item) {
+  if (item.workId && item.workId.trim()) {
+    return `workId:${item.workId.trim()}`;
+  }
+  if (item.workUrl && item.workUrl.trim()) {
+    return `workUrl:${item.workUrl.trim()}`;
+  }
+  if (item.workTitle && item.workTitle.trim()) {
+    return `workTitle:${item.workTitle.trim()}`;
+  }
+  return '__unknown_work__';
+}
+
+export function groupApprovedItemsByWork(items) {
+  const groupMap = new Map();
+  const groupOrder = [];
+
+  for (const item of items) {
+    const key = getWorkGroupKey(item);
+    if (!groupMap.has(key)) {
+      groupMap.set(key, []);
+      groupOrder.push(key);
+    }
+    groupMap.get(key).push(item);
+  }
+
+  return groupOrder.map(key => ({ key, items: groupMap.get(key) }));
+}
 
 function parseArgs(argv) {
   const args = { plan: null };
@@ -85,13 +115,14 @@ async function executeOneItem(page, item, db, run, planId) {
     return r;
   }
 
-  // Check maxItems
-  if (run.executed >= run.options.maxItems) {
+  // Check maxItems (counts both dry-run and execute attempts)
+  if (run.processed >= run.options.maxItems) {
     r.status = 'skipped';
     r.reason = `已达到本轮最大执行数量 ${run.options.maxItems}`;
     r.code = RESULT_CODES.MAX_ITEMS_REACHED;
     return r;
   }
+  run.processed++;
 
   console.log(`\n[reply] 处理: ${item.actorName} "${item.commentText.slice(0, 40)}"`);
 
@@ -203,9 +234,6 @@ async function main() {
     process.exit(0);
   }
 
-  // Always keep browser open so user can verify results
-  commonArgs.options.keepOpen = true;
-
   const actionMode = commonArgs.options.execute ? 'execute' : 'dry-run';
   console.log(`[reply] 模式: ${actionMode}`);
   console.log(`[reply] ~ ${approvedItems.length} 条待处理, 最大执行 ${commonArgs.options.maxItems} 条`);
@@ -220,7 +248,7 @@ async function main() {
 
   try {
     console.log('[reply] 启动浏览器...');
-    const ctx = await createBrowserContext({ headless: false, enableReuse: options.keepOpen });
+    const ctx = await createBrowserContext({ headless: false, enableReuse: commonArgs.options.keepOpen });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
@@ -250,7 +278,7 @@ async function main() {
       }
 
       // Stop if we hit max items
-      if (commonArgs.options.execute && run.executed >= commonArgs.options.maxItems) {
+      if (run.processed >= commonArgs.options.maxItems) {
         console.log(`[reply] 已达到本轮最大执行数量 ${commonArgs.options.maxItems}, 停止。`);
         break;
       }
@@ -290,6 +318,7 @@ async function main() {
       results,
       summary: {
         total: approvedItems.length,
+        processed: run.processed || 0,
         succeeded: successCount,
         skipped: skipCount,
         blocked: blockedCount,
@@ -312,4 +341,7 @@ async function main() {
   }
 }
 
-main().catch(err => { console.error(err.message); process.exit(1); });
+const __filename = fileURLToPath(import.meta.url);
+if (process.argv[1] === __filename) {
+  main().catch(err => { console.error(err.message); process.exit(1); });
+}
