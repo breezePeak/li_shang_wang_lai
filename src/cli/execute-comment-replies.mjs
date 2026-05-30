@@ -17,35 +17,6 @@ import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose 
 import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 
-export function getWorkGroupKey(item) {
-  if (item.workId && item.workId.trim()) {
-    return `workId:${item.workId.trim()}`;
-  }
-  if (item.workUrl && item.workUrl.trim()) {
-    return `workUrl:${item.workUrl.trim()}`;
-  }
-  if (item.workTitle && item.workTitle.trim()) {
-    return `workTitle:${item.workTitle.trim()}`;
-  }
-  return '__unknown_work__';
-}
-
-export function groupApprovedItemsByWork(items) {
-  const groupMap = new Map();
-  const groupOrder = [];
-
-  for (const item of items) {
-    const key = getWorkGroupKey(item);
-    if (!groupMap.has(key)) {
-      groupMap.set(key, []);
-      groupOrder.push(key);
-    }
-    groupMap.get(key).push(item);
-  }
-
-  return groupOrder.map(key => ({ key, items: groupMap.get(key) }));
-}
-
 function parseArgs(argv) {
   const args = { plan: null };
   for (let i = 0; i < argv.length; i++) {
@@ -181,12 +152,7 @@ async function executeOneItemInCurrentWork(page, item, db, run, planId) {
     return r;
   }
 
-<<<<<<< HEAD
-  // Check maxItems (counts both dry-run and execute attempts)
   if (run.processed >= run.options.maxItems) {
-=======
-  if (run.executed >= run.options.maxItems) {
->>>>>>> d42e142701f8fe0d57a2c137b85955a457e66a6c
     r.status = 'skipped';
     r.reason = `已达到本轮最大执行数量 ${run.options.maxItems}`;
     r.code = RESULT_CODES.MAX_ITEMS_REACHED;
@@ -284,7 +250,7 @@ async function executeWorkGroup(page, group, db, run, planId) {
     const result = await executeOneItemInCurrentWork(page, group.items[i], db, run, planId);
     results.push(result);
 
-    if (run.options.execute && run.executed >= run.options.maxItems) {
+    if (run.processed >= run.options.maxItems) {
       break;
     }
 
@@ -367,12 +333,7 @@ async function main() {
         else if (r.status === 'blocked') blockedCount++;
       }
 
-<<<<<<< HEAD
-      // Stop if we hit max items
       if (run.processed >= commonArgs.options.maxItems) {
-=======
-      if (commonArgs.options.execute && run.executed >= commonArgs.options.maxItems) {
->>>>>>> d42e142701f8fe0d57a2c137b85955a457e66a6c
         console.log(`[reply] 已达到本轮最大执行数量 ${commonArgs.options.maxItems}, 停止。`);
         break;
       }
@@ -409,11 +370,8 @@ async function main() {
       results,
       summary: {
         total: approvedItems.length,
-<<<<<<< HEAD
-        processed: run.processed || 0,
-=======
         workGroups: groups.length,
->>>>>>> d42e142701f8fe0d57a2c137b85955a457e66a6c
+        processed: run.processed || 0,
         succeeded: successCount,
         skipped: skipCount,
         blocked: blockedCount,
@@ -436,11 +394,7 @@ async function main() {
   }
 }
 
-<<<<<<< HEAD
 const __filename = fileURLToPath(import.meta.url);
 if (process.argv[1] === __filename) {
-=======
-if (process.argv[1] && process.argv[1].includes('execute-comment-replies')) {
->>>>>>> d42e142701f8fe0d57a2c137b85955a457e66a6c
   main().catch(err => { console.error(err.message); process.exit(1); });
 }
