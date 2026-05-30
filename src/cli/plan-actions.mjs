@@ -148,12 +148,19 @@ async function main() {
   const useJson = argv.includes('--json');
   const commitMode = argv.includes('--commit');
 
+  let limit = 200;
+  const limitIdx = argv.indexOf('--limit');
+  if (limitIdx >= 0 && argv[limitIdx + 1]) {
+    const parsed = parseInt(argv[limitIdx + 1], 10);
+    if (!isNaN(parsed) && parsed > 0) limit = parsed;
+  }
+
   if (commitMode) {
     console.error('[plan] --commit 模式暂未实现，默认以只读模式运行');
   }
 
   console.error('[plan] 读取待处理事件...');
-  const events = getEvents({ status: 'new', limit: 200 });
+  const events = getEvents({ status: 'new', limit });
 
   if (events.length === 0) {
     console.error('[plan] 没有待处理事件。先运行 npm run interactions:scan');

@@ -8,12 +8,12 @@ describe('normalizeDouyinUrl', () => {
     normalizeDouyinUrl = mod.normalizeDouyinUrl;
   });
 
-  it('absolute https URL passes through', () => {
+  it('absolute https URL normalizes cleanly', () => {
     expect(normalizeDouyinUrl('https://www.douyin.com/user/abc')).toBe('https://www.douyin.com/user/abc');
   });
 
-  it('absolute http URL passes through', () => {
-    expect(normalizeDouyinUrl('http://www.douyin.com/user/abc')).toBe('http://www.douyin.com/user/abc');
+  it('http URL gets upgraded to https', () => {
+    expect(normalizeDouyinUrl('http://www.douyin.com/user/abc')).toBe('https://www.douyin.com/user/abc');
   });
 
   it('protocol-relative URL gets https prefix', () => {
@@ -26,6 +26,21 @@ describe('normalizeDouyinUrl', () => {
 
   it('bare domain path gets https protocol', () => {
     expect(normalizeDouyinUrl('www.douyin.com/user/abc')).toBe('https://www.douyin.com/user/abc');
+  });
+
+  it('double-domain URL with //www.douyin.com nested inside', () => {
+    expect(normalizeDouyinUrl('https://www.douyin.com//www.douyin.com/user/MS4wLjABAAAAZhnT'))
+      .toBe('https://www.douyin.com/user/MS4wLjABAAAAZhnT');
+  });
+
+  it('double-domain URL with protocol nested inside', () => {
+    expect(normalizeDouyinUrl('https://www.douyin.com/https://www.douyin.com/user/abc'))
+      .toBe('https://www.douyin.com/user/abc');
+  });
+
+  it('double-domain URL with query params', () => {
+    expect(normalizeDouyinUrl('https://www.douyin.com//www.douyin.com/user/abc?enter_from=interact_cell'))
+      .toBe('https://www.douyin.com/user/abc?enter_from=interact_cell');
   });
 
   it('empty string returns empty string', () => {

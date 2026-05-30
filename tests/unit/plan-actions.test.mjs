@@ -229,3 +229,55 @@ describe('getMergeKey', () => {
     expect(getMergeKey(event)).toBe('测试用户');
   });
 });
+
+describe('generatePlan — read-only guarantee', () => {
+  it('consecutive runs produce same output without modifying event status', () => {
+    const events = [
+      makeEvent({ id: 1, event_type: 'like', relation: 'friend', actor_profile_key: 'k1', actor_profile_url: 'https://www.douyin.com/user/k1' }),
+      makeEvent({ id: 2, event_type: 'comment', relation: 'unknown', actor_name: '路人' }),
+    ];
+    const beforeStatuses = events.map(e => e.status);
+    generatePlan(events);
+    generatePlan(events);
+    generatePlan(events);
+    const afterStatuses = events.map(e => e.status);
+    expect(afterStatuses).toEqual(beforeStatuses);
+  });
+
+  it('consecutive runs return same candidate counts', () => {
+    const events = [
+      makeEvent({ id: 1, event_type: 'like', relation: 'friend', actor_profile_key: 'k1', actor_profile_url: 'https://www.douyin.com/user/k1' }),
+      makeEvent({ id: 2, event_type: 'comment', relation: 'unknown', actor_name: '路人' }),
+    ];
+    const r1 = generatePlan(events);
+    const r2 = generatePlan(events);
+    expect(r2.visitWorkCandidates.length).toBe(r1.visitWorkCandidates.length);
+    expect(r2.replyCommentCandidates.length).toBe(r1.replyCommentCandidates.length);
+    expect(r2.skipped.length).toBe(r1.skipped.length);
+  });
+});
+
+describe('generatePlan — output field invariants', () => {
+  it('all visitWorkCandidates have executeAllowed=false', () => {
+    const events = [
+      makeEvent({ id: 1, event_type: 'like', relation: 'friend', actor_profile_key: 'k1', actor_profile_url: 'https://www.douyin.com/user/k1' }),
+    ];
+    const result = generatePlan(events);
+    for (const v of result.visitWorkCandidates) {
+      expect(v.executeAllowed).toBe(false);
+    }
+  });
+
+  it('visitWorkCandidates only contain friend or mutual relations', () => {
+    const events = [
+      makeEvent({ id: 1, event_type: 'like', relation: 'friend', actor_profile_key: 'k1', actor_profile_url: 'https://www.douyin.com/user/k1' }),
+      makeEvent({ id: 2, event_type: 'like', relation: 'mutual', actor_profile_key: 'k2', actor_profile_url: 'https://www.douyin.com/user/k2' }),
+      makeEvent({ id: 3, event_type: 'like', relation: 'unknown', actor_profile_key: 'k3', actor_profile_url: 'https://www.douyin.com/user/k3' }),
+    ];
+    const result = generatePlan(events);
+    for (const v of result.visitWorkCandidates) {
+      expect(['friend', 'mutual']).toContain(v.relation);
+    }
+    expect(result.visitWorkCandidates).toHaveLength(2);
+  });
+});

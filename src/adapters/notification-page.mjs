@@ -13,12 +13,19 @@ const SELF_URL = 'https://www.douyin.com/user/self';
 
 export function normalizeDouyinUrl(href) {
   if (!href) return '';
-  const s = href.trim();
+  let s = href.trim();
   if (!s) return '';
-  if (s.startsWith('https://') || s.startsWith('http://')) return s;
-  if (s.startsWith('//')) return 'https:' + s;
-  if (s.startsWith('/')) return 'https://www.douyin.com' + s;
-  return 'https://' + s;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    if (s.startsWith('https://')) { s = s.slice(8); changed = true; continue; }
+    if (s.startsWith('http://')) { s = s.slice(7); changed = true; continue; }
+    if (s.startsWith('//www.douyin.com')) { s = s.slice(16); changed = true; continue; }
+    if (s.startsWith('//')) { s = s.slice(2); changed = true; continue; }
+    if (s.startsWith('www.douyin.com')) { s = s.slice(14); changed = true; continue; }
+    if (s.startsWith('/')) { s = s.slice(1); changed = true; continue; }
+  }
+  return 'https://www.douyin.com/' + s;
 }
 
 export async function ensureNotificationPageReady(page) {
@@ -274,12 +281,19 @@ export async function extractVisibleNotifications(page) {
 
     function _normUrl(h) {
       if (!h) return '';
-      const s = h.trim();
+      let s = h.trim();
       if (!s) return '';
-      if (s.startsWith('https://') || s.startsWith('http://')) return s;
-      if (s.startsWith('//')) return 'https:' + s;
-      if (s.startsWith('/')) return 'https://www.douyin.com' + s;
-      return 'https://' + s;
+      let changed = true;
+      while (changed) {
+        changed = false;
+        if (s.startsWith('https://')) { s = s.slice(8); changed = true; continue; }
+        if (s.startsWith('http://')) { s = s.slice(7); changed = true; continue; }
+        if (s.startsWith('//www.douyin.com')) { s = s.slice(16); changed = true; continue; }
+        if (s.startsWith('//')) { s = s.slice(2); changed = true; continue; }
+        if (s.startsWith('www.douyin.com')) { s = s.slice(14); changed = true; continue; }
+        if (s.startsWith('/')) { s = s.slice(1); changed = true; continue; }
+      }
+      return 'https://www.douyin.com/' + s;
     }
 
     function findNotificationPanel() {
