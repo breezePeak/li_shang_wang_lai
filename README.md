@@ -318,7 +318,7 @@ npm run likes:reciprocate -- --execute
 | `npm run likes:reciprocate` | 好友回赞执行 | **默认禁用** |
 | `npm test` | 运行测试 | 已配置 |
 
-> **⚠️ 点赞回访**：`likes:reciprocate --execute` 在 MVP 阶段默认禁用。好友回访功能仅支持候选预览，不执行真实点赞。
+> **⚠️ 点赞回访**：`likes:reciprocate --execute` 在 MVP 阶段默认禁用。`visits:live-review --execute` 是唯一的逐条执行入口（用户逐条输入 1/2/3 选择草稿后，在当前页面执行点赞+评论，不允许批量确认）。
 
 ---
 

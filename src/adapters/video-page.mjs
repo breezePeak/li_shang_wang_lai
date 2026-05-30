@@ -604,6 +604,77 @@ export async function getVideoTitle(page) {
   }
 }
 
+export async function findDouyinActionBarLikeItem(page) {
+  try {
+    const info = await page.evaluate(() => {
+      function isDouyinRedColor(val) {
+        if (!val) return false;
+        const m = val.match(/rgb[va]?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+        if (!m) return false;
+        const r = parseInt(m[1], 10);
+        const g = parseInt(m[2], 10);
+        const b = parseInt(m[3], 10);
+        return r >= 230 && g <= 90 && b <= 130;
+      }
+
+      function isVisibleEl(el) {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 5 || rect.height < 5) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        return true;
+      }
+
+      const container = document.querySelector('.t5VMknM2 .MinpposV');
+      if (!container) return null;
+      const items = Array.from(container.querySelectorAll(':scope > .AOWKbsTg'));
+      if (items.length === 0) return null;
+      const likeItem = items[0];
+
+      const cls = (typeof likeItem.className === 'string' ? likeItem.className : '');
+      const isLikedClass = /\bf7caOKG9\b/.test(cls);
+
+      let pathFill = '';
+      const svgs = likeItem.querySelectorAll('svg');
+      for (const svg of svgs) {
+        if (!isVisibleEl(svg)) continue;
+        const paths = svg.querySelectorAll('path');
+        for (const p of paths) {
+          if (!isVisibleEl(p)) continue;
+          const pf = p.getAttribute('fill') || '';
+          if (pf && isDouyinRedColor(pf)) pathFill = pf;
+          const pcs = window.getComputedStyle(p);
+          if (isDouyinRedColor(pcs.fill)) pathFill = pcs.fill;
+        }
+      }
+
+      return {
+        className: cls.slice(0, 80),
+        isLiked: isLikedClass || isDouyinRedColor(pathFill),
+        pathFill: pathFill || '',
+        found: true,
+      };
+    });
+
+    if (!info) {
+      return blocking(
+        RESULT_CODES.BLOCKED,
+        '找不到点赞按钮 (action bar not found)',
+        { data: {} }
+      );
+    }
+
+    return success(info);
+  } catch (err) {
+    return blocking(
+      RESULT_CODES.BLOCKED,
+      `查找点赞按钮异常: ${err.message}`,
+      { data: { error: err.message } }
+    );
+  }
+}
+
 export async function clickLike(page, { execute = false } = {}) {
   try {
     if (!execute) {
@@ -614,29 +685,8 @@ export async function clickLike(page, { execute = false } = {}) {
       );
     }
 
-    const result = await page.evaluate(() => {
-      const all = document.querySelectorAll('span, div, [role="button"], button');
-
-      for (const el of all) {
-        const text = (el.innerText || '').trim();
-        if (!text.startsWith('点赞') && !text.startsWith('赞')) continue;
-
-        const parent = el.parentElement;
-        const target = parent || el;
-
-        const pCls = (target.className || '') + ' ' + (target.getAttribute('style') || '');
-        const isLiked = /active|liked|selected|checked|hasLiked/i.test(pCls);
-
-        if (isLiked) return { clicked: false, reason: 'already-liked' };
-
-        target.click();
-        return { clicked: true };
-      }
-
-      return null;
-    });
-
-    if (!result) {
+    const barResult = await findDouyinActionBarLikeItem(page);
+    if (!barResult.ok) {
       return blocking(
         RESULT_CODES.BLOCKED,
         '找不到点赞按钮',
@@ -644,7 +694,7 @@ export async function clickLike(page, { execute = false } = {}) {
       );
     }
 
-    if (!result.clicked) {
+    if (barResult.data.isLiked) {
       return blocking(
         RESULT_CODES.ALREADY_LIKED,
         '已经点过赞，跳过',
@@ -652,7 +702,9 @@ export async function clickLike(page, { execute = false } = {}) {
       );
     }
 
-    console.error('[video-page] 已点击点赞按钮');
+    const likeItem = page.locator('.t5VMknM2 .MinpposV > .AOWKbsTg').first();
+    await likeItem.click();
+    console.error('[video-page] 已点击点赞按钮 (action bar)');
     await page.waitForTimeout(2000);
     return success({ clicked: true });
   } catch (err) {
@@ -666,38 +718,25 @@ export async function clickLike(page, { execute = false } = {}) {
 
 export async function confirmLikeSucceeded(page) {
   try {
-    const confirmed = await page.evaluate(() => {
-      const all = document.querySelectorAll('span, div, [role="button"], button');
-      for (const el of all) {
-        const text = (el.innerText || '').trim();
-        if (!text.startsWith('点赞') && !text.startsWith('赞')) continue;
+    const barResult = await findDouyinActionBarLikeItem(page);
+    if (!barResult.ok) {
+      return blocking(
+        RESULT_CODES.BLOCKED,
+        '点击点赞按钮后无法确认已赞 (action bar not found)',
+        { data: {} }
+      );
+    }
 
-        const parent = el.parentElement;
-        const target = parent || el;
-        const pCls = (target.className || '') + ' ' + (target.getAttribute('style') || '');
-        if (/active|liked|selected|checked|hasLiked/i.test(pCls)) {
-          return { confirmed: true, signal: 'liked-class' };
-        }
-
-        const svgs = target.querySelectorAll('svg');
-        for (const svg of svgs) {
-          const fill = svg.getAttribute('fill') || '';
-          if (fill === '#FF0040' || fill === '#FE2C55') {
-            return { confirmed: true, signal: 'red-fill' };
-          }
-        }
-      }
-      return { confirmed: false, signal: 'no-indicator' };
-    });
-
-    if (confirmed.confirmed) {
-      return success({ signal: confirmed.signal });
+    const info = barResult.data;
+    if (info.isLiked) {
+      const signal = /\bf7caOKG9\b/.test(info.className) ? 'liked-class' : 'red-fill';
+      return success({ signal });
     }
 
     return blocking(
       RESULT_CODES.BLOCKED,
       '点击点赞按钮后无法确认已赞，请检查页面状态',
-      { data: { signal: confirmed.signal } }
+      { data: { pathFill: info.pathFill, className: info.className } }
     );
   } catch (err) {
     return blocking(
@@ -726,23 +765,17 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
       );
     }
 
-    const typed = await page.evaluate((commentText) => {
-      const input = document.querySelector(
-        '[contenteditable="true"][data-placeholder*="评"], ' +
-        '[contenteditable="true"][placeholder*="评"], ' +
-        'textarea[placeholder*="评"], ' +
-        'input[placeholder*="评"]'
-      );
-      if (!input) return { posted: false, reason: 'input-not-found' };
+    const trimmed = text.trim();
 
-      input.focus();
-      input.textContent = commentText;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-      return { posted: true };
-    }, text.trim());
+    const input = page.locator(
+      '[contenteditable="true"][data-placeholder*="评"], ' +
+      '[contenteditable="true"][placeholder*="评"], ' +
+      'textarea[placeholder*="评"], ' +
+      'input[placeholder*="评"]'
+    ).first();
 
-    if (!typed.posted) {
+    const inputCount = await input.count();
+    if (inputCount === 0) {
       return blocking(
         RESULT_CODES.COMMENT_INPUT_NOT_FOUND,
         '找不到视频评论区输入框',
@@ -750,21 +783,14 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
       );
     }
 
+    await input.click();
+    await page.waitForTimeout(300);
+    await page.keyboard.type(trimmed, { delay: 50 });
     await page.waitForTimeout(500);
 
-    const sent = await page.evaluate(() => {
-      const btns = document.querySelectorAll('button, [role="button"], div[class]');
-      for (const btn of btns) {
-        const t = (btn.innerText || '').trim();
-        if (t === '发送' || t === '发布') {
-          btn.click();
-          return { sent: true };
-        }
-      }
-      return { sent: false };
-    });
-
-    if (!sent.sent) {
+    const sendBtn = page.locator('button').filter({ hasText: /^发送$|^发布$/ }).first();
+    const sendCount = await sendBtn.count();
+    if (sendCount === 0) {
       return blocking(
         RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND,
         '找不到发送/发布按钮',
@@ -772,10 +798,20 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
       );
     }
 
+    await sendBtn.click();
     console.error('[video-page] 已提交评论');
     await page.waitForTimeout(2000);
 
-    return success({ text: text.trim() });
+    const isEmpty = await input.evaluate(el => {
+      const text = el.textContent || '';
+      return text.trim().length === 0;
+    });
+
+    if (!isEmpty) {
+      return success({ text: trimmed, unconfirmed: true });
+    }
+
+    return success({ text: trimmed });
   } catch (err) {
     return blocking(
       RESULT_CODES.BLOCKED,
