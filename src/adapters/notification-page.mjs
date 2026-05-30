@@ -11,6 +11,27 @@
 
 const SELF_URL = 'https://www.douyin.com/user/self';
 
+export async function ensureNotificationPageReady(page) {
+  await page.goto(SELF_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  console.error('[notify-page] 等待页面加载...');
+  const maxWait = 15000;
+  const pollInterval = 1000;
+  const start = Date.now();
+  while (Date.now() - start < maxWait) {
+    const found = await page.evaluate(() => {
+      return !!document.querySelector('svg.LtuRRess') ||
+        !!document.querySelector('[data-e2e*="notify"]') ||
+        !!document.querySelector('[data-e2e*="message"]');
+    }).catch(() => false);
+    if (found) {
+      console.error(`[notify-page] 页面就绪 (${((Date.now() - start) / 1000).toFixed(1)}s)`);
+      return;
+    }
+    await page.waitForTimeout(pollInterval);
+  }
+  console.error('[notify-page] 页面就绪（超时降级）');
+}
+
 export async function openNotificationPanel(page) {
   try {
     console.error('[notify-page] 定位通知铃铛...');
@@ -218,7 +239,7 @@ export async function getPanelBoundingBox(page) {
 
 export async function scrollPanelDown(page, { deltaY = 600 } = {}) {
   const panelBox = await getPanelBoundingBox(page);
-  if (!panelBox) return { scrolled: false, reachedBottom: true };
+  if (!panelBox) return { scrolled: false };
 
   const centerX = panelBox.x + panelBox.width / 2;
   const centerY = panelBox.y + panelBox.height / 2;
@@ -226,66 +247,11 @@ export async function scrollPanelDown(page, { deltaY = 600 } = {}) {
   await page.mouse.move(centerX, centerY, { steps: 3 });
   await page.waitForTimeout(100);
 
-  const scrollInfo = await page.evaluate(() => {
-    let panel = null;
-    for (const el of document.querySelectorAll('*')) {
-      const t = (el.innerText || '').trim();
-      if (t.startsWith('互动消息') || t.startsWith('全部消息')) {
-        const r = el.getBoundingClientRect();
-        if (r.width < 100 || r.height < 30) continue;
-        let c = el.parentElement;
-        for (let i = 0; i < 6 && c && c !== document.body; i++) {
-          const cr = c.getBoundingClientRect();
-          if (cr.width > 250 && cr.height > 300) { panel = c; break; }
-          c = c.parentElement;
-        }
-        if (panel) break;
-      }
-    }
-    if (!panel) return null;
-    return {
-      scrollTop: panel.scrollTop,
-      scrollHeight: panel.scrollHeight,
-      clientHeight: panel.clientHeight,
-    };
-  });
+  console.error(`[notify-page] wheel 滚动通知面板 delta=${deltaY}`);
+  await page.mouse.wheel(0, deltaY);
+  await page.waitForTimeout(1200);
 
-  if (!scrollInfo) return { scrolled: false, reachedBottom: true };
-
-  const delta = Math.min(deltaY, Math.floor(scrollInfo.height * 0.8) || 600);
-  console.error(`[notify-page] wheel 滚动通知面板 delta=${delta}`);
-
-  await page.mouse.wheel(0, delta);
-  await page.waitForTimeout(800);
-
-  const afterInfo = await page.evaluate(() => {
-    let panel = null;
-    for (const el of document.querySelectorAll('*')) {
-      const t = (el.innerText || '').trim();
-      if (t.startsWith('互动消息') || t.startsWith('全部消息')) {
-        const r = el.getBoundingClientRect();
-        if (r.width < 100 || r.height < 30) continue;
-        let c = el.parentElement;
-        for (let i = 0; i < 6 && c && c !== document.body; i++) {
-          const cr = c.getBoundingClientRect();
-          if (cr.width > 250 && cr.height > 300) { panel = c; break; }
-          c = c.parentElement;
-        }
-        if (panel) break;
-      }
-    }
-    if (!panel) return null;
-    return {
-      scrollTop: panel.scrollTop,
-      scrollHeight: panel.scrollHeight,
-      clientHeight: panel.clientHeight,
-    };
-  });
-
-  if (!afterInfo) return { scrolled: false, reachedBottom: true };
-
-  const reachedBottom = afterInfo.scrollTop + afterInfo.clientHeight >= afterInfo.scrollHeight - 10;
-  return { scrolled: true, reachedBottom, scrollInfo: afterInfo };
+  return { scrolled: true };
 }
 
 export async function extractVisibleNotifications(page) {
@@ -502,9 +468,14 @@ export async function extractVisibleNotifications(page) {
       items.push(itemData);
     }
 
-    const hasMore = panel.scrollHeight > panel.clientHeight + panel.scrollTop + 10;
+    const NO_MORE_PATTERNS = ['暂无更多数据', '暂无数据', '没有更多了', '没有更多消息', '已加载全部', '已经到底了', '没有更多内容'];
+    let noMoreData = false;
+    const panelText = (panel.innerText || '');
+    for (const pat of NO_MORE_PATTERNS) {
+      if (panelText.includes(pat)) { noMoreData = true; break; }
+    }
 
-    return { ok: true, data: { notifications: items, hasNew: hasMore }, _diag: { panelFound: true, candidateCount: notificationElements.length, parsedCount: items.length, skipped: diagSkipped.slice(0, 10) } };
+    return { ok: true, data: { notifications: items, noMoreData }, _diag: { panelFound: true, candidateCount: notificationElements.length, parsedCount: items.length, skipped: diagSkipped.slice(0, 10), noMoreData } };
   });
 
   const diag = result._diag;

@@ -5,7 +5,7 @@ import {
   extractComments,
   getSelectedWorkTitle,
 } from '../adapters/comment-page.mjs';
-import { commentFingerprint, commentInitialStatus, normalizeTimeText } from '../domain/event-fingerprint.mjs';
+import { commentFingerprint, commentInitialStatus, normalizeTimeText, notificationFingerprint } from '../domain/event-fingerprint.mjs';
 import { insertEvent, getEventCounts, findUnstableEvent, promoteUnstableEvent, enrichEvent, upsertNotificationEvent } from '../db/interaction-repository.mjs';
 import logger from '../utils/logger.mjs';
 import { runMigrations } from '../db/migrations.mjs';
@@ -202,6 +202,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0) {
     }
 
     const notifications = batchResult.data.notifications || [];
+    const noMoreData = batchResult.data.noMoreData || false;
     let batchInserted = 0;
     let batchEnriched = 0;
     let batchDuplicate = 0;
@@ -209,12 +210,14 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0) {
     let batchProfileResolved = 0;
     let batchProfileUnresolved = 0;
     let newInBatch = 0;
+    let processedInBatch = 0;
 
     for (const n of notifications) {
       const itemKey = n.notificationItemKey || (n.username + '||' + n.action + '||' + (n.content || ''));
       if (seenItemKeys.has(itemKey)) continue;
       seenItemKeys.add(itemKey);
       newInBatch++;
+      processedInBatch++;
 
       try {
         if (!wantComments && n.eventType === 'comment') continue;
@@ -330,6 +333,11 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0) {
 
     console.error(`[scan]   轮次 ${scrollRounds}: +${batchInserted}条 (${batchDuplicate}重复, ${batchEnriched}补全, ${batchAmbiguous}歧义, ${batchProfileResolved}主页解析, ${newInBatch}新)`);
 
+    if (noMoreData) {
+      console.error('[scan] 面板显示"暂无更多数据"，停止采集');
+      break;
+    }
+
     if (newInBatch === 0) {
       consecutiveEmptyRounds++;
       if (consecutiveEmptyRounds >= 2) {
@@ -340,9 +348,15 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0) {
       consecutiveEmptyRounds = 0;
     }
 
+    const allDuplicate = notifications.length > 0 && processedInBatch === 0 && batchInserted === 0 && batchEnriched === 0;
+    if (allDuplicate) {
+      console.error('[scan] 本轮全部为重复数据，停止采集');
+      break;
+    }
+
     const scrollResult = await scrollPanelDown(page, { deltaY: 600 });
-    if (!scrollResult.scrolled || scrollResult.reachedBottom) {
-      console.error('[scan] 已到达通知面板底部或无法滚动');
+    if (!scrollResult.scrolled) {
+      console.error('[scan] 无法滚动通知面板');
       break;
     }
   }
