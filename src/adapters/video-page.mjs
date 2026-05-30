@@ -316,9 +316,48 @@ export async function checkLikeState(page) {
         if (candidates.length >= 20) break; // safety limit
       }
 
-      // ---- Phase 2: determine like state ----
+      // ---- Phase 2: heuristic detection via right-side SVG containers ----
+      // Douyin's like button has no aria/title/data-e2e with "like"/"赞".
+      // It's a clickable container in the right sidebar that contains an SVG.
+      // Detection: check SVG fill color (red=liked, white/gray=neutral).
       if (candidates.length === 0) {
-        // Collect page diagnostics to help debug why no candidates found
+        // Find right-side interactive containers that contain SVGs
+        const panel = [];
+        const vw = window.innerWidth;
+        const all = document.querySelectorAll('[tabindex], [cursor="pointer"]');
+        for (const el of all) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width < 20 || rect.height < 20) continue;
+          if (rect.x < vw * 0.55) continue;
+          const svgs = el.querySelectorAll('svg');
+          if (svgs.length === 0) continue;
+          const anyRed = Array.from(svgs).some(svg => {
+            const fill = svg.getAttribute('fill') || '';
+            const style = window.getComputedStyle(svg);
+            return fill === '#FF0040' || fill === '#FE2C55' || fill === 'red' ||
+              (style.fill && (style.fill.includes('rgb(255') || style.fill.includes('rgb(254') || style.fill.includes('rgb(251')));
+          });
+          const text = (el.innerText || '').trim();
+          panel.push({ el, rect, anyRed, text: text.slice(0, 10) });
+          if (panel.length >= 6) break;
+        }
+
+        if (panel.length > 0) {
+          // First non-red SVG container is likely the neutral like button
+          const neutral = panel.find(p => !p.anyRed);
+          const redItem = panel.find(p => p.anyRed);
+
+          if (redItem) {
+            return { liked: true, confidence: 'confirmed', signal: 'rightside-svg-red', diag: { tag: redItem.el.tagName.toLowerCase(), text: redItem.text } };
+          }
+          if (neutral) {
+            return { liked: false, confidence: 'confirmed', signal: 'rightside-svg-neutral', diag: { tag: neutral.el.tagName.toLowerCase(), text: neutral.text } };
+          }
+        }
+      }
+
+      // ---- Phase 3: no heuristic match → collect page diagnostics ----
+      if (candidates.length === 0) {
         return collectPageDiagnostics();
       }
 

@@ -489,3 +489,28 @@ describe('discovered item — pageDiagnostics pass-through', () => {
     expect(base.likeDiagnostics.candidates).toHaveLength(1);
   });
 });
+
+// ============================================================
+// 11. Heuristic like detection (rightside-svg signal)
+// ============================================================
+describe('classifyLikeResult — heuristic signals', () => {
+  it('heuristic rightside-svg-red → skipped (already liked)', () => {
+    const likeResult = {
+      ok: true,
+      data: { alreadyLiked: true, confidence: 'confirmed', signal: 'rightside-svg-red', text: '495' },
+    };
+    const c = classifyLikeResult(likeResult);
+    expect(c.status).toBe('skipped');
+    expect(c.likeState).toBe('already_liked');
+  });
+
+  it('heuristic rightside-svg-neutral → pending_review (not liked)', () => {
+    const likeResult = {
+      ok: true,
+      data: { alreadyLiked: false, confidence: 'confirmed', signal: 'rightside-svg-neutral', text: '436' },
+    };
+    const c = classifyLikeResult(likeResult);
+    expect(c.status).toBe('pending_review');
+    expect(c.likeState).toBe('not_liked');
+  });
+});
