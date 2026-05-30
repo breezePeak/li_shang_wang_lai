@@ -15,6 +15,7 @@ import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { promptRecoveryAction } from '../browser/interactive-control.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
+import { resolve } from 'path';
 
 async function runCommentScan(page, run) {
   console.error('[scan] === 评论扫描 ===');
@@ -114,7 +115,7 @@ async function runCommentScan(page, run) {
   return success({ commentCount: newCount, duplicateCount, parseFailedCount, step: 'comment-scan' });
 }
 
-async function runNotificationScan(page, run, type, pauseAfterOpen = 0) {
+async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNotificationDom = false) {
   console.error('[scan] === 通知面板扫描（增量逐批采集） ===');
 
   const {
@@ -189,6 +190,8 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0) {
 
   console.error('[scan] 开始逐批采集通知...');
 
+  let debugDumpDone = false;
+
   while (scrollRounds < maxScrolls) {
     const batchResult = await extractVisibleNotifications(page);
     if (!batchResult || !batchResult.ok) {
@@ -200,6 +203,19 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0) {
         );
       }
       break;
+    }
+
+    if (debugNotificationDom && !debugDumpDone) {
+      debugDumpDone = true;
+      try {
+        const { debugDumpNotificationItems } = await import('../adapters/notification-page.mjs');
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const debugDir = resolve('data', 'debug', 'notifications', ts);
+        console.error(`[scan] --debug-notification-dom: 保存通知 DOM 调试信息到 ${debugDir}`);
+        await debugDumpNotificationItems(page, debugDir);
+      } catch (err) {
+        console.error(`[scan] debug dump 失败: ${err.message}`);
+      }
     }
 
     const notifications = batchResult.data.notifications || [];
@@ -425,6 +441,7 @@ async function main() {
   const type = typeIdx >= 0 ? remaining[typeIdx + 1] : 'all';
   const pauseIdx = remaining.indexOf('--pause-after-open');
   const pauseAfterOpen = pauseIdx >= 0 ? parseInt(remaining[pauseIdx + 1], 10) || 0 : 0;
+  const debugNotificationDom = remaining.includes('--debug-notification-dom');
   const validTypes = ['all', 'comment', 'like'];
   if (!validTypes.includes(type)) {
     if (options.json) {
@@ -455,7 +472,7 @@ async function main() {
     // All new interaction collection flows through the notification center.
     // runCommentScan() is preserved only for reply execution positioning,
     // NOT for new event collection.
-    const notifResult = await runPhaseWithRecovery(page, run, 'notification', () => runNotificationScan(page, run, type, pauseAfterOpen), options);
+    const notifResult = await runPhaseWithRecovery(page, run, 'notification', () => runNotificationScan(page, run, type, pauseAfterOpen, debugNotificationDom), options);
     if (!notifResult.ok) {
       if (options.json) {
         printJsonError('interactions:scan', notifResult.code || RESULT_CODES.BLOCKED,

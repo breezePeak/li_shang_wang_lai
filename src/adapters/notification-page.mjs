@@ -738,3 +738,138 @@ export async function clickCommentLink(page, username) {
 
   return false;
 }
+
+export async function debugDumpNotificationItems(page, debugDir) {
+  const { ensureDir, writeJSON } = await import('../utils/filesystem.mjs');
+  const { writeFileSync } = await import('fs');
+  const { resolve } = await import('path');
+
+  ensureDir(debugDir);
+
+  const ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '评论了你的作品', '回复了你的评论'];
+
+  const debugData = await page.evaluate((ACTION_PATTERNS) => {
+    function findNotificationPanel() {
+      const candidates = document.querySelectorAll('[class*="notification"], [class*="message"], [class*="inform"], [data-e2e*="notify"], [data-e2e*="message"]');
+      for (const el of candidates) {
+        if (el.offsetHeight > 100 && el.offsetWidth > 100) return el;
+      }
+      return null;
+    }
+
+    const panel = findNotificationPanel();
+    if (!panel) return { error: 'panel not found', items: [] };
+
+    const allElements = panel.querySelectorAll('*');
+    const itemEls = [];
+    for (const el of allElements) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 30 || rect.height < 5) continue;
+      const text = (el.innerText || '').trim();
+      for (const pat of ACTION_PATTERNS) {
+        if (text.includes(pat)) { itemEls.push(el); break; }
+      }
+    }
+
+    const seen = new Set();
+    const items = [];
+    for (const itemEl of itemEls) {
+      const text = (itemEl.innerText || '').trim();
+      if (seen.has(text)) continue;
+      seen.add(text);
+
+      const links = [];
+      const allLinks = itemEl.querySelectorAll('a[href]');
+      allLinks.forEach((link, index) => {
+        const dataset = {};
+        for (const key of Object.keys(link.dataset || {})) {
+          dataset[key] = link.dataset[key];
+        }
+        links.push({
+          index,
+          text: (link.innerText || '').trim().slice(0, 200),
+          href: link.getAttribute('href') || '',
+          className: link.className || '',
+          ariaLabel: link.getAttribute('aria-label') || '',
+          title: link.getAttribute('title') || '',
+          dataset,
+        });
+      });
+
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      let actorName = '';
+      if (lines.length > 0) actorName = lines[0];
+      let eventType = '';
+      let action = '';
+      let content = '';
+      for (const line of lines) {
+        for (const pat of ACTION_PATTERNS) {
+          if (line.includes(pat)) {
+            action = pat;
+            eventType = pat.includes('赞了') ? 'like' : 'comment';
+            break;
+          }
+        }
+        if (eventType) break;
+      }
+
+      let workUrl = '', workId = '', workTitle = '';
+      for (const link of allLinks) {
+        const href = link.getAttribute('href') || '';
+        const videoMatch = href.match(/\/video\/(\d+)/);
+        if (videoMatch) { workUrl = href; workId = 'video-' + videoMatch[1]; workTitle = (link.getAttribute('title') || '').trim() || (link.innerText || '').trim(); break; }
+        const noteMatch = href.match(/\/note\/(\d+)/);
+        if (noteMatch) { workUrl = href; workId = 'note-' + noteMatch[1]; workTitle = (link.getAttribute('title') || '').trim() || (link.innerText || '').trim(); break; }
+      }
+
+      let actorProfileUrl = '';
+      for (const link of allLinks) {
+        const href = link.getAttribute('href') || '';
+        if (href.match(/\/user\//)) { actorProfileUrl = href; break; }
+      }
+
+      const warnings = [];
+      if (eventType === 'comment' && !content) warnings.push('missing_comment_text');
+      if (!actorName) warnings.push('missing_actor_name');
+      if (!workTitle && eventType === 'comment') warnings.push('missing_work_title');
+
+      items.push({
+        outerHtml: itemEl.outerHTML,
+        innerText: text,
+        links,
+        meta: {
+          actorName: actorName.slice(0, 50),
+          commentText: content.slice(0, 300),
+          eventType,
+          action,
+          rawText: text.slice(0, 500),
+          notificationItemKey: '',
+          profileUrl: actorProfileUrl,
+          workId: workId || null,
+          workUrl: workUrl || null,
+          workTitle: workTitle.slice(0, 120) || null,
+          warnings,
+        },
+      });
+    }
+
+    return { error: null, items };
+  }, ACTION_PATTERNS);
+
+  if (debugData.error) {
+    console.error(`[debug-notify] 通知面板未找到，无法 dump`);
+    return;
+  }
+
+  console.error(`[debug-notify] 采集到 ${debugData.items.length} 条通知，保存到 ${debugDir}`);
+
+  for (let i = 0; i < debugData.items.length; i++) {
+    const idx = String(i + 1).padStart(3, '0');
+    const item = debugData.items[i];
+
+    writeFileSync(resolve(debugDir, `item-${idx}.html`), item.outerHtml, 'utf8');
+    writeFileSync(resolve(debugDir, `item-${idx}.txt`), item.innerText, 'utf8');
+    writeJSON(resolve(debugDir, `item-${idx}-links.json`), item.links);
+    writeJSON(resolve(debugDir, `item-${idx}-meta.json`), item.meta);
+  }
+}
