@@ -8,9 +8,11 @@ import { navigateToVideo, checkLikeState, getVideoTitle, clickLike, confirmLikeS
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
-import { generateVisitCommentCandidates } from '../domain/visit-comment-generator.mjs';
+import { generateVisitCommentCandidates, FIXED_FALLBACK_TEMPLATES } from '../domain/visit-comment-generator.mjs';
 
 export const FRIENDLY_RELATIONS = new Set(['friend', 'mutual']);
+
+export const VISIT_DRAFTS = FIXED_FALLBACK_TEMPLATES;
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 
@@ -32,13 +34,12 @@ export function classifyLikeResult(likeResult) {
   return { status: 'pending_review', likeState: 'not_liked', reason: null, plannedActions: ['like_work', 'comment_work'] };
 }
 
-export function isExecuteAllowedByRisk(candidate, record) {
+export function isExecuteAllowedByRisk(candidate) {
   if (!candidate) return false;
-  if (!record || !record.selectedCommentText) return false;
   if (candidate.riskLevel === 'high') return false;
   if (candidate.replyMode === 'ignore') return false;
-  if (candidate.riskLevel === 'low' && candidate.replyMode === 'auto_simple' && record.manualReviewMethod === 'user_selected_template') return true;
-  if (candidate.riskLevel === 'medium' && candidate.replyMode === 'agent_generated_review_required' && record.manualReviewMethod === 'user_selected_agent_comment') return true;
+  if (candidate.riskLevel === 'low' && candidate.replyMode === 'auto_simple') return true;
+  if (candidate.riskLevel === 'medium' && candidate.replyMode === 'agent_generated_review_required') return true;
   return false;
 }
 
@@ -85,7 +86,6 @@ async function processCandidate(page, candidate) {
     autoExecuteAllowed: false,
     actionResults: null,
     generatedCommentCandidates: null,
-    usedFallback: false,
     commentContext: null,
   };
 
@@ -165,12 +165,11 @@ async function processCandidate(page, candidate) {
   const commentContext = contextResult.data;
   record.commentContext = commentContext;
 
-  const { generatedCommentCandidates, usedFallback } = generateVisitCommentCandidates(commentContext);
-  record.generatedCommentCandidates = generatedCommentCandidates;
-  record.usedFallback = usedFallback;
+  const candidates = generateVisitCommentCandidates(commentContext);
+  record.generatedCommentCandidates = candidates;
 
   const isContextual = commentContext.canGenerateContextualComment;
-  console.error(`[live-review]   未点赞 → ${record.targetWorkTitle.slice(0, 40)} (context=${isContextual}, candidates=${generatedCommentCandidates.length}, fallback=${usedFallback})`);
+  console.error(`[live-review]   未点赞 → ${record.targetWorkTitle.slice(0, 40)} (context=${isContextual}, candidates=${candidates.length})`);
   return record;
 }
 
@@ -229,8 +228,8 @@ async function interactiveSelect(page, record, isExecute) {
     return { action: 'selected', selected };
   }
 
-  // risk gate: high or ignore always blocked; also need selectedCommentText + correct manualReviewMethod
-  if (!isExecuteAllowedByRisk(selected, record)) {
+  // risk gate: high or ignore always blocked
+  if (!isExecuteAllowedByRisk(selected)) {
     record.status = 'blocked';
     record.reason = 'comment_risk_too_high';
     console.error(`[live-review]   风险等级=${selected.riskLevel}, replyMode=${selected.replyMode}，不允许执行`);
@@ -282,14 +281,8 @@ async function interactiveSelect(page, record, isExecute) {
     return { action: 'comment_failed', selected };
   }
 
-  if (commentExec.data?.unconfirmed) {
-    record.actionResults.comment = 'unconfirmed';
-    record.actionResults.commentReason = 'comment_not_confirmed';
-    console.error(`[live-review]   评论已发送但未确认`);
-  } else {
-    record.actionResults.comment = 'confirmed';
-    console.error(`[live-review]   评论成功`);
-  }
+  record.actionResults.comment = 'confirmed';
+  console.error(`[live-review]   评论成功`);
   return { action: 'executed', selected };
 }
 
@@ -421,8 +414,7 @@ async function main() {
         targetWorkTitle: d.targetWorkTitle,
         likeState: d.likeState,
         suggestedActions: d.plannedActions,
-        generatedCommentCandidates: d.generatedCommentCandidates || [],
-        usedFallback: d.usedFallback,
+        generatedCommentCandidates: (d.generatedCommentCandidates || []).map(c => c.text),
         selectedCommentText: d.selectedCommentText,
         commentCategory: d.commentCategory,
         replyMode: d.replyMode,

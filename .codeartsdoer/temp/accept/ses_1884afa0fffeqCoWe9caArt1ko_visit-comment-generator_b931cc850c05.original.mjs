@@ -149,22 +149,13 @@ function buildContextualCandidates(context) {
 
 export function generateVisitCommentCandidates(context) {
   if (!context || !context.canGenerateContextualComment) {
-    return {
-      generatedCommentCandidates: FIXED_FALLBACK_TEMPLATES.map(t => ({ ...t, sourceSignals: ['fallback_no_context'] })),
-      usedFallback: true,
-    };
+    return FIXED_FALLBACK_TEMPLATES.map(t => ({ ...t, sourceSignals: ['fallback_no_context'] }));
   }
 
   const contextual = buildContextualCandidates(context);
   if (contextual.length === 0) {
-    return {
-      generatedCommentCandidates: FIXED_FALLBACK_TEMPLATES.map(t => ({ ...t, sourceSignals: ['fallback_no_context'] })),
-      usedFallback: true,
-    };
+    return FIXED_FALLBACK_TEMPLATES.map(t => ({ ...t, sourceSignals: ['fallback_no_context'] }));
   }
 
-  return {
-    generatedCommentCandidates: contextual,
-    usedFallback: false,
-  };
+  return contextual;
 }
