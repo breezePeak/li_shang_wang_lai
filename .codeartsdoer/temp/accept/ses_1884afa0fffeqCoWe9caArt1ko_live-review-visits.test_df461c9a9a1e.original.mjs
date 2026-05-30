@@ -304,10 +304,12 @@ describe('live-review-visits.mjs — safety invariants', () => {
     expect(initMatch.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('handles comment unconfirmed', () => {
+  it('handles comment unconfirmed → action=comment_unconfirmed', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toMatch(/unconfirmed/);
+    expect(src).toMatch(/comment_unconfirmed/);
     expect(src).toMatch(/comment_not_confirmed/);
+    const execMatch = src.match(/action:\s*['"]comment_unconfirmed['"]/g);
+    expect(execMatch.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not export VISIT_DRAFTS', () => {

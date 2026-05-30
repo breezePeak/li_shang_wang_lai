@@ -286,10 +286,11 @@ async function interactiveSelect(page, record, isExecute) {
     record.actionResults.comment = 'unconfirmed';
     record.actionResults.commentReason = 'comment_not_confirmed';
     console.error(`[live-review]   评论已发送但未确认`);
-  } else {
-    record.actionResults.comment = 'confirmed';
-    console.error(`[live-review]   评论成功`);
+    return { action: 'comment_unconfirmed', selected };
   }
+
+  record.actionResults.comment = 'confirmed';
+  console.error(`[live-review]   评论成功`);
   return { action: 'executed', selected };
 }
 
@@ -368,7 +369,7 @@ async function main() {
         break;
       }
 
-      if (result.action === 'executed' || result.action === 'comment_failed' || result.action === 'like_failed' || result.action === 'like_unconfirmed') {
+      if (result.action === 'executed' || result.action === 'comment_failed' || result.action === 'comment_unconfirmed' || result.action === 'like_failed' || result.action === 'like_unconfirmed') {
         run.executed++;
         if (result.action === 'executed') run.succeeded++;
         else run.failed++;

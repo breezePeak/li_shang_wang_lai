@@ -10,11 +10,6 @@ const DEFAULT_OPTIONS = {
   keepOpenOnError: true,
   pauseOnError: true,
   maxItems: 1,
-  commentMode: 'skill',
-  selectedCommentText: null,
-  replyMode: null,
-  riskLevel: null,
-  manualReviewMethod: null,
 };
 
 export function chinaTimestamp() {
@@ -60,19 +55,6 @@ export function parseCommonArgs(argv) {
     if (arg === '--max-items' && i + 1 < argv.length) {
       const n = parseInt(argv[++i]);
       options.maxItems = isNaN(n) || n < 1 ? 1 : n;
-      continue;
-    }
-
-    const stringFlags = {
-      '--comment-mode': 'commentMode',
-      '--selected-comment-text': 'selectedCommentText',
-      '--reply-mode': 'replyMode',
-      '--risk-level': 'riskLevel',
-      '--manual-review-method': 'manualReviewMethod',
-    };
-
-    if (stringFlags[arg] && i + 1 < argv.length) {
-      options[stringFlags[arg]] = argv[++i];
       continue;
     }
 

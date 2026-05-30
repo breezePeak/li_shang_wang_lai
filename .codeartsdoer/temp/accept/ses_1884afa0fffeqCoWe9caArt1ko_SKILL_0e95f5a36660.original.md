@@ -119,7 +119,7 @@ npm run likes:reciprocate -- --execute   # FEATURE_DISABLED
 > - `actions:plan`：纯数据分流，不进主页，只按 actorProfileKey 合并事件，输出 visitWorkCandidates；
 > - `visits:discover`：phase3，浏览器进入好友/互关主页，找最近非置顶作品，检查点赞状态，输出 pending_review/skipped/blocked；
 > - `visits:review`：phase4，复用 visits:discover 的浏览器流程，仅输出 pending_review 候选，每条附带 3 条评论草稿（不点赞、不评论、不落库）；
-> - `visits:live-review`：phase5，支持三种评论模式（`--comment-mode local|agent|skill`，默认 skill）；local 用本地规则生成候选，agent 预留 LLM 接口（当前 FEATURE_DISABLED），skill 给外部 Agent 使用只输出 commentContext+constraints；用户选择或传 `--selected-comment-text` 即代表人工审核通过；
+> - `visits:live-review`：phase5，交互式终端，根据作品上下文生成评论候选（Agent 生成 = medium risk），上下文不足时退回固定 low-risk 模板；用户选择 1/2/3 即代表人工审核通过当前条；dry-run 只记录不执行，execute 模式经风险校验（low+auto_simple 或 medium+agent_generated 均允许执行，high/ignore 阻断）后点赞+评论；
 
 ### Agent 生成回访评论要求
 
@@ -395,21 +395,21 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
 阶段 4: 现场审核 (visits:live-review, phase5)
   用户说 "逐条审核回访候选"、"现场确认回访"
     ↓
-  三种评论模式：--comment-mode local|agent|skill（默认 skill）
+  npm run visits:live-review -- --max-items 5                    # dry-run 预览
+  npm run visits:live-review -- --execute --max-items 5          # 执行模式
     ↓
-  local:  npm run visits:live-review -- --comment-mode local --execute --max-items 5
-  agent:  npm run visits:live-review -- --comment-mode agent --max-items 5  (当前 FEATURE_DISABLED)
-  skill:  npm run visits:live-review -- --comment-mode skill --json --max-items 1
+  逐条：提取作品上下文 → 生成评论候选（Agent 生成 = medium, 固定模板 = low）
     ↓
-  local 模式：提取上下文 → generateVisitCommentCandidates → 展示 1/2/3 → 用户选择 → 执行
-  agent 模式：预留 LLM 接口，当前 FEATURE_DISABLED
-  skill 模式：提取上下文 → 输出 needsAgentComment + commentContext + constraints → 外部 Agent 生成评论
-  skill 执行：npm run visits:live-review -- --selected-comment-text "xxx" --execute
+  dry-run 模式：选择 1/2/3 仅记录 selectedCommentText + 元数据，不执行
+  execute 模式：选择 1/2/3 → 风险校验（low+auto_simple 或 medium+agent_generated 允许执行，high/ignore 阻断）→ 重新检查点赞状态 → 点赞 → 评论
     ↓
-  选择或传入 --selected-comment-text 即代表人工审核通过当前条，不需要 YES
-  执行前当前页 re-check like state
+  输入 s 跳过当前条，输入 q 停止本轮
+  每条必须单独选择，不能批量确认
     ↓
-  输出 reviewCandidates（含 generatedCommentCandidates/needsAgentComment/commentContext/constraints/selectedCommentText 等）
+  输出 reviewCandidates（含 generatedCommentCandidates, selectedCommentText, commentCategory, replyMode, riskLevel, generationReason, sourceSignals, manualReviewMethod, autoExecuteAllowed=false, actionResults）
+    ↓
+  注意：用户选择 1/2/3 即代表对当前候选的人工审核通过（manualReviewMethod=user_selected_template 或 user_selected_agent_comment）
+  high/ignore 风险候选不允许执行；固定 low-risk 模板仅作为上下文不足时 fallback
 
 阶段 5: 旧版真实执行保留 (likes:reciprocate, MVP 硬阻断)
   用户说 "给这个候选点赞"

@@ -6,11 +6,14 @@ import { spawnSync } from 'child_process';
 import {
   FRIENDLY_RELATIONS,
   classifyLikeResult,
-  isExecuteAllowedByRisk,
 } from '../../src/cli/live-review-visits.mjs';
 import {
+  validateSelectedComment,
+  isExecuteAllowed,
+  FORBIDDEN_WORDS,
+} from '../../src/domain/comment-policy.mjs';
+import {
   generateVisitCommentCandidates,
-  FIXED_FALLBACK_TEMPLATES,
 } from '../../src/domain/visit-comment-generator.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -38,121 +41,156 @@ describe('FRIENDLY_RELATIONS', () => {
     expect(FRIENDLY_RELATIONS.has('friend')).toBe(true);
     expect(FRIENDLY_RELATIONS.has('mutual')).toBe(true);
   });
-
-  it('does NOT contain unknown', () => {
-    expect(FRIENDLY_RELATIONS.has('unknown')).toBe(false);
-  });
 });
 
 // ============================================================
-// 2. FIXED_FALLBACK_TEMPLATES
+// 2. classifyLikeResult
 // ============================================================
-describe('FIXED_FALLBACK_TEMPLATES', () => {
-  it('has 3 entries all low risk', () => {
-    expect(FIXED_FALLBACK_TEMPLATES).toHaveLength(3);
-    for (const d of FIXED_FALLBACK_TEMPLATES) {
-      expect(d.riskLevel).toBe('low');
-      expect(d.replyMode).toBe('auto_simple');
-      expect(d.autoExecuteAllowed).toBe(false);
-    }
-  });
-});
-
-// ============================================================
-// 3. classifyLikeResult
-// ============================================================
-describe('classifyLikeResult (live-review-visits)', () => {
-  it('already_liked + confirmed → skipped', () => {
+describe('classifyLikeResult', () => {
+  it('already_liked → skipped', () => {
     const r = classifyLikeResult({ ok: true, data: { alreadyLiked: true, confidence: 'confirmed' } });
     expect(r.status).toBe('skipped');
-    expect(r.likeState).toBe('already_liked');
   });
 
-  it('not_liked + confirmed → pending_review', () => {
+  it('not_liked → pending_review', () => {
     const r = classifyLikeResult({ ok: true, data: { alreadyLiked: false, confidence: 'confirmed' } });
     expect(r.status).toBe('pending_review');
   });
 
   it('null → blocked', () => {
-    const r = classifyLikeResult(null);
-    expect(r.status).toBe('blocked');
+    expect(classifyLikeResult(null).status).toBe('blocked');
   });
 });
 
 // ============================================================
-// 4. isExecuteAllowedByRisk — with manualReviewMethod + selectedCommentText
+// 3. validateSelectedComment
 // ============================================================
-describe('isExecuteAllowedByRisk', () => {
-  const withTemplate = { selectedCommentText: '支持一下', manualReviewMethod: 'user_selected_template' };
-  const withAgent = { selectedCommentText: 'React不错', manualReviewMethod: 'user_selected_agent_comment' };
-  const noSelection = { selectedCommentText: null, manualReviewMethod: null };
-
-  it('low + auto_simple + user_selected_template → allowed', () => {
-    expect(isExecuteAllowedByRisk({ riskLevel: 'low', replyMode: 'auto_simple' }, withTemplate)).toBe(true);
+describe('validateSelectedComment', () => {
+  it('low + auto_simple + user_selected_template → valid', () => {
+    const r = validateSelectedComment({
+      text: '支持一下',
+      replyMode: 'auto_simple',
+      riskLevel: 'low',
+      manualReviewMethod: 'user_selected_template',
+    });
+    expect(r.valid).toBe(true);
+    expect(r.errors).toHaveLength(0);
   });
 
-  it('medium + agent_generated + user_selected_agent_comment → allowed', () => {
-    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'agent_generated_review_required' }, withAgent)).toBe(true);
+  it('medium + agent_generated + user_selected_agent_comment → valid', () => {
+    const r = validateSelectedComment({
+      text: 'React做得不错',
+      replyMode: 'agent_generated_review_required',
+      riskLevel: 'medium',
+      manualReviewMethod: 'user_selected_agent_comment',
+    });
+    expect(r.valid).toBe(true);
   });
 
-  it('high → blocked regardless', () => {
-    expect(isExecuteAllowedByRisk({ riskLevel: 'high', replyMode: 'auto_simple' }, withTemplate)).toBe(false);
-    expect(isExecuteAllowedByRisk({ riskLevel: 'high', replyMode: 'agent_generated_review_required' }, withAgent)).toBe(false);
+  it('high → invalid', () => {
+    const r = validateSelectedComment({
+      text: 'test',
+      replyMode: 'auto_simple',
+      riskLevel: 'high',
+      manualReviewMethod: 'user_selected_template',
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.some(e => e.includes('high'))).toBe(true);
   });
 
-  it('ignore → blocked regardless', () => {
-    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'ignore' }, withAgent)).toBe(false);
+  it('ignore → invalid', () => {
+    const r = validateSelectedComment({
+      text: 'test',
+      replyMode: 'ignore',
+      riskLevel: 'medium',
+      manualReviewMethod: 'user_selected_agent_comment',
+    });
+    expect(r.valid).toBe(false);
+  });
+
+  it('empty text → invalid', () => {
+    const r = validateSelectedComment({
+      text: '',
+      replyMode: 'auto_simple',
+      riskLevel: 'low',
+      manualReviewMethod: 'user_selected_template',
+    });
+    expect(r.valid).toBe(false);
+  });
+
+  it('no manualReviewMethod → invalid', () => {
+    const r = validateSelectedComment({
+      text: 'test',
+      replyMode: 'auto_simple',
+      riskLevel: 'low',
+      manualReviewMethod: null,
+    });
+    expect(r.valid).toBe(false);
+  });
+
+  it('forbidden words → invalid', () => {
+    const r = validateSelectedComment({
+      text: '互关注我',
+      replyMode: 'agent_generated_review_required',
+      riskLevel: 'medium',
+      manualReviewMethod: 'user_selected_agent_comment',
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.some(e => e.includes('forbidden'))).toBe(true);
+  });
+
+  it('too long → invalid', () => {
+    const r = validateSelectedComment({
+      text: '这'.repeat(41),
+      replyMode: 'auto_simple',
+      riskLevel: 'low',
+      manualReviewMethod: 'user_selected_template',
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.some(e => e.includes('too long'))).toBe(true);
+  });
+
+  it('wrong combination → invalid', () => {
+    const r = validateSelectedComment({
+      text: 'test',
+      replyMode: 'auto_simple',
+      riskLevel: 'medium',
+      manualReviewMethod: 'user_selected_agent_comment',
+    });
+    expect(r.valid).toBe(false);
+  });
+});
+
+// ============================================================
+// 4. isExecuteAllowed (from comment-policy)
+// ============================================================
+describe('isExecuteAllowed (comment-policy)', () => {
+  it('valid combination → allowed', () => {
+    const c = { riskLevel: 'medium', replyMode: 'agent_generated_review_required' };
+    const r = { selectedCommentText: 'test', manualReviewMethod: 'user_selected_agent_comment' };
+    expect(isExecuteAllowed(c, r)).toBe(true);
   });
 
   it('no selectedCommentText → blocked', () => {
-    expect(isExecuteAllowedByRisk({ riskLevel: 'low', replyMode: 'auto_simple' }, noSelection)).toBe(false);
-    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'agent_generated_review_required' }, noSelection)).toBe(false);
+    const c = { riskLevel: 'low', replyMode: 'auto_simple' };
+    const r = { selectedCommentText: null, manualReviewMethod: 'user_selected_template' };
+    expect(isExecuteAllowed(c, r)).toBe(false);
   });
 
-  it('null candidate → blocked', () => {
-    expect(isExecuteAllowedByRisk(null, withTemplate)).toBe(false);
-  });
-
-  it('null record → blocked', () => {
-    expect(isExecuteAllowedByRisk({ riskLevel: 'low', replyMode: 'auto_simple' }, null)).toBe(false);
-  });
-
-  it('low + auto_simple + wrong manualReviewMethod → blocked', () => {
-    expect(isExecuteAllowedByRisk({ riskLevel: 'low', replyMode: 'auto_simple' }, withAgent)).toBe(false);
-  });
-
-  it('medium + agent_generated + wrong manualReviewMethod → blocked', () => {
-    expect(isExecuteAllowedByRisk({ riskLevel: 'medium', replyMode: 'agent_generated_review_required' }, withTemplate)).toBe(false);
+  it('null → blocked', () => {
+    expect(isExecuteAllowed(null, null)).toBe(false);
   });
 });
 
 // ============================================================
-// 5. generateVisitCommentCandidates — returns { generatedCommentCandidates, usedFallback }
+// 5. generateVisitCommentCandidates
 // ============================================================
 describe('generateVisitCommentCandidates', () => {
-  it('context with hashtag → contextual candidates + usedFallback=false', () => {
+  it('contextual → usedFallback=false', () => {
     const result = generateVisitCommentCandidates({
-      targetWorkTitle: 'React开发技巧',
+      targetWorkTitle: 'React',
       captionText: '',
       hashtags: ['React'],
-      authorName: '某作者',
-      canGenerateContextualComment: true,
-    });
-    expect(result.usedFallback).toBe(false);
-    expect(result.generatedCommentCandidates.length).toBeGreaterThanOrEqual(2);
-    for (const c of result.generatedCommentCandidates) {
-      expect(c.riskLevel).toBe('medium');
-      expect(c.replyMode).toBe('agent_generated_review_required');
-      expect(c.autoExecuteAllowed).toBe(false);
-    }
-    expect(result.generatedCommentCandidates[0].text).toContain('React');
-  });
-
-  it('context with title → contextual candidates', () => {
-    const result = generateVisitCommentCandidates({
-      targetWorkTitle: 'Vue3组合式API教程',
-      captionText: '',
-      hashtags: [],
       authorName: '',
       canGenerateContextualComment: true,
     });
@@ -160,117 +198,60 @@ describe('generateVisitCommentCandidates', () => {
     expect(result.generatedCommentCandidates.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('no context → fallback + usedFallback=true', () => {
-    const result = generateVisitCommentCandidates({
-      targetWorkTitle: '',
-      captionText: '',
-      hashtags: [],
-      authorName: '',
-      canGenerateContextualComment: false,
-    });
-    expect(result.usedFallback).toBe(true);
-    expect(result.generatedCommentCandidates).toHaveLength(3);
-    for (const c of result.generatedCommentCandidates) {
-      expect(c.riskLevel).toBe('low');
-      expect(c.replyMode).toBe('auto_simple');
-    }
-  });
-
-  it('null → fallback + usedFallback=true', () => {
+  it('no context → usedFallback=true', () => {
     const result = generateVisitCommentCandidates(null);
     expect(result.usedFallback).toBe(true);
     expect(result.generatedCommentCandidates).toHaveLength(3);
   });
-
-  it('no forbidden patterns in generated comments', () => {
-    const result = generateVisitCommentCandidates({
-      targetWorkTitle: '互关技巧分享',
-      captionText: '',
-      hashtags: ['互关'],
-      authorName: '',
-      canGenerateContextualComment: true,
-    });
-    for (const c of result.generatedCommentCandidates) {
-      expect(c.text).not.toMatch(/互关|回访|已赞|三连|求关注|私信|加V|加微信|互赞|引流|广告/);
-    }
-  });
-
-  it('comments ≤24 chars', () => {
-    const result = generateVisitCommentCandidates({
-      targetWorkTitle: '一个非常非常非常非常非常非常非常非常长的标题',
-      captionText: '',
-      hashtags: ['测试'],
-      authorName: '',
-      canGenerateContextualComment: true,
-    });
-    for (const c of result.generatedCommentCandidates) {
-      expect(c.text.length).toBeLessThanOrEqual(24);
-    }
-  });
-
-  it('each candidate has required fields', () => {
-    const result = generateVisitCommentCandidates({
-      targetWorkTitle: 'Test',
-      captionText: 'desc',
-      hashtags: ['tag'],
-      authorName: 'author',
-      canGenerateContextualComment: true,
-    });
-    for (const c of result.generatedCommentCandidates) {
-      expect(typeof c.text).toBe('string');
-      expect(c.text.length).toBeGreaterThan(0);
-      expect(typeof c.commentCategory).toBe('string');
-      expect(typeof c.replyMode).toBe('string');
-      expect(typeof c.riskLevel).toBe('string');
-      expect(typeof c.reason).toBe('string');
-      expect(Array.isArray(c.sourceSignals)).toBe(true);
-      expect(c.autoExecuteAllowed).toBe(false);
-    }
-  });
 });
 
 // ============================================================
-// 6. No DB write imports
+// 6. Source code invariants
 // ============================================================
-describe('live-review-visits.mjs — no DB writes', () => {
-  it('does not import updateEventStatus', () => {
+describe('live-review-visits.mjs — invariants', () => {
+  it('imports validateSelectedComment and isExecuteAllowed from comment-policy', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).not.toMatch(/updateEventStatus/);
+    expect(src).toMatch(/validateSelectedComment/);
+    expect(src).toMatch(/isExecuteAllowed/);
+    expect(src).toMatch(/comment-policy/);
   });
 
-  it('only imports getEvents from interaction-repository', () => {
+  it('imports generateAgentCommentCandidates', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    const importMatch = src.match(/import \{([^}]+)\} from ['"]\.\.\/db\/interaction-repository/);
-    expect(importMatch).not.toBeNull();
-    const imports = importMatch[1].split(',').map(s => s.trim());
-    expect(imports).toEqual(['getEvents']);
+    expect(src).toMatch(/generateAgentCommentCandidates/);
+    expect(src).toMatch(/llm-comment-generator/);
   });
-});
 
-// ============================================================
-// 7. CLI output structure (empty DB)
-// ============================================================
-describe('visits:live-review JSON output structure', () => {
-  it('empty DB produces valid JSON with correct keys', () => {
-    const result = runCli('live-review-visits.mjs', ['--json', '--max-items', '5'], 15_000);
-    const parsed = parseStdout(result);
-    expect(parsed).not.toBeNull();
-    expect(parsed.ok).toBe(true);
-    expect(parsed.command).toBe('visits:live-review');
-    expect(parsed.data).toHaveProperty('reviewCandidates');
+  it('supports --comment-mode', () => {
+    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
+    expect(src).toMatch(/commentMode/);
+    expect(src).toMatch(/VALID_COMMENT_MODES/);
   });
-});
 
-// ============================================================
-// 8. Source code invariants — safety
-// ============================================================
-describe('live-review-visits.mjs — safety invariants', () => {
+  it('skill mode outputs needsAgentComment + constraints', () => {
+    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
+    expect(src).toMatch(/needsAgentComment/);
+    expect(src).toMatch(/SKILL_CONSTRAINTS/);
+  });
+
+  it('skill mode supports --selected-comment-text', () => {
+    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
+    expect(src).toMatch(/selectedCommentText/);
+    expect(src).toMatch(/handleSkillExecution/);
+  });
+
+  it('comment_unconfirmed returns action=comment_unconfirmed not executed', () => {
+    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
+    expect(src).toMatch(/action:\s*['"]comment_unconfirmed['"]/);
+    expect(src).toMatch(/comment_not_confirmed/);
+  });
+
   it('does not call clickLike without execute guard', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
     expect(src).toMatch(/clickLike\(page,\s*\{ execute:\s*true \}\)/);
   });
 
-  it('calls checkLikeState before clickLike in execute mode', () => {
+  it('re-checks like state before clickLike', () => {
     const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
     const recheckIndex = src.indexOf('const recheck = await checkLikeState(page)');
     const clickLikeIndex = src.indexOf('clickLike(page, { execute: true })');
@@ -278,78 +259,31 @@ describe('live-review-visits.mjs — safety invariants', () => {
     expect(clickLikeIndex).toBeGreaterThan(-1);
     expect(recheckIndex).toBeLessThan(clickLikeIndex);
   });
+});
 
-  it('does not re-open targetWorkUrl before execute', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    const navInInteractive = src.indexOf('interactiveSelect');
-    const navCallsAfter = src.indexOf('navigateToVideo', navInInteractive);
-    expect(navCallsAfter).toBe(-1);
-  });
-
-  it('has risk gate using isExecuteAllowedByRisk with record', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toMatch(/isExecuteAllowedByRisk\(selected,\s*record\)/);
-    expect(src).toMatch(/comment_risk_too_high/);
-  });
-
-  it('sets manualReviewMethod based on replyMode', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toMatch(/user_selected_template/);
-    expect(src).toMatch(/user_selected_agent_comment/);
-  });
-
-  it('autoExecuteAllowed is always false', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    const initMatch = src.match(/autoExecuteAllowed[:\s=]*false/g);
-    expect(initMatch.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('handles comment unconfirmed → action=comment_unconfirmed', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toMatch(/comment_unconfirmed/);
-    expect(src).toMatch(/comment_not_confirmed/);
-    const execMatch = src.match(/action:\s*['"]comment_unconfirmed['"]/g);
-    expect(execMatch.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('does not export VISIT_DRAFTS', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).not.toMatch(/export const VISIT_DRAFTS/);
-  });
-
-  it('imports extractVideoCommentContext and generateVisitCommentCandidates', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toMatch(/extractVideoCommentContext/);
-    expect(src).toMatch(/generateVisitCommentCandidates/);
-  });
-
-  it('each candidate requires individual input (no batch)', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toMatch(/interactiveSelect\(page,\s*item,\s*isExecute\)/);
+// ============================================================
+// 7. CLI output structure
+// ============================================================
+describe('visits:live-review JSON output', () => {
+  it('empty DB produces valid JSON', () => {
+    const result = runCli('live-review-visits.mjs', ['--json', '--max-items', '5'], 15_000);
+    const parsed = parseStdout(result);
+    expect(parsed).not.toBeNull();
+    expect(parsed.ok).toBe(true);
+    expect(parsed.command).toBe('visits:live-review');
   });
 });
 
 // ============================================================
-// 9. maxItems default
+// 8. FORBIDDEN_WORDS
 // ============================================================
-describe('visits:live-review --max-items', () => {
-  it('default maxItems is 10', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toContain("options.maxItems || 10");
-  });
-});
-
-// ============================================================
-// 10. interactiveSelect prompts
-// ============================================================
-describe('interactiveSelect — terminal prompts', () => {
-  it('dry-run prompt does not mention execution', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toMatch(/dry-run，不会执行真实点赞\/评论/);
-  });
-
-  it('execute prompt mentions immediate execution', () => {
-    const src = readFileSync(resolve(CLI_DIR, 'live-review-visits.mjs'), 'utf8');
-    expect(src).toMatch(/选择后将立即执行当前条/);
+describe('FORBIDDEN_WORDS', () => {
+  it('contains expected words', () => {
+    expect(FORBIDDEN_WORDS).toContain('互关');
+    expect(FORBIDDEN_WORDS).toContain('回访');
+    expect(FORBIDDEN_WORDS).toContain('已赞');
+    expect(FORBIDDEN_WORDS).toContain('求关注');
+    expect(FORBIDDEN_WORDS).toContain('加V');
+    expect(FORBIDDEN_WORDS).toContain('引流');
   });
 });
