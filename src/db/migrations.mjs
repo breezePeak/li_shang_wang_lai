@@ -62,7 +62,7 @@ export function runMigrations(dbPath = DB_PATH) {
       target_url TEXT,
       target_title TEXT,
       action_text TEXT,
-      status TEXT NOT NULL CHECK (status IN ('planned','prepared','approved','dry_run_ok','execute_confirmed','running','succeeded','failed','blocked','skipped')),
+      status TEXT NOT NULL CHECK (status IN ('planned','prepared','approved','dry_run_ok','execute_confirmed','running','succeeded','failed','blocked','skipped','sent_unverified')),
       reason TEXT,
       evidence_json TEXT,
       screenshot_path TEXT,
@@ -79,7 +79,9 @@ export function runMigrations(dbPath = DB_PATH) {
   ).get();
 
   const actionsSql = checkActions ? (checkActions.sql || '') : '';
-  const needsActionsMigration = !actionsSql.includes("execute_confirmed");
+  const needsActionsMigration =
+    !actionsSql.includes("execute_confirmed") ||
+    !actionsSql.includes("sent_unverified");
 
   if (needsActionsMigration && actionsSql) {
     console.error('[db:init] 检测到旧版 actions 表约束，重建中...');
@@ -93,7 +95,7 @@ export function runMigrations(dbPath = DB_PATH) {
         target_url TEXT,
         target_title TEXT,
         action_text TEXT,
-        status TEXT NOT NULL CHECK (status IN ('planned','prepared','approved','dry_run_ok','execute_confirmed','running','succeeded','failed','blocked','skipped')),
+        status TEXT NOT NULL CHECK (status IN ('planned','prepared','approved','dry_run_ok','execute_confirmed','running','succeeded','failed','blocked','skipped','sent_unverified')),
         reason TEXT,
         evidence_json TEXT,
         screenshot_path TEXT,

@@ -56,7 +56,8 @@ async function main() {
   if (events.length === 0) {
     console.log(`[comments:plan] 没有状态为 "${args.status}" 的评论事件`);
     const plan = buildEmptyPlan(now, args);
-    writePlanFile(plan, args);
+    const outPath = writePlanFile(plan, args);
+    console.log(`[comments:plan] 输出文件: ${outPath}`);
     return;
   }
 
@@ -127,11 +128,11 @@ async function main() {
     },
   };
 
-  writePlanFile(plan, args);
+  const outPath = writePlanFile(plan, args);
 
   console.log(`[comments:plan] 已生成计划: ${planned}`);
   console.log(`[comments:plan] 已跳过: ${skipped}`);
-  console.log(`[comments:plan] 输出文件: ${plan._outputPath}`);
+  console.log(`[comments:plan] 输出文件: ${outPath}`);
 }
 
 function buildEmptyPlan(now, args) {
@@ -148,7 +149,6 @@ function buildEmptyPlan(now, args) {
       skipped: 0,
       maxItems: args.maxItems,
     },
-    _outputPath: args.output || path.resolve('data', 'plans', `${planId}.json`),
   };
 }
 
@@ -157,9 +157,8 @@ function writePlanFile(plan, args) {
   const plansDir = path.resolve('data', 'plans');
   ensureDir(plansDir);
   const outPath = args.output || path.join(plansDir, `${planId}.json`);
-  plan._outputPath = outPath;
   writeJSON(outPath, plan);
-  delete plan._outputPath;
+  return outPath;
 }
 
 const __filename = fileURLToPath(import.meta.url);
