@@ -108,6 +108,38 @@ async function waitForPanelContent(page, { maxWait = 15000 } = {}) {
   return false;
 }
 
+export async function waitForPanelItems(page, { maxWait = 5000 } = {}) {
+  await page.waitForFunction(({ actionPatterns }) => {
+    const panel = (function findNotificationPanel() {
+      for (const el of document.querySelectorAll('*')) {
+        const t = (el.innerText || '').trim();
+        if (t.startsWith('互动消息') || t.startsWith('全部消息')) {
+          const r = el.getBoundingClientRect();
+          if (r.width < 100 || r.height < 30) continue;
+          let c = el.parentElement;
+          for (let i = 0; i < 6 && c && c !== document.body; i++) {
+            const cr = c.getBoundingClientRect();
+            if (cr.width > 250 && cr.height > 300) return c;
+            c = c.parentElement;
+          }
+        }
+      }
+      return null;
+    })();
+    if (!panel) return true;
+    const candidates = panel.querySelectorAll('li, [class*="item"], [class*="row"], [class*="entry"], [class*="list"] > *');
+    let matchCount = 0;
+    for (const itemEl of candidates) {
+      const text = (itemEl.innerText || '').trim();
+      if (text.length < 3) continue;
+      for (const pat of actionPatterns) {
+        if (text.includes(pat)) { matchCount++; break; }
+      }
+    }
+    return matchCount > 0;
+  }, { timeout: maxWait }, { actionPatterns: ['赞了你的作品', '赞了你的评论', '赞了你的视频', '评论了你的作品', '回复了你的评论'] }).catch(() => {});
+}
+
 /**
  * Close the notification panel by moving mouse away
  */
@@ -148,11 +180,11 @@ export async function extractNotifications(page) {
  * The caller drives the scroll loop and handles dedup/enrich per-batch.
  */
 export async function extractNotificationsBatch(page) {
-  return await page.evaluate(() => {
+  const result = await page.evaluate(() => {
     const items = [];
     const panel = findNotificationPanel();
     if (!panel) {
-      return { ok: false, data: { notifications: [], hasNew: false }, message: 'notification panel not found' };
+      return { ok: false, data: { notifications: [], hasNew: false }, message: 'notification panel not found', _diag: { panelFound: false } };
     }
 
     const skipSet = new Set(['互动消息', '全部消息', '点击加载更多', '加载更多', '没有更多了', '暂无消息', '推荐了你的视频']);
@@ -161,13 +193,42 @@ export async function extractNotificationsBatch(page) {
     const timePattern = /^(\d{2}:\d{2}|\d+[秒分时天周月年]前|\d{2}-\d{2}|\d+月\d+日|昨天\s?\d{2}:\d{2}|星期\S)$/;
     const relationMap = { '朋友': 'friend', '互相关注': 'mutual' };
 
+    // Diagnostic: capture panel child structure when no candidates found
+    const diagPanelStructure = listItems.length === 0 ? (() => {
+      const children = panel.children;
+      const samples = [];
+      for (let i = 0; i < Math.min(children.length, 8); i++) {
+        const c = children[i];
+        samples.push({
+          tag: c.tagName.toLowerCase(),
+          cls: (c.className && typeof c.className === 'string') ? c.className.slice(0, 80) : '',
+          text: (c.innerText || '').trim().slice(0, 60),
+          childCount: c.children.length,
+        });
+      }
+      const deeper = [];
+      if (children.length > 0) {
+        const first = children[0];
+        for (let i = 0; i < Math.min(first.children.length, 5); i++) {
+          const gc = first.children[i];
+          deeper.push({
+            tag: gc.tagName.toLowerCase(),
+            cls: (gc.className && typeof gc.className === 'string') ? gc.className.slice(0, 80) : '',
+            text: (gc.innerText || '').trim().slice(0, 60),
+          });
+        }
+      }
+      return { childCount: children.length, samples, deeper };
+    })() : null;
+
     const seenTexts = new Set();
+    const diagSkipped = [];
 
     for (const itemEl of listItems) {
       const text = (itemEl.innerText || '').trim();
-      if (text.length < 3 || skipSet.has(text)) continue;
-      // Skip items we've already seen in this batch
-      if (seenTexts.has(text)) continue;
+      if (text.length < 3) { if (text.length > 0) diagSkipped.push({ reason: 'too_short', text: text.slice(0, 60) }); continue; }
+      if (skipSet.has(text)) { diagSkipped.push({ reason: 'skip_set', text: text.slice(0, 60) }); continue; }
+      if (seenTexts.has(text)) { diagSkipped.push({ reason: 'duplicate_text', text: text.slice(0, 60) }); continue; }
       seenTexts.add(text);
 
       const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
@@ -175,7 +236,10 @@ export async function extractNotificationsBatch(page) {
 
       let idx = 0;
       const username = lines[idx];
-      if (!username || username.length > 40 || timePattern.test(username) || relationMap[username] || skipSet.has(username)) continue;
+      if (!username || username.length > 40 || timePattern.test(username) || relationMap[username] || skipSet.has(username)) {
+        diagSkipped.push({ reason: 'bad_username', text: text.slice(0, 80), username: (username || '').slice(0, 30) });
+        continue;
+      }
       idx++;
 
       let relation = 'unknown';
@@ -197,7 +261,7 @@ export async function extractNotificationsBatch(page) {
         }
         if (eventType) break;
       }
-      if (!eventType) continue;
+      if (!eventType) { diagSkipped.push({ reason: 'no_action', text: text.slice(0, 80) }); continue; }
 
       let timeText = '';
       for (let k = idx; k < lines.length; k++) {
@@ -311,8 +375,31 @@ export async function extractNotificationsBatch(page) {
       panel.scrollTop = panel.scrollTop + panel.clientHeight * 0.8;
     }
 
-    return { ok: true, data: { notifications: items, hasNew: hasMore } };
+    return { ok: true, data: { notifications: items, hasNew: hasMore }, _diag: { panelFound: true, candidateCount: listItems.length, skipped: diagSkipped.slice(0, 20), parsedCount: items.length, panelStructure: diagPanelStructure } };
   });
+
+  const diag = result._diag;
+  if (diag) {
+    if (!diag.panelFound) {
+      console.error('[notify-page] 诊断: 未找到通知面板');
+    } else {
+      console.error(`[notify-page] 诊断: 面板候选元素 ${diag.candidateCount}, 解析成功 ${diag.parsedCount}, 跳过 ${diag.skipped.length}`);
+      if (diag.panelStructure) {
+        console.error(`[notify-page] 诊断: 面板子元素 ${diag.panelStructure.childCount} 个`);
+        for (const s of diag.panelStructure.samples) {
+          console.error(`[notify-page]   <${s.tag}> class="${s.cls}" text="${s.text}" children=${s.childCount}`);
+        }
+        for (const d of diag.panelStructure.deeper) {
+          console.error(`[notify-page]     <${d.tag}> class="${d.cls}" text="${d.text}"`);
+        }
+      }
+      for (const s of diag.skipped.slice(0, 5)) {
+        console.error(`[notify-page]   跳过: ${s.reason} → ${s.text || s.username || ''}`);
+      }
+    }
+  }
+
+  return result;
 }
 
 /**

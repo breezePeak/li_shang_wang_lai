@@ -137,6 +137,10 @@ async function runNotificationScan(page, run, type) {
     );
   }
 
+  const { waitForPanelItems } = await import('../adapters/notification-page.mjs');
+  await waitForPanelItems(page);
+  console.error('[scan] 通知面板项目已就绪，开始采集...');
+
   const wantComments = (type === 'all' || type === 'comment');
   const wantLikes = (type === 'all' || type === 'like');
 
