@@ -1,0 +1,111 @@
+import { getDb } from './database.mjs';
+
+export function upsertWorkComment(comment) {
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  const {
+    workId, workUrl, modalId,
+    actorName, actorProfileUrl, actorProfileKey,
+    commentText, eventTimeText, commentKey,
+    sourceEventId, sourceNotificationKey,
+    rawCommentJson,
+  } = comment;
+
+  if (workId && commentKey) {
+    const existing = db.prepare(
+      'SELECT * FROM work_comments WHERE work_id = ? AND comment_key = ?'
+    ).get(workId, commentKey);
+
+    if (existing) {
+      if (existing.reply_status === 'succeeded') {
+        return { action: 'duplicate', id: existing.id };
+      }
+      const updates = [];
+      const params = [];
+      if (actorProfileUrl && !existing.actor_profile_url) { updates.push('actor_profile_url = ?'); params.push(actorProfileUrl); }
+      if (actorProfileKey && !existing.actor_profile_key) { updates.push('actor_profile_key = ?'); params.push(actorProfileKey); }
+      if (rawCommentJson) { updates.push('raw_comment_json = ?'); params.push(rawCommentJson); }
+      updates.push('last_seen_at = ?');
+      params.push(now);
+      params.push(existing.id);
+      db.prepare(`UPDATE work_comments SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+      return { action: 'enriched', id: existing.id };
+    }
+  }
+
+  const stmt = db.prepare(`
+    INSERT INTO work_comments (work_id, work_url, modal_id, actor_name, actor_profile_url, actor_profile_key,
+      comment_text, event_time_text, comment_key, source_event_id, source_notification_key,
+      reply_status, raw_comment_json, first_seen_at, last_seen_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+  `);
+  const result = stmt.run(
+    workId || null, workUrl || null, modalId || null,
+    actorName || null, actorProfileUrl || null, actorProfileKey || null,
+    commentText, eventTimeText || null, commentKey,
+    sourceEventId || null, sourceNotificationKey || null,
+    rawCommentJson || null, now, now,
+  );
+  return { action: 'inserted', id: result.lastInsertRowid };
+}
+
+export function listPendingCommentsGroupedByWork(options = {}) {
+  const db = getDb();
+  const { limit = 100 } = options;
+  const rows = db.prepare(
+    "SELECT * FROM work_comments WHERE reply_status = 'pending' ORDER BY first_seen_at ASC LIMIT ?"
+  ).all(limit);
+
+  const groups = new Map();
+  for (const row of rows) {
+    const key = row.work_id || row.modal_id || '__unknown__';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  return groups;
+}
+
+export function listPreparedComments(options = {}) {
+  const db = getDb();
+  const { limit = 100 } = options;
+  return db.prepare(
+    "SELECT * FROM work_comments WHERE reply_status = 'prepared' ORDER BY first_seen_at ASC LIMIT ?"
+  ).all(limit);
+}
+
+export function markCommentReplyPrepared(commentId, replyText, reason) {
+  const db = getDb();
+  db.prepare(
+    "UPDATE work_comments SET reply_status = 'prepared', reply_text = ?, reply_reason = ?, last_seen_at = ? WHERE id = ?"
+  ).run(replyText, reason || null, new Date().toISOString(), commentId);
+}
+
+export function markCommentReplied(commentId) {
+  const db = getDb();
+  const now = new Date().toISOString();
+  db.prepare(
+    "UPDATE work_comments SET reply_status = 'succeeded', replied_at = ?, last_seen_at = ? WHERE id = ?"
+  ).run(now, now, commentId);
+}
+
+export function markCommentSentUnverified(commentId, reason) {
+  const db = getDb();
+  db.prepare(
+    "UPDATE work_comments SET reply_status = 'sent_unverified', reply_reason = ?, last_seen_at = ? WHERE id = ?"
+  ).run(reason || null, new Date().toISOString(), commentId);
+}
+
+export function markCommentBlocked(commentId, reason) {
+  const db = getDb();
+  db.prepare(
+    "UPDATE work_comments SET reply_status = 'blocked', reply_reason = ?, last_seen_at = ? WHERE id = ?"
+  ).run(reason || null, new Date().toISOString(), commentId);
+}
+
+export function markCommentSkipped(commentId, reason) {
+  const db = getDb();
+  db.prepare(
+    "UPDATE work_comments SET reply_status = 'skipped', reply_reason = ?, last_seen_at = ? WHERE id = ?"
+  ).run(reason || null, new Date().toISOString(), commentId);
+}

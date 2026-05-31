@@ -150,6 +150,86 @@ export function runMigrations(dbPath = DB_PATH) {
       AND status IN ('prepared','approved','dry_run_ok','execute_confirmed');
   `);
 
+  // ---- New tables for live workflow ----
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS works (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      platform TEXT NOT NULL DEFAULT 'douyin',
+      work_id TEXT,
+      modal_id TEXT,
+      work_url TEXT,
+      work_title TEXT,
+      work_type TEXT,
+      thumbnail_key TEXT,
+      thumbnail_src TEXT,
+      author_name TEXT,
+      author_profile_url TEXT,
+      author_profile_key TEXT,
+      raw_context_json TEXT,
+      first_seen_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_works_work_id
+    ON works(work_id)
+    WHERE work_id IS NOT NULL AND work_id != '';
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_works_modal_id
+    ON works(modal_id)
+    WHERE modal_id IS NOT NULL AND modal_id != '';
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_works_thumbnail_key
+    ON works(thumbnail_key)
+    WHERE thumbnail_key IS NOT NULL AND thumbnail_key != '';
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS work_comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      work_id TEXT,
+      work_url TEXT,
+      modal_id TEXT,
+      actor_name TEXT,
+      actor_profile_url TEXT,
+      actor_profile_key TEXT,
+      comment_text TEXT NOT NULL,
+      event_time_text TEXT,
+      comment_key TEXT NOT NULL,
+      source_event_id INTEGER,
+      source_notification_key TEXT,
+      reply_status TEXT NOT NULL DEFAULT 'pending' CHECK (reply_status IN ('pending','prepared','succeeded','sent_unverified','blocked','skipped')),
+      reply_text TEXT,
+      reply_reason TEXT,
+      raw_comment_json TEXT,
+      first_seen_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      replied_at TEXT
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_work_comments_unique
+    ON work_comments(work_id, comment_key)
+    WHERE work_id IS NOT NULL AND work_id != '';
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS revisit_candidates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      actor_name TEXT,
+      actor_profile_url TEXT,
+      actor_profile_key TEXT,
+      revisit_key TEXT NOT NULL UNIQUE,
+      reasons_json TEXT NOT NULL,
+      event_ids_json TEXT,
+      comments_json TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','succeeded','skipped','blocked')),
+      last_reason TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      visited_at TEXT
+    );
+  `);
+
   // Migrate: add target_work_id, target_work_url, dedup_confidence, profile_resolution_status
   const newColumns = [
     { col: 'target_work_id', check: 'target_work_id' },
