@@ -191,13 +191,29 @@ async function processWorkModal(page, notification, db, run, options, state) {
     return r;
   }
 
+  // 终极前置去重：在点击缩略图进入视频 Modal 前，通过超链接中的作品 ID 或缩略图 Key 实施完美阻断
+  if (notification.workId) {
+    const cleanId = notification.workId.replace('video-', '').replace('note-', '');
+    const existingWork = findWorkByModalId(cleanId) || findWorkByWorkId(cleanId);
+    if (existingWork || state.visitedModalIds.has(cleanId)) {
+      r.status = 'skipped';
+      r.reason = `作品已采集过 (workId=${notification.workId})`;
+      console.log(`[live]   【前置排重拦截成功】检测到超链接作品ID已采集或已访问过，直接跳过点击缩略图: ${notification.workId}`);
+      if (r.eventId) {
+        const matched = existingWork || { work_id: cleanId, work_url: notification.workUrl, work_title: notification.workTitle };
+        updateEventWorkInfo(db, r.eventId, matched.work_id || cleanId, matched.work_url, matched.work_title, null);
+      }
+      return r;
+    }
+  }
+
   if (notification.thumbnailKey) {
     const existingByThumbnail = findWorkByThumbnailKey(notification.thumbnailKey);
-    if (existingByThumbnail) {
+    if (existingByThumbnail || (state.visitedThumbnailKeys && state.visitedThumbnailKeys.has(notification.thumbnailKey))) {
       r.status = 'skipped';
-      r.reason = `作品缩略图已采集过 (works.id=${existingByThumbnail.id})`;
-      console.log(`[live]   跳过已采集作品缩略图: ${notification.thumbnailKey.slice(0, 60)}`);
-      if (r.eventId) {
+      r.reason = `作品缩略图已采集过 (thumbnailKey)`;
+      console.log(`[live]   【前置排重拦截成功】根据缩略图Key检测到已采集过，直接跳过点击: ${notification.thumbnailKey.slice(0, 60)}`);
+      if (r.eventId && existingByThumbnail) {
         updateEventWorkInfo(db, r.eventId, existingByThumbnail.work_id, existingByThumbnail.work_url, existingByThumbnail.work_title, null);
       }
       return r;
@@ -375,6 +391,10 @@ async function processWorkModal(page, notification, db, run, options, state) {
     comment.commentKey = commentKey;
   }
   console.log(`[live]   work_comments表: 新增 ${commentsUpserted} 条`);
+
+  if (notification.thumbnailKey && state.visitedThumbnailKeys) {
+    state.visitedThumbnailKeys.add(notification.thumbnailKey);
+  }
 
   r.status = 'succeeded';
   r.reason = `采集完成: ${scanResult.data.total} 条评论，${unreplied.length} 条待回复，${commentsUpserted} 条新入库`;
@@ -757,6 +777,7 @@ async function main() {
 
   const state = {
     visitedModalIds: new Set(),
+    visitedThumbnailKeys: new Set(),
     repliedCommentKeys: new Set(),
     skippedThumbnailTexts: [],
   };
