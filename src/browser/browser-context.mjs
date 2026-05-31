@@ -76,15 +76,35 @@ export async function createBrowserContext(options = {}) {
 
   // Launch new browser
   console.error('[browser] 启动新浏览器...');
-  const context = await chromium.launchPersistentContext(profileDir, {
-    headless,
-    slowMo,
-    args: [
-      '--no-sandbox',
-      ...(enableReuse ? [`--remote-debugging-port=${CDP_PORT}`] : []),
-    ],
-    viewport: { width: 1280, height: 800 },
-  });
+  const launchArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    ...(enableReuse ? [`--remote-debugging-port=${CDP_PORT}`] : []),
+  ];
+
+  let context;
+  try {
+    context = await chromium.launchPersistentContext(profileDir, {
+      headless,
+      slowMo,
+      args: launchArgs,
+      viewport: { width: 1280, height: 800 },
+    });
+  } catch (launchErr) {
+    if (launchErr.message?.includes('ProcessSingleton') || launchErr.message?.includes('EPERM')) {
+      console.error('[browser] Playwright chromium 失败，尝试系统 Chrome...');
+      context = await chromium.launchPersistentContext(profileDir, {
+        channel: 'chrome',
+        headless,
+        slowMo,
+        args: launchArgs,
+        viewport: { width: 1280, height: 800 },
+      });
+    } else {
+      throw launchErr;
+    }
+  }
 
   // Only write lock file and expose CDP when reuse is explicitly enabled
   if (enableReuse) {
