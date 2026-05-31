@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { 
   generateReturnVisitComment,
   validateXiaoyuanComment,
-  generateXiaoyuanReturnVisitComment 
+  generateXiaoyuanReturnVisitComment,
+  analyzeReturnVisitContext,
 } from '../../src/services/return-visit-comment-generator.mjs';
 
 describe('Xiaoyuan Comment Persona - validateXiaoyuanComment', () => {
@@ -105,5 +106,26 @@ describe('Xiaoyuan Comment Generator', () => {
     expect(result.ok).toBe(true);
     expect(result.comment).not.toBe('小猿看完觉得这个思考角度挺有启发，读完以后确实带来了一些新思路。');
     expect(result.comment).toContain('小猿');
+  });
+
+  it('analyzes video content and existing comments before generating a new comment', () => {
+    const analysis = analyzeReturnVisitContext({
+      workTitle: '周末带孩子去水上乐园玩水',
+      workText: '真实生活分享计划，记录孩子游泳和玩水的日常片段。',
+      referenceComments: ['哈哈太欢乐了', '孩子好开心', '这种日常很真实'],
+    });
+    expect(analysis.contentType).toBe('life');
+    expect(analysis.commentFocus).toBe('light');
+
+    const result = generateReturnVisitComment({
+      workTitle: '周末带孩子去水上乐园玩水',
+      workText: '真实生活分享计划，记录孩子游泳和玩水的日常片段。',
+      referenceComments: ['哈哈太欢乐了', '孩子好开心', '这种日常很真实'],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.reason).toContain('agent_context');
+    expect(result.comment).toContain('小猿');
+    expect(result.comment).not.toBe('哈哈太欢乐了');
+    expect(result.comment).not.toContain('回访');
   });
 });

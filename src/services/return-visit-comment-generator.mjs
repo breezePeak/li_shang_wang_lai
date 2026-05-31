@@ -68,6 +68,40 @@ function classifyContentType(fullText) {
   return 'generic';
 }
 
+function analyzeReferenceComments(referenceComments) {
+  const text = (referenceComments || []).join(' ');
+  if (/笑|哈哈|可爱|有趣|好玩|开心|欢乐/.test(text)) return 'light';
+  if (/真实|生活|日常|共鸣|感动|舒服/.test(text)) return 'real';
+  if (/学到|干货|有用|收藏|步骤|清楚|细节/.test(text)) return 'useful';
+  if (/观点|思路|认同|说得对|启发/.test(text)) return 'thinking';
+  if (/漂亮|好看|氛围|画面|质感/.test(text)) return 'visual';
+  return 'general';
+}
+
+export function analyzeReturnVisitContext(input = {}) {
+  const workTitle = String(input.workTitle || '').trim();
+  const workText = String(input.workText || '').trim();
+  const contentSummary = String(input.contentSummary || '').trim();
+  const referenceComments = Array.isArray(input.referenceComments) ? input.referenceComments : [];
+  const fullText = [workTitle, workText, contentSummary, referenceComments.join(' ')].filter(Boolean).join(' ');
+  const stripped = normalizeText(fullText);
+  const contentType = stripped.length < 8 ? 'generic' : classifyContentType(fullText);
+  const commentFocus = analyzeReferenceComments(referenceComments);
+  const contentDeficient = normalizeText([workTitle, workText, contentSummary].filter(Boolean).join(' ')).length < 8;
+
+  return {
+    workTitle,
+    workText,
+    contentSummary,
+    referenceComments,
+    fullText,
+    stripped,
+    contentType,
+    commentFocus,
+    contentDeficient,
+  };
+}
+
 function calcSeed(text) {
   let hash = 0;
   for (let i = 0; i < text.length; i++) {
@@ -99,6 +133,36 @@ function chooseCandidatesByType(type, seed) {
     rotated.push(templates[(i + shift) % templates.length]);
   }
   return rotated;
+}
+
+function buildAgentCandidates(analysis) {
+  const { contentType, commentFocus } = analysis;
+  const candidates = [];
+
+  if (commentFocus === 'light') {
+    candidates.push('小猿看完觉得氛围很轻松，评论区也挺有共鸣。');
+  } else if (commentFocus === 'real') {
+    candidates.push('小猿看完觉得内容挺真实，评论区的感受也很自然。');
+  } else if (commentFocus === 'useful') {
+    candidates.push('小猿看完觉得细节挺实用，评论区关注点也很准。');
+  } else if (commentFocus === 'thinking') {
+    candidates.push('小猿看完觉得思路挺顺，评论区的共鸣点也很真。');
+  } else if (commentFocus === 'visual') {
+    candidates.push('小猿看完觉得画面挺有质感，整体氛围也很舒服。');
+  }
+
+  const byType = {
+    tutorial: '小猿看完觉得步骤挺清楚，细节拆得很实用。',
+    viewpoint: '小猿看完觉得观点很顺，表达里的思考也挺真。',
+    life: '小猿看完觉得氛围很自然，生活感拿捏得挺好。',
+    tool: '小猿看完觉得场景讲得清楚，实际用起来会很顺。',
+    tech: '小猿看完觉得技术思路挺稳，关键细节也讲明白了。',
+    generic: '小猿看完觉得内容挺用心，评论区反馈也很真实。',
+  };
+  candidates.push(byType[contentType] || byType.generic);
+  candidates.push('小猿看完觉得这个分享挺自然，细节处理也很用心。');
+
+  return [...new Set(candidates)];
 }
 
 /**
@@ -167,24 +231,18 @@ export function validateXiaoyuanComment(text, referenceComments = [], workTitle 
  * @returns {object} 生成结果对象 { ok, reason, contentType, comment, candidates }
  */
 export function generateXiaoyuanReturnVisitComment(input = {}) {
-  const workTitle = String(input.workTitle || '').trim();
-  const workText = String(input.workText || '').trim();
-  const contentSummary = String(input.contentSummary || '').trim();
-  const referenceComments = Array.isArray(input.referenceComments) ? input.referenceComments : [];
-
-  const fullText = [workTitle, workText, contentSummary].filter(Boolean).join(' ');
-  const stripped = normalizeText(fullText);
-
-  // 1. 内容不足时（规范化字符长度小于 8），标记并降级直接生成安全泛化评论
-  const isContentDeficient = stripped.length < 8;
-  const contentType = isContentDeficient ? 'generic' : classifyContentType(fullText);
+  const analysis = analyzeReturnVisitContext(input);
+  const { workTitle, workText, contentSummary, referenceComments, contentType } = analysis;
 
   const seed = calcSeed(`${workTitle}|${workText}|${contentSummary}`);
-  const candidates = chooseCandidatesByType(contentType, seed);
+  const candidates = [
+    ...buildAgentCandidates(analysis),
+    ...chooseCandidatesByType(contentType, seed),
+  ];
 
   const accepted = [];
-  // 仅在内容充足时才尝试分类模板匹配，否则直接走兜底
-  if (!isContentDeficient) {
+  // 内容充足时优先走上下文分析候选，避免固定模板感。
+  if (!analysis.contentDeficient) {
     for (const candidate of candidates) {
       if (validateXiaoyuanComment(candidate, referenceComments, workTitle)) {
         accepted.push(candidate);
@@ -219,8 +277,11 @@ export function generateXiaoyuanReturnVisitComment(input = {}) {
 
   return {
     ok: true,
-    reason: isContentDeficient ? 'deficient_generic_fallback' : (accepted[0] === candidates[0] ? `${contentType}_template` : 'safe_fallback_generic'),
+    reason: analysis.contentDeficient
+      ? 'deficient_generic_fallback'
+      : (buildAgentCandidates(analysis).includes(accepted[0]) ? `agent_context_${contentType}_${analysis.commentFocus}` : 'safe_fallback_generic'),
     contentType,
+    commentFocus: analysis.commentFocus,
     comment: accepted[0],
     candidates: accepted,
   };

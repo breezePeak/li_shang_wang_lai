@@ -13,6 +13,8 @@ function makeDiag(overrides = {}) {
     backgroundColor: overrides.backgroundColor || '',
     svgFill: overrides.svgFill || '',
     pathFill: overrides.pathFill || '',
+    svgStroke: overrides.svgStroke || '',
+    pathStroke: overrides.pathStroke || '',
     rect: { x: 0, y: 0, w: 100, h: 40 },
     visible: true,
   };
@@ -110,8 +112,20 @@ describe('assessCandidateLikeState — already liked', () => {
     expect(r.liked).toBe(true);
   });
 
+  it('lowercase SVG fill #fe2c55 → liked=true', () => {
+    const d = makeDiag({ tag: 'span', text: '赞', svgFill: '#fe2c55' });
+    const r = assessCandidateLikeState(d);
+    expect(r.liked).toBe(true);
+  });
+
   it('path fill red → liked=true', () => {
     const d = makeDiag({ tag: 'span', text: '点赞', pathFill: 'red' });
+    const r = assessCandidateLikeState(d);
+    expect(r.liked).toBe(true);
+  });
+
+  it('path stroke #ff0040 → liked=true', () => {
+    const d = makeDiag({ tag: 'span', text: '点赞', pathStroke: '#ff0040' });
     const r = assessCandidateLikeState(d);
     expect(r.liked).toBe(true);
   });

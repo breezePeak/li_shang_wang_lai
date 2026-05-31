@@ -16,7 +16,18 @@ export function assessCandidateLikeState(diag) {
   // color-based detection
   function _isDouyinRed(val) {
     if (!val) return false;
-    const m = val.match(/rgb[va]?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+    const normalized = String(val).trim().toLowerCase();
+    if (normalized === 'red') return true;
+    const hex = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+    if (hex) {
+      let raw = hex[1];
+      if (raw.length === 3) raw = raw.split('').map(ch => ch + ch).join('');
+      const r = parseInt(raw.slice(0, 2), 16);
+      const g = parseInt(raw.slice(2, 4), 16);
+      const b = parseInt(raw.slice(4, 6), 16);
+      return r >= 230 && g <= 90 && b <= 130;
+    }
+    const m = normalized.match(/rgb[va]?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
     if (!m) return false;
     const r = parseInt(m[1], 10);
     const g = parseInt(m[2], 10);
@@ -27,7 +38,7 @@ export function assessCandidateLikeState(diag) {
   if (_isDouyinRed(diag.backgroundColor)) return { liked: true, confidence: 'confirmed', signal: 'red-bg:' + diag.tag };
 
   // SVG-based detection
-  if ([diag.svgFill, diag.pathFill].some(f => f === '#FF0040' || f === '#FE2C55' || f === 'red')) {
+  if ([diag.svgFill, diag.pathFill, diag.svgStroke, diag.pathStroke].some(f => _isDouyinRed(f))) {
     return { liked: true, confidence: 'confirmed', signal: 'red-svg:' + diag.tag };
   }
 
@@ -84,7 +95,18 @@ export async function checkLikeState(page) {
       // ---- helpers ----
       function isDouyinRedColor(val) {
         if (!val) return false;
-        const m = val.match(/rgb[va]?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+        const normalized = String(val).trim().toLowerCase();
+        if (normalized === 'red') return true;
+        const hex = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+        if (hex) {
+          let raw = hex[1];
+          if (raw.length === 3) raw = raw.split('').map(ch => ch + ch).join('');
+          const r = parseInt(raw.slice(0, 2), 16);
+          const g = parseInt(raw.slice(2, 4), 16);
+          const b = parseInt(raw.slice(4, 6), 16);
+          return r >= 230 && g <= 90 && b <= 130;
+        }
+        const m = normalized.match(/rgb[va]?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
         if (!m) return false;
         const r = parseInt(m[1], 10);
         const g = parseInt(m[2], 10);
@@ -102,7 +124,46 @@ export async function checkLikeState(page) {
       }
 
       function hasLikedClass(cls) {
-        return /active|liked|selected|checked|hasLiked/i.test(cls);
+        return /active|liked|selected|checked|hasLiked|\bf7caOKG9\b/i.test(cls);
+      }
+
+      function collectClassNames(root) {
+        const nodes = [root, ...Array.from(root.querySelectorAll('*'))];
+        return nodes
+          .map(node => typeof node.className === 'string' ? node.className : '')
+          .filter(Boolean)
+          .join(' ');
+      }
+
+      function hasPressedOrCheckedState(root) {
+        const nodes = [root, ...Array.from(root.querySelectorAll('[aria-pressed], [aria-selected], [aria-checked], [data-state], [data-status]'))];
+        return nodes.some(node => {
+          const values = [
+            node.getAttribute('aria-pressed'),
+            node.getAttribute('aria-selected'),
+            node.getAttribute('aria-checked'),
+            node.getAttribute('data-state'),
+            node.getAttribute('data-status'),
+          ].filter(Boolean).map(v => String(v).toLowerCase());
+          return values.some(v => v === 'true' || v === 'checked' || v === 'selected' || v === 'active' || v === 'liked');
+        });
+      }
+
+      function hasRedSvgSignal(root) {
+        const nodes = Array.from(root.querySelectorAll('svg, path, use'));
+        for (const node of nodes) {
+          const style = window.getComputedStyle(node);
+          const values = [
+            node.getAttribute('fill'),
+            node.getAttribute('stroke'),
+            node.getAttribute('color'),
+            style.fill,
+            style.stroke,
+            style.color,
+          ];
+          if (values.some(isDouyinRedColor)) return true;
+        }
+        return false;
       }
 
       function hasLikedSvg(el) {
@@ -111,9 +172,10 @@ export async function checkLikeState(page) {
         for (const svg of svgs) {
           if (!isVisibleEl(svg)) continue;
           const fill = svg.getAttribute('fill') || '';
-          if (fill === '#FF0040' || fill === '#FE2C55' || fill === 'red') return true;
+          const stroke = svg.getAttribute('stroke') || '';
+          if (isDouyinRedColor(fill) || isDouyinRedColor(stroke)) return true;
           const style = window.getComputedStyle(svg);
-          if (isDouyinRedColor(style.fill)) return true;
+          if (isDouyinRedColor(style.fill) || isDouyinRedColor(style.stroke) || isDouyinRedColor(style.color)) return true;
         }
         return false;
       }
@@ -123,12 +185,19 @@ export async function checkLikeState(page) {
         const rect = el.getBoundingClientRect();
         const style = window.getComputedStyle(el);
         const svgEls = el.querySelectorAll('svg');
-        let svgFill = '', pathFill = '';
+        let svgFill = '', pathFill = '', svgStroke = '', pathStroke = '';
         for (const svg of svgEls) {
           const f = svg.getAttribute('fill') || '';
           if (f) svgFill = f;
+          const s = svg.getAttribute('stroke') || '';
+          if (s) svgStroke = s;
           const paths = svg.querySelectorAll('path');
-          for (const p of paths) { const pf = p.getAttribute('fill') || ''; if (pf) pathFill = pf; }
+          for (const p of paths) {
+            const pf = p.getAttribute('fill') || '';
+            if (pf) pathFill = pf;
+            const ps = p.getAttribute('stroke') || '';
+            if (ps) pathStroke = ps;
+          }
         }
         return {
           tag,
@@ -144,6 +213,8 @@ export async function checkLikeState(page) {
           backgroundColor: style.backgroundColor || '',
           svgFill,
           pathFill,
+          svgStroke,
+          pathStroke,
           rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
         };
       }
@@ -246,37 +317,49 @@ export async function checkLikeState(page) {
         const diag = (() => {
           const tag = likeItem.tagName.toLowerCase();
           const rect = likeItem.getBoundingClientRect();
-          const cls = (typeof likeItem.className === 'string' ? likeItem.className : '');
+          const cls = collectClassNames(likeItem);
           const countEl = likeItem.querySelector('.Z4B2hGGG');
           const countText = countEl ? (countEl.innerText || '').trim() : '';
           const style = window.getComputedStyle(likeItem);
-          let svgFill = '', pathFill = '';
+          let svgFill = '', pathFill = '', svgStroke = '', pathStroke = '';
           const svgs = likeItem.querySelectorAll('svg');
           for (const svg of svgs) {
             if (!isVisibleEl(svg)) continue;
             const f = svg.getAttribute('fill') || '';
             if (f) svgFill = f;
+            const s = svg.getAttribute('stroke') || '';
+            if (s) svgStroke = s;
             const cs = window.getComputedStyle(svg);
             if (isDouyinRedColor(cs.fill)) svgFill = cs.fill;
+            if (isDouyinRedColor(cs.stroke)) svgStroke = cs.stroke;
+            if (isDouyinRedColor(cs.color) && f === 'currentColor') svgFill = cs.color;
             const paths = svg.querySelectorAll('path');
             for (const p of paths) {
-              if (!isVisibleEl(p)) continue;
               const pf = p.getAttribute('fill') || '';
-              if (pf && isDouyinRedColor(pf)) pathFill = pf;
+              if (pf) pathFill = pf;
+              const ps = p.getAttribute('stroke') || '';
+              if (ps) pathStroke = ps;
               const pcs = window.getComputedStyle(p);
               if (isDouyinRedColor(pcs.fill)) pathFill = pcs.fill;
+              if (isDouyinRedColor(pcs.stroke)) pathStroke = pcs.stroke;
+              if (isDouyinRedColor(pcs.color) && pf === 'currentColor') pathFill = pcs.color;
               const pstroke = p.getAttribute('stroke') || '';
-              if (pstroke === '#FF0040' || pstroke === '#FE2C55' || pstroke === 'red') pathFill = pstroke;
+              if (isDouyinRedColor(pstroke)) pathStroke = pstroke;
             }
           }
           return {
-            tag, className: cls.slice(0, 60),
+            tag,
+            className: (typeof likeItem.className === 'string' ? likeItem.className : '').slice(0, 120),
+            allClassName: cls.slice(0, 500),
             text: ((likeItem.innerText || '').trim()).slice(0, 20),
             countText,
             color: style.color || '',
             backgroundColor: style.backgroundColor || '',
             svgFill,
             pathFill,
+            svgStroke,
+            pathStroke,
+            pressedOrChecked: hasPressedOrCheckedState(likeItem),
             rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
           };
         })();
@@ -287,12 +370,16 @@ export async function checkLikeState(page) {
           const countEl = el.querySelector('.Z4B2hGGG');
           const countText = countEl ? (countEl.innerText || '').trim() : '';
           const dataE2e = el.getAttribute('data-e2e') || el.querySelector('[data-e2e]')?.getAttribute?.('data-e2e') || '';
-          let svgFill = '', pathFill = '';
+          let svgFill = '', pathFill = '', svgStroke = '', pathStroke = '';
           const svgs = el.querySelectorAll('svg');
           for (const svg of svgs) {
             const f = svg.getAttribute('fill') || ''; if (f) svgFill = f;
+            const s = svg.getAttribute('stroke') || ''; if (s) svgStroke = s;
             const paths = svg.querySelectorAll('path');
-            for (const p of paths) { const pf = p.getAttribute('fill') || ''; if (pf) pathFill = pf; }
+            for (const p of paths) {
+              const pf = p.getAttribute('fill') || ''; if (pf) pathFill = pf;
+              const ps = p.getAttribute('stroke') || ''; if (ps) pathStroke = ps;
+            }
           }
           return {
             index: i,
@@ -302,6 +389,8 @@ export async function checkLikeState(page) {
             dataE2e,
             svgFill,
             pathFill,
+            svgStroke,
+            pathStroke,
           };
         });
 
@@ -312,14 +401,17 @@ export async function checkLikeState(page) {
         const { likeItem, diag, actionItemCount, actionItemsDiag } = actionBarCheck;
         likeItem.setAttribute('data-temp-like-btn', 'true');
         // check liked signals — f7caOKG9 class OR douyin red via isDouyinRedColor
-        const cls = diag.className || '';
-        const hasLikedClass = /\bf7caOKG9\b/.test(cls);
+        const cls = `${diag.className || ''} ${diag.allClassName || ''}`;
+        const hasLikedClassSignal = hasLikedClass(cls);
         const svgRed = diag.svgFill && isDouyinRedColor(diag.svgFill);
         const pathRed = diag.pathFill && isDouyinRedColor(diag.pathFill);
+        const svgStrokeRed = diag.svgStroke && isDouyinRedColor(diag.svgStroke);
+        const pathStrokeRed = diag.pathStroke && isDouyinRedColor(diag.pathStroke);
         const colorRed = isDouyinRedColor(diag.color);
         const bgRed = isDouyinRedColor(diag.backgroundColor);
+        const descendantSvgRed = hasRedSvgSignal(likeItem);
 
-        if (hasLikedClass || svgRed || pathRed || colorRed || bgRed) {
+        if (hasLikedClassSignal || diag.pressedOrChecked || svgRed || pathRed || svgStrokeRed || pathStrokeRed || colorRed || bgRed || descendantSvgRed) {
           return {
             liked: true,
             confidence: 'confirmed',
@@ -513,13 +605,21 @@ export async function checkLikeState(page) {
         }
 
         // 2c: SVG fill-based liked detection
-        if (diag.svgFill && (diag.svgFill === '#FF0040' || diag.svgFill === '#FE2C55' || diag.svgFill === 'red')) {
+        if (diag.svgFill && isDouyinRedColor(diag.svgFill)) {
           el.setAttribute('data-temp-like-btn', 'true');
           return { liked: true, confidence: 'confirmed', signal: 'red-svg-fill:' + diag.tag, diag };
         }
-        if (diag.pathFill && (diag.pathFill === '#FF0040' || diag.pathFill === '#FE2C55' || diag.pathFill === 'red')) {
+        if (diag.pathFill && isDouyinRedColor(diag.pathFill)) {
           el.setAttribute('data-temp-like-btn', 'true');
           return { liked: true, confidence: 'confirmed', signal: 'red-path-fill:' + diag.tag, diag };
+        }
+        if (diag.svgStroke && isDouyinRedColor(diag.svgStroke)) {
+          el.setAttribute('data-temp-like-btn', 'true');
+          return { liked: true, confidence: 'confirmed', signal: 'red-svg-stroke:' + diag.tag, diag };
+        }
+        if (diag.pathStroke && isDouyinRedColor(diag.pathStroke)) {
+          el.setAttribute('data-temp-like-btn', 'true');
+          return { liked: true, confidence: 'confirmed', signal: 'red-path-stroke:' + diag.tag, diag };
         }
 
         // 2d: explicit like button with count → neutral (already checked for red)
@@ -717,7 +817,20 @@ export async function clickLike(page, { execute = false } = {}) {
     const targetBtn = page.locator('[data-temp-like-btn="true"]').first();
     const count = await targetBtn.count();
     if (count > 0) {
-      await targetBtn.click();
+      try {
+        await targetBtn.click({ timeout: 5000 });
+      } catch {
+        const clicked = await page.evaluate(() => {
+          const marked = document.querySelector('[data-temp-like-btn="true"]');
+          if (!marked) return false;
+          const innerButton = marked.querySelector('button, [role="button"]');
+          (innerButton || marked).click();
+          return true;
+        });
+        if (!clicked) {
+          await targetBtn.click({ force: true, timeout: 5000 });
+        }
+      }
       console.error(`[video-page] 已点击点赞按钮 (${likeState.data?.signal || 'marked-btn'})`);
       await page.waitForTimeout(2000);
       return success({ clicked: true });
@@ -948,6 +1061,56 @@ async function findCommentInput(page) {
   return null;
 }
 
+async function activateCommentComposer(page) {
+  return await page.evaluate(() => {
+    function visible(el) {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 10 || rect.height < 10) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    }
+
+    const patterns = ['善语结善缘', '说点什么', '留下评论', '发表评论', '写评论', '评论'];
+    const selectors = [
+      '[class*="comment"]',
+      '[id*="comment"]',
+      '[data-e2e*="comment"]',
+      'button',
+      'div',
+      'span',
+    ];
+    const nodes = [];
+    for (const selector of selectors) {
+      for (const el of document.querySelectorAll(selector)) {
+        if (!visible(el)) continue;
+        const text = (el.innerText || el.textContent || '').trim();
+        const placeholder = el.getAttribute('placeholder') || el.getAttribute('data-placeholder') || '';
+        const combined = `${text} ${placeholder}`.trim();
+        if (!combined || combined.length > 80) continue;
+        if (patterns.some(p => combined.includes(p))) nodes.push(el);
+      }
+    }
+
+    nodes.sort((a, b) => {
+      const ar = a.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+      return br.top - ar.top;
+    });
+
+    for (const el of nodes) {
+      const rect = el.getBoundingClientRect();
+      if (rect.top < 0 || rect.bottom > window.innerHeight) {
+        el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      }
+      el.click();
+      return { ok: true, text: (el.innerText || el.textContent || '').trim().slice(0, 40) };
+    }
+
+    return { ok: false, reason: 'composer_placeholder_not_found' };
+  });
+}
+
 export async function postVideoComment(page, text, { execute = false } = {}) {
   try {
     if (!text || !text.trim()) {
@@ -973,6 +1136,14 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
 
     // 2. 寻找输入框
     let input = await findCommentInput(page);
+    if (!input) {
+      const activateResult = await activateCommentComposer(page);
+      if (activateResult.ok) {
+        console.error(`[video-page] 已点击评论输入入口 (${activateResult.text || 'placeholder'})`);
+        await page.waitForTimeout(1200);
+        input = await findCommentInput(page);
+      }
+    }
 
     // 3. 收集 Debug 诊断信息
     if (!input) {

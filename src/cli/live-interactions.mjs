@@ -21,8 +21,10 @@ import {
 } from '../adapters/work-modal-page.mjs';
 import { clickNotificationWorkThumbnail } from '../adapters/work-context-page.mjs';
 import { checkWorkOwner, getSelfProfile } from '../adapters/work-context-page.mjs';
+import { clickLike, postVideoComment } from '../adapters/video-page.mjs';
 import { generateReplyText } from '../domain/reply-template.mjs';
 import { classifyNotificationAction } from '../domain/notification-action-router.mjs';
+import { generateReturnVisitComment } from '../services/return-visit-comment-generator.mjs';
 import { upsertNotificationEvent } from '../db/interaction-repository.mjs';
 import { upsertWorkContext, findWorkByModalId, findWorkByWorkId, findWorkByThumbnailKey } from '../db/work-repository.mjs';
 import { upsertWorkComment, listPendingCommentsGroupedByWork, listPreparedComments, markCommentReplyPrepared, markCommentReplied, markCommentSentUnverified, markCommentBlocked, markCommentSkipped, findCommentByActorAndText } from '../db/work-comment-repository.mjs';
@@ -60,6 +62,12 @@ function updateEventWorkInfo(db, eventId, workId, workUrl, workTitle, rawPayload
 }
 
 function addRevisitCandidateDB(notification, reason) {
+  const relation = notification.relation || 'unknown';
+  if (relation !== 'friend' && relation !== 'mutual') {
+    console.log(`[live]   跳过回访候选: ${notification.username || ''} relation=${relation}`);
+    return { action: 'skipped', reason: 'non_friend_relation' };
+  }
+
   const result = upsertRevisitCandidate({
     actorName: notification.username || '',
     actorProfileUrl: notification.actorProfileUrl || '',
@@ -706,6 +714,30 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
     return null;
   }
 
+  async function extractRevisitWorkContext() {
+    return await page.evaluate(() => {
+      const workTitle =
+        document.querySelector('[data-e2e="video-desc"]')?.innerText ||
+        document.querySelector('[class*="title"]')?.innerText ||
+        document.querySelector('h1')?.innerText ||
+        document.title ||
+        '';
+      const workText = (document.body?.innerText || '').slice(0, 1200);
+      const referenceComments = [];
+      const commentItems = document.querySelectorAll('[data-e2e="comment-item"], [class*="comment-item"], [class*="commentItem"]');
+      for (const item of commentItems) {
+        const text = (item.innerText || '').trim();
+        if (text && text.length < 120) referenceComments.push(text);
+        if (referenceComments.length >= 8) break;
+      }
+      return {
+        workTitle: workTitle.trim().slice(0, 160),
+        workText,
+        referenceComments,
+      };
+    });
+  }
+
   for (let i = 0; i < revisitList.length; i++) {
     const candidate = revisitList[i];
     console.log(`[live] 回访 ${i + 1}/${revisitList.length} actor=${candidate.actor_name} key=${candidate.revisit_key}`);
@@ -741,28 +773,52 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
 
       console.log(`[live]   打开最近作品...`);
       await page.mouse.click(firstWork.x, firstWork.y);
-      await page.waitForTimeout(Math.max(options.videoSettleMs || 0, 6000));
-
-      const likeResult = await page.evaluate(() => {
-        const likeBtn = document.querySelector('[data-e2e*="like"]') || document.querySelector('[class*="like"]');
-        if (!likeBtn) return { ok: false, reason: 'no_like_button' };
-        const text = (likeBtn.innerText || '').trim();
-        const alreadyLiked = text.includes('已赞') || text.includes('已点赞');
-        if (alreadyLiked) return { ok: true, method: 'already_liked' };
-        likeBtn.click();
-        return { ok: true, method: 'click_like' };
-      });
-
-      if (likeResult.ok) {
-        console.log(`[live]   点赞成功 (${likeResult.method})`);
-        markRevisitDone(candidate.id);
-        revisitResults.push({ actorName: candidate.actor_name, status: 'succeeded', reason: likeResult.method });
-        run.succeeded++;
-      } else {
-        console.log(`[live]   点赞失败: ${likeResult.reason}`);
-        markRevisitBlocked(candidate.id, likeResult.reason);
-        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: likeResult.reason });
+      await page.waitForTimeout(Math.min(Math.max(options.videoSettleMs || 0, 3000), 5000));
+      const modalResult = await waitForWorkModal(page, { timeoutMs: 15000, closeAutoPlay: true });
+      if (!modalResult.ok) {
+        console.log(`[live]   作品评论区未就绪: ${modalResult.message}`);
+        markRevisitBlocked(candidate.id, modalResult.message || 'work_modal_not_ready');
+        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: modalResult.message || 'work_modal_not_ready' });
+        continue;
       }
+
+      const likeResult = await clickLike(page, { execute: true });
+      const likeOk = likeResult.ok || likeResult.code === RESULT_CODES.ALREADY_LIKED;
+      const likeMethod = likeResult.ok ? 'click_like' : 'already_liked';
+      if (!likeOk) {
+        console.log(`[live]   点赞失败: ${likeResult.message}`);
+        markRevisitBlocked(candidate.id, likeResult.message || 'like_failed');
+        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: likeResult.message || 'like_failed' });
+        continue;
+      }
+
+      console.log(`[live]   点赞完成 (${likeMethod})`);
+      await page.waitForTimeout(2500 + Math.floor(Math.random() * 1500));
+
+      const workContext = await extractRevisitWorkContext();
+      const generated = generateReturnVisitComment(workContext);
+      if (!generated.ok || !generated.comment) {
+        const reason = generated.reason || 'generate_comment_failed';
+        console.log(`[live]   生成回访评论失败: ${reason}`);
+        markRevisitBlocked(candidate.id, reason);
+        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason });
+        continue;
+      }
+
+      console.log(`[live]   发送回访评论: "${generated.comment}"`);
+      const commentResult = await postVideoComment(page, generated.comment, { execute: true });
+      if (!commentResult.ok) {
+        console.log(`[live]   回访评论失败: ${commentResult.message}`);
+        markRevisitBlocked(candidate.id, commentResult.message || 'comment_failed');
+        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: commentResult.message || 'comment_failed' });
+        continue;
+      }
+
+      const commentReason = commentResult.data?.unconfirmed ? 'comment_sent_unconfirmed' : 'comment_posted';
+      console.log(`[live]   回访完成: ${likeMethod} + ${commentReason}`);
+      markRevisitDone(candidate.id);
+      revisitResults.push({ actorName: candidate.actor_name, status: 'succeeded', reason: `${likeMethod}+${commentReason}` });
+      run.succeeded++;
 
       await page.waitForTimeout(2000);
     } catch (err) {
@@ -860,6 +916,7 @@ async function main() {
     const maxScrollRounds = commonArgs.options.maxScrollRounds || 5;
     const maxNotifications = commonArgs.options.maxNotifications || 50;
     let processedNotifications = 0;
+    let openedWorkCount = 0;
     let phase1EndedReason = '';
 
     for (let scrollRound = 0; scrollRound < maxScrollRounds; scrollRound++) {
@@ -912,8 +969,12 @@ async function main() {
 
       for (const n of likeNotifs) {
         if (!commonArgs.options.noRevisit) {
-          addRevisitCandidateDB(n, 'like_received');
-          console.log(`[live] 点赞通知：actor=${n.username} -> 加入回访候选，稍后统一回访`);
+          const revisitResult = addRevisitCandidateDB(n, 'like_received');
+          if (revisitResult.action === 'skipped') {
+            console.log(`[live] 点赞通知：actor=${n.username} -> 不加入回访候选 (${revisitResult.reason})`);
+          } else {
+            console.log(`[live] 点赞通知：actor=${n.username} -> 加入回访候选，稍后统一回访`);
+          }
         } else {
           console.log(`[live] noRevisit=true，本轮不收集回访候选`);
         }
@@ -933,8 +994,12 @@ async function main() {
 
       for (const n of commentNotifs) {
         if (!commonArgs.options.noRevisit) {
-          addRevisitCandidateDB(n, 'comment_on_my_work');
-          console.log(`[live] 评论人加入回访候选: actor=${n.username}`);
+          const revisitResult = addRevisitCandidateDB(n, 'comment_on_my_work');
+          if (revisitResult.action === 'skipped') {
+            console.log(`[live] 评论人不加入回访候选: actor=${n.username} (${revisitResult.reason})`);
+          } else {
+            console.log(`[live] 评论人加入回访候选: actor=${n.username}`);
+          }
         }
 
         const commentKey = `${(n.username || '')}::${(n.content || '').slice(0, 60)}`;
@@ -952,11 +1017,20 @@ async function main() {
         console.log(`[live] 评论通知：actor=${n.username} -> 进入 modal 回复`);
         const result = await processWorkModal(page, n, db, run, commonArgs.options, state);
         results.push(result);
+        if (result.status === 'succeeded' || result.step === 'wait-modal' || result.step === 'extract-context' || result.step === 'scan-unreplied') {
+          openedWorkCount++;
+        }
 
         const backOk = await returnToNotificationPanel(page);
         if (!backOk) {
           console.error('[live] 无法返回通知面板，终止第一阶段');
           phase1EndedReason = '通知面板不可用';
+          break;
+        }
+
+        if (openedWorkCount >= commonArgs.options.maxItems) {
+          console.log(`[live] 已打开 ${openedWorkCount} 个作品采集评论，达到 maxItems=${commonArgs.options.maxItems}，停止打开更多通知作品`);
+          phase1EndedReason = 'maxItems-opened-works';
           break;
         }
       }
