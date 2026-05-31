@@ -87,7 +87,7 @@ async function collectInteractables(page) {
         ariaLabel: el.getAttribute('aria-label') || '',
         title: el.getAttribute('title') || '',
         placeholder: el.getAttribute('placeholder') || '',
-        className: (el.className || '').slice(0, 200),
+        className: (el.getAttribute('class') || '').slice(0, 200),
         id: el.id || '',
         dataset: Object.fromEntries(Object.entries(el.dataset).map(([k, v]) => [k, (v || '').slice(0, 80)])),
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
@@ -109,7 +109,7 @@ async function collectLinks(page) {
         index: i,
         text: (el.textContent || '').trim().slice(0, 120),
         href: el.getAttribute('href') || '',
-        className: (el.className || '').slice(0, 200),
+        className: (el.getAttribute('class') || '').slice(0, 200),
         ariaLabel: el.getAttribute('aria-label') || '',
         title: el.getAttribute('title') || '',
         dataset: Object.fromEntries(Object.entries(el.dataset).map(([k, v]) => [k, (v || '').slice(0, 80)])),
@@ -129,7 +129,7 @@ async function collectImages(page) {
       let p = el.parentElement;
       for (let j = 0; j < 3 && p; j++) {
         if ((p.textContent || '').trim()) parentText = (p.textContent || '').trim().slice(0, 120);
-        if (p.className) parentClassName = (p.className || '').slice(0, 200);
+        if (p.getAttribute && p.getAttribute('class')) parentClassName = (p.getAttribute('class') || '').slice(0, 200);
         if (parentText) break;
         p = p.parentElement;
       }
@@ -137,7 +137,7 @@ async function collectImages(page) {
         index: i,
         src: el.getAttribute('src') || '',
         alt: el.getAttribute('alt') || '',
-        className: (el.className || '').slice(0, 200),
+        className: (el.getAttribute('class') || '').slice(0, 200),
         width: el.width,
         height: el.height,
         naturalWidth: el.naturalWidth,
@@ -163,7 +163,7 @@ async function collectInputs(page) {
         valuePreview: value,
         placeholder: el.getAttribute('placeholder') || '',
         ariaLabel: el.getAttribute('aria-label') || '',
-        className: (el.className || '').slice(0, 200),
+        className: (el.getAttribute('class') || '').slice(0, 200),
         visible: rect.width > 0 && rect.height > 0,
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
       };
@@ -193,7 +193,7 @@ async function collectButtons(page) {
         ariaLabel: el.getAttribute('aria-label') || '',
         title: el.getAttribute('title') || '',
         placeholder: el.getAttribute('placeholder') || '',
-        className: (el.className || '').slice(0, 200),
+        className: (el.getAttribute('class') || '').slice(0, 200),
         id: el.id || '',
         dataset: Object.fromEntries(Object.entries(el.dataset).map(([k, v]) => [k, (v || '').slice(0, 80)])),
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
@@ -226,7 +226,7 @@ async function collectButtons(page) {
         ariaLabel: el.getAttribute('aria-label') || '',
         title: el.getAttribute('title') || '',
         placeholder: '',
-        className: (el.className || '').slice(0, 200),
+        className: (el.getAttribute('class') || '').slice(0, 200),
         id: el.id || '',
         dataset: Object.fromEntries(Object.entries(el.dataset).map(([k, v]) => [k, (v || '').slice(0, 80)])),
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
@@ -250,7 +250,7 @@ async function collectModalCandidates(page) {
       return {
         index: i,
         tag: el.tagName.toLowerCase(),
-        className: (el.className || '').slice(0, 300),
+        className: (el.getAttribute('class') || '').slice(0, 300),
         id: el.id || '',
         textPreview: (el.textContent || '').trim().slice(0, 200),
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
@@ -271,7 +271,7 @@ async function collectCommentCandidates(page) {
       return {
         index: i,
         tag: el.tagName.toLowerCase(),
-        className: (el.className || '').slice(0, 300),
+        className: (el.getAttribute('class') || '').slice(0, 300),
         textPreview: (el.textContent || '').trim().slice(0, 200),
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         childrenCount: el.children.length,
