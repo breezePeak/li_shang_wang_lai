@@ -273,6 +273,8 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
           notificationItemKey: n.notificationItemKey,
           platformEventId: n.platformEventId || null,
           workId: n.workId || null,
+          workUrl: n.workUrl || null,
+          thumbnailKey: n.thumbnailKey || null,
         });
 
         const rawPayload = {
@@ -283,6 +285,9 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
           workId: n.workId || null,
           workUrl: n.workUrl || null,
           workTitle: n.workTitle || null,
+          thumbnailKey: n.thumbnailKey || null,
+          thumbnailSrc: n.thumbnailSrc || null,
+          thumbnailAlt: n.thumbnailAlt || null,
           dedupConfidence: confidence,
           profileResolutionStatus,
         };

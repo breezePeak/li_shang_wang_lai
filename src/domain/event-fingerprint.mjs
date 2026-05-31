@@ -69,12 +69,26 @@ export function commentInitialStatus(timeText) {
  *
  * Priority order:
  * 1. platformEventId (stable DOM attribute)
- * 2. workId (target work identifier, distinguishes same-user interactions on different works)
+ * 2. workId/workUrl/thumbnailKey (target work identifier, distinguishes same-user interactions on different works)
  * 3. actorId + action + textSummary (excludes relative time)
  *
- * Returns { fp, confidence: 'strong' | 'weak' } to allow downstream filtering.
+ * Returns { fp, confidence: 'strong' | 'medium' | 'weak' } to allow downstream filtering.
  */
-export function notificationFingerprint({ eventType, username, actorProfileKey, actorProfileUrl, action, content, timeText, rawText, notificationItemKey, platformEventId, workId }) {
+export function notificationFingerprint({
+  eventType,
+  username,
+  actorProfileKey,
+  actorProfileUrl,
+  action,
+  content,
+  timeText,
+  rawText,
+  notificationItemKey,
+  platformEventId,
+  workId,
+  workUrl,
+  thumbnailKey,
+}) {
   if ((platformEventId || '').trim()) {
     return {
       fp: crypto.createHash('sha256').update('notify:pid:' + platformEventId.trim()).digest('hex').slice(0, 16),
@@ -82,10 +96,15 @@ export function notificationFingerprint({ eventType, username, actorProfileKey, 
     };
   }
 
-  if ((workId || '').trim()) {
+  const targetKey =
+    (workId || '').trim() ||
+    (workUrl || '').trim() ||
+    (thumbnailKey || '').trim();
+
+  if (targetKey) {
     const actorId = (actorProfileKey || '').trim() || (actorProfileUrl || '').trim() || (username || '').trim();
     const textSummary = ((content || '').trim()).slice(0, 200);
-    const raw = [eventType, actorId, workId.trim(), (action || '').trim(), textSummary]
+    const raw = [eventType, actorId, targetKey, (action || '').trim(), textSummary]
       .map(s => s || '').join('||');
     return {
       fp: crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16),

@@ -22,6 +22,33 @@ export function parseRelationLine(line) {
   return null;
 }
 
+export function generateNotificationItemKey(d) {
+  const workKey =
+    d.workId ||
+    d.workUrl ||
+    d.thumbnailKey ||
+    d.thumbnailSrc ||
+    '';
+
+  const raw = [
+    d.username,
+    d.relation,
+    d.action,
+    workKey,
+    (d.content || '').slice(0, 200),
+    d.actorProfileKey || d.actorProfileUrl,
+  ]
+    .map(s => (s || '').trim())
+    .join('||');
+
+  let hash = 0;
+  for (let i = 0; i < raw.length; i++) {
+    hash = ((hash << 5) - hash) + raw.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
 export async function ensureNotificationPageReady(page) {
   await page.goto(SELF_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
   console.error('[notify-page] 等待页面加载...');
@@ -380,10 +407,28 @@ export async function extractVisibleNotifications(page) {
     }
 
     function generateItemKey(d) {
-      const raw = [d.username, d.relation, d.action, (d.content || '').slice(0, 200), d.actorProfileKey || d.actorProfileUrl]
-        .map(s => (s || '').trim()).join('||');
+      const workKey =
+        d.workId ||
+        d.workUrl ||
+        d.thumbnailKey ||
+        d.thumbnailSrc ||
+        '';
+
+      const raw = [
+        d.username,
+        d.relation,
+        d.action,
+        workKey,
+        (d.content || '').slice(0, 200),
+        d.actorProfileKey || d.actorProfileUrl,
+      ]
+        .map(s => (s || '').trim())
+        .join('||');
       let hash = 0;
-      for (let i = 0; i < raw.length; i++) { hash = ((hash << 5) - hash) + raw.charCodeAt(i); hash |= 0; }
+      for (let i = 0; i < raw.length; i++) {
+        hash = ((hash << 5) - hash) + raw.charCodeAt(i);
+        hash |= 0;
+      }
       return Math.abs(hash).toString(36);
     }
 
@@ -485,6 +530,8 @@ export async function extractVisibleNotifications(page) {
         if (videoMatch) { workUrl = _normUrl(href); workId = 'video-' + videoMatch[1]; workTitle = (link.getAttribute('title') || '').trim() || (link.innerText || '').trim(); break; }
         const noteMatch = href.match(/\/note\/(\d+)/);
         if (noteMatch) { workUrl = _normUrl(href); workId = 'note-' + noteMatch[1]; workTitle = (link.getAttribute('title') || '').trim() || (link.innerText || '').trim(); break; }
+        const modalMatch = href.match(/modal_id=(\d+)/);
+        if (modalMatch) { workUrl = _normUrl(href); workId = 'modal-' + modalMatch[1]; workTitle = (link.getAttribute('title') || '').trim() || (link.innerText || '').trim(); break; }
       }
 
       let platformEventId = '';
