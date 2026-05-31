@@ -193,8 +193,9 @@ export async function extractWorkModalContext(page) {
   }
 
   let workTitle = '';
+  let workText = '';
   try {
-    workTitle = await page.evaluate(() => {
+    const textData = await page.evaluate(() => {
       const modal = document.querySelector('.modal-video-container');
       const scope = modal || document.body;
 
@@ -209,32 +210,50 @@ export async function extractWorkModalContext(page) {
         '[class*="video-info"] [class*="desc"]',
         '[class*="detail-desc"]',
       ];
+      const descriptions = [];
       for (const sel of specificSelectors) {
         const el = scope.querySelector(sel);
         if (el) {
           const text = (el.innerText || '').trim();
-          if (text.length > 2 && text.length < 500 && !text.includes('回复') && !text.includes('评论')) return text;
+          if (text.length > 2 && text.length < 500 && !text.includes('回复') && !text.includes('评论')) descriptions.push(text);
         }
       }
 
       const genericDesc = scope.querySelector('[class*="desc"], [class*="caption"], [class*="mark"]');
       if (genericDesc) {
         const text = (genericDesc.innerText || '').trim();
-        if (text.length > 2 && text.length < 500 && !text.includes('回复') && !text.includes('评论')) return text;
+        if (text.length > 2 && text.length < 500 && !text.includes('回复') && !text.includes('评论')) descriptions.push(text);
       }
+
+      const metaDescription = document.querySelector('meta[name="description"], meta[property="og:description"]');
+      const metaText = (metaDescription?.getAttribute('content') || '').trim();
+      if (metaText.length > 2) descriptions.push(metaText);
 
       const ogTitle = document.querySelector('meta[property="og:title"]');
       if (ogTitle) {
         const content = (ogTitle.getAttribute('content') || '').trim();
-        if (content.length > 2) return content;
+        if (content.length > 2) descriptions.push(content);
       }
 
       const title = document.title || '';
       const cleaned = title.replace(/ - 抖音$/, '').replace(/的抖音.*$/, '').trim();
-      if (cleaned.length > 2) return cleaned;
+      if (cleaned.length > 2) descriptions.push(cleaned);
 
-      return '';
+      const unique = [];
+      const seen = new Set();
+      for (const item of descriptions) {
+        const normalized = item.replace(/\s+/g, ' ').trim();
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        unique.push(normalized);
+      }
+
+      const titleText = unique[0] || '';
+      const bodyText = unique.join('\n').slice(0, 1200);
+      return { titleText, bodyText };
     });
+    workTitle = textData.titleText || '';
+    workText = textData.bodyText || workTitle || '';
   } catch {}
 
   const videoMatch = currentUrl.match(/\/video\/([^/?#]+)/);
@@ -355,6 +374,7 @@ export async function extractWorkModalContext(page) {
     workId,
     workUrl: normalizeDouyinUrl(currentUrl.split('?')[0]) + '?modal_id=' + modalId,
     workTitle: workTitle || null,
+    workText: workText || null,
     workType,
     modalId,
     isModal: true,
@@ -769,6 +789,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
 
     return success({
       total: allComments.length,
+      comments: allComments,
       unreplied,
       allKeys: allComments.map(c => c.commentKey),
     });

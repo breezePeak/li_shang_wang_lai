@@ -107,6 +107,33 @@ describe('generateReplyText', () => {
     const result = generateReplyText('怎么才能像你一样厉害');
     expect(result.reason).toBe('template:question');
   });
+
+  it('uses work context when preparing replies from stored comments', () => {
+    const result = generateReplyText('这个怎么做到的？', {
+      workTitle: '为了龙虾口粮，魔改网上脚本居然成功了',
+      referenceComments: ['省流量 cliproxy+gpt codex 注册机', '已领'],
+    });
+    expect(result.reason).toBe('template:question_context:script_hack');
+    expect(result.replyText).toContain('脚本折腾过程');
+  });
+
+  it('uses reference comments to infer the reply topic', () => {
+    const result = generateReplyText('厉害', {
+      referenceComments: ['这个 openclaw 和 codex 的流程很有用'],
+    });
+    expect(result.reason).toBe('template:praise_context:ai_tooling');
+    expect(result.replyText).toContain('AI工具实践');
+  });
+
+  it('uses work body text, not only work title', () => {
+    const result = generateReplyText('这个有意思', {
+      workTitle: '',
+      workText: '视频里完整演示了用 codex agent 自动读取评论并生成回复的过程',
+      referenceComments: [],
+    });
+    expect(result.reason).toBe('template:default_context:ai_tooling');
+    expect(result.replyText).toContain('AI工具实践');
+  });
 });
 
 describe('buildPlanItemFromEvent', () => {

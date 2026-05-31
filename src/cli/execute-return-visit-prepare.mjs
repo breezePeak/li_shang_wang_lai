@@ -11,7 +11,7 @@ import {
   markReturnVisitFailure,
 } from '../services/return-visit-task-service.mjs';
 import { collectCandidateWorkFromProfile } from '../services/return-visit-work-collector.mjs';
-import { generateReturnVisitComment } from '../services/return-visit-comment-generator.mjs';
+import { analyzeReturnVisitContext, generateReturnVisitComment } from '../services/return-visit-comment-generator.mjs';
 
 function parseArgs(argv) {
   const args = {
@@ -179,6 +179,35 @@ async function main() {
     });
 
     log(args.json, `[return-visit:prepare] collected work: ${selectedWork.workUrl}`);
+
+    const analysis = analyzeReturnVisitContext({
+      workTitle: selectedWork.workTitle,
+      workText: selectedWork.workText,
+      contentSummary: selectedWork.contentSummary,
+      referenceComments: selectedWork.referenceComments || [],
+    });
+
+    if (!analysis.workTitle && analysis.referenceComments.length === 0) {
+      updateReturnVisitTask(task.taskId, {
+        status: RETURN_VISIT_STATUS.SKIPPED_NO_SUITABLE_WORK,
+        lastError: 'revisit_context_missing_work_and_comments',
+      });
+      taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.SKIPPED_NO_SUITABLE_WORK, reason: 'revisit_context_missing_work_and_comments' });
+      skipped++;
+      consecutiveFailures = 0;
+      continue;
+    }
+
+    if (analysis.sceneSignals.length === 0) {
+      updateReturnVisitTask(task.taskId, {
+        status: RETURN_VISIT_STATUS.SKIPPED_NO_SUITABLE_WORK,
+        lastError: 'revisit_context_no_scene_signal',
+      });
+      taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.SKIPPED_NO_SUITABLE_WORK, reason: 'revisit_context_no_scene_signal' });
+      skipped++;
+      consecutiveFailures = 0;
+      continue;
+    }
 
     const commentResult = generateReturnVisitComment({
       workTitle: selectedWork.workTitle,

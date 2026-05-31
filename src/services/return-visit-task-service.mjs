@@ -203,6 +203,12 @@ export function createOrUpdateReturnVisitTasksFromEvents(options = {}) {
   `);
 
   for (const event of events) {
+    const relation = String(event.relation || '').trim().toLowerCase();
+    if (relation !== 'friend' && relation !== 'mutual') {
+      skipped++;
+      continue;
+    }
+
     const userId = String(event.actor_profile_key || '').trim() || null;
     const userProfileUrl = normalizeDouyinUrl(event.actor_profile_url || '') || null;
     const userName = String(event.actor_name || '').trim();

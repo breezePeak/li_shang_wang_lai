@@ -24,7 +24,7 @@ import { checkWorkOwner, getSelfProfile } from '../adapters/work-context-page.mj
 import { clickLike, postVideoComment } from '../adapters/video-page.mjs';
 import { generateReplyText } from '../domain/reply-template.mjs';
 import { classifyNotificationAction } from '../domain/notification-action-router.mjs';
-import { generateReturnVisitComment } from '../services/return-visit-comment-generator.mjs';
+import { analyzeReturnVisitContext, generateReturnVisitComment } from '../services/return-visit-comment-generator.mjs';
 import { upsertNotificationEvent } from '../db/interaction-repository.mjs';
 import { upsertWorkContext, findWorkByModalId, findWorkByWorkId, findWorkByThumbnailKey } from '../db/work-repository.mjs';
 import { upsertWorkComment, listPendingCommentsGroupedByWork, listPreparedComments, markCommentReplyPrepared, markCommentReplied, markCommentSentUnverified, markCommentBlocked, markCommentSkipped, findCommentByActorAndText } from '../db/work-comment-repository.mjs';
@@ -385,6 +385,29 @@ async function processWorkModal(page, notification, db, run, options, state) {
   const unreplied = scanResult.data.unreplied;
   console.log(`[live]   总评论 ${scanResult.data.total} 条，未回复 ${unreplied.length} 条`);
 
+  const scannedComments = (scanResult.data.comments || []).map(c => ({
+    actorName: c.actorName || '',
+    commentText: c.commentText || '',
+    hasMyReply: !!c.hasMyReply,
+    isSelfComment: !!c.isSelfComment,
+    alreadyReplied: !!c.alreadyReplied,
+  })).filter(c => c.commentText).slice(0, 30);
+
+  if (scannedComments.length > 0) {
+    upsertWorkContext({
+      ...workCtx,
+      publishedAt: workCtx.publishedAt || null,
+      thumbnailKey: notification.thumbnailKey || null,
+      thumbnailSrc: workCtx.thumbnailSrc || notification.thumbnailSrc || null,
+      rawContextJson: JSON.stringify({
+        ...workCtx,
+        scannedComments,
+        scannedCommentCount: scanResult.data.total,
+      }),
+    });
+    console.log(`[live]   works表: 已补充作品评论上下文 ${scannedComments.length}/${scanResult.data.total} 条`);
+  }
+
   // Upsert work_comments to DB
   let commentsUpserted = 0;
   for (const comment of unreplied) {
@@ -727,6 +750,13 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
     }
   }
 
+  function safeEvidenceName(text) {
+    return String(text || 'unknown')
+      .replace(/[\\/:*?"<>|\s]+/g, '_')
+      .replace(/_+/g, '_')
+      .slice(0, 60) || 'unknown';
+  }
+
   async function openProfileAndFindWork(profileUrl, phaseLabel) {
     console.log(`[live]   ${phaseLabel}打开主页: ${profileUrl}`);
     await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
@@ -776,18 +806,39 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
 
   async function extractRevisitWorkContext() {
     return await page.evaluate(() => {
+      const metaDescription = document.querySelector('meta[name="description"]')?.getAttribute('content') || '';
+      const ogTitle = document.querySelector('meta[property="og:title"]')?.getAttribute('content') || '';
       const workTitle =
+        document.querySelector('div.title[data-e2e="video-desc"]')?.innerText ||
         document.querySelector('[data-e2e="video-desc"]')?.innerText ||
+        document.querySelector('[class*="video-desc"]')?.innerText ||
+        document.querySelector('[class*="desc-info"]')?.innerText ||
+        document.querySelector('[class*="aweme-desc"]')?.innerText ||
         document.querySelector('[class*="title"]')?.innerText ||
         document.querySelector('h1')?.innerText ||
+        ogTitle ||
         document.title ||
         '';
-      const workText = (document.body?.innerText || '').slice(0, 1200);
+      const workText = [
+        workTitle,
+        metaDescription,
+        document.body?.innerText || '',
+      ].filter(Boolean).join('\n').slice(0, 1800);
       const referenceComments = [];
-      const commentItems = document.querySelectorAll('[data-e2e="comment-item"], [class*="comment-item"], [class*="commentItem"], .comment-item-info-wrap, .comment-mainContent [class*="content"]');
+      const commentItems = document.querySelectorAll('[data-e2e="comment-item"], .comment-item-info-wrap');
       for (const item of commentItems) {
         const text = (item.innerText || '').trim();
-        if (text && text.length < 180) referenceComments.push(text);
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        const cleaned = [];
+        for (const line of lines) {
+          if (line === '回复' || line === '赞' || line === '分享' || line === '作者' || line === '朋友' || line === '互相关注') continue;
+          if (/^\d+$/.test(line)) continue;
+          if (/^\d+[秒分时天周月年]前/.test(line) || /^\d+月\d+日/.test(line)) continue;
+          if (line.includes('·') && line.length < 30) continue;
+          if (line.length > 1 && line.length < 120) cleaned.push(line);
+        }
+        const commentText = cleaned.slice(1, 3).join(' ') || cleaned[0] || '';
+        if (commentText && commentText.length < 180 && !referenceComments.includes(commentText)) referenceComments.push(commentText);
         if (referenceComments.length >= 8) break;
       }
       return {
@@ -841,9 +892,14 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
       }
 
       const readWorkContext = await extractRevisitWorkContext();
+      const modalContextResult = await extractWorkModalContext(page).catch(() => null);
+      const modalWorkContext = modalContextResult?.ok ? modalContextResult.data : null;
       const workContext = {
         ...readWorkContext,
+        workTitle: modalWorkContext?.workTitle || readWorkContext.workTitle || firstWork.text || firstWork.imgAlt || '',
         contentSummary: [
+          modalWorkContext?.workTitle || '',
+          modalWorkContext?.publishedAtText || '',
           profileContext.profileTitle,
           profileContext.nickname,
           profileContext.signature,
@@ -852,10 +908,46 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
           profileContext.visibleWorks.map(w => `${w.text} ${w.imgAlt}`.trim()).filter(Boolean).join(' '),
         ].filter(Boolean).join('\n').slice(0, 1200),
         referenceComments: [
-          ...sourceComments,
           ...(readWorkContext.referenceComments || []),
         ].filter(Boolean).slice(0, 12),
       };
+
+      const analysis = analyzeReturnVisitContext(workContext);
+      const contextEvidence = {
+        actorName: candidate.actor_name,
+        profileUrl,
+        sourceActorComments: sourceComments,
+        profileContext,
+        firstWork,
+        modalWorkContext,
+        workContext,
+        analysis: {
+          contentType: analysis.contentType,
+          commentFocus: analysis.commentFocus,
+          contentDeficient: analysis.contentDeficient,
+          sceneSignals: analysis.sceneSignals,
+        },
+      };
+      const evidencePath = path.join(run.outputDir, `revisit-analysis-${i + 1}-${safeEvidenceName(candidate.actor_name)}.json`);
+      writeJSON(evidencePath, contextEvidence);
+      console.log(`[live]   回访分析证据已保存: ${evidencePath}`);
+      console.log(`[live]   回访上下文: title="${(workContext.workTitle || '').slice(0, 60)}" comments=${workContext.referenceComments.length} signals=${analysis.sceneSignals.map(s => s.key).join(',') || 'none'}`);
+
+      if (!workContext.workTitle && workContext.referenceComments.length === 0) {
+        const reason = 'revisit_context_missing_work_and_comments';
+        console.log(`[live]   回访上下文不足，拒绝执行评论: ${reason}`);
+        markRevisitBlocked(candidate.id, reason);
+        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason });
+        continue;
+      }
+
+      if (analysis.sceneSignals.length === 0) {
+        const reason = 'revisit_context_no_scene_signal';
+        console.log(`[live]   回访上下文没有具体场景信号，拒绝执行评论: ${reason}`);
+        markRevisitBlocked(candidate.id, reason);
+        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason });
+        continue;
+      }
 
       const generated = generateReturnVisitComment(workContext);
       if (!generated.ok || !generated.comment) {
@@ -865,6 +957,8 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
         revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason });
         continue;
       }
+      contextEvidence.generated = generated;
+      writeJSON(evidencePath, contextEvidence);
 
       console.log(`[live]   已生成回访评论 (${generated.reason || 'generated'}): "${generated.comment}"`);
 
@@ -962,6 +1056,7 @@ async function main() {
   runMigrations();
 
   const commonArgs = parseCommonArgs(process.argv.slice(2));
+  const collectOnly = commonArgs.remaining.includes('--collect-only');
   const run = createRunContext('interactions-live', commonArgs.options);
 
   const db = getDb();
@@ -1158,6 +1253,11 @@ async function main() {
 
     if (!phase1EndedReason) phase1EndedReason = '滚动轮数上限';
     console.log(`[live] 通知页处理完成 (${phase1EndedReason})`);
+
+    if (collectOnly) {
+      console.log('[live] --collect-only：采集阶段完成，只入库，不生成回复、不执行回复、不回访');
+      return;
+    }
 
     const prepareSummary = preparePendingReplies(commonArgs.options);
     results.push({

@@ -81,20 +81,22 @@ function analyzeReferenceComments(referenceComments) {
 function extractSceneSignals(fullText) {
   const text = String(fullText || '');
   const signalRules = [
-    { key: 'water_kids', pattern: /玩水|游泳|水上乐园|泳池|孩子|小孩|亲子/, subject: '玩水日常', detail: '孩子状态真自然' },
-    { key: 'life_record', pattern: /生活|日常|记录|随拍|vlog|真实生活/, subject: '日常记录', detail: '生活感很足' },
-    { key: 'api_key', pattern: /API\s*key|apikey|接口密钥|密钥/i, subject: '接口问题', detail: '互动点挺具体' },
-    { key: 'coding', pattern: /代码|编程|开发|前端|后端|接口|工程|AI|模型|调试/, subject: '技术内容', detail: '问题切得挺准' },
-    { key: 'tutorial', pattern: /教程|步骤|方法|技巧|教学|干货|怎么|如何/, subject: '步骤讲解', detail: '细节挺清楚' },
-    { key: 'food', pattern: /美食|吃|餐|饭|菜|探店|味道/, subject: '美食分享', detail: '烟火气很足' },
-    { key: 'travel', pattern: /旅行|旅游|风景|景色|城市|打卡|出游/, subject: '出游记录', detail: '画面感挺强' },
-    { key: 'pet', pattern: /猫|狗|宠物|毛孩子|小猫|小狗/, subject: '宠物日常', detail: '状态很可爱' },
+    { key: 'api_key', priority: 100, pattern: /API\s*key|apikey|接口密钥|密钥/i, subject: '接口问题', detail: '互动点挺具体' },
+    { key: 'ai_tooling', priority: 95, pattern: /openclaw|codex|chatgpt|agent|skills|claude|deepseek|qwen|千问|模型|AI/i, subject: 'AI工具折腾', detail: '实践味很足' },
+    { key: 'script_hack', priority: 90, pattern: /脚本|魔改|注册机|验证码|临时邮箱|代理|proxy|bug|调试/, subject: '脚本魔改', detail: '动手思路挺清楚' },
+    { key: 'coding', priority: 80, pattern: /代码|编程|开发|前端|后端|接口|工程|调试|程序员/, subject: '技术内容', detail: '问题切得挺准' },
+    { key: 'tutorial', priority: 70, pattern: /教程|步骤|方法|技巧|教学|干货|怎么|如何/, subject: '步骤讲解', detail: '细节挺清楚' },
+    { key: 'water_kids', priority: 65, pattern: /玩水|游泳|水上乐园|泳池|孩子|小孩|亲子/, subject: '玩水日常', detail: '孩子状态真自然' },
+    { key: 'travel', priority: 55, pattern: /旅行|旅游|风景|景色|城市|打卡|出游/, subject: '出游记录', detail: '画面感挺强' },
+    { key: 'pet', priority: 55, pattern: /猫|狗|宠物|毛孩子|小猫|小狗/, subject: '宠物日常', detail: '状态很可爱' },
+    { key: 'food', priority: 45, pattern: /美食|吃|餐|饭|菜|探店|味道|口粮/, subject: '美食分享', detail: '烟火气很足' },
+    { key: 'life_record', priority: 10, pattern: /生活|日常|记录|随拍|vlog|真实生活/, subject: '日常记录', detail: '生活感很足' },
   ];
   const signals = [];
   for (const rule of signalRules) {
     if (rule.pattern.test(text)) signals.push(rule);
   }
-  return signals;
+  return signals.sort((a, b) => b.priority - a.priority);
 }
 
 export function analyzeReturnVisitContext(input = {}) {
@@ -308,6 +310,7 @@ export function generateXiaoyuanReturnVisitComment(input = {}) {
       : (buildAgentCandidates(analysis).includes(accepted[0]) ? `agent_context_${contentType}_${analysis.commentFocus}` : 'safe_fallback_generic'),
     contentType,
     commentFocus: analysis.commentFocus,
+    sceneSignals: analysis.sceneSignals,
     comment: accepted[0],
     candidates: accepted,
   };

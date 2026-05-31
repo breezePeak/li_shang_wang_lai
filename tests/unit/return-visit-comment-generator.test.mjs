@@ -143,4 +143,16 @@ describe('Xiaoyuan Comment Generator', () => {
     expect(result.comment).toMatch(/接口|技术/);
     expect(result.comment).not.toMatch(/氛围很自然|生活感拿捏/);
   });
+
+  it('prioritizes specific AI tooling signals over generic daily-record signals', () => {
+    const result = generateReturnVisitComment({
+      workTitle: '为了龙虾口粮，魔改可以下网上下的脚本，居然成功了',
+      workText: '#程序员日常 #openclaw #codex #chatgpt 原版临时邮箱和验证码需要第三方，自己改成免费的。',
+      referenceComments: ['省流量 cliproxy+gpt codex 注册机', '哈哈哈'],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.sceneSignals.map(s => s.key).slice(0, 2)).toEqual(['ai_tooling', 'script_hack']);
+    expect(result.comment).toMatch(/AI工具|脚本|技术/);
+    expect(result.comment).not.toMatch(/日常记录|生活感/);
+  });
 });
