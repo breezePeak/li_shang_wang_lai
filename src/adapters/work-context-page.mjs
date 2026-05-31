@@ -88,11 +88,11 @@ export function checkWorkOwner(workContext, selfProfile) {
   };
 }
 
-export async function clickNotificationWorkThumbnail(page) {
+export async function clickNotificationWorkThumbnail(page, { skipItemTexts = [] } = {}) {
   const TARGET_PATTERN = '评论了你的作品';
   const ALL_ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '评论了你的作品', '回复了你的评论'];
 
-  const thumbResult = await page.evaluate(({ TARGET_PATTERN, ALL_ACTION_PATTERNS }) => {
+  const thumbResult = await page.evaluate(({ TARGET_PATTERN, ALL_ACTION_PATTERNS, skipItemTexts }) => {
     function findNotificationPanel() {
       for (const el of document.querySelectorAll('*')) {
         const t = (el.innerText || '').trim();
@@ -136,6 +136,9 @@ export async function clickNotificationWorkThumbnail(page) {
       const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
       if (lines.length < 2) continue;
 
+      const itemTextKey = text.slice(0, 100);
+      if (skipItemTexts.some(s => s === itemTextKey)) continue;
+
       const imgs = el.querySelectorAll('img');
       for (const img of imgs) {
         const src = img.getAttribute('src') || '';
@@ -151,7 +154,7 @@ export async function clickNotificationWorkThumbnail(page) {
           ok: true,
           x: Math.round(finalRect.x + finalRect.width / 2),
           y: Math.round(finalRect.y + finalRect.height / 2),
-          itemText: text.slice(0, 100),
+          itemText: itemTextKey,
           imgW: Math.round(finalRect.width),
           imgH: Math.round(finalRect.height),
           priority: isLikelyAvatar ? 0 : 1,
@@ -163,7 +166,7 @@ export async function clickNotificationWorkThumbnail(page) {
 
     if (candidates.length === 0) return { ok: false, reason: 'no comment_on_my_work thumbnail found' };
     return candidates[0];
-  }, { TARGET_PATTERN, ALL_ACTION_PATTERNS });
+  }, { TARGET_PATTERN, ALL_ACTION_PATTERNS, skipItemTexts });
 
   if (!thumbResult.ok) {
     return { ok: false, code: 'THUMBNAIL_NOT_FOUND', message: thumbResult.reason };
@@ -179,7 +182,7 @@ export async function clickNotificationWorkThumbnail(page) {
   console.error(`[work-context] 点击前: ${urlBefore}`);
   console.error(`[work-context] 点击后: ${urlAfter}`);
 
-  return { ok: true, urlBefore, urlAfter };
+  return { ok: true, urlBefore, urlAfter, itemText: thumbResult.itemText };
 }
 
 export async function extractWorkContextFromPage(page, options = {}) {

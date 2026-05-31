@@ -22,6 +22,9 @@ import { clickNotificationWorkThumbnail } from '../adapters/work-context-page.mj
 import { checkWorkOwner, getSelfProfile } from '../adapters/work-context-page.mjs';
 import { generateReplyText } from '../domain/reply-template.mjs';
 import { upsertNotificationEvent } from '../db/interaction-repository.mjs';
+import { upsertWorkContext, findWorkByModalId, findWorkByWorkId } from '../db/work-repository.mjs';
+import { upsertWorkComment, listPendingCommentsGroupedByWork, markCommentReplyPrepared, markCommentReplied, markCommentSentUnverified, markCommentBlocked, markCommentSkipped } from '../db/work-comment-repository.mjs';
+import { upsertRevisitCandidate, listPendingRevisitCandidates, markRevisitDone, markRevisitSkipped, markRevisitBlocked } from '../db/revisit-repository.mjs';
 import { getDb } from '../db/database.mjs';
 import { runMigrations } from '../db/migrations.mjs';
 import { writeJSON, ensureDir } from '../utils/filesystem.mjs';
@@ -30,12 +33,14 @@ import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose 
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-function recordAction(db, eventId, planId, targetTitle, targetUrl, actionText, status, reason, evidenceJson) {
+function recordAction(db, eventId, planId, targetTitle, targetUrl, actionText, actionType, status, reason, evidenceJson) {
   if (!eventId) return;
+  const validStatuses = ['planned','prepared','approved','dry_run_ok','execute_confirmed','running','succeeded','failed','blocked','skipped','sent_unverified'];
+  const safeStatus = validStatuses.includes(status) ? status : 'skipped';
   db.prepare(`
     INSERT INTO actions (event_id, plan_id, action_type, target_title, target_url, action_text, status, reason, evidence_json, executed_at)
-    VALUES (?, ?, 'reply_comment', ?, ?, ?, ?, ?, ?, ?)
-  `).run(eventId, planId, targetTitle, targetUrl, actionText, status, reason || null, evidenceJson || null, new Date().toISOString());
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(eventId, planId, actionType || 'reply_comment', targetTitle, targetUrl, actionText, safeStatus, reason || null, evidenceJson || null, new Date().toISOString());
 }
 
 function updateEventWorkInfo(db, eventId, workId, workUrl, workTitle, rawPayloadJson) {
@@ -52,26 +57,16 @@ function updateEventWorkInfo(db, eventId, workId, workUrl, workTitle, rawPayload
   db.prepare(`UPDATE interaction_events SET ${fields.join(', ')} WHERE id = ?`).run(...params);
 }
 
-function addRevisitCandidate(candidates, notification, reason) {
-  const key = notification.actorProfileKey || notification.actorProfileUrl || notification.username;
-  if (!key) return;
-  const existing = candidates.get(key);
-  if (existing) {
-    if (!existing.reasons.includes(reason)) existing.reasons.push(reason);
-    if (notification.eventId) existing.eventIds.push(notification.eventId);
-    if (notification.content) existing.rawTexts.push(notification.content.slice(0, 200));
-  } else {
-    candidates.set(key, {
-      key,
-      actorName: notification.username || '',
-      actorProfileUrl: notification.actorProfileUrl || '',
-      actorProfileKey: notification.actorProfileKey || '',
-      reasons: [reason],
-      eventIds: notification.eventId ? [notification.eventId] : [],
-      comments: [],
-      rawTexts: notification.content ? [notification.content.slice(0, 200)] : [],
-    });
-  }
+function addRevisitCandidateDB(notification, reason) {
+  const result = upsertRevisitCandidate({
+    actorName: notification.username || '',
+    actorProfileUrl: notification.actorProfileUrl || '',
+    actorProfileKey: notification.actorProfileKey || '',
+    eventId: notification.eventId || null,
+    reason,
+    rawText: notification.content || '',
+  });
+  return result;
 }
 
 async function replyToOneComment(page, comment, workCtx, db, run, options) {
@@ -79,6 +74,7 @@ async function replyToOneComment(page, comment, workCtx, db, run, options) {
     actorName: comment.actorName,
     commentText: comment.commentText,
     commentKey: comment.commentKey,
+    commentDbId: comment.dbId || null,
     status: 'skipped',
     reason: '',
     step: '',
@@ -104,6 +100,10 @@ async function replyToOneComment(page, comment, workCtx, db, run, options) {
   const { replyText, reason: templateReason } = generateReplyText(comment.commentText);
   console.log(`[live]     生成回复: "${replyText}" (${templateReason})`);
 
+  if (r.commentDbId) {
+    markCommentReplyPrepared(r.commentDbId, replyText, `template:${templateReason}`);
+  }
+
   r.step = 'open-reply-box';
   const openResult = await openReplyBoxByIndex(page, comment.commentIndex);
   if (!openResult.ok) {
@@ -111,7 +111,7 @@ async function replyToOneComment(page, comment, workCtx, db, run, options) {
     r.reason = `打开回复框失败: ${openResult.message}`;
     r.code = openResult.code;
     console.log(`[live]     ✗ ${r.reason}`);
-    recordAction(db, 0, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'blocked', r.reason, null);
+    if (r.commentDbId) markCommentBlocked(r.commentDbId, r.reason);
     run.hadBlocked = true;
     return r;
   }
@@ -125,14 +125,13 @@ async function replyToOneComment(page, comment, workCtx, db, run, options) {
       r.reason = `填入回复失败: ${fillResult.message}`;
       r.code = fillResult.code;
       console.log(`[live]     ✗ ${r.reason}`);
-      recordAction(db, 0, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'blocked', r.reason, null);
+      if (r.commentDbId) markCommentBlocked(r.commentDbId, r.reason);
       run.hadBlocked = true;
       return r;
     }
     r.status = 'succeeded';
     r.reason = '预演：已填入回复，未发送';
     console.log(`[live]     ✓ [预演] 已填入: "${replyText.slice(0, 30)}"`);
-    recordAction(db, 0, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'preview', r.reason, null);
     run.succeeded++;
     return r;
   }
@@ -143,7 +142,7 @@ async function replyToOneComment(page, comment, workCtx, db, run, options) {
     r.reason = `发送失败: ${sendResult.message}`;
     r.code = sendResult.code;
     console.log(`[live]     ✗ ${r.reason}`);
-    recordAction(db, 0, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'blocked', r.reason, null);
+    if (r.commentDbId) markCommentBlocked(r.commentDbId, r.reason);
     run.hadBlocked = true;
     return r;
   }
@@ -155,7 +154,7 @@ async function replyToOneComment(page, comment, workCtx, db, run, options) {
     r.reason = verifyResult.message;
     r.code = verifyResult.code;
     console.log(`[live]     ⚠ 发送后未确认: ${verifyResult.message}`);
-    recordAction(db, 0, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'sent_unverified', verifyResult.message, null);
+    if (r.commentDbId) markCommentSentUnverified(r.commentDbId, r.reason);
     run.hadBlocked = true;
     return r;
   }
@@ -164,7 +163,7 @@ async function replyToOneComment(page, comment, workCtx, db, run, options) {
   r.reason = '回复成功';
   console.log(`[live]     ✓ 回复成功: "${replyText.slice(0, 30)}"`);
 
-  recordAction(db, 0, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'succeeded', null, null);
+  if (r.commentDbId) markCommentReplied(r.commentDbId);
   run.succeeded++;
 
   return r;
@@ -192,7 +191,7 @@ async function processWorkModal(page, notification, db, run, options, state) {
 
   r.step = 'click-thumbnail';
   console.log(`[live]   点击通知缩略图...`);
-  const clickResult = await clickNotificationWorkThumbnail(page);
+  const clickResult = await clickNotificationWorkThumbnail(page, { skipItemTexts: state.skippedThumbnailTexts });
   if (!clickResult.ok) {
     r.status = 'blocked';
     r.reason = `点击缩略图失败: ${clickResult.message || clickResult.code}`;
@@ -208,7 +207,8 @@ async function processWorkModal(page, notification, db, run, options, state) {
     r.status = 'skipped';
     r.reason = `作品已删除/不可见: ${earlyRemoved}`;
     console.log(`[live]   跳过: ${r.reason}`);
-    if (r.eventId) recordAction(db, r.eventId, null, '', '', '', 'skipped', r.reason, null);
+    if (clickResult.itemText) state.skippedThumbnailTexts.push(clickResult.itemText);
+    if (r.eventId) recordAction(db, r.eventId, null, '', '', '', 'skip', 'skipped', r.reason, null);
     return r;
   }
 
@@ -220,7 +220,8 @@ async function processWorkModal(page, notification, db, run, options, state) {
       r.status = 'skipped';
       r.reason = `作品已删除/不可见: ${modalResult.message}`;
       console.log(`[live]   跳过: ${r.reason}`);
-      if (r.eventId) recordAction(db, r.eventId, null, '', '', '', 'skipped', r.reason, null);
+      if (clickResult.itemText) state.skippedThumbnailTexts.push(clickResult.itemText);
+      if (r.eventId) recordAction(db, r.eventId, null, '', '', '', 'skip', 'skipped', r.reason, null);
       return r;
     }
     r.status = 'blocked';
@@ -243,13 +244,35 @@ async function processWorkModal(page, notification, db, run, options, state) {
   const workCtx = contextResult.data;
   console.log(`[live]   modalId=${workCtx.modalId} workType=${workCtx.workType} workTitle="${(workCtx.workTitle || '').slice(0, 40)}"`);
 
+  // DB-based dedup: check works table
+  const existingWork = findWorkByModalId(workCtx.modalId) || findWorkByWorkId(workCtx.workId);
+  if (existingWork) {
+    r.status = 'skipped';
+    r.reason = `作品已采集过 (works.id=${existingWork.id})，跳过重复打开`;
+    console.log(`[live]   跳过已采集作品`);
+    return r;
+  }
   if (state.visitedModalIds.has(workCtx.modalId)) {
     r.status = 'skipped';
-    r.reason = `作品 ${workCtx.modalId} 已访问过，跳过`;
+    r.reason = `作品 ${workCtx.modalId} 本轮已访问过，跳过`;
     console.log(`[live]   跳过已访问作品`);
     return r;
   }
   state.visitedModalIds.add(workCtx.modalId);
+
+  // Upsert works to DB
+  const workUpsertResult = upsertWorkContext({
+    workId: workCtx.workId,
+    modalId: workCtx.modalId,
+    workUrl: workCtx.workUrl,
+    workTitle: workCtx.workTitle,
+    workType: workCtx.workType,
+    authorName: workCtx.authorName,
+    authorProfileUrl: workCtx.authorProfileUrl,
+    authorProfileKey: workCtx.authorProfileKey,
+    rawContextJson: JSON.stringify(workCtx),
+  });
+  console.log(`[live]   works表: ${workUpsertResult.action} id=${workUpsertResult.id}`);
 
   if (r.eventId) {
     const rawPayload = { workContextResolved: true, workContextResolveMethod: 'click_notification_thumbnail', workContext: workCtx };
@@ -272,7 +295,7 @@ async function processWorkModal(page, notification, db, run, options, state) {
       r.status = 'skipped';
       r.reason = `作品不属于当前账号 (${ownerResult.ownerCheckMethod})`;
       console.log(`[live]   跳过: ${r.reason}`);
-      if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', '', 'skipped', r.reason, null);
+      if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', '', 'skip', 'skipped', r.reason, null);
       return r;
     }
 
@@ -282,7 +305,7 @@ async function processWorkModal(page, notification, db, run, options, state) {
         r.status = 'skipped';
         r.reason = `无法确认作品归属，需要主人确认`;
         console.log(`[live]   跳过: ${r.reason}`);
-        if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', '', 'skipped', r.reason, null);
+        if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', '', 'skip', 'skipped', r.reason, null);
         return r;
       }
       console.log(`[live]   ⚠ 无法验证作品归属，但通知暗示为自身作品 (${notification.action})，继续执行`);
@@ -302,6 +325,30 @@ async function processWorkModal(page, notification, db, run, options, state) {
 
   const unreplied = scanResult.data.unreplied;
   console.log(`[live]   总评论 ${scanResult.data.total} 条，未回复 ${unreplied.length} 条`);
+
+  // Upsert work_comments to DB
+  let commentsUpserted = 0;
+  for (const comment of unreplied) {
+    const commentKey = `${comment.actorName}::${comment.commentText.slice(0, 80)}`;
+    const upsertResult = upsertWorkComment({
+      workId: workCtx.workId,
+      workUrl: workCtx.workUrl,
+      modalId: workCtx.modalId,
+      actorName: comment.actorName,
+      actorProfileUrl: '',
+      actorProfileKey: '',
+      commentText: comment.commentText,
+      eventTimeText: '',
+      commentKey,
+      sourceEventId: r.eventId || null,
+      sourceNotificationKey: notification.notificationItemKey || null,
+      rawCommentJson: JSON.stringify(comment),
+    });
+    if (upsertResult.action === 'inserted') commentsUpserted++;
+    comment.dbId = upsertResult.id;
+    comment.commentKey = commentKey;
+  }
+  console.log(`[live]   work_comments表: 新增 ${commentsUpserted} 条`);
 
   if (unreplied.length === 0) {
     r.status = 'skipped';
@@ -362,19 +409,20 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
 
   for (let i = 0; i < revisitList.length; i++) {
     const candidate = revisitList[i];
-    console.log(`[live] 回访 ${i + 1}/${revisitList.length} actor=${candidate.actorName} reasons=${candidate.reasons.join(',')}`);
+    console.log(`[live] 回访 ${i + 1}/${revisitList.length} actor=${candidate.actor_name} key=${candidate.revisit_key}`);
 
     if (options.dryRun) {
-      console.log(`[live]   (dry-run) 将回访 ${candidate.actorName}`);
-      revisitResults.push({ actorName: candidate.actorName, status: 'skipped', reason: 'dry-run' });
+      console.log(`[live]   (dry-run) 将回访 ${candidate.actor_name}`);
+      revisitResults.push({ actorName: candidate.actor_name, status: 'skipped', reason: 'dry-run' });
       continue;
     }
 
     try {
-      const profileUrl = candidate.actorProfileUrl || (candidate.actorProfileKey ? `https://www.douyin.com/user/${candidate.actorProfileKey}` : null);
+      const profileUrl = candidate.actor_profile_url || (candidate.actor_profile_key ? `https://www.douyin.com/user/${candidate.actor_profile_key}` : null);
       if (!profileUrl) {
         console.log(`[live]   跳过：无主页 URL`);
-        revisitResults.push({ actorName: candidate.actorName, status: 'skipped', reason: 'no_profile_url' });
+        markRevisitSkipped(candidate.id, 'no_profile_url');
+        revisitResults.push({ actorName: candidate.actor_name, status: 'skipped', reason: 'no_profile_url' });
         continue;
       }
 
@@ -396,7 +444,8 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
 
       if (!firstWork) {
         console.log(`[live]   未找到作品，跳过`);
-        revisitResults.push({ actorName: candidate.actorName, status: 'skipped', reason: 'no_work_found' });
+        markRevisitSkipped(candidate.id, 'no_work_found');
+        revisitResults.push({ actorName: candidate.actor_name, status: 'skipped', reason: 'no_work_found' });
         continue;
       }
 
@@ -416,17 +465,20 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
 
       if (likeResult.ok) {
         console.log(`[live]   点赞成功 (${likeResult.method})`);
-        revisitResults.push({ actorName: candidate.actorName, status: 'succeeded', reason: likeResult.method });
+        markRevisitDone(candidate.id);
+        revisitResults.push({ actorName: candidate.actor_name, status: 'succeeded', reason: likeResult.method });
         run.succeeded++;
       } else {
         console.log(`[live]   点赞失败: ${likeResult.reason}`);
-        revisitResults.push({ actorName: candidate.actorName, status: 'blocked', reason: likeResult.reason });
+        markRevisitBlocked(candidate.id, likeResult.reason);
+        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: likeResult.reason });
       }
 
       await page.waitForTimeout(2000);
     } catch (err) {
       console.log(`[live]   回访异常: ${err.message}`);
-      revisitResults.push({ actorName: candidate.actorName, status: 'blocked', reason: err.message });
+      markRevisitBlocked(candidate.id, err.message);
+      revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: err.message });
     }
   }
 
@@ -478,9 +530,10 @@ async function main() {
   const state = {
     visitedModalIds: new Set(),
     repliedCommentKeys: new Set(),
+    skippedThumbnailTexts: [],
   };
 
-  const revisitCandidates = commonArgs.options.noRevisit ? null : new Map();
+  const revisitCandidates = null; // no longer using in-memory Map
 
   try {
     console.error('[live] 启动浏览器...');
@@ -531,6 +584,24 @@ async function main() {
         return true;
       });
 
+      for (const n of newNotifs) {
+        const eventResult = upsertNotificationEvent({
+          eventType: n.eventType || 'comment',
+          actorName: n.username || '',
+          actorProfileKey: n.actorProfileKey || '',
+          actorProfileUrl: n.actorProfileUrl || '',
+          relation: n.relation || 'unknown',
+          commentText: n.content || '',
+          eventTimeText: n.timeText || '',
+          fingerprint: n.notificationItemKey || `${n.username}|${n.action}|${n.content}`,
+          notificationItemKey: n.notificationItemKey || '',
+          action: n.action || '',
+          content: n.content || '',
+          rawPayloadJson: JSON.stringify(n),
+        });
+        n.eventId = eventResult.eventId;
+      }
+
       const commentNotifs = newNotifs.filter(n => classifyNotification(n) === 'comment_on_my_work');
       const likeNotifs = newNotifs.filter(n => classifyNotification(n) === 'like_received');
       const replyNotifs = newNotifs.filter(n => classifyNotification(n) === 'reply_to_my_comment');
@@ -540,8 +611,8 @@ async function main() {
       console.log(`[live] 第 ${scrollRound + 1} 轮: 通知 ${notifications.length} 条，新增 ${newNotifs.length} 条 (评论${commentNotifs.length} 点赞${likeNotifs.length} 回复${replyNotifs.length} 关注${followNotifs.length} 未知${unknownNotifs.length})`);
 
       for (const n of likeNotifs) {
-        if (revisitCandidates) {
-          addRevisitCandidate(revisitCandidates, n, 'like_received');
+        if (!commonArgs.options.noRevisit) {
+          addRevisitCandidateDB(n, 'like_received');
           console.log(`[live] 点赞通知：actor=${n.username} -> 加入回访候选，稍后统一回访`);
         } else {
           console.log(`[live] noRevisit=true，本轮不收集回访候选`);
@@ -574,8 +645,8 @@ async function main() {
         const result = await processWorkModal(page, n, db, run, commonArgs.options, state);
         results.push(result);
 
-        if (revisitCandidates && (result.status === 'succeeded' || result.status === 'sent_unverified')) {
-          addRevisitCandidate(revisitCandidates, n, 'comment_on_my_work');
+        if (!commonArgs.options.noRevisit && (result.status === 'succeeded' || result.status === 'sent_unverified')) {
+          addRevisitCandidateDB(n, 'comment_on_my_work');
           console.log(`[live] 评论人加入回访候选: actor=${n.username}`);
         }
 
@@ -615,14 +686,11 @@ async function main() {
 
     if (!phase1EndedReason) phase1EndedReason = '滚动轮数上限';
     console.log(`[live] 通知页处理完成 (${phase1EndedReason})`);
-    if (revisitCandidates) {
-      console.log(`[live] 回访候选去重后：${revisitCandidates.size} 人`);
-    }
 
-    if (!commonArgs.options.noRevisit && revisitCandidates && revisitCandidates.size > 0) {
-      console.log(`[live] 第二阶段：统一回访开始`);
-      const revisitList = Array.from(revisitCandidates.values());
-      const revisitResults = await processRevisitCandidates(page, revisitList, db, run, commonArgs.options);
+    const pendingRevisits = commonArgs.options.noRevisit ? [] : listPendingRevisitCandidates({ limit: commonArgs.options.maxRevisits || 20 });
+    if (pendingRevisits.length > 0) {
+      console.log(`[live] 第二阶段：统一回访开始 (${pendingRevisits.length} 人)`);
+      const revisitResults = await processRevisitCandidates(page, pendingRevisits, db, run, commonArgs.options);
       results.push(...revisitResults.map(r => ({ ...r, phase: 'revisit' })));
       console.log(`[live] 统一回访完成`);
     } else if (commonArgs.options.noRevisit) {
@@ -658,13 +726,13 @@ async function main() {
         maxItems: commonArgs.options.maxItems,
         visitedWorks: state.visitedModalIds.size,
         repliedComments: state.repliedCommentKeys.size,
-        revisitCandidates: revisitCandidates ? revisitCandidates.size : 0,
+        revisitCandidates: listPendingRevisitCandidates({ limit: 1 }).length >= 0 ? 'see_db' : 0,
       },
     });
 
     console.log(`[live] 结果已保存: ${resultPath}`);
     console.log(`[live] ${succeeded} 成功 / ${sentUnverified} 未确认 / ${blocked} 阻塞 / ${skipped} 跳过`);
-    console.log(`[live] 访问作品 ${state.visitedModalIds.size} 个，回复评论 ${state.repliedCommentKeys.size} 条，回访候选 ${revisitCandidates ? revisitCandidates.size : 0} 人`);
+    console.log(`[live] 访问作品 ${state.visitedModalIds.size} 个，回复评论 ${state.repliedCommentKeys.size} 条`);
 
     saveRunSummary(run);
 

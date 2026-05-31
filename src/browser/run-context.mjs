@@ -21,6 +21,7 @@ const DEFAULT_OPTIONS = {
   revisit: false,
   noRevisit: false,
   preview: false,
+  maxRevisits: 20,
 };
 
 export function chinaTimestamp() {
@@ -69,6 +70,12 @@ export function parseCommonArgs(argv) {
     if (arg === '--max-items' && i + 1 < argv.length) {
       const n = parseInt(argv[++i]);
       options.maxItems = isNaN(n) || n < 1 ? 1 : n;
+      continue;
+    }
+
+    if (arg === '--max-revisits' && i + 1 < argv.length) {
+      const n = parseInt(argv[++i]);
+      options.maxRevisits = isNaN(n) || n < 1 ? 20 : n;
       continue;
     }
 
