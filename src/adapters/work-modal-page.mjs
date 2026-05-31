@@ -88,36 +88,63 @@ export async function extractWorkModalContext(page) {
   if (videoMatch) { workType = 'video'; workId = 'video-' + videoMatch[1]; }
   else if (noteMatch) { workType = 'note'; workId = 'note-' + noteMatch[1]; }
 
-  let authorName = '', authorProfileKey = '', authorProfileUrl = '';
+  let authorName = '', authorProfileKey = '', authorProfileUrl = '', workTypeFromDom = '';
   try {
     const authorData = await page.evaluate(() => {
       const modal = document.querySelector('.modal-video-container');
       const scope = modal || document.body;
-      let name = '', key = '', url = '';
+      let name = '', key = '', url = '', typeText = '';
 
-      const authorLink = scope.querySelector('a[href*="/user/"]');
-      if (authorLink) {
-        const href = authorLink.getAttribute('href') || '';
-        const match = href.match(/\/user\/([A-Za-z0-9_.-]+)/);
-        if (match) { key = match[1]; url = href; }
-        const text = (authorLink.innerText || '').trim();
+      const nicknameEl = scope.querySelector('[data-e2e="feed-video-nickname"]');
+      if (nicknameEl) {
+        const text = (nicknameEl.innerText || '').trim().replace(/^@/, '');
         if (text.length > 0 && text.length < 50) name = text;
+      }
+
+      if (!name) {
+        const authorLink = scope.querySelector('a[href*="/user/"]');
+        if (authorLink) {
+          const href = authorLink.getAttribute('href') || '';
+          const match = href.match(/\/user\/([A-Za-z0-9_.-]+)/);
+          if (match) { key = match[1]; url = href; }
+          const text = (authorLink.innerText || '').trim().replace(/^@/, '');
+          if (text.length > 0 && text.length < 50) name = text;
+        }
       }
 
       if (!name) {
         const authorEl = scope.querySelector('[class*="author"], [class*="nickname"], [class*="userName"]');
         if (authorEl) {
-          const text = (authorEl.innerText || '').trim();
+          const text = (authorEl.innerText || '').trim().replace(/^@/, '');
           if (text.length > 0 && text.length < 50) name = text;
         }
       }
 
-      return { name, key, url };
+      if (!key) {
+        const authorLink = scope.querySelector('a[href*="/user/"]');
+        if (authorLink) {
+          const href = authorLink.getAttribute('href') || '';
+          const match = href.match(/\/user\/([A-Za-z0-9_.-]+)/);
+          if (match) { key = match[1]; url = href; }
+        }
+      }
+
+      const accountCard = scope.querySelector('.account-card');
+      if (accountCard) {
+        const text = (accountCard.innerText || '').trim();
+        if (text.includes('图文')) typeText = 'note';
+        else if (text.includes('视频')) typeText = 'video';
+      }
+
+      return { name, key, url, typeText };
     });
     authorName = authorData.name;
     authorProfileKey = authorData.key;
     authorProfileUrl = authorData.url;
+    workTypeFromDom = authorData.typeText;
   } catch {}
+
+  if (workTypeFromDom) workType = workTypeFromDom;
 
   const isOwnWorkByUrl = currentUrl.includes('/user/self');
 
