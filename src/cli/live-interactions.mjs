@@ -463,6 +463,73 @@ function findTargetScannedComment(unreplied, comment) {
   }) || unreplied.find(c => prefix && (c.commentText || '').includes(prefix));
 }
 
+function notificationMatchesPreparedComment(notification, comment) {
+  const actorName = (comment.actor_name || '').trim();
+  const commentText = (comment.comment_text || '').trim();
+  const rawText = `${notification.username || ''}\n${notification.content || ''}\n${notification.rawText || ''}`;
+
+  if (actorName && notification.username !== actorName && !rawText.includes(actorName)) {
+    return false;
+  }
+
+  if (!commentText) return false;
+  const needles = [
+    commentText,
+    commentText.slice(0, 20),
+    commentText.replace(/\[[^\]]+\]/g, '').trim().slice(0, 20),
+  ].filter(Boolean);
+  return needles.some(needle => rawText.includes(needle));
+}
+
+async function openPreparedCommentModalFromNotification(page, comment, options = {}) {
+  console.log(`[live]     优先从通知入口打开作品...`);
+
+  await ensureNotificationPageReady(page);
+  const opened = await openNotificationPanel(page);
+  if (!opened) {
+    return { ok: false, reason: 'notification_panel_not_opened' };
+  }
+
+  const stableResult = await waitForNotificationPanelStable(page);
+  if (!stableResult.stable || stableResult.empty) {
+    return { ok: false, reason: 'notification_panel_not_stable_or_empty' };
+  }
+  await moveMouseIntoPanel(page, stableResult.panelBox);
+
+  const maxScrollRounds = options.maxScrollRounds || 5;
+  for (let round = 0; round < maxScrollRounds; round++) {
+    const batchResult = await extractVisibleNotifications(page);
+    if (!batchResult?.ok) {
+      return { ok: false, reason: 'extract_notifications_failed' };
+    }
+
+    const target = (batchResult.data.notifications || []).find(n => {
+      const route = routeNotification(n);
+      return route.notificationAction === 'comment_on_my_work' && notificationMatchesPreparedComment(n, comment);
+    });
+
+    if (target) {
+      const clickResult = await clickNotificationWorkThumbnail(page, {
+        targetActorName: comment.actor_name || '',
+        targetContent: comment.comment_text || '',
+      });
+      if (!clickResult.ok) {
+        return { ok: false, reason: clickResult.message || clickResult.code || 'click_notification_thumbnail_failed' };
+      }
+      await page.waitForTimeout(1500);
+      return { ok: true, method: 'notification_thumbnail', url: page.url() };
+    }
+
+    if (round < maxScrollRounds - 1) {
+      const scrollResult = await scrollPanelDown(page);
+      if (!scrollResult.scrolled || scrollResult.reachedBottom) break;
+      await page.waitForTimeout(1000);
+    }
+  }
+
+  return { ok: false, reason: 'matching_notification_not_found' };
+}
+
 async function executePreparedReplies(page, db, run, options) {
   const preparedComments = listPreparedComments({ limit: options.maxItems || 10, days: options.days || null });
   console.log(`[live] 第三阶段：执行 prepared 回复 (${preparedComments.length} 条, maxItems=${options.maxItems})`);
@@ -511,7 +578,7 @@ async function executePreparedReplies(page, db, run, options) {
     }
 
     const work = resolveWorkForComment(comment);
-    const modalUrl = resolveWorkModalUrl(comment, work);
+    let modalUrl = resolveWorkModalUrl(comment, work);
     if (!work || !modalUrl) {
       result.reason = 'work_or_modal_url_not_found';
       markCommentBlocked(comment.id, result.reason);
@@ -522,9 +589,16 @@ async function executePreparedReplies(page, db, run, options) {
     }
 
     try {
-      console.log(`[live]     打开作品: ${modalUrl}`);
-      await page.goto(modalUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await page.waitForTimeout(3000);
+      const notificationOpenResult = await openPreparedCommentModalFromNotification(page, comment, options);
+      if (notificationOpenResult.ok) {
+        modalUrl = notificationOpenResult.url || modalUrl;
+        console.log(`[live]     已通过通知入口打开作品`);
+      } else {
+        console.log(`[live]     通知入口未找到匹配项，回退到作品链接: ${notificationOpenResult.reason}`);
+        console.log(`[live]     打开作品: ${modalUrl}`);
+        await page.goto(modalUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        await page.waitForTimeout(3000);
+      }
 
       const removed = await detectVideoRemoved(page);
       if (removed) {
