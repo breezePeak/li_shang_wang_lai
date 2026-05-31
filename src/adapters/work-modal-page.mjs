@@ -21,10 +21,27 @@ export async function extractWorkModalContext(page) {
       const modal = document.querySelector('.modal-video-container');
       const scope = modal || document.body;
 
-      const desc = scope.querySelector('[class*="desc"], [class*="title"], [class*="caption"], [class*="mark"]');
-      if (desc) {
-        const text = (desc.innerText || '').trim();
-        if (text.length > 2 && text.length < 500) return text;
+      const specificSelectors = [
+        '[class*="video-desc"]',
+        '[class*="desc-info"]',
+        '[class*="work-desc"]',
+        '[class*="aweme-desc"]',
+        '[class*="publish-desc"]',
+        '[class*="video-info"] [class*="desc"]',
+        '[class*="detail-desc"]',
+      ];
+      for (const sel of specificSelectors) {
+        const el = scope.querySelector(sel);
+        if (el) {
+          const text = (el.innerText || '').trim();
+          if (text.length > 2 && text.length < 500 && !text.includes('回复') && !text.includes('评论')) return text;
+        }
+      }
+
+      const genericDesc = scope.querySelector('[class*="desc"], [class*="caption"], [class*="mark"]');
+      if (genericDesc) {
+        const text = (genericDesc.innerText || '').trim();
+        if (text.length > 2 && text.length < 500 && !text.includes('回复') && !text.includes('评论')) return text;
       }
 
       const ogTitle = document.querySelector('meta[property="og:title"]');
@@ -48,6 +65,37 @@ export async function extractWorkModalContext(page) {
   if (videoMatch) { workType = 'video'; workId = 'video-' + videoMatch[1]; }
   else if (noteMatch) { workType = 'note'; workId = 'note-' + noteMatch[1]; }
 
+  let authorName = '', authorProfileKey = '', authorProfileUrl = '';
+  try {
+    const authorData = await page.evaluate(() => {
+      const modal = document.querySelector('.modal-video-container');
+      const scope = modal || document.body;
+      let name = '', key = '', url = '';
+
+      const authorLink = scope.querySelector('a[href*="/user/"]');
+      if (authorLink) {
+        const href = authorLink.getAttribute('href') || '';
+        const match = href.match(/\/user\/([A-Za-z0-9_.-]+)/);
+        if (match) { key = match[1]; url = href; }
+        const text = (authorLink.innerText || '').trim();
+        if (text.length > 0 && text.length < 50) name = text;
+      }
+
+      if (!name) {
+        const authorEl = scope.querySelector('[class*="author"], [class*="nickname"], [class*="userName"]');
+        if (authorEl) {
+          const text = (authorEl.innerText || '').trim();
+          if (text.length > 0 && text.length < 50) name = text;
+        }
+      }
+
+      return { name, key, url };
+    });
+    authorName = authorData.name;
+    authorProfileKey = authorData.key;
+    authorProfileUrl = authorData.url;
+  } catch {}
+
   return success({
     currentUrl,
     workId,
@@ -56,6 +104,9 @@ export async function extractWorkModalContext(page) {
     workType,
     modalId,
     isModal: true,
+    authorName: authorName || null,
+    authorProfileKey: authorProfileKey || null,
+    authorProfileUrl: authorProfileUrl || null,
   });
 }
 
@@ -63,13 +114,34 @@ export async function waitForWorkModal(page, { timeoutMs = 10000 } = {}) {
   try {
     await page.waitForSelector('.modal-video-container', { state: 'visible', timeout: timeoutMs });
     await page.waitForSelector('.comment-mainContent', { state: 'visible', timeout: 5000 });
+    await page.evaluate(MATCH_COMMENT_INNER);
     return success({ modalVisible: true });
   } catch (err) {
     return blocking(RESULT_CODES.BLOCKED, `作品 modal 未出现: ${err.message}`, { recoverable: false });
   }
 }
 
-export async function findCommentInWorkModal(page, item) {
+const MATCH_COMMENT_INNER = `
+  function matchComment(items, actorName, commentText, eventTimeText) {
+    for (let i = 0; i < items.length; i++) {
+      const text = (items[i].innerText || '').trim();
+      if (!text.includes(commentText)) continue;
+      if (actorName && !text.includes(actorName)) continue;
+      if (eventTimeText && !text.includes(eventTimeText)) continue;
+      const rect = items[i].getBoundingClientRect();
+      return { ok: true, commentIndex: i, previewText: text.slice(0, 200), x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) };
+    }
+    for (let i = 0; i < items.length; i++) {
+      const text = (items[i].innerText || '').trim();
+      if (!text.includes(commentText)) continue;
+      const rect = items[i].getBoundingClientRect();
+      return { ok: true, commentIndex: i, previewText: text.slice(0, 200), x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height), fallback: true };
+    }
+    return null;
+  }
+`;
+
+export async function findCommentInWorkModal(page, item, { maxScrolls = 10 } = {}) {
   const actorName = (item?.actorName || '').trim();
   const commentText = (item?.commentText || '').trim();
   const eventTimeText = (item?.eventTimeText || '').trim();
@@ -84,49 +156,52 @@ export async function findCommentInWorkModal(page, item) {
       if (!commentArea) return { ok: false, reason: 'comment-mainContent not found' };
 
       const items = commentArea.querySelectorAll('.comment-item-info-wrap');
-      for (let i = 0; i < items.length; i++) {
-        const text = (items[i].innerText || '').trim();
-        if (!text.includes(commentText)) continue;
-        if (actorName && !text.includes(actorName)) continue;
-        if (eventTimeText && !text.includes(eventTimeText)) continue;
+      const match = matchComment(items, actorName, commentText, eventTimeText);
+      if (match) return match;
 
-        const rect = items[i].getBoundingClientRect();
-        return {
-          ok: true,
-          commentIndex: i,
-          previewText: text.slice(0, 200),
-          x: Math.round(rect.x),
-          y: Math.round(rect.y),
-          w: Math.round(rect.width),
-          h: Math.round(rect.height),
-        };
-      }
-
-      for (let i = 0; i < items.length; i++) {
-        const text = (items[i].innerText || '').trim();
-        if (!text.includes(commentText)) continue;
-
-        const rect = items[i].getBoundingClientRect();
-        return {
-          ok: true,
-          commentIndex: i,
-          previewText: text.slice(0, 200),
-          x: Math.round(rect.x),
-          y: Math.round(rect.y),
-          w: Math.round(rect.width),
-          h: Math.round(rect.height),
-          fallback: true,
-        };
-      }
-
-      return { ok: false, reason: 'no matching comment', totalItems: items.length };
+      const canScroll = commentArea.scrollHeight > commentArea.clientHeight + 10;
+      return { ok: false, reason: 'no matching comment', totalItems: items.length, canScroll };
     }, { actorName, commentText, eventTimeText });
 
     if (found.ok) {
       return success(found);
     }
 
-    return blocking(RESULT_CODES.COMMENT_ITEM_PARSE_FAILED, found.reason || '评论未找到', { recoverable: true, data: found });
+    if (!found.canScroll) {
+      return blocking(RESULT_CODES.COMMENT_ITEM_PARSE_FAILED, found.reason || '评论未找到', { recoverable: true, data: found });
+    }
+
+    console.error(`[work-modal] 评论区可滚动，开始滚动查找 (max ${maxScrolls})`);
+
+    for (let s = 0; s < maxScrolls; s++) {
+      const scrolled = await page.evaluate(() => {
+        const commentArea = document.querySelector('.comment-mainContent');
+        if (!commentArea) return { scrolled: false, atEnd: true };
+        const prev = commentArea.scrollTop;
+        commentArea.scrollTop = commentArea.scrollHeight;
+        return { scrolled: true, atEnd: commentArea.scrollTop === prev };
+      });
+
+      if (scrolled.atEnd) break;
+
+      await page.waitForTimeout(600);
+
+      const foundAfterScroll = await page.evaluate(({ actorName, commentText, eventTimeText }) => {
+        const commentArea = document.querySelector('.comment-mainContent');
+        if (!commentArea) return { ok: false, reason: 'comment-mainContent not found' };
+        const items = commentArea.querySelectorAll('.comment-item-info-wrap');
+        const match = matchComment(items, actorName, commentText, eventTimeText);
+        if (match) { match.scrolled = true; return match; }
+        return { ok: false, reason: 'no matching comment', totalItems: items.length };
+      }, { actorName, commentText, eventTimeText });
+
+      if (foundAfterScroll.ok) {
+        console.error(`[work-modal] 滚动 ${s + 1} 次后找到评论`);
+        return success(foundAfterScroll);
+      }
+    }
+
+    return blocking(RESULT_CODES.COMMENT_ITEM_PARSE_FAILED, '滚动后仍未找到评论', { recoverable: true });
   } catch (err) {
     return blocking(RESULT_CODES.COMMENT_ITEM_PARSE_FAILED, `查找评论异常: ${err.message}`, { recoverable: true });
   }
@@ -147,20 +222,9 @@ export async function openReplyBoxInWorkModal(page, item) {
       const items = commentArea.querySelectorAll('.comment-item-info-wrap');
       let targetItem = null;
 
-      for (const it of items) {
-        const text = (it.innerText || '').trim();
-        if (!text.includes(commentText)) continue;
-        if (actorName && !text.includes(actorName)) continue;
-        if (eventTimeText && !text.includes(eventTimeText)) continue;
-        targetItem = it;
-        break;
-      }
-
-      if (!targetItem) {
-        for (const it of items) {
-          const text = (it.innerText || '').trim();
-          if (text.includes(commentText)) { targetItem = it; break; }
-        }
+      const m = matchComment(items, actorName, commentText, eventTimeText);
+      if (m && m.ok) {
+        targetItem = items[m.commentIndex];
       }
 
       if (!targetItem) return { ok: false, reason: 'comment not found' };

@@ -6,6 +6,7 @@ import {
   moveMouseIntoPanel,
   closeNotificationPanel,
   extractVisibleNotifications,
+  scrollPanelDown,
 } from '../adapters/notification-page.mjs';
 import {
   waitForWorkModal,
@@ -137,12 +138,16 @@ async function processOneCommentNotification(page, notification, db, run, option
     return r;
   }
 
-  if (ownerResult.isOwnWork === null && !notification.action?.includes('你的作品')) {
-    r.status = 'skipped';
-    r.reason = `无法确认作品归属，需要主人确认`;
-    console.log(`[live]   跳过: ${r.reason}`);
-    if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', '', 'skipped', r.reason, null);
-    return r;
+  if (ownerResult.isOwnWork === null) {
+    const actionSuggestsOwn = notification.action?.includes('你的作品') || notification.action?.includes('你的评论');
+    if (!actionSuggestsOwn) {
+      r.status = 'skipped';
+      r.reason = `无法确认作品归属，需要主人确认`;
+      console.log(`[live]   跳过: ${r.reason}`);
+      if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', '', 'skipped', r.reason, null);
+      return r;
+    }
+    console.log(`[live]   ⚠ 无法验证作品归属，但通知暗示为自身作品 (${notification.action})，继续执行`);
   }
 
   if (options.dryRun) {
@@ -253,29 +258,64 @@ async function main() {
     await moveMouseIntoPanel(page, panelBox);
     console.error('[live] 通知面板已就绪');
 
-    const batchResult = await extractVisibleNotifications(page);
-    if (!batchResult || !batchResult.ok) {
-      console.error('[live] 采集通知失败');
-      process.exit(1);
-    }
-
-    const notifications = batchResult.data.notifications || [];
-    const commentNotifs = notifications.filter(n => n.eventType === 'comment');
-
     console.log(`[live] 模式: ${commonArgs.options.dryRun ? 'dry-run' : 'execute'}`);
-    console.log(`[live] 通知: ${notifications.length} 条，评论: ${commentNotifs.length} 条`);
 
-    for (const n of commentNotifs) {
-      const result = await processOneCommentNotification(page, n, db, run, commonArgs.options);
-      results.push(result);
+    const seenKeys = new Set();
+    const maxScrollRounds = 5;
 
-      if (run.processed >= commonArgs.options.maxItems) {
-        console.log(`[live] 已达到 maxItems ${commonArgs.options.maxItems}`);
+    for (let scrollRound = 0; scrollRound < maxScrollRounds; scrollRound++) {
+      const batchResult = await extractVisibleNotifications(page);
+      if (!batchResult || !batchResult.ok) {
+        console.error(`[live] 第 ${scrollRound + 1} 轮采集通知失败`);
         break;
       }
 
-      await page.goto('https://www.douyin.com/user/self', { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await page.waitForTimeout(2000);
+      const notifications = batchResult.data.notifications || [];
+      const newNotifs = notifications.filter(n => {
+        const key = n.notificationItemKey || `${n.username}|${n.action}|${n.content}`;
+        if (seenKeys.has(key)) return false;
+        seenKeys.add(key);
+        return true;
+      });
+
+      const commentNotifs = newNotifs.filter(n => n.eventType === 'comment');
+      console.log(`[live] 第 ${scrollRound + 1} 轮: 通知 ${notifications.length} 条，新增 ${newNotifs.length} 条，评论 ${commentNotifs.length} 条`);
+
+      for (const n of commentNotifs) {
+        const result = await processOneCommentNotification(page, n, db, run, commonArgs.options);
+        results.push(result);
+
+        if (run.processed >= commonArgs.options.maxItems) {
+          console.log(`[live] 已达到 maxItems ${commonArgs.options.maxItems}`);
+          break;
+        }
+
+        await page.goto('https://www.douyin.com/user/self', { waitUntil: 'domcontentloaded', timeout: 15000 });
+        await page.waitForTimeout(2000);
+
+        const reopened = await openNotificationPanel(page);
+        if (reopened) {
+          const { stable: s2, empty: e2, panelBox: pb2 } = await waitForNotificationPanelStable(page);
+          if (s2 && !e2 && pb2) await moveMouseIntoPanel(page, pb2);
+        }
+      }
+
+      if (run.processed >= commonArgs.options.maxItems) break;
+
+      if (batchResult.data.noMoreData) {
+        console.log(`[live] 没有更多通知`);
+        break;
+      }
+
+      if (scrollRound < maxScrollRounds - 1) {
+        console.log(`[live] 滚动加载更多通知...`);
+        const scrollResult = await scrollPanelDown(page);
+        if (!scrollResult.scrolled || scrollResult.reachedBottom) {
+          console.log(`[live] 无法继续滚动`);
+          break;
+        }
+        await page.waitForTimeout(1500);
+      }
     }
 
   } catch (err) {
