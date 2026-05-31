@@ -227,8 +227,9 @@ export async function waitForWorkModal(page, { timeoutMs = 10000 } = {}) {
 
     // Check for "加载失败" error in modal
     const loadFailed = await page.evaluate(() => {
-      const errorPage = document.querySelector('[data-e2e="error-page"]');
-      if (errorPage) {
+      const errorPages = document.querySelectorAll('[data-e2e="error-page"]');
+      for (const errorPage of errorPages) {
+        if (errorPage.closest('#videoSideCard, #relatedVideoCard')) continue;
         const text = (errorPage.innerText || '').trim();
         if (text.includes('加载失败') || text.includes('网络') || text.includes('稍后重试')) return text.slice(0, 80);
       }
@@ -349,6 +350,7 @@ export async function detectVideoRemoved(page) {
     }
     const overlays = document.querySelectorAll('[class*="error"], [class*="empty"], [class*="removed"], [class*="deleted"], [class*="not-found"]');
     for (const el of overlays) {
+      if (el.closest('#videoSideCard, #relatedVideoCard')) continue;
       const rect = el.getBoundingClientRect();
       if (rect.width > 200 && rect.height > 100) {
         const text = (el.innerText || '').trim();
@@ -589,8 +591,9 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
         await page.waitForTimeout(1500 + Math.floor(Math.random() * 2500));
 
         const hasError = await page.evaluate(() => {
-          const errorPage = document.querySelector('[data-e2e="error-page"]');
-          if (errorPage) {
+          const errorPages = document.querySelectorAll('[data-e2e="error-page"]');
+          for (const errorPage of errorPages) {
+            if (errorPage.closest('#videoSideCard, #relatedVideoCard')) continue;
             const text = (errorPage.innerText || '').trim();
             if (text.includes('加载失败')) return true;
           }
