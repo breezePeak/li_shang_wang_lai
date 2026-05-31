@@ -162,6 +162,80 @@ app.post('/api/revisit-tasks/:id/skip', (req, res) => {
   }
 });
 
+// 4b. POST /api/revisit-tasks/bulk-approve: 批量批准回访任务并更新 AI 评论
+app.post('/api/revisit-tasks/bulk-approve', (req, res) => {
+  const { tasks } = req.body;
+
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    return res.status(400).json({ ok: false, error: '审批任务列表不能为空' });
+  }
+
+  try {
+    const db = getDb();
+    const now = new Date().toISOString();
+
+    const bulkApprove = db.transaction((taskList) => {
+      const updateStmt = db.prepare(`
+        UPDATE return_visit_tasks 
+        SET generated_comment = ?, status = 'pending_execute', comment_status = 'generated', updated_at = ?, retry_count = 0, last_error = null
+        WHERE id = ?
+      `);
+
+      let updatedCount = 0;
+      for (const task of taskList) {
+        if (task.id && task.commentText && task.commentText.trim()) {
+          const result = updateStmt.run(task.commentText.trim(), now, task.id);
+          if (result.changes > 0) {
+            updatedCount++;
+          }
+        }
+      }
+      return updatedCount;
+    });
+
+    const count = bulkApprove(tasks);
+    res.json({ ok: true, message: `成功批量批准通过了 ${count} 个回访任务` });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 4c. POST /api/revisit-tasks/bulk-skip: 批量跳过回访任务
+app.post('/api/revisit-tasks/bulk-skip', (req, res) => {
+  const { ids, reason = 'user_skipped_bulk' } = req.body;
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ ok: false, error: '跳过的任务 ID 列表不能为空' });
+  }
+
+  try {
+    const db = getDb();
+    const now = new Date().toISOString();
+
+    const bulkSkip = db.transaction((idList) => {
+      const updateStmt = db.prepare(`
+        UPDATE return_visit_tasks 
+        SET status = 'skipped_no_suitable_work', last_error = ?, updated_at = ?
+        WHERE id = ?
+      `);
+
+      let updatedCount = 0;
+      for (const id of idList) {
+        const result = updateStmt.run(reason, now, id);
+        if (result.changes > 0) {
+          updatedCount++;
+        }
+      }
+      return updatedCount;
+    });
+
+    const count = bulkSkip(ids);
+    res.json({ ok: true, message: `成功批量跳过了 ${count} 个回访任务` });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // 5. GET /api/pending-comments: 获取暂缓回复的评论列表
 app.get('/api/pending-comments', (req, res) => {
   try {

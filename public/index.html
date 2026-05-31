@@ -87,8 +87,45 @@
           <h2>回访任务列表 <span class="badge" id="review-count">0</span></h2>
           <p class="pane-subtitle">在此处审核由 AI 基于好友作品上下文生成的互动回复草稿，审核通过后该任务将进入下一轮物理加固执行队列。</p>
         </div>
-        <div class="task-grid" id="review-task-grid">
-          <!-- 动态加载任务卡片 -->
+
+        <!-- 过滤器和视图切换器 -->
+        <div class="control-panel">
+          <div class="search-box">
+            <i class="fa-solid fa-magnifying-glass search-icon"></i>
+            <input type="text" id="search-input" placeholder="搜索用户昵称、作品标题、评论候选...">
+          </div>
+          <div class="filters-group">
+            <div class="select-wrapper">
+              <i class="fa-solid fa-filter"></i>
+              <select id="filter-status">
+                <option value="all">所有状态</option>
+                <option value="pending">准备中</option>
+                <option value="ready">等待执行</option>
+                <option value="failed">执行失败</option>
+              </select>
+            </div>
+            <div class="select-wrapper">
+              <i class="fa-solid fa-user-group"></i>
+              <select id="filter-relation">
+                <option value="all">所有关系</option>
+                <option value="follow">互关</option>
+                <option value="other">粉丝/朋友</option>
+              </select>
+            </div>
+          </div>
+          <div class="view-switcher">
+            <button class="view-btn active" id="btn-view-grid" title="卡片网格视图">
+              <i class="fa-solid fa-grip"></i> 网格卡片
+            </button>
+            <button class="view-btn" id="btn-view-table" title="紧凑表格视图">
+              <i class="fa-solid fa-table-list"></i> 紧凑表格
+            </button>
+          </div>
+        </div>
+
+        <!-- 通用渲染容器 (表格与网格均在内部渲染) -->
+        <div id="review-container" class="view-grid">
+          <!-- 动态加载内容 -->
           <div class="empty-state">
             <i class="fa-solid fa-circle-check"></i>
             <p>目前没有待审核的回访任务，全部运转正常！</p>
@@ -115,6 +152,27 @@
 
   <!-- Notification Toast 全局提示 -->
   <div class="toast-container" id="toast-container"></div>
+
+  <!-- Floating Bulk Action Bar 悬浮批量操作栏 -->
+  <div class="bulk-floating-bar" id="bulk-action-bar">
+    <div class="bulk-bar-content">
+      <div class="bulk-info">
+        <span class="bulk-icon"><i class="fa-solid fa-list-check"></i></span>
+        <span class="bulk-count">已选中 <strong id="selected-count">0</strong> 项任务</span>
+      </div>
+      <div class="bulk-actions">
+        <button class="btn btn-primary" id="btn-bulk-approve">
+          <i class="fa-solid fa-circle-check"></i> 批量批准通过
+        </button>
+        <button class="btn btn-danger" id="btn-bulk-skip">
+          <i class="fa-solid fa-circle-xmark"></i> 批量跳过所选
+        </button>
+        <button class="btn btn-secondary" id="btn-bulk-cancel">
+          取消选择
+        </button>
+      </div>
+    </div>
+  </div>
 
   <script src="index.js"></script>
 </body>
