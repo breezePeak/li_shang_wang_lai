@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>礼尚往来 · 创作者回访控制驾驶舱</title>
+  <link rel="stylesheet" href="index.css">
+  <!-- Google Fonts & FontAwesome -->
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Noto+Sans+SC:wght@300;400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+  <!-- 背景动效立体光晕 -->
+  <div class="bg-glow glow-1"></div>
+  <div class="bg-glow glow-2"></div>
+
+  <div class="app-container">
+    <!-- Header 头部 -->
+    <header class="app-header">
+      <div class="header-logo">
+        <div class="logo-icon"><i class="fa-solid fa-gift"></i></div>
+        <div class="logo-text">
+          <h1>礼尚往来</h1>
+          <p>DOUYIN CREATOR COCKPIT</p>
+        </div>
+      </div>
+      <div class="header-status">
+        <span class="status-indicator online"></span>
+        <span class="status-label">SQLite WAL 驱动已就绪</span>
+      </div>
+    </header>
+
+    <!-- Stats Panel 统计仪表盘 -->
+    <section class="stats-container">
+      <div class="stat-card stat-total">
+        <div class="stat-icon"><i class="fa-solid fa-database"></i></div>
+        <div class="stat-info">
+          <h3>累计回访用户</h3>
+          <span class="stat-value" id="stat-total-tasks">0</span>
+        </div>
+        <div class="card-glow"></div>
+      </div>
+
+      <div class="stat-card stat-likes">
+        <div class="stat-icon"><i class="fa-solid fa-heart"></i></div>
+        <div class="stat-info">
+          <h3>待点赞作品</h3>
+          <span class="stat-value" id="stat-pending-likes">0</span>
+        </div>
+        <div class="card-glow"></div>
+      </div>
+
+      <div class="stat-card stat-comments">
+        <div class="stat-icon"><i class="fa-solid fa-comment-dots"></i></div>
+        <div class="stat-info">
+          <h3>待审核回访评论</h3>
+          <span class="stat-value" id="stat-pending-comments">0</span>
+        </div>
+        <div class="card-glow"></div>
+      </div>
+
+      <div class="stat-card stat-replies">
+        <div class="stat-icon"><i class="fa-solid fa-reply-all"></i></div>
+        <div class="stat-info">
+          <h3>暂缓回复评论</h3>
+          <span class="stat-value" id="stat-pending-replies">0</span>
+        </div>
+        <div class="card-glow"></div>
+      </div>
+    </section>
+
+    <!-- Tabs Navigation 选项卡 -->
+    <nav class="nav-tabs">
+      <button class="tab-btn active" data-tab="tab-review">
+        <i class="fa-solid fa-shield-halved"></i> 回访大厅 · 现场审核
+      </button>
+      <button class="tab-btn" data-tab="tab-pending">
+        <i class="fa-solid fa-circle-pause"></i> 暂缓回复评论队列
+      </button>
+    </nav>
+
+    <!-- Tab Contents 内容区 -->
+    <main class="main-content">
+      <!-- 选项卡 1：回访审核 -->
+      <div id="tab-review" class="tab-pane active">
+        <div class="pane-header">
+          <h2>回访任务列表 <span class="badge" id="review-count">0</span></h2>
+          <p class="pane-subtitle">在此处审核由 AI 基于好友作品上下文生成的互动回复草稿，审核通过后该任务将进入下一轮物理加固执行队列。</p>
+        </div>
+        <div class="task-grid" id="review-task-grid">
+          <!-- 动态加载任务卡片 -->
+          <div class="empty-state">
+            <i class="fa-solid fa-circle-check"></i>
+            <p>目前没有待审核的回访任务，全部运转正常！</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 选项卡 2：暂缓回复 -->
+      <div id="tab-pending" class="tab-pane">
+        <div class="pane-header">
+          <h2>暂未回复评论展示区 <span class="badge badge-replies" id="pending-count">0</span></h2>
+          <p class="pane-subtitle">这里是系统已扫描入库、但按照规则自动暂缓且需要人工确认是否回复的评论。批准后才会加入回复队列。</p>
+        </div>
+        <div class="pending-list" id="pending-comment-list">
+          <!-- 动态加载挂起评论 -->
+          <div class="empty-state">
+            <i class="fa-solid fa-face-smile-beam"></i>
+            <p>没有暂缓回复的好友评论。</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Notification Toast 全局提示 -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="index.js"></script>
+</body>
+</html>
