@@ -12,28 +12,10 @@ export function upsertWorkContext(workContext) {
     rawContextJson,
   } = workContext;
 
-  if (workId) {
-    const existing = db.prepare('SELECT * FROM works WHERE work_id = ?').get(workId);
-    if (existing) {
-      _updateWork(db, existing.id, workContext, now);
-      return { action: 'enriched', id: existing.id };
-    }
-  }
-
-  if (!workId && modalId) {
-    const existing = db.prepare('SELECT * FROM works WHERE modal_id = ?').get(modalId);
-    if (existing) {
-      _updateWork(db, existing.id, workContext, now);
-      return { action: 'enriched', id: existing.id };
-    }
-  }
-
-  if (!workId && !modalId && thumbnailKey) {
-    const existing = db.prepare('SELECT * FROM works WHERE thumbnail_key = ?').get(thumbnailKey);
-    if (existing) {
-      _updateWork(db, existing.id, workContext, now);
-      return { action: 'enriched', id: existing.id };
-    }
+  const existing = _findExistingWork(db, { workId, modalId, thumbnailKey });
+  if (existing) {
+    _updateWork(db, existing, workContext, now);
+    return { action: 'enriched', id: existing.id };
   }
 
   const stmt = db.prepare(`
@@ -50,10 +32,29 @@ export function upsertWorkContext(workContext) {
   return { action: 'inserted', id: result.lastInsertRowid };
 }
 
-function _updateWork(db, id, ctx, now) {
+function _findExistingWork(db, { workId, modalId, thumbnailKey }) {
+  if (workId) {
+    const existing = db.prepare('SELECT * FROM works WHERE work_id = ?').get(workId);
+    if (existing) return existing;
+  }
+  if (modalId) {
+    const existing = db.prepare('SELECT * FROM works WHERE modal_id = ?').get(modalId);
+    if (existing) return existing;
+  }
+  if (thumbnailKey) {
+    const existing = db.prepare('SELECT * FROM works WHERE thumbnail_key = ?').get(thumbnailKey);
+    if (existing) return existing;
+  }
+  return null;
+}
+
+function _updateWork(db, existing, ctx, now) {
   const updates = [];
   const params = [];
 
+  if (ctx.workId && !existing.work_id) { updates.push('work_id = ?'); params.push(ctx.workId); }
+  if (ctx.modalId && !existing.modal_id) { updates.push('modal_id = ?'); params.push(ctx.modalId); }
+  if (ctx.thumbnailKey && !existing.thumbnail_key) { updates.push('thumbnail_key = ?'); params.push(ctx.thumbnailKey); }
   if (ctx.workTitle && ctx.workTitle.length > 0) { updates.push('work_title = ?'); params.push(ctx.workTitle); }
   if (ctx.workUrl && ctx.workUrl.length > 0) { updates.push('work_url = ?'); params.push(ctx.workUrl); }
   if (ctx.workType && ctx.workType.length > 0) { updates.push('work_type = ?'); params.push(ctx.workType); }
@@ -64,10 +65,9 @@ function _updateWork(db, id, ctx, now) {
   if (ctx.thumbnailSrc && ctx.thumbnailSrc.length > 0) { updates.push('thumbnail_src = ?'); params.push(ctx.thumbnailSrc); }
   if (ctx.rawContextJson) { updates.push('raw_context_json = ?'); params.push(ctx.rawContextJson); }
 
-  if (updates.length === 0) return;
   updates.push('last_seen_at = ?');
   params.push(now);
-  params.push(id);
+  params.push(existing.id);
   db.prepare(`UPDATE works SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 }
 

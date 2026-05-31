@@ -137,6 +137,23 @@ async function processOneLikeEvent(page, event) {
   return r;
 }
 
+function buildJsonPreviewCandidate(event) {
+  const eligibleRelation = event.relation === 'friend' || event.relation === 'mutual';
+  return {
+    eventId: event.id,
+    actorName: event.actor_name,
+    relation: event.relation,
+    actorProfileUrl: event.actor_profile_url || null,
+    targetVideoUrl: null,
+    targetVideoTitle: null,
+    alreadyLiked: false,
+    status: eligibleRelation ? 'planned' : 'skipped',
+    reason: eligibleRelation ? null : `关系为 ${event.relation}，非好友/互关`,
+    previewOnly: true,
+    executeAllowed: false,
+  };
+}
+
 async function main() {
   console.error('[likes:plan] 当前链路：点赞/回赞计划生成');
   console.error('[likes:plan] 行为：从 interaction_events 读取点赞事件 → 生成 plan');
@@ -162,6 +179,17 @@ async function main() {
   }
 
   console.error(`[plan-likes] 找到 ${likes.length} 个点赞事件`);
+
+  if (commonArgs.options.json) {
+    const candidates = likes.map(buildJsonPreviewCandidate);
+    printJsonResult('likes:plan', { candidates }, {
+      total: candidates.length,
+      planned: candidates.filter(i => i.status === 'planned').length,
+      skipped: candidates.filter(i => i.status === 'skipped').length,
+      blocked: 0,
+    }, ['json_mode_preview_only_no_browser']);
+    return;
+  }
 
   const run = createRunContext('plan-likes', commonArgs.options);
   const db = getDb();

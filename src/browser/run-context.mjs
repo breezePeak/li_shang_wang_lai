@@ -21,7 +21,14 @@ const DEFAULT_OPTIONS = {
   revisit: false,
   noRevisit: false,
   preview: false,
+  aiReply: false,
   maxRevisits: 20,
+  maxNotifications: 50,
+  maxScrollRounds: 5,
+  aiMaxComments: 10,
+  aiTimeoutMs: 30000,
+  replyMaxLength: 40,
+  revisitLikeOnly: true,
   days: null,
 };
 
@@ -59,6 +66,8 @@ export function parseCommonArgs(argv) {
       '--revisit': 'revisit',
       '--no-revisit': 'noRevisit',
       '--preview': 'preview',
+      '--ai-reply': 'aiReply',
+      '--revisit-like-only': 'revisitLikeOnly',
     };
 
     if (boolFlags[arg]) {
@@ -77,6 +86,36 @@ export function parseCommonArgs(argv) {
     if (arg === '--max-revisits' && i + 1 < argv.length) {
       const n = parseInt(argv[++i]);
       options.maxRevisits = isNaN(n) || n < 1 ? 20 : n;
+      continue;
+    }
+
+    if (arg === '--max-notifications' && i + 1 < argv.length) {
+      const n = parseInt(argv[++i]);
+      options.maxNotifications = isNaN(n) || n < 1 ? DEFAULT_OPTIONS.maxNotifications : n;
+      continue;
+    }
+
+    if (arg === '--max-scroll-rounds' && i + 1 < argv.length) {
+      const n = parseInt(argv[++i]);
+      options.maxScrollRounds = isNaN(n) || n < 1 ? DEFAULT_OPTIONS.maxScrollRounds : n;
+      continue;
+    }
+
+    if (arg === '--ai-max-comments' && i + 1 < argv.length) {
+      const n = parseInt(argv[++i]);
+      options.aiMaxComments = isNaN(n) || n < 1 ? DEFAULT_OPTIONS.aiMaxComments : n;
+      continue;
+    }
+
+    if (arg === '--ai-timeout-ms' && i + 1 < argv.length) {
+      const n = parseInt(argv[++i]);
+      options.aiTimeoutMs = isNaN(n) || n < 1 ? DEFAULT_OPTIONS.aiTimeoutMs : n;
+      continue;
+    }
+
+    if (arg === '--reply-max-length' && i + 1 < argv.length) {
+      const n = parseInt(argv[++i]);
+      options.replyMaxLength = isNaN(n) || n < 1 ? DEFAULT_OPTIONS.replyMaxLength : n;
       continue;
     }
 
@@ -131,6 +170,10 @@ export function parseCommonArgs(argv) {
     options.observeMs = Math.min(options.observeMs, 1000);
     options.profileSettleMs = Math.max(Math.min(options.profileSettleMs, 3000), 3000);
     options.videoSettleMs = Math.max(Math.min(options.videoSettleMs, 3000), 3000);
+  }
+
+  if (options.aiReply) {
+    options.replyMode = 'ai';
   }
 
   return { options, remaining };

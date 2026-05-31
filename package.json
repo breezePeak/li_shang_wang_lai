@@ -49,8 +49,10 @@
     "dev:inspect-page": "node ./src/cli/dev-inspect-page.mjs",
     "history": "node ./src/cli/show-history.mjs",
     "server": "node ./src/server.mjs",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "npm run test:live",
+    "test:live": "vitest run tests/unit/notification-action-router.test.mjs tests/unit/migrations-actions-status.test.mjs tests/unit/interaction-repository.test.mjs tests/unit/notification-dedup.test.mjs tests/unit/work-modal-page.test.mjs tests/unit/work-context-owner-check.test.mjs tests/unit/reply-template.test.mjs tests/unit/like-state-detection.test.mjs tests/unit/like-plan-safety.test.mjs",
+    "test:full": "vitest run",
+    "test:watch": "vitest tests/unit/notification-action-router.test.mjs tests/unit/migrations-actions-status.test.mjs tests/unit/interaction-repository.test.mjs tests/unit/notification-dedup.test.mjs tests/unit/work-modal-page.test.mjs tests/unit/work-context-owner-check.test.mjs tests/unit/reply-template.test.mjs tests/unit/like-state-detection.test.mjs tests/unit/like-plan-safety.test.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",

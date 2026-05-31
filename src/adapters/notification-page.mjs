@@ -207,7 +207,7 @@ export async function waitForNotificationPanelStable(page) {
     })();
     if (!panel) return { panelFound: false, empty: true };
     const text = (panel.innerText || '').trim();
-    const actionPatterns = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '评论了你的作品', '回复了你的评论'];
+    const actionPatterns = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '回复了你的评论'];
     const hasEmpty = text.includes('暂无消息') || text.includes('暂无通知') || text.includes('没有更多了');
     const hasAction = actionPatterns.some(p => text.includes(p));
     return { panelFound: true, empty: hasEmpty && !hasAction };
@@ -268,7 +268,7 @@ export async function scrollPanelDown(page, { deltaY = 600 } = {}) {
 export async function extractVisibleNotifications(page) {
   const result = await page.evaluate(() => {
     // --- Constants must be inline inside evaluate() ---
-    const ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '评论了你的作品', '回复了你的评论'];
+    const ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '回复了你的评论'];
     const TIME_PATTERN = /^(\d{2}:\d{2}|\d+[秒分时天周月年]前|\d{2}-\d{2}|\d+月\d+日|昨天\s?\d{2}:\d{2}|星期\S)$/;
     const SKIP_SET = new Set(['互动消息', '全部消息', '点击加载更多', '加载更多', '没有更多了', '暂无消息', '推荐了你的视频']);
 
@@ -431,7 +431,7 @@ export async function extractVisibleNotifications(page) {
         for (const pat of ACTION_PATTERNS) {
           if (lines[k].includes(pat)) {
             action = pat;
-            eventType = pat.includes('赞了') ? 'like' : 'comment';
+            eventType = (pat.includes('赞了') || pat.includes('点赞')) ? 'like' : 'comment';
             if (k > idx) content = lines.slice(idx, k).join(' ');
             idx = k + 1;
             break;
@@ -500,6 +500,25 @@ export async function extractVisibleNotifications(page) {
         }
       }
 
+      let thumbnailSrc = '', thumbnailAlt = '', thumbnailKey = '';
+      const imgs = itemEl.querySelectorAll('img');
+      for (const img of imgs) {
+        const src = img.getAttribute('src') || '';
+        const alt = (img.getAttribute('alt') || '').trim();
+        const rect = img.getBoundingClientRect();
+        if (!src || rect.width < 20 || rect.height < 20) continue;
+        if (src.includes('aweme-avatar')) continue;
+        const isLikelyAvatar = rect.width <= 60 && rect.height <= 60;
+        if (isLikelyAvatar && imgs.length > 1) continue;
+        thumbnailSrc = src;
+        thumbnailAlt = alt;
+        break;
+      }
+      if (thumbnailSrc) {
+        const stableSrc = thumbnailSrc.split('?')[0].replace(/^https?:\/\//, '').slice(0, 260);
+        thumbnailKey = stableSrc || thumbnailAlt;
+      }
+
       const itemData = {
         username: username.slice(0, 50),
         relation, eventType, action,
@@ -511,6 +530,9 @@ export async function extractVisibleNotifications(page) {
         workUrl,
         workId,
         workTitle: workTitle.slice(0, 120),
+        thumbnailSrc,
+        thumbnailAlt,
+        thumbnailKey,
         platformEventId,
       };
       itemData.notificationItemKey = generateItemKey(itemData);
@@ -746,7 +768,7 @@ export async function debugDumpNotificationItems(page, debugDir) {
 
   ensureDir(debugDir);
 
-  const ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '评论了你的作品', '回复了你的评论'];
+  const ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '回复了你的评论'];
 
   const debugData = await page.evaluate((ACTION_PATTERNS) => {
     function findNotificationPanel() {
@@ -888,7 +910,7 @@ export async function debugDumpNotificationItems(page, debugDir) {
         for (const pat of ACTION_PATTERNS) {
           if (line.includes(pat)) {
             action = pat;
-            eventType = pat.includes('赞了') ? 'like' : 'comment';
+            eventType = (pat.includes('赞了') || pat.includes('点赞')) ? 'like' : 'comment';
             break;
           }
         }

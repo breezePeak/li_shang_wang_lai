@@ -89,10 +89,10 @@ export function checkWorkOwner(workContext, selfProfile) {
 }
 
 export async function clickNotificationWorkThumbnail(page, { skipItemTexts = [], targetActorName = '', targetContent = '' } = {}) {
-  const TARGET_PATTERN = '评论了你的作品';
-  const ALL_ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '评论了你的作品', '回复了你的评论'];
+  const TARGET_PATTERNS = ['评论了你的作品', '评论了你的视频'];
+  const ALL_ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '回复了你的评论'];
 
-  const thumbResult = await page.evaluate(({ TARGET_PATTERN, ALL_ACTION_PATTERNS, skipItemTexts, targetActorName, targetContent }) => {
+  const thumbResult = await page.evaluate(({ TARGET_PATTERNS, ALL_ACTION_PATTERNS, skipItemTexts, targetActorName, targetContent }) => {
     function findNotificationPanel() {
       for (const el of document.querySelectorAll('*')) {
         const t = (el.innerText || '').trim();
@@ -124,7 +124,7 @@ export async function clickNotificationWorkThumbnail(page, { skipItemTexts = [],
       const text = (el.innerText || '').trim();
       if (text.length < 5) continue;
 
-      if (!text.includes(TARGET_PATTERN)) continue;
+      if (!TARGET_PATTERNS.some(pattern => text.includes(pattern))) continue;
 
       let totalActionCount = 0;
       for (const pat of ALL_ACTION_PATTERNS) {
@@ -172,7 +172,7 @@ export async function clickNotificationWorkThumbnail(page, { skipItemTexts = [],
     const best = candidates[0];
     best.clicked = true;
     return best;
-  }, { TARGET_PATTERN, ALL_ACTION_PATTERNS, skipItemTexts, targetActorName, targetContent });
+  }, { TARGET_PATTERNS, ALL_ACTION_PATTERNS, skipItemTexts, targetActorName, targetContent });
 
   if (!thumbResult.ok) {
     return { ok: false, code: 'THUMBNAIL_NOT_FOUND', message: thumbResult.reason };

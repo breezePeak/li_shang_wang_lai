@@ -22,9 +22,10 @@ import {
 import { clickNotificationWorkThumbnail } from '../adapters/work-context-page.mjs';
 import { checkWorkOwner, getSelfProfile } from '../adapters/work-context-page.mjs';
 import { generateReplyText } from '../domain/reply-template.mjs';
+import { classifyNotificationAction } from '../domain/notification-action-router.mjs';
 import { upsertNotificationEvent } from '../db/interaction-repository.mjs';
-import { upsertWorkContext, findWorkByModalId, findWorkByWorkId } from '../db/work-repository.mjs';
-import { upsertWorkComment, listPendingCommentsGroupedByWork, markCommentReplyPrepared, markCommentReplied, markCommentSentUnverified, markCommentBlocked, markCommentSkipped, findCommentByActorAndText } from '../db/work-comment-repository.mjs';
+import { upsertWorkContext, findWorkByModalId, findWorkByWorkId, findWorkByThumbnailKey } from '../db/work-repository.mjs';
+import { upsertWorkComment, listPendingCommentsGroupedByWork, listPreparedComments, markCommentReplyPrepared, markCommentReplied, markCommentSentUnverified, markCommentBlocked, markCommentSkipped, findCommentByActorAndText } from '../db/work-comment-repository.mjs';
 import { upsertRevisitCandidate, listPendingRevisitCandidates, markRevisitDone, markRevisitSkipped, markRevisitBlocked } from '../db/revisit-repository.mjs';
 import { getDb } from '../db/database.mjs';
 import { runMigrations } from '../db/migrations.mjs';
@@ -190,6 +191,19 @@ async function processWorkModal(page, notification, db, run, options, state) {
     return r;
   }
 
+  if (notification.thumbnailKey) {
+    const existingByThumbnail = findWorkByThumbnailKey(notification.thumbnailKey);
+    if (existingByThumbnail) {
+      r.status = 'skipped';
+      r.reason = `作品缩略图已采集过 (works.id=${existingByThumbnail.id})`;
+      console.log(`[live]   跳过已采集作品缩略图: ${notification.thumbnailKey.slice(0, 60)}`);
+      if (r.eventId) {
+        updateEventWorkInfo(db, r.eventId, existingByThumbnail.work_id, existingByThumbnail.work_url, existingByThumbnail.work_title, null);
+      }
+      return r;
+    }
+  }
+
   r.step = 'click-thumbnail';
   console.log(`[live]   点击通知缩略图 (target: ${notification.username})...`);
   const clickResult = await clickNotificationWorkThumbnail(page, {
@@ -280,7 +294,8 @@ async function processWorkModal(page, notification, db, run, options, state) {
     authorProfileUrl: workCtx.authorProfileUrl,
     authorProfileKey: workCtx.authorProfileKey,
     publishedAt: workCtx.publishedAt || null,
-    thumbnailSrc: workCtx.thumbnailSrc || null,
+    thumbnailKey: notification.thumbnailKey || null,
+    thumbnailSrc: workCtx.thumbnailSrc || notification.thumbnailSrc || null,
     rawContextJson: JSON.stringify(workCtx),
   });
   console.log(`[live]   works表: ${workUpsertResult.action} id=${workUpsertResult.id}`);
@@ -365,6 +380,261 @@ async function processWorkModal(page, notification, db, run, options, state) {
   r.reason = `采集完成: ${scanResult.data.total} 条评论，${unreplied.length} 条待回复，${commentsUpserted} 条新入库`;
   console.log(`[live]   ✅ ${r.reason}`);
   return r;
+}
+
+function shouldSkipPendingComment(comment) {
+  const text = (comment.comment_text || '').trim();
+  const actor = (comment.actor_name || '').trim();
+  if (!text) return 'empty_comment_text';
+  if (text === '...' || actor === '...' || text === '作者') return 'invalid_comment_placeholder';
+  return null;
+}
+
+function clampReplyText(replyText, maxLength) {
+  const text = (replyText || '').trim();
+  if (!maxLength || text.length <= maxLength) return text;
+  return text.slice(0, maxLength);
+}
+
+function preparePendingReplies(options = {}) {
+  const pendingGroups = listPendingCommentsGroupedByWork({ limit: options.prepareLimit || 100 });
+  let totalPending = 0;
+  for (const [, comments] of pendingGroups) totalPending += comments.length;
+
+  const replyMode = options.aiReply || options.replyMode === 'ai' ? 'ai' : 'template';
+  console.log(`[live] 第二阶段：生成回复内容 (${totalPending} 条 pending, ${pendingGroups.size} 个作品, mode=${replyMode})`);
+
+  if (replyMode === 'ai') {
+    console.log('[live]   AI 回复暂未接入本地实现，本轮降级为 template 生成');
+  }
+
+  let preparedCount = 0;
+  let skippedCount = 0;
+
+  for (const [workKey, comments] of pendingGroups) {
+    const work = findWorkByWorkId(workKey) || findWorkByModalId(workKey);
+    const workTitle = work?.work_title || '';
+    console.log(`[live]   作品 ${workKey}: ${comments.length} 条待生成`);
+
+    for (const comment of comments) {
+      const skipReason = shouldSkipPendingComment(comment);
+      if (skipReason) {
+        markCommentSkipped(comment.id, skipReason);
+        skippedCount++;
+        continue;
+      }
+
+      const generated = generateReplyText(comment.comment_text, { workTitle });
+      const replyText = clampReplyText(generated.replyText, options.replyMaxLength || 40);
+      const reason = replyText === generated.replyText
+        ? generated.reason
+        : `${generated.reason};truncated_to_${options.replyMaxLength || 40}`;
+
+      markCommentReplyPrepared(comment.id, replyText, reason);
+      preparedCount++;
+    }
+  }
+
+  console.log(`[live] 第二阶段完成：prepared ${preparedCount} 条，skipped ${skippedCount} 条`);
+  return { preparedCount, skippedCount, totalPending };
+}
+
+function resolveWorkForComment(comment) {
+  return findWorkByWorkId(comment.work_id) || findWorkByModalId(comment.modal_id);
+}
+
+function resolveWorkModalUrl(comment, work) {
+  if (comment.work_url) return comment.work_url;
+  if (work?.work_url) return work.work_url;
+  if (work?.modal_id) return `https://www.douyin.com/user/self?modal_id=${work.modal_id}`;
+  if (comment.modal_id) return `https://www.douyin.com/user/self?modal_id=${comment.modal_id}`;
+  return null;
+}
+
+function findTargetScannedComment(unreplied, comment) {
+  const actorName = (comment.actor_name || '').trim();
+  const commentText = (comment.comment_text || '').trim();
+  const prefix = commentText.slice(0, 20);
+
+  return unreplied.find(c => {
+    if (actorName && c.actorName !== actorName) return false;
+    if (!prefix) return false;
+    return (c.commentText || '').includes(prefix);
+  }) || unreplied.find(c => prefix && (c.commentText || '').includes(prefix));
+}
+
+async function executePreparedReplies(page, db, run, options) {
+  const preparedComments = listPreparedComments({ limit: options.maxItems || 10, days: options.days || null });
+  console.log(`[live] 第三阶段：执行 prepared 回复 (${preparedComments.length} 条, maxItems=${options.maxItems})`);
+
+  if (preparedComments.length === 0) {
+    return [];
+  }
+
+  if (options.dryRun && !options.preview && !options.execute) {
+    console.log('[live]   dry-run 模式：只展示待执行回复，不打开回复框');
+    for (const comment of preparedComments.slice(0, 10)) {
+      console.log(`[live]   将回复 ${comment.actor_name}: "${comment.comment_text?.slice(0, 30)}" -> "${comment.reply_text?.slice(0, 30)}"`);
+    }
+    return preparedComments.map(comment => ({
+      phase: 'reply',
+      commentId: comment.id,
+      actorName: comment.actor_name,
+      status: 'skipped',
+      reason: 'dry-run',
+    }));
+  }
+
+  const results = [];
+  const selfProfile = getSelfProfile();
+  const selfNickname = selfProfile.nickname || '';
+
+  for (let i = 0; i < preparedComments.length; i++) {
+    const comment = preparedComments[i];
+    const result = {
+      phase: 'reply',
+      commentId: comment.id,
+      eventId: comment.source_event_id || 0,
+      actorName: comment.actor_name || '',
+      status: 'blocked',
+      reason: '',
+    };
+
+    console.log(`[live]   回复 ${i + 1}/${preparedComments.length}: ${comment.actor_name} "${comment.comment_text?.slice(0, 30)}"`);
+
+    if (!comment.reply_text || !comment.reply_text.trim()) {
+      result.status = 'skipped';
+      result.reason = 'reply_text_empty';
+      markCommentSkipped(comment.id, result.reason);
+      results.push(result);
+      continue;
+    }
+
+    const work = resolveWorkForComment(comment);
+    const modalUrl = resolveWorkModalUrl(comment, work);
+    if (!work || !modalUrl) {
+      result.reason = 'work_or_modal_url_not_found';
+      markCommentBlocked(comment.id, result.reason);
+      recordAction(db, result.eventId, null, '', modalUrl || '', comment.reply_text, 'reply_comment', 'blocked', result.reason, null);
+      results.push(result);
+      run.hadBlocked = true;
+      continue;
+    }
+
+    try {
+      console.log(`[live]     打开作品: ${modalUrl}`);
+      await page.goto(modalUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.waitForTimeout(3000);
+
+      const removed = await detectVideoRemoved(page);
+      if (removed) {
+        result.reason = `video_removed:${removed}`;
+        markCommentBlocked(comment.id, result.reason);
+        recordAction(db, result.eventId, null, work.work_title || '', modalUrl, comment.reply_text, 'reply_comment', 'blocked', result.reason, null);
+        results.push(result);
+        run.hadBlocked = true;
+        continue;
+      }
+
+      const modalResult = await waitForWorkModal(page);
+      if (!modalResult.ok) {
+        result.reason = `modal_not_found:${modalResult.message}`;
+        markCommentBlocked(comment.id, result.reason);
+        recordAction(db, result.eventId, null, work.work_title || '', modalUrl, comment.reply_text, 'reply_comment', 'blocked', result.reason, null);
+        results.push(result);
+        run.hadBlocked = true;
+        continue;
+      }
+
+      const scanResult = await findUnrepliedCommentsInModal(page, { selfNickname });
+      if (!scanResult.ok) {
+        result.reason = `scan_failed:${scanResult.message}`;
+        markCommentBlocked(comment.id, result.reason);
+        recordAction(db, result.eventId, null, work.work_title || '', modalUrl, comment.reply_text, 'reply_comment', 'blocked', result.reason, null);
+        results.push(result);
+        run.hadBlocked = true;
+        continue;
+      }
+
+      const targetComment = findTargetScannedComment(scanResult.data.unreplied, comment);
+      if (!targetComment) {
+        result.reason = 'comment_not_found_in_modal';
+        markCommentBlocked(comment.id, result.reason);
+        recordAction(db, result.eventId, null, work.work_title || '', modalUrl, comment.reply_text, 'reply_comment', 'blocked', result.reason, null);
+        results.push(result);
+        run.hadBlocked = true;
+        continue;
+      }
+
+      const openResult = await openReplyBoxByIndex(page, targetComment.commentIndex);
+      if (!openResult.ok) {
+        result.reason = `open_reply_box_failed:${openResult.message}`;
+        markCommentBlocked(comment.id, result.reason);
+        recordAction(db, result.eventId, null, work.work_title || '', modalUrl, comment.reply_text, 'reply_comment', 'blocked', result.reason, null);
+        results.push(result);
+        run.hadBlocked = true;
+        continue;
+      }
+
+      if (options.preview) {
+        const fillResult = await fillReplyInWorkModal(page, comment.reply_text);
+        if (!fillResult.ok) {
+          result.reason = `fill_failed:${fillResult.message}`;
+          markCommentBlocked(comment.id, result.reason);
+          recordAction(db, result.eventId, null, work.work_title || '', modalUrl, comment.reply_text, 'reply_comment', 'blocked', result.reason, null);
+          results.push(result);
+          run.hadBlocked = true;
+          continue;
+        }
+        result.status = 'succeeded';
+        result.reason = 'preview_filled_not_sent';
+        results.push(result);
+        run.succeeded++;
+        console.log(`[live]     ✓ [预演] 已填入，未发送`);
+        continue;
+      }
+
+      const sendResult = await sendReplyInWorkModal(page, comment.reply_text);
+      if (!sendResult.ok) {
+        result.reason = `send_failed:${sendResult.message}`;
+        markCommentBlocked(comment.id, result.reason);
+        recordAction(db, result.eventId, null, work.work_title || '', modalUrl, comment.reply_text, 'reply_comment', 'blocked', result.reason, null);
+        results.push(result);
+        run.hadBlocked = true;
+        continue;
+      }
+
+      const verifyResult = await verifyReplyInWorkModal(page, { actorName: comment.actor_name, commentText: comment.comment_text }, comment.reply_text);
+      if (!verifyResult.ok) {
+        result.status = 'sent_unverified';
+        result.reason = verifyResult.message;
+        markCommentSentUnverified(comment.id, result.reason);
+        recordAction(db, result.eventId, null, work.work_title || '', modalUrl, comment.reply_text, 'reply_comment', 'sent_unverified', result.reason, null);
+        results.push(result);
+        run.hadBlocked = true;
+        continue;
+      }
+
+      result.status = 'succeeded';
+      result.reason = 'reply_succeeded';
+      markCommentReplied(comment.id);
+      recordAction(db, result.eventId, null, work.work_title || '', modalUrl, comment.reply_text, 'reply_comment', 'succeeded', result.reason, null);
+      results.push(result);
+      run.succeeded++;
+      console.log(`[live]     ✓ 回复成功`);
+    } catch (err) {
+      result.status = 'blocked';
+      result.reason = err.message;
+      markCommentBlocked(comment.id, result.reason);
+      recordAction(db, result.eventId, null, '', modalUrl, comment.reply_text, 'reply_comment', 'blocked', result.reason, null);
+      results.push(result);
+      run.hadBlocked = true;
+    }
+
+    await page.waitForTimeout(1500);
+  }
+
+  return results;
 }
 
 async function processRevisitCandidates(page, revisitList, db, run, options) {
@@ -468,17 +738,12 @@ async function returnToNotificationPanel(page) {
   return true;
 }
 
-function classifyNotification(n) {
-  const action = n.action || '';
-  if (action.includes('评论了你的作品') || action.includes('评论了你的视频')) return 'comment_on_my_work';
-  if (action.includes('回复了你的评论')) return 'reply_to_my_comment';
-  if (action.includes('赞了你的作品') || action.includes('赞了你的评论') || action.includes('赞了你的视频')) return 'like_received';
-  if (action.includes('关注了你') || action.includes('关注了')) return 'follow';
-  return 'unknown';
+function routeNotification(n) {
+  return classifyNotificationAction(n.rawText || `${n.username || ''}\n${n.content || ''}\n${n.action || ''}`);
 }
 
 async function main() {
-  console.error('[interactions:live] 两阶段流程：第一阶段=通知页处理+评论回复，第二阶段=统一回访');
+  console.error('[interactions:live] 主流程：通知扫描入库 -> 生成回复 -> 执行回复 -> 统一回访');
 
   runMigrations();
 
@@ -525,10 +790,12 @@ async function main() {
 
     const modeLabel = commonArgs.options.preview ? 'preview(预演)' : (commonArgs.options.dryRun ? 'dry-run' : 'execute');
     console.log(`[live] 模式: ${modeLabel}${commonArgs.options.noRevisit ? ' + no-revisit' : ''}`);
-    console.log(`[live] 第一阶段：处理通知页`);
+    console.log(`[live] 第一阶段：通知页扫描与入库`);
 
     const seenNotifKeys = new Set();
-    const maxScrollRounds = 5;
+    const maxScrollRounds = commonArgs.options.maxScrollRounds || 5;
+    const maxNotifications = commonArgs.options.maxNotifications || 50;
+    let processedNotifications = 0;
     let phase1EndedReason = '';
 
     for (let scrollRound = 0; scrollRound < maxScrollRounds; scrollRound++) {
@@ -540,16 +807,23 @@ async function main() {
       }
 
       const notifications = batchResult.data.notifications || [];
-      const newNotifs = notifications.filter(n => {
+      let newNotifs = notifications.filter(n => {
         const key = n.notificationItemKey || `${n.username}|${n.action}|${n.content}`;
         if (seenNotifKeys.has(key)) return false;
         seenNotifKeys.add(key);
         return true;
       });
+      const remainingNotifications = Math.max(0, maxNotifications - processedNotifications);
+      if (newNotifs.length > remainingNotifications) {
+        newNotifs = newNotifs.slice(0, remainingNotifications);
+      }
+      processedNotifications += newNotifs.length;
 
       for (const n of newNotifs) {
+        const route = routeNotification(n);
+        n.route = route;
         const eventResult = upsertNotificationEvent({
-          eventType: n.eventType || 'comment',
+          eventType: route.eventType === 'unknown' ? (n.eventType || 'comment') : route.eventType,
           actorName: n.username || '',
           actorProfileKey: n.actorProfileKey || '',
           actorProfileUrl: n.actorProfileUrl || '',
@@ -560,18 +834,17 @@ async function main() {
           notificationItemKey: n.notificationItemKey || '',
           action: n.action || '',
           content: n.content || '',
-          rawPayloadJson: JSON.stringify(n),
+          rawPayloadJson: JSON.stringify({ ...n, route }),
         });
         n.eventId = eventResult.eventId;
       }
 
-      const commentNotifs = newNotifs.filter(n => classifyNotification(n) === 'comment_on_my_work');
-      const likeNotifs = newNotifs.filter(n => classifyNotification(n) === 'like_received');
-      const replyNotifs = newNotifs.filter(n => classifyNotification(n) === 'reply_to_my_comment');
-      const followNotifs = newNotifs.filter(n => classifyNotification(n) === 'follow');
-      const unknownNotifs = newNotifs.filter(n => classifyNotification(n) === 'unknown');
+      const commentNotifs = newNotifs.filter(n => n.route?.notificationAction === 'comment_on_my_work');
+      const likeNotifs = newNotifs.filter(n => n.route?.notificationAction === 'like_received');
+      const replyNotifs = newNotifs.filter(n => n.route?.notificationAction === 'reply_to_my_comment');
+      const unknownNotifs = newNotifs.filter(n => n.route?.notificationAction === 'unknown');
 
-      console.log(`[live] 第 ${scrollRound + 1} 轮: 通知 ${notifications.length} 条，新增 ${newNotifs.length} 条 (评论${commentNotifs.length} 点赞${likeNotifs.length} 回复${replyNotifs.length} 关注${followNotifs.length} 未知${unknownNotifs.length})`);
+      console.log(`[live] 第 ${scrollRound + 1} 轮: 通知 ${notifications.length} 条，新增 ${newNotifs.length} 条 (评论${commentNotifs.length} 点赞${likeNotifs.length} 回复${replyNotifs.length} 未知${unknownNotifs.length})`);
 
       for (const n of likeNotifs) {
         if (!commonArgs.options.noRevisit) {
@@ -584,20 +857,22 @@ async function main() {
 
       for (const n of replyNotifs) {
         console.log(`[live] 回复了我的评论：actor=${n.username} -> 跳过，需要主人确认`);
+        recordAction(db, n.eventId, null, '', '', '', 'skip', 'skipped', n.route?.reason || 'reply_to_my_comment_requires_owner_review', null);
         results.push({ actorName: n.username, status: 'skipped', reason: 'reply_to_my_comment: 不回复，不加入回访列表' });
-      }
-
-      for (const n of followNotifs) {
-        console.log(`[live] 关注通知：actor=${n.username} -> 跳过`);
-        results.push({ actorName: n.username, status: 'skipped', reason: 'follow: 不处理' });
       }
 
       for (const n of unknownNotifs) {
         console.log(`[live] 未知通知类型：actor=${n.username} action="${n.action}" -> 跳过`);
+        recordAction(db, n.eventId, null, '', '', '', 'skip', 'skipped', n.route?.reason || 'unknown_notification_requires_owner_review', null);
         results.push({ actorName: n.username, status: 'skipped', reason: 'unknown: 不处理，不加入回访列表' });
       }
 
       for (const n of commentNotifs) {
+        if (!commonArgs.options.noRevisit) {
+          addRevisitCandidateDB(n, 'comment_on_my_work');
+          console.log(`[live] 评论人加入回访候选: actor=${n.username}`);
+        }
+
         const commentKey = `${(n.username || '')}::${(n.content || '').slice(0, 60)}`;
         if (state.repliedCommentKeys.has(commentKey)) {
           console.log(`[live]   跳过已回复通知: ${n.username} "${(n.content || '').slice(0, 30)}"`);
@@ -614,17 +889,6 @@ async function main() {
         const result = await processWorkModal(page, n, db, run, commonArgs.options, state);
         results.push(result);
 
-        if (!commonArgs.options.noRevisit && (result.status === 'succeeded' || result.status === 'sent_unverified')) {
-          addRevisitCandidateDB(n, 'comment_on_my_work');
-          console.log(`[live] 评论人加入回访候选: actor=${n.username}`);
-        }
-
-        if (run.processed >= commonArgs.options.maxItems) {
-          console.log(`[live] 已达到 maxItems ${commonArgs.options.maxItems}`);
-          phase1EndedReason = 'maxItems';
-          break;
-        }
-
         const backOk = await returnToNotificationPanel(page);
         if (!backOk) {
           console.error('[live] 无法返回通知面板，终止第一阶段');
@@ -634,6 +898,12 @@ async function main() {
       }
 
       if (phase1EndedReason) break;
+
+      if (processedNotifications >= maxNotifications) {
+        console.log(`[live] 已达到 maxNotifications ${maxNotifications}`);
+        phase1EndedReason = 'maxNotifications';
+        break;
+      }
 
       if (batchResult.data.noMoreData) {
         console.log(`[live] 没有更多通知`);
@@ -656,16 +926,26 @@ async function main() {
     if (!phase1EndedReason) phase1EndedReason = '滚动轮数上限';
     console.log(`[live] 通知页处理完成 (${phase1EndedReason})`);
 
+    const prepareSummary = preparePendingReplies(commonArgs.options);
+    results.push({
+      phase: 'prepare_replies',
+      status: 'succeeded',
+      reason: `prepared=${prepareSummary.preparedCount}, skipped=${prepareSummary.skippedCount}`,
+    });
+
+    const replyResults = await executePreparedReplies(page, db, run, commonArgs.options);
+    results.push(...replyResults);
+
     const pendingRevisits = commonArgs.options.noRevisit ? [] : listPendingRevisitCandidates({ limit: commonArgs.options.maxRevisits || 20 });
     if (pendingRevisits.length > 0) {
-      console.log(`[live] 第二阶段：统一回访开始 (${pendingRevisits.length} 人)`);
+      console.log(`[live] 第四阶段：统一回访开始 (${pendingRevisits.length} 人)`);
       const revisitResults = await processRevisitCandidates(page, pendingRevisits, db, run, commonArgs.options);
       results.push(...revisitResults.map(r => ({ ...r, phase: 'revisit' })));
       console.log(`[live] 统一回访完成`);
     } else if (commonArgs.options.noRevisit) {
       console.log(`[live] --no-revisit：跳过统一回访阶段`);
     } else {
-      console.log(`[live] 无回访候选，跳过第二阶段`);
+      console.log(`[live] 无回访候选，跳过第四阶段`);
     }
 
   } catch (err) {
@@ -684,7 +964,7 @@ async function main() {
     const sentUnverified = results.filter(r => r.status === 'sent_unverified').length;
 
     writeJSON(resultPath, {
-      mode: commonArgs.options.dryRun ? 'dry-run' : 'execute',
+      mode: commonArgs.options.preview ? 'preview' : (commonArgs.options.dryRun ? 'dry-run' : 'execute'),
       results,
       summary: {
         total: results.length,
