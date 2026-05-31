@@ -1,5 +1,18 @@
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 
+export const DOUYIN_PLAYER_ACTION_SELECTORS = Object.freeze({
+  like: '[data-e2e="video-player-digg"]',
+  comment: '[data-e2e="feed-comment-icon"]',
+  collect: '[data-e2e="video-player-collect"]',
+  share: '[data-e2e="video-player-share"]',
+});
+
+export const DOUYIN_PLAYER_ACTION_STATES = Object.freeze({
+  liked: 'video-player-is-digged',
+  notLiked: 'video-player-no-digged',
+  notCollected: 'video-player-no-collect',
+});
+
 /**
  * Pure function: determine like state from a single candidate's diagnostic info.
  * Returns { liked: true|false|null, confidence, signal } or null if can't determine.
