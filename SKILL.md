@@ -21,6 +21,8 @@ description: 礼尚往来 · 抖音创作者互动助手。发现评论与好友
 | "确认发送这一条" | 校验审批 + execute 单条回复 |
 | "看看好友回访候选"、"哪些朋友点赞了" | likes:plan 或 visits:discover，仅预览 |
 | "进入好友主页看看"、"发现回访目标" | visits:discover，进入主页找最新作品并检查点赞 |
+| "去把互关朋友的最新作品拿出来准备回访"、"提取回访候选" | return-visit:prepare 阶段 → 扫描并分析好友最新作品以准备候选任务 |
+| "去执行好友回访"、"帮我回访一下" | return-visit:execute 阶段 → 物理隔离顶栏搜索框，安全执行点赞+评论 |
 | "自动给好友回赞"、"都回一下" | **拒绝**，提供候选预览和单条审批说明 |
 
 ## 禁止场景
@@ -450,3 +452,38 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
   - `visits:review` — phase4，生成待审核回访候选（含评论草稿，不点赞、不评论、不落库）
   - `visits:live-review` — phase5，交互式审核，根据作品上下文生成评论候选（Agent=medium, 固定模板=low fallback），选择 1/2/3 即审核通过；high/ignore 阻断
   - `likes:reciprocate` — 真实点赞代码层硬阻断
+- 新版回访两阶段流程 (return-visit):
+  - `return-visit:prepare` — 执行准备阶段。进入好友主页扫描最近非置顶作品并提取上下文，生成 AI 评论内容，并将合法任务标记为 `pending_execute` 落库。
+  - `return-visit:execute` — 执行回访阶段。从库中加载真正的合法候选，通过打标精确定位点赞按钮，自动在物理及词汇层级排除顶栏全局搜索框，无缝完成视频点赞和评论发送。
+
+---
+
+## 新版回访两阶段执行与加固规范
+
+### 1. 任务数据流与严格过滤
+执行阶段命令 `return-visit:execute` 必须对库中取出的候选任务进行严格把关。
+- **合法执行任务标准**：
+  1. `status === "pending_execute"` 且非失败状态。
+  2. 任务必须存有有效的 `generatedComment`（非空字符）。
+  3. 任务必须具有明确的作品 URL（`targetWork.workUrl` 存在且非空）。
+  4. 该任务的评论未被执行（`commentStatus !== "posted"`）。
+- **脏任务预处理跳过规则**：
+  - 若 `generatedComment` 为空，立即标记状态为 `failed_generate_comment`，跳过并不计入执行列表。
+  - 若 `workUrl` 为空，立即标记状态为 `failed_collect`，跳过并不计入执行列表。
+  - 脏任务预处理更新状态时，**决不计入**本轮真实执行循环，且**绝不累加** `consecutiveFailures` 连续页面操作失败计数。
+
+### 2. 精准定位加固防线 (杜绝误击顶部搜索框)
+在视频页进行点赞和评论时，必须严格通过以下物理和逻辑层级的设计，绝不能误点击到任何无关组件：
+- **点赞打标定位法**：
+  - 在 `page.evaluate` 进行点赞状态判定（无论是 `actionBar` 还是 `rightside`）后，确认目标按钮节点时，在该元素上附带设置临时唯一属性 `data-temp-like-btn="true"`。
+  - Playwright 层面优先且直接根据 `[data-temp-like-btn="true"]` 选择器进行精准点击，彻底规避传统泛用选择器因动态打包带来的误中漂移。
+- **物理与特定词汇排除评论定位法**：
+  - **绝对禁止**无任何前置词汇或容器限制的通用 `'input'`、`'textarea'` 以及 `'[contenteditable="true"]'` 选择器，防止由于评论面板渲染延迟而直接误中页面最显眼且最先渲染的顶栏全局搜索框！
+  - 评论选择器必须仅定位在带有特定评论词汇（如匹配 `留下你的精彩评论吧`、`说点什么`、`善语`、`留下`）的属性框上，或仅在评论专属包裹容器（如包含 `class*="comment"` 或 `id*="comment"`）内查找。
+  - **双重防搜机制**：匹配输入框后，在运行时 evaluate 动态校验该节点的 placeholder、ID 或类名，一旦发现含有 `搜`、`search` 字样，一律强制剔除，实施物理阻绝。
+
+### 3. 失败截图与 DOM 结构现场调试
+当遇到 `failed_like` 或 `failed_comment` 等页面级操作失败时，Skill 必须自动化完成以下现场保留：
+- **现场截图**：自动截取当前页面并输出保存到 `data/debug/return-visit/`，文件名格式包含 `taskId`、失败阶段及时间戳。
+- **DOM 结构诊断**：自动使用 `page.evaluate` 搜集页面前 20 个候选可点击交互元素、所有文本输入区的 placeholder 列表，并将这些 DOM 树结构输出到错误日志中，方便后期分析。
+
