@@ -72,7 +72,7 @@ async function main() {
         continue;
       }
 
-      const modalResult = await waitForWorkModal(page);
+      const modalResult = await waitForWorkModal(page, { closeAutoPlay: true });
       if (!modalResult.ok) {
         console.log(`[execute]   modal 未出现: ${modalResult.message}`);
         results.push({ status: 'blocked', reason: modalResult.message });

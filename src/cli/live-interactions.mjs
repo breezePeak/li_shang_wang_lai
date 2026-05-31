@@ -233,7 +233,7 @@ async function processWorkModal(page, notification, db, run, options, state) {
 
   r.step = 'wait-modal';
   console.log(`[live]   等待作品 modal...`);
-  const modalResult = await waitForWorkModal(page);
+  const modalResult = await waitForWorkModal(page, { closeAutoPlay: false });
   if (!modalResult.ok) {
     if (modalResult.videoRemoved) {
       r.status = 'skipped';
@@ -536,7 +536,7 @@ async function executePreparedReplies(page, db, run, options) {
         continue;
       }
 
-      const modalResult = await waitForWorkModal(page);
+      const modalResult = await waitForWorkModal(page, { closeAutoPlay: true });
       if (!modalResult.ok) {
         result.reason = `modal_not_found:${modalResult.message}`;
         markCommentBlocked(comment.id, result.reason);

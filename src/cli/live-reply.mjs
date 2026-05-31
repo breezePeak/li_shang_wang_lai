@@ -111,7 +111,7 @@ async function main() {
         continue;
       }
 
-      const modalResult = await waitForWorkModal(page);
+      const modalResult = await waitForWorkModal(page, { closeAutoPlay: true });
       if (!modalResult.ok) {
         console.log(`[reply]   modal 未出现: ${modalResult.message}`);
         markCommentBlocked(comment.id, `modal not found: ${modalResult.message}`);

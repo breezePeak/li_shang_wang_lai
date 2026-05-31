@@ -79,6 +79,75 @@ async function captureReplyBoxDebug(page, phase) {
   }
 }
 
+async function typeIntoReplyDraftEditor(page, replyText) {
+  const editor = page.locator('.comment-input-container [contenteditable="true"]').last();
+  await editor.waitFor({ state: 'visible', timeout: 3000 });
+  await editor.click({ timeout: 3000 });
+  await page.keyboard.insertText(replyText);
+
+  const typed = await page.evaluate((text) => {
+    const container = document.querySelector('.comment-input-container');
+    const editorEl = container?.querySelector('[contenteditable="true"]');
+    const visibleText = (container?.innerText || editorEl?.innerText || '').trim();
+    if (visibleText.includes(text) || visibleText.includes(text.slice(0, Math.min(10, text.length)))) {
+      return { ok: true, method: 'keyboard_insertText' };
+    }
+
+    if (!editorEl) return { ok: false, reason: 'editor disappeared after insertText' };
+    const rect = editorEl.getBoundingClientRect();
+    if (rect.width < 50 || rect.height < 10) return { ok: false, reason: 'editor too small after insertText' };
+
+    editorEl.focus();
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(editorEl);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.execCommand('insertText', false, text);
+    editorEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+
+    const fallbackText = (container?.innerText || editorEl.innerText || '').trim();
+    if (fallbackText.includes(text) || fallbackText.includes(text.slice(0, Math.min(10, text.length)))) {
+      return { ok: true, method: 'execCommand_fallback' };
+    }
+    return { ok: false, reason: 'text not reflected in reply editor' };
+  }, replyText);
+
+  return typed;
+}
+
+async function clickReplySendControl(page) {
+  return await page.evaluate(() => {
+    const container = document.querySelector('.comment-input-container');
+    if (!container) return { ok: false, reason: 'comment input container not found' };
+
+    function visible(el) {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }
+
+    const candidates = Array.from(container.querySelectorAll('button, [role="button"], div, span'))
+      .filter(visible)
+      .map(el => {
+        const text = (el.innerText || el.textContent || '').trim();
+        const aria = el.getAttribute('aria-label') || '';
+        const title = el.getAttribute('title') || '';
+        return { el, label: `${text} ${aria} ${title}`.trim() };
+      })
+      .filter(({ label }) => label === '发送' || label.includes('发送'));
+
+    for (const { el } of candidates) {
+      const target = el.closest('button,[role="button"]') || el;
+      if (!visible(target)) continue;
+      target.click();
+      return { ok: true, method: 'send_control_click', label: (el.innerText || el.textContent || '').trim() };
+    }
+
+    return { ok: false, reason: 'send control not found' };
+  });
+}
+
 export function parseDouyinTimeText(text) {
   if (!text) return null;
   const now = new Date();
@@ -104,6 +173,15 @@ export function extractModalIdFromUrl(url) {
   if (!url) return null;
   const match = url.match(/[?&]modal_id=([^&#]+)/);
   return match ? match[1] : null;
+}
+
+async function isWorkModalVisible(page) {
+  return await page.evaluate(() => {
+    const modal = document.querySelector('[data-e2e="modal-video-container"], .modal-video-container');
+    if (!modal) return false;
+    const rect = modal.getBoundingClientRect();
+    return rect.width > 100 && rect.height > 100;
+  });
 }
 
 export async function extractWorkModalContext(page) {
@@ -289,14 +367,23 @@ export async function extractWorkModalContext(page) {
   });
 }
 
-export async function waitForWorkModal(page, { timeoutMs = 10000 } = {}) {
+export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay = false } = {}) {
   try {
     const removed = await detectVideoRemoved(page);
     if (removed) {
       return blocking(RESULT_CODES.BLOCKED, `作品已删除/不可见: ${removed}`, { recoverable: true, videoRemoved: true });
     }
 
-    await page.waitForSelector('.modal-video-container', { state: 'visible', timeout: timeoutMs });
+    const startedAt = Date.now();
+    let modalVisible = false;
+    while (Date.now() - startedAt < timeoutMs) {
+      modalVisible = await isWorkModalVisible(page).catch(() => false);
+      if (modalVisible) break;
+      await page.waitForTimeout(300);
+    }
+    if (!modalVisible) {
+      await page.waitForSelector('[data-e2e="modal-video-container"], .modal-video-container', { state: 'visible', timeout: 1000 });
+    }
 
     const removedAfter = await detectVideoRemoved(page);
     if (removedAfter) {
@@ -317,27 +404,25 @@ export async function waitForWorkModal(page, { timeoutMs = 10000 } = {}) {
       return blocking(RESULT_CODES.BLOCKED, `作品加载失败: ${loadFailed}`, { recoverable: true });
     }
 
-    // Step 1: Disable auto-play (连播) FIRST to prevent video jumping to next
-    await page.waitForTimeout(1500);
-    let autoPlayOff = false;
-    for (let retry = 0; retry < 5; retry++) {
-      const autoPlayResult = await page.evaluate(() => {
-        const autoPlayEl = document.querySelector('.xgplayer-autoplay-setting');
-        if (!autoPlayEl) return { found: false };
-        const e2eState = autoPlayEl.querySelector('[data-e2e-state]')?.getAttribute('data-e2e-state') || '';
-        const isOff = e2eState.includes('no-auto-play');
-        if (isOff) return { found: true, alreadyOff: true };
-        const switchBtn = autoPlayEl.querySelector('.xg-switch');
-        if (switchBtn) { switchBtn.click(); return { found: true, alreadyOff: false, method: 'switch' }; }
-        autoPlayEl.click();
-        return { found: true, alreadyOff: false, method: 'parent' };
-      });
-      if (autoPlayResult.found && autoPlayResult.alreadyOff) {
-        console.error('[work-modal] 连播已关闭');
-        autoPlayOff = true;
-        break;
-      }
-      if (autoPlayResult.found && !autoPlayResult.alreadyOff) {
+    if (closeAutoPlay) {
+      await page.waitForTimeout(1500);
+      for (let retry = 0; retry < 2; retry++) {
+        const autoPlayResult = await page.evaluate(() => {
+          const autoPlayEl = document.querySelector('.xgplayer-autoplay-setting');
+          if (!autoPlayEl) return { found: false };
+          const e2eState = autoPlayEl.querySelector('[data-e2e-state]')?.getAttribute('data-e2e-state') || '';
+          const isOff = e2eState.includes('no-auto-play');
+          if (isOff) return { found: true, alreadyOff: true };
+          const switchBtn = autoPlayEl.querySelector('.xg-switch');
+          if (switchBtn) { switchBtn.click(); return { found: true, alreadyOff: false, method: 'switch' }; }
+          autoPlayEl.click();
+          return { found: true, alreadyOff: false, method: 'parent' };
+        });
+        if (!autoPlayResult.found) break;
+        if (autoPlayResult.alreadyOff) {
+          console.error('[work-modal] 连播已关闭');
+          break;
+        }
         console.error(`[work-modal] 尝试关闭连播 (method=${autoPlayResult.method})`);
         await page.waitForTimeout(800);
         const verifyOff = await page.evaluate(() => {
@@ -346,30 +431,11 @@ export async function waitForWorkModal(page, { timeoutMs = 10000 } = {}) {
         });
         if (verifyOff.includes('no-auto-play')) {
           console.error('[work-modal] 连播已关闭');
-          autoPlayOff = true;
-          break;
-        }
-        console.error('[work-modal] 连播关闭未生效，尝试快捷键 K...');
-        await page.keyboard.press('k');
-        await page.waitForTimeout(800);
-        const verifyK = await page.evaluate(() => {
-          const el = document.querySelector('.xgplayer-autoplay-setting [data-e2e-state]');
-          return el ? el.getAttribute('data-e2e-state') : '';
-        });
-        if (verifyK.includes('no-auto-play')) {
-          console.error('[work-modal] 快捷键 K 关闭连播成功');
-          autoPlayOff = true;
           break;
         }
       }
-      console.error(`[work-modal] 连播元素未找到，重试 ${retry + 1}/5...`);
-      await page.waitForTimeout(1000);
-    }
-    if (!autoPlayOff) {
-      console.error('[work-modal] ⚠ 连播元素未找到，继续尝试打开评论区');
     }
 
-    // Step 2: Open comment area if not visible
     const commentVisible = await page.evaluate(() => {
       const commentArea = document.querySelector('.comment-mainContent');
       if (commentArea) {
@@ -843,17 +909,7 @@ export async function fillReplyInWorkModal(page, replyText) {
   console.error(`[work-modal] 填入回复(预演): "${replyText.slice(0, 60)}"`);
 
   try {
-    const filled = await page.evaluate((text) => {
-      const editor = document.querySelector('.comment-input-container [contenteditable="true"]');
-      if (editor) {
-        const rect = editor.getBoundingClientRect();
-        if (rect.width < 50 || rect.height < 10) return { ok: false, reason: 'editor too small' };
-        editor.focus();
-        document.execCommand('insertText', false, text);
-        return { ok: true, method: 'contenteditable_execCommand' };
-      }
-      return { ok: false, reason: 'no contenteditable editor in .comment-input-container' };
-    }, replyText);
+    const filled = await typeIntoReplyDraftEditor(page, replyText);
 
     if (!filled.ok) {
       const fallback = await page.evaluate((text) => {
@@ -884,8 +940,8 @@ export async function fillReplyInWorkModal(page, replyText) {
       }
     }
 
-    console.error(`[work-modal] 已填入回复，未点击发送`);
-    return success({ filled: true, sent: false, method: 'preview' });
+    console.error(`[work-modal] 已填入回复，未点击发送 method=${filled.method || 'fallback'}`);
+    return success({ filled: true, sent: false, method: filled.method || 'preview' });
   } catch (err) {
     return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, `填入回复异常: ${err.message}`, { recoverable: true });
   }
@@ -899,67 +955,25 @@ export async function sendReplyInWorkModal(page, replyText) {
   console.error(`[work-modal] 发送回复: "${replyText.slice(0, 60)}"`);
 
   try {
-    const filled = await page.evaluate((text) => {
-      const SEARCH_PHRASES = ['搜索', 'search', '查询'];
-      function isSearchInput(input) {
-        const ph = (input.getAttribute('placeholder') || '').toLowerCase();
-        const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
-        return SEARCH_PHRASES.some(s => (ph + ' ' + ariaLabel).includes(s));
-      }
-
-      const editor = document.querySelector('.comment-input-container [contenteditable="true"]');
-      if (editor) {
-        const rect = editor.getBoundingClientRect();
-        if (rect.width < 50 || rect.height < 10) return { ok: false, reason: 'editor too small' };
-        editor.focus();
-        document.execCommand('insertText', false, text);
-        return { ok: true, method: 'contenteditable_execCommand' };
-      }
-
-      const inputs = document.querySelectorAll('input[type="text"], textarea');
-      for (const input of inputs) {
-        const rect = input.getBoundingClientRect();
-        if (rect.width < 50 || rect.height < 20) continue;
-        if (isSearchInput(input)) continue;
-        const valueSetter = Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype, 'value')?.set;
-        if (valueSetter) valueSetter.call(input, text);
-        else input.value = text;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        input.focus();
-        return { ok: true, method: input.tagName === 'TEXTAREA' ? 'textarea_fallback' : 'input_fallback' };
-      }
-
-      return { ok: false, reason: 'no reply input found' };
-    }, replyText);
+    const filled = await typeIntoReplyDraftEditor(page, replyText);
 
     if (!filled.ok) {
       await captureReplyBoxDebug(page, 'send-no-input');
       return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '找不到回复输入框', { recoverable: true });
     }
 
-    await page.waitForTimeout(800);
-
-    const focused = await page.evaluate(() => {
-      const active = document.activeElement;
-      if (active && active.closest?.('.comment-input-container')) return true;
-      if (active?.tagName === 'INPUT' || active?.tagName === 'TEXTAREA') return true;
-
-      const editor = document.querySelector('.comment-input-container [contenteditable="true"]');
-      if (!editor) return false;
-      editor.focus();
-      return document.activeElement === editor || !!document.activeElement?.closest?.('.comment-input-container');
-    });
-    if (!focused) {
-      await captureReplyBoxDebug(page, 'send-not-focused');
-      return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '回复输入框已消失或未聚焦，未发送', { recoverable: true });
+    const clicked = await clickReplySendControl(page);
+    if (clicked.ok) {
+      console.error(`[work-modal] 点击发送控件 method=${clicked.method}`);
+      await page.waitForTimeout(2000);
+      return success({ sent: true, method: clicked.method, fillMethod: filled.method });
     }
 
     await page.keyboard.press('Enter');
-    console.error(`[work-modal] 按 Enter 发送`);
+    console.error(`[work-modal] 未找到发送控件，按 Enter 发送`);
     await page.waitForTimeout(2000);
 
-    return success({ sent: true, method: 'enter_key' });
+    return success({ sent: true, method: 'enter_key', fillMethod: filled.method, sendControlReason: clicked.reason });
   } catch (err) {
     return blocking(RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND, `发送回复异常: ${err.message}`, { recoverable: true });
   }
