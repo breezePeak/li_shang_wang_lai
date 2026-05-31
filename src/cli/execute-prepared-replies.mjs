@@ -54,8 +54,7 @@ async function main() {
       const work = findWorkByWorkId(comment.work_id) || findWorkByModalId(comment.modal_id);
       if (!work) {
         console.log('[execute]   作品未找到，跳过');
-        markCommentBlocked(comment.id, 'work not found in DB');
-        results.push({ status: 'blocked' });
+        results.push({ status: 'blocked', reason: 'work not found' });
         blocked++;
         continue;
       }
@@ -68,8 +67,7 @@ async function main() {
       const removed = await detectVideoRemoved(page);
       if (removed) {
         console.log(`[execute]   作品已删除: ${removed}`);
-        markCommentBlocked(comment.id, `video removed: ${removed}`);
-        results.push({ status: 'blocked' });
+        results.push({ status: 'blocked', reason: `video removed: ${removed}` });
         blocked++;
         continue;
       }
@@ -77,8 +75,7 @@ async function main() {
       const modalResult = await waitForWorkModal(page);
       if (!modalResult.ok) {
         console.log(`[execute]   modal 未出现: ${modalResult.message}`);
-        markCommentBlocked(comment.id, `modal not found: ${modalResult.message}`);
-        results.push({ status: 'blocked' });
+        results.push({ status: 'blocked', reason: modalResult.message });
         blocked++;
         continue;
       }
@@ -86,8 +83,7 @@ async function main() {
       const scanResult = await findUnrepliedCommentsInModal(page, { selfNickname: '' });
       if (!scanResult.ok) {
         console.log(`[execute]   扫描评论失败: ${scanResult.message}`);
-        markCommentBlocked(comment.id, `scan failed: ${scanResult.message}`);
-        results.push({ status: 'blocked' });
+        results.push({ status: 'blocked', reason: scanResult.message });
         blocked++;
         continue;
       }
@@ -97,8 +93,7 @@ async function main() {
       );
       if (!targetComment) {
         console.log('[execute]   评论未找到，可能已回复');
-        markCommentBlocked(comment.id, 'comment not found in modal');
-        results.push({ status: 'blocked' });
+        results.push({ status: 'blocked', reason: 'comment not found in modal' });
         blocked++;
         continue;
       }
@@ -106,8 +101,7 @@ async function main() {
       const openResult = await openReplyBoxByIndex(page, targetComment.commentIndex);
       if (!openResult.ok) {
         console.log(`[execute]   打开回复框失败: ${openResult.message}`);
-        markCommentBlocked(comment.id, `open reply box failed: ${openResult.message}`);
-        results.push({ status: 'blocked' });
+        results.push({ status: 'blocked', reason: openResult.message });
         blocked++;
         continue;
       }
@@ -116,13 +110,12 @@ async function main() {
         const fillResult = await fillReplyInWorkModal(page, comment.reply_text);
         if (!fillResult.ok) {
           console.log(`[execute]   填入失败: ${fillResult.message}`);
-          markCommentBlocked(comment.id, `fill failed: ${fillResult.message}`);
-          results.push({ status: 'blocked' });
+          results.push({ status: 'blocked', reason: fillResult.message });
           blocked++;
           continue;
         }
         console.log(`[execute]   ✓ [预演] 已填入: "${comment.reply_text?.slice(0, 30)}"`);
-        results.push({ status: 'succeeded' });
+        results.push({ status: 'succeeded', reason: 'preview' });
         succeeded++;
         continue;
       }
@@ -130,8 +123,7 @@ async function main() {
       const sendResult = await sendReplyInWorkModal(page, comment.reply_text);
       if (!sendResult.ok) {
         console.log(`[execute]   发送失败: ${sendResult.message}`);
-        markCommentBlocked(comment.id, `send failed: ${sendResult.message}`);
-        results.push({ status: 'blocked' });
+        results.push({ status: 'blocked', reason: sendResult.message });
         blocked++;
         continue;
       }
@@ -140,7 +132,7 @@ async function main() {
       if (!verifyResult.ok) {
         console.log(`[execute]   ⚠ 未确认: ${verifyResult.message}`);
         markCommentSentUnverified(comment.id, verifyResult.message);
-        results.push({ status: 'sent_unverified' });
+        results.push({ status: 'sent_unverified', reason: verifyResult.message });
         continue;
       }
 

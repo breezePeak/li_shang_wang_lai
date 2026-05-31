@@ -127,6 +127,110 @@ export async function waitForWorkModal(page, { timeoutMs = 10000 } = {}) {
       return blocking(RESULT_CODES.BLOCKED, `作品已删除/不可见: ${removedAfter}`, { recoverable: true, videoRemoved: true });
     }
 
+    // Check for "加载失败" error in modal
+    const loadFailed = await page.evaluate(() => {
+      const errorPage = document.querySelector('[data-e2e="error-page"]');
+      if (errorPage) {
+        const text = (errorPage.innerText || '').trim();
+        if (text.includes('加载失败') || text.includes('网络') || text.includes('稍后重试')) return text.slice(0, 80);
+      }
+      return null;
+    });
+    if (loadFailed) {
+      return blocking(RESULT_CODES.BLOCKED, `作品加载失败: ${loadFailed}`, { recoverable: true });
+    }
+
+    // Step 1: Disable auto-play (连播) FIRST to prevent video jumping to next
+    await page.waitForTimeout(1500);
+    let autoPlayOff = false;
+    for (let retry = 0; retry < 5; retry++) {
+      const autoPlayResult = await page.evaluate(() => {
+        const autoPlayEl = document.querySelector('.xgplayer-autoplay-setting');
+        if (!autoPlayEl) return { found: false };
+        const e2eState = autoPlayEl.querySelector('[data-e2e-state]')?.getAttribute('data-e2e-state') || '';
+        const isOff = e2eState.includes('no-auto-play');
+        if (isOff) return { found: true, alreadyOff: true };
+        const switchBtn = autoPlayEl.querySelector('.xg-switch');
+        if (switchBtn) { switchBtn.click(); return { found: true, alreadyOff: false, method: 'switch' }; }
+        autoPlayEl.click();
+        return { found: true, alreadyOff: false, method: 'parent' };
+      });
+      if (autoPlayResult.found && autoPlayResult.alreadyOff) {
+        console.error('[work-modal] 连播已关闭');
+        autoPlayOff = true;
+        break;
+      }
+      if (autoPlayResult.found && !autoPlayResult.alreadyOff) {
+        console.error(`[work-modal] 尝试关闭连播 (method=${autoPlayResult.method})`);
+        await page.waitForTimeout(800);
+        const verifyOff = await page.evaluate(() => {
+          const el = document.querySelector('.xgplayer-autoplay-setting [data-e2e-state]');
+          return el ? el.getAttribute('data-e2e-state') : '';
+        });
+        if (verifyOff.includes('no-auto-play')) {
+          console.error('[work-modal] 连播已关闭');
+          autoPlayOff = true;
+          break;
+        }
+        console.error('[work-modal] 连播关闭未生效，尝试快捷键 K...');
+        await page.keyboard.press('k');
+        await page.waitForTimeout(800);
+        const verifyK = await page.evaluate(() => {
+          const el = document.querySelector('.xgplayer-autoplay-setting [data-e2e-state]');
+          return el ? el.getAttribute('data-e2e-state') : '';
+        });
+        if (verifyK.includes('no-auto-play')) {
+          console.error('[work-modal] 快捷键 K 关闭连播成功');
+          autoPlayOff = true;
+          break;
+        }
+      }
+      console.error(`[work-modal] 连播元素未找到，重试 ${retry + 1}/5...`);
+      await page.waitForTimeout(1000);
+    }
+    if (!autoPlayOff) {
+      console.error('[work-modal] ⚠ 无法关闭连播，中止打开评论区');
+      return blocking(RESULT_CODES.BLOCKED, '无法关闭连播，跳过此作品', { recoverable: true });
+    }
+
+    // Step 2: Open comment area if not visible
+    const commentVisible = await page.evaluate(() => {
+      const commentArea = document.querySelector('.comment-mainContent');
+      if (commentArea) {
+        const rect = commentArea.getBoundingClientRect();
+        if (rect.width > 50 && rect.height > 50) return true;
+      }
+      return false;
+    });
+
+    if (!commentVisible) {
+      console.error('[work-modal] 评论区未展开，点击评论按钮...');
+      const clicked = await page.evaluate(() => {
+        const commentIcon = document.querySelector('[data-e2e="feed-comment-icon"]');
+        if (!commentIcon) return false;
+        const rect = commentIcon.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          commentIcon.click();
+          return true;
+        }
+        return false;
+      });
+      if (clicked) {
+        await page.waitForTimeout(2000);
+      } else {
+        console.error('[work-modal] 未找到评论按钮，尝试点击评论区容器...');
+        const containerClicked = await page.evaluate(() => {
+          const containers = document.querySelectorAll('[data-e2e="feed-comment-icon"], [class*="comment-icon"], [class*="comment-btn"]');
+          for (const el of containers) {
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) { el.click(); return true; }
+          }
+          return false;
+        });
+        if (containerClicked) await page.waitForTimeout(2000);
+      }
+    }
+
     await page.waitForSelector('.comment-mainContent', { state: 'visible', timeout: 5000 });
     await page.evaluate(MATCH_COMMENT_INNER);
     return success({ modalVisible: true });
