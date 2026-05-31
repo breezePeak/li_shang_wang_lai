@@ -1,5 +1,83 @@
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 import { normalizeDouyinUrl } from '../utils/douyin-url.mjs';
+import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
+import path from 'path';
+
+async function captureReplyBoxDebug(page, phase) {
+  try {
+    const dir = path.resolve('data', 'debug', 'reply-box');
+    ensureDir(dir);
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const base = path.join(dir, `${ts}-${phase}`);
+
+    const data = await page.evaluate(() => {
+      function summarize(el) {
+        if (!el) return null;
+        const rect = el.getBoundingClientRect();
+        const parent = el.parentElement;
+        return {
+          tag: el.tagName.toLowerCase(),
+          id: el.id || '',
+          className: (el.getAttribute('class') || '').slice(0, 300),
+          role: el.getAttribute('role') || '',
+          type: el.getAttribute('type') || '',
+          placeholder: el.getAttribute('placeholder') || '',
+          ariaLabel: el.getAttribute('aria-label') || '',
+          text: (el.innerText || el.textContent || '').trim().slice(0, 300),
+          value: typeof el.value === 'string' ? el.value.slice(0, 200) : '',
+          rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+          visible: rect.width > 0 && rect.height > 0,
+          html: el.outerHTML.slice(0, 1000),
+          parentClassName: parent ? (parent.getAttribute('class') || '').slice(0, 300) : '',
+          parentText: parent ? (parent.innerText || parent.textContent || '').trim().slice(0, 300) : '',
+          parentHtml: parent ? parent.outerHTML.slice(0, 1200) : '',
+        };
+      }
+
+      const inputSelector = 'input, textarea, [contenteditable="true"], [role="textbox"]';
+      const inputs = Array.from(document.querySelectorAll(inputSelector)).map(summarize);
+
+      const actionEls = Array.from(document.querySelectorAll('button, [role="button"], span, div'))
+        .map(el => ({ el, text: (el.innerText || el.textContent || '').trim() }))
+        .filter(({ el, text }) => {
+          if (!text) return false;
+          if (!['回复', '回复中', '发送', '评论', '取消'].some(t => text === t || text.includes(t))) return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        })
+        .slice(0, 80)
+        .map(({ el }) => summarize(el));
+
+      const containers = Array.from(document.querySelectorAll('[class*="comment"], [class*="reply"], [class*="input"], [class*="editor"]'))
+        .filter(el => {
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        })
+        .slice(0, 80)
+        .map(summarize);
+
+      return {
+        url: location.href,
+        title: document.title,
+        activeElement: summarize(document.activeElement),
+        bodyTextPreview: (document.body?.innerText || '').slice(-2000),
+        inputs,
+        actionEls,
+        containers,
+      };
+    });
+
+    writeJSON(`${base}.json`, data);
+    try {
+      await page.screenshot({ path: `${base}.png`, fullPage: false });
+    } catch {}
+    console.error(`[work-modal] 回复框诊断已保存: ${base}.json`);
+    return `${base}.json`;
+  } catch (err) {
+    console.error(`[work-modal] 回复框诊断保存失败: ${err.message}`);
+    return null;
+  }
+}
 
 export function parseDouyinTimeText(text) {
   if (!text) return null;
@@ -745,9 +823,11 @@ export async function openReplyBoxByIndex(page, commentIndex) {
     });
 
     if (!inputVisible) {
+      await captureReplyBoxDebug(page, 'open-no-input');
       return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '点击回复后输入框未出现', { recoverable: true });
     }
 
+    await captureReplyBoxDebug(page, 'open-success');
     console.error(`[work-modal] 回复输入框已出现`);
     return success({ replyBoxOpened: true });
   } catch (err) {
@@ -799,6 +879,7 @@ export async function fillReplyInWorkModal(page, replyText) {
       }, replyText);
 
       if (!fallback.ok) {
+        await captureReplyBoxDebug(page, 'fill-no-input');
         return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '找不到回复输入框', { recoverable: true });
       }
     }
@@ -853,6 +934,7 @@ export async function sendReplyInWorkModal(page, replyText) {
     }, replyText);
 
     if (!filled.ok) {
+      await captureReplyBoxDebug(page, 'send-no-input');
       return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '找不到回复输入框', { recoverable: true });
     }
 
@@ -869,6 +951,7 @@ export async function sendReplyInWorkModal(page, replyText) {
       return document.activeElement === editor || !!document.activeElement?.closest?.('.comment-input-container');
     });
     if (!focused) {
+      await captureReplyBoxDebug(page, 'send-not-focused');
       return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '回复输入框已消失或未聚焦，未发送', { recoverable: true });
     }
 
