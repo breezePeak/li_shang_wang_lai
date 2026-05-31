@@ -1,0 +1,48 @@
+{
+"name": "li-shang-wang-lai-skills",
+"version": "0.1.0",
+"description": "A GitHub-cloneable skill pack for creator interaction workflows. It includes a comment suggestion skill and an interaction execution skill. The execution skill must use the comment suggestion skill whenever a comment draft is needed.",
+"skills": [
+{
+"name": "creator-comment-suggestion",
+"path": "skills/creator-comment-suggestion",
+"entry": "skills/creator-comment-suggestion/SKILL.md",
+"description": "Generate exactly one safe, natural Chinese comment suggestion based only on provided work context.",
+"outputs": [
+"one Chinese comment text"
+],
+"doesNotDo": [
+"open pages",
+"click like",
+"post comments",
+"execute platform actions"
+]
+},
+{
+"name": "creator-interaction-executor",
+"path": "skills/creator-interaction-executor",
+"entry": "skills/creator-interaction-executor/SKILL.md",
+"description": "Execute creator interaction workflows after explicit user confirmation, including preparation, validation, liking, posting approved comments, and recording results.",
+"dependsOn": [
+{
+"name": "creator-comment-suggestion",
+"entry": "skills/creator-comment-suggestion/SKILL.md",
+"usage": "Required whenever a comment draft is needed."
+}
+],
+"outputs": [
+"prepared task",
+"execution result",
+"blocked result",
+"unsupported result"
+]
+}
+],
+"recommendedLoadOrder": [
+"creator-comment-suggestion",
+"creator-interaction-executor"
+],
+"shared": [
+"shared/comment-safety-rules.md"
+]
+}
