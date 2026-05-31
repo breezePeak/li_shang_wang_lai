@@ -52,6 +52,24 @@ export function assessCandidateLikeState(diag) {
   return null;
 }
 
+export function assessDouyinPlayerDiggState(diag) {
+  if (!diag) return null;
+  const state = String(diag.dataE2eState || '').toLowerCase();
+  if (state.includes('no-digg') || state.includes('no-digged') || state.includes('not-digged')) {
+    return { liked: false, confidence: 'confirmed', signal: 'douyin-player-digg-state' };
+  }
+  if (state.includes('is-digged') || state.includes('digged') || state.includes('liked')) {
+    return { liked: true, confidence: 'confirmed', signal: 'douyin-player-digg-state' };
+  }
+  if (diag.hasRedSvg) {
+    return { liked: true, confidence: 'confirmed', signal: 'douyin-player-digg-red-svg' };
+  }
+  if (diag.found) {
+    return { liked: false, confidence: 'confirmed', signal: 'douyin-player-digg-neutral' };
+  }
+  return null;
+}
+
 export async function navigateToVideo(page, videoUrl, options = {}) {
   const { timeoutMs = 15000 } = options;
 
@@ -164,6 +182,23 @@ export async function checkLikeState(page) {
           if (values.some(isDouyinRedColor)) return true;
         }
         return false;
+      }
+
+      function assessPlayerDiggState(diag) {
+        const state = String(diag.dataE2eState || '').toLowerCase();
+        if (state.includes('no-digg') || state.includes('no-digged') || state.includes('not-digged')) {
+          return { liked: false, confidence: 'confirmed', signal: 'douyin-player-digg-state' };
+        }
+        if (state.includes('is-digged') || state.includes('digged') || state.includes('liked')) {
+          return { liked: true, confidence: 'confirmed', signal: 'douyin-player-digg-state' };
+        }
+        if (diag.hasRedSvg) {
+          return { liked: true, confidence: 'confirmed', signal: 'douyin-player-digg-red-svg' };
+        }
+        if (diag.found) {
+          return { liked: false, confidence: 'confirmed', signal: 'douyin-player-digg-neutral' };
+        }
+        return null;
       }
 
       function hasLikedSvg(el) {
@@ -301,6 +336,48 @@ export async function checkLikeState(page) {
             visibleSvgParents: svgParents.slice(0, 50),
           },
         };
+      }
+
+      // ---- Phase -1: current Douyin PC player action row ----
+      // Evidence DOM:
+      //   <div data-e2e="video-player-digg" data-e2e-state="video-player-is-digged">...</div>
+      // The same action row contains:
+      //   data-e2e="feed-comment-icon"
+      //   data-e2e="video-player-collect"
+      //   data-e2e="video-player-share"
+      const playerDigg = document.querySelector('[data-e2e="video-player-digg"]');
+      if (playerDigg) {
+        const rect = playerDigg.getBoundingClientRect();
+        const style = window.getComputedStyle(playerDigg);
+        const diag = {
+          found: true,
+          tag: playerDigg.tagName.toLowerCase(),
+          text: ((playerDigg.innerText || '').trim()).slice(0, 40),
+          className: (typeof playerDigg.className === 'string' ? playerDigg.className : '').slice(0, 160),
+          dataE2e: playerDigg.getAttribute('data-e2e') || '',
+          dataE2eState: playerDigg.getAttribute('data-e2e-state') || '',
+          color: style.color || '',
+          backgroundColor: style.backgroundColor || '',
+          hasRedSvg: hasRedSvgSignal(playerDigg),
+          rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+        };
+        const assessed = assessPlayerDiggState(diag);
+        if (assessed) {
+          playerDigg.setAttribute('data-temp-like-btn', 'true');
+          return {
+            ...assessed,
+            diag,
+            actionBarFound: true,
+            actionItemCount: document.querySelectorAll('[data-e2e="video-player-digg"], [data-e2e="feed-comment-icon"], [data-e2e="video-player-collect"], [data-e2e="video-player-share"]').length,
+            actionItemsDiag: Array.from(document.querySelectorAll('[data-e2e="video-player-digg"], [data-e2e="feed-comment-icon"], [data-e2e="video-player-collect"], [data-e2e="video-player-share"]')).map((el, i) => ({
+              index: i,
+              dataE2e: el.getAttribute('data-e2e') || '',
+              dataE2eState: el.getAttribute('data-e2e-state') || '',
+              className: (typeof el.className === 'string' ? el.className : '').slice(0, 160),
+              text: ((el.innerText || '').trim()).slice(0, 40),
+            })),
+          };
+        }
       }
 
       // ---- Phase 0: Douyin PC action bar like button detection ----

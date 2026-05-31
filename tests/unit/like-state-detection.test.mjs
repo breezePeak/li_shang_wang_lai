@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assessCandidateLikeState } from '../../src/adapters/video-page.mjs';
+import { assessCandidateLikeState, assessDouyinPlayerDiggState } from '../../src/adapters/video-page.mjs';
 
 function makeDiag(overrides = {}) {
   return {
@@ -52,6 +52,41 @@ describe('assessCandidateLikeState — selector coverage', () => {
     const r = assessCandidateLikeState(d);
     expect(r.liked).toBe(false);
     expect(r.signal).toBe('neutral-like-btn');
+  });
+});
+
+describe('assessDouyinPlayerDiggState — real data-e2e state', () => {
+  it('video-player-is-digged → already liked', () => {
+    const r = assessDouyinPlayerDiggState({
+      found: true,
+      dataE2e: 'video-player-digg',
+      dataE2eState: 'video-player-is-digged',
+      hasRedSvg: true,
+    });
+    expect(r.liked).toBe(true);
+    expect(r.signal).toBe('douyin-player-digg-state');
+  });
+
+  it('video-player-no-digged → not liked', () => {
+    const r = assessDouyinPlayerDiggState({
+      found: true,
+      dataE2e: 'video-player-digg',
+      dataE2eState: 'video-player-no-digged',
+      hasRedSvg: false,
+    });
+    expect(r.liked).toBe(false);
+    expect(r.signal).toBe('douyin-player-digg-state');
+  });
+
+  it('missing state but red SVG → already liked', () => {
+    const r = assessDouyinPlayerDiggState({
+      found: true,
+      dataE2e: 'video-player-digg',
+      dataE2eState: '',
+      hasRedSvg: true,
+    });
+    expect(r.liked).toBe(true);
+    expect(r.signal).toBe('douyin-player-digg-red-svg');
   });
 });
 
