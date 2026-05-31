@@ -17,13 +17,14 @@ import {
   sendReplyInWorkModal,
   verifyReplyInWorkModal,
   detectVideoRemoved,
+  parseDouyinTimeText,
 } from '../adapters/work-modal-page.mjs';
 import { clickNotificationWorkThumbnail } from '../adapters/work-context-page.mjs';
 import { checkWorkOwner, getSelfProfile } from '../adapters/work-context-page.mjs';
 import { generateReplyText } from '../domain/reply-template.mjs';
 import { upsertNotificationEvent } from '../db/interaction-repository.mjs';
 import { upsertWorkContext, findWorkByModalId, findWorkByWorkId } from '../db/work-repository.mjs';
-import { upsertWorkComment, listPendingCommentsGroupedByWork, markCommentReplyPrepared, markCommentReplied, markCommentSentUnverified, markCommentBlocked, markCommentSkipped } from '../db/work-comment-repository.mjs';
+import { upsertWorkComment, listPendingCommentsGroupedByWork, markCommentReplyPrepared, markCommentReplied, markCommentSentUnverified, markCommentBlocked, markCommentSkipped, findCommentByActorAndText } from '../db/work-comment-repository.mjs';
 import { upsertRevisitCandidate, listPendingRevisitCandidates, markRevisitDone, markRevisitSkipped, markRevisitBlocked } from '../db/revisit-repository.mjs';
 import { getDb } from '../db/database.mjs';
 import { runMigrations } from '../db/migrations.mjs';
@@ -246,6 +247,10 @@ async function processWorkModal(page, notification, db, run, options, state) {
   }
 
   const workCtx = contextResult.data;
+  workCtx.publishedAt = parseDouyinTimeText(workCtx.publishedAtText) || null;
+  if (workCtx.publishedAtText) {
+    console.log(`[live]   发布时间: "${workCtx.publishedAtText}" -> ${workCtx.publishedAt || '解析失败'}`);
+  }
   console.log(`[live]   modalId=${workCtx.modalId} workType=${workCtx.workType} workTitle="${(workCtx.workTitle || '').slice(0, 40)}"`);
 
   // DB-based dedup: check works table
@@ -274,6 +279,8 @@ async function processWorkModal(page, notification, db, run, options, state) {
     authorName: workCtx.authorName,
     authorProfileUrl: workCtx.authorProfileUrl,
     authorProfileKey: workCtx.authorProfileKey,
+    publishedAt: workCtx.publishedAt || null,
+    thumbnailSrc: workCtx.thumbnailSrc || null,
     rawContextJson: JSON.stringify(workCtx),
   });
   console.log(`[live]   works表: ${workUpsertResult.action} id=${workUpsertResult.id}`);
@@ -594,6 +601,12 @@ async function main() {
         const commentKey = `${(n.username || '')}::${(n.content || '').slice(0, 60)}`;
         if (state.repliedCommentKeys.has(commentKey)) {
           console.log(`[live]   跳过已回复通知: ${n.username} "${(n.content || '').slice(0, 30)}"`);
+          continue;
+        }
+
+        const existingComment = findCommentByActorAndText(n.username || '', (n.content || '').slice(0, 60));
+        if (existingComment) {
+          console.log(`[live]   跳过已采集评论: ${n.username} "${(n.content || '').slice(0, 30)}" (status=${existingComment.reply_status})`);
           continue;
         }
 

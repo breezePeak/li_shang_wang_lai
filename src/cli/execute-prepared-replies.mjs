@@ -21,8 +21,8 @@ async function main() {
   const db = getDb();
   const options = commonArgs.options;
 
-  const preparedComments = listPreparedComments({ limit: options.maxItems || 10 });
-  console.log(`[execute] 待执行: ${preparedComments.length} 条 prepared 评论`);
+  const preparedComments = listPreparedComments({ limit: options.maxItems || 10, days: options.days || null });
+  console.log(`[execute] 待执行: ${preparedComments.length} 条 prepared 评论${options.days ? ` (最近 ${options.days} 天)` : ''}`);
 
   if (preparedComments.length === 0) {
     console.log('[execute] 无 prepared 评论，退出');

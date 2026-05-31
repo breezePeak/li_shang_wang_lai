@@ -1,6 +1,27 @@
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 import { normalizeDouyinUrl } from '../utils/douyin-url.mjs';
 
+export function parseDouyinTimeText(text) {
+  if (!text) return null;
+  const now = new Date();
+  const m = text.match(/(\d+)天前/);
+  if (m) return new Date(now.getTime() - parseInt(m[1]) * 86400000).toISOString();
+  const h = text.match(/(\d+)小时前/);
+  if (h) return new Date(now.getTime() - parseInt(h[1]) * 3600000).toISOString();
+  const min = text.match(/(\d+)分钟前/);
+  if (min) return new Date(now.getTime() - parseInt(min[1]) * 60000).toISOString();
+  if (text.startsWith('刚刚')) return now.toISOString();
+  if (text.startsWith('昨天')) return new Date(now.getTime() - 86400000).toISOString();
+  if (text.startsWith('前天')) return new Date(now.getTime() - 2 * 86400000).toISOString();
+  const md = text.match(/(\d{1,2})月(\d{1,2})日/);
+  if (md) return new Date(now.getFullYear(), parseInt(md[1]) - 1, parseInt(md[2])).toISOString();
+  const dash = text.match(/(\d{2})-(\d{2})/);
+  if (dash) return new Date(now.getFullYear(), parseInt(dash[1]) - 1, parseInt(dash[2])).toISOString();
+  const full = text.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (full) return new Date(parseInt(full[1]), parseInt(full[2]) - 1, parseInt(full[3])).toISOString();
+  return null;
+}
+
 export function extractModalIdFromUrl(url) {
   if (!url) return null;
   const match = url.match(/[?&]modal_id=([^&#]+)/);
@@ -22,6 +43,8 @@ export async function extractWorkModalContext(page) {
       const scope = modal || document.body;
 
       const specificSelectors = [
+        'div.title[data-e2e="video-desc"]',
+        '[data-e2e="video-desc"]',
         '[class*="video-desc"]',
         '[class*="desc-info"]',
         '[class*="work-desc"]',
@@ -98,6 +121,52 @@ export async function extractWorkModalContext(page) {
 
   const isOwnWorkByUrl = currentUrl.includes('/user/self');
 
+  let publishedAtText = '';
+  try {
+    publishedAtText = await page.evaluate(() => {
+      const modal = document.querySelector('.modal-video-container');
+      const scope = modal || document.body;
+      const directSelectors = [
+        '.video-create-time span.time',
+        '.video-create-time',
+        'span.time',
+      ];
+      for (const sel of directSelectors) {
+        const el = scope.querySelector(sel);
+        if (el) {
+          const text = (el.innerText || '').trim().replace(/^·\s*/, '');
+          if (text.length > 0 && text.length < 30) return text;
+        }
+      }
+      const timeSelectors = [
+        '[class*="publish-time"]',
+        '[class*="create-time"]',
+        '[class*="aweme-time"]',
+        '[class*="time-text"]',
+        '[class*="date-text"]',
+      ];
+      for (const sel of timeSelectors) {
+        const el = scope.querySelector(sel);
+        if (el) {
+          const text = (el.innerText || '').trim().replace(/^·\s*/, '');
+          if (text.length > 0 && text.length < 30) return text;
+        }
+      }
+      return '';
+    });
+  } catch {}
+
+  let thumbnailSrc = '';
+  try {
+    thumbnailSrc = await page.evaluate(() => {
+      const modal = document.querySelector('.modal-video-container');
+      const scope = modal || document.body;
+      const img = scope.querySelector('img[class*="poster"], img[class*="cover"], video');
+      if (img) return img.src || img.poster || '';
+      return '';
+    });
+  } catch {}
+
   return success({
     currentUrl,
     workId,
@@ -110,6 +179,8 @@ export async function extractWorkModalContext(page) {
     authorName: authorName || null,
     authorProfileKey: authorProfileKey || null,
     authorProfileUrl: authorProfileUrl || null,
+    publishedAtText: publishedAtText || null,
+    thumbnailSrc: thumbnailSrc || null,
   });
 }
 
@@ -189,8 +260,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000 } = {}) {
       await page.waitForTimeout(1000);
     }
     if (!autoPlayOff) {
-      console.error('[work-modal] ⚠ 无法关闭连播，中止打开评论区');
-      return blocking(RESULT_CODES.BLOCKED, '无法关闭连播，跳过此作品', { recoverable: true });
+      console.error('[work-modal] ⚠ 连播元素未找到，继续尝试打开评论区');
     }
 
     // Step 2: Open comment area if not visible
@@ -319,13 +389,14 @@ export async function findCommentInWorkModal(page, item, { maxScrolls = 10 } = {
         const commentArea = document.querySelector('.comment-mainContent');
         if (!commentArea) return { scrolled: false, atEnd: true };
         const prev = commentArea.scrollTop;
-        commentArea.scrollTop = commentArea.scrollHeight;
+        const step = Math.min(150 + Math.floor(Math.random() * 150), commentArea.scrollHeight - commentArea.scrollTop);
+        commentArea.scrollTop += step;
         return { scrolled: true, atEnd: commentArea.scrollTop === prev };
       });
 
       if (scrolled.atEnd) break;
 
-      await page.waitForTimeout(600);
+      await page.waitForTimeout(1500 + Math.floor(Math.random() * 2500));
 
       const foundAfterScroll = await page.evaluate(({ actorName, commentText, eventTimeText }) => {
         const commentArea = document.querySelector('.comment-mainContent');
@@ -458,7 +529,8 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
             if (areaText.includes(pat)) return { atEnd: true, noMore: true };
           }
           const prev = commentArea.scrollTop;
-          commentArea.scrollTop = commentArea.scrollHeight;
+          const step = Math.min(150 + Math.floor(Math.random() * 150), commentArea.scrollHeight - commentArea.scrollTop);
+          commentArea.scrollTop += step;
           return { atEnd: commentArea.scrollTop === prev, noMore: false };
         });
         if (scrolled.noMore) {
@@ -466,7 +538,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
           break;
         }
         if (scrolled.atEnd) {
-          await page.waitForTimeout(1500);
+          await page.waitForTimeout(2000);
           const recheck = await page.evaluate(() => {
             const commentArea = document.querySelector('.comment-mainContent');
             if (!commentArea) return { atEnd: true, noMore: false };
@@ -476,7 +548,8 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
               if (areaText.includes(pat)) return { atEnd: true, noMore: true };
             }
             const prev = commentArea.scrollTop;
-            commentArea.scrollTop = commentArea.scrollHeight;
+            const step = Math.min(150 + Math.floor(Math.random() * 150), commentArea.scrollHeight - commentArea.scrollTop);
+            commentArea.scrollTop += step;
             return { atEnd: commentArea.scrollTop === prev, noMore: false };
           });
           if (recheck.noMore) {
@@ -486,7 +559,20 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
           if (recheck.atEnd) break;
         }
 
-        await page.waitForTimeout(1200);
+        await page.waitForTimeout(1500 + Math.floor(Math.random() * 2500));
+
+        const hasError = await page.evaluate(() => {
+          const errorPage = document.querySelector('[data-e2e="error-page"]');
+          if (errorPage) {
+            const text = (errorPage.innerText || '').trim();
+            if (text.includes('加载失败')) return true;
+          }
+          return false;
+        });
+        if (hasError) {
+          console.error(`[work-modal] 检测到加载失败，停止滚动`);
+          break;
+        }
 
         result = await collect();
         const newComments = result.comments.filter(c => !allComments.some(e => e.commentKey === c.commentKey));

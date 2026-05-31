@@ -168,7 +168,8 @@ export function runMigrations(dbPath = DB_PATH) {
       author_profile_key TEXT,
       raw_context_json TEXT,
       first_seen_at TEXT NOT NULL,
-      last_seen_at TEXT NOT NULL
+      last_seen_at TEXT NOT NULL,
+      published_at TEXT
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_works_work_id
@@ -229,6 +230,15 @@ export function runMigrations(dbPath = DB_PATH) {
       visited_at TEXT
     );
   `);
+
+  // Migrate: add published_at column to works
+  const checkWorks = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='works'").get();
+  const worksSql = checkWorks ? (checkWorks.sql || '') : '';
+  if (worksSql && !worksSql.includes('published_at')) {
+    console.error('[db:init] 旧版 works 缺少 published_at 列，迁移中...');
+    db.exec('ALTER TABLE works ADD COLUMN published_at TEXT');
+    console.error('[db:init] published_at 列已添加');
+  }
 
   // Migrate: add target_work_id, target_work_url, dedup_confidence, profile_resolution_status
   const newColumns = [

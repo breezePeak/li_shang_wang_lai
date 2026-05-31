@@ -8,6 +8,7 @@ export function upsertWorkContext(workContext) {
     workId, modalId, workUrl, workTitle, workType,
     thumbnailKey, thumbnailSrc,
     authorName, authorProfileUrl, authorProfileKey,
+    publishedAt,
     rawContextJson,
   } = workContext;
 
@@ -37,14 +38,14 @@ export function upsertWorkContext(workContext) {
 
   const stmt = db.prepare(`
     INSERT INTO works (work_id, modal_id, work_url, work_title, work_type, thumbnail_key, thumbnail_src,
-      author_name, author_profile_url, author_profile_key, raw_context_json, first_seen_at, last_seen_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      author_name, author_profile_url, author_profile_key, published_at, raw_context_json, first_seen_at, last_seen_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     workId || null, modalId || null, workUrl || null, workTitle || null, workType || null,
     thumbnailKey || null, thumbnailSrc || null,
     authorName || null, authorProfileUrl || null, authorProfileKey || null,
-    rawContextJson || null, now, now,
+    publishedAt || null, rawContextJson || null, now, now,
   );
   return { action: 'inserted', id: result.lastInsertRowid };
 }
@@ -59,6 +60,8 @@ function _updateWork(db, id, ctx, now) {
   if (ctx.authorName && ctx.authorName.length > 0) { updates.push('author_name = ?'); params.push(ctx.authorName); }
   if (ctx.authorProfileUrl && ctx.authorProfileUrl.length > 0) { updates.push('author_profile_url = ?'); params.push(ctx.authorProfileUrl); }
   if (ctx.authorProfileKey && ctx.authorProfileKey.length > 0) { updates.push('author_profile_key = ?'); params.push(ctx.authorProfileKey); }
+  if (ctx.publishedAt) { updates.push('published_at = ?'); params.push(ctx.publishedAt); }
+  if (ctx.thumbnailSrc && ctx.thumbnailSrc.length > 0) { updates.push('thumbnail_src = ?'); params.push(ctx.thumbnailSrc); }
   if (ctx.rawContextJson) { updates.push('raw_context_json = ?'); params.push(ctx.rawContextJson); }
 
   if (updates.length === 0) return;

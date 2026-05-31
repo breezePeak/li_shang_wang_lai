@@ -68,7 +68,17 @@ export function listPendingCommentsGroupedByWork(options = {}) {
 
 export function listPreparedComments(options = {}) {
   const db = getDb();
-  const { limit = 100 } = options;
+  const { limit = 100, days } = options;
+  if (days) {
+    const since = new Date(Date.now() - days * 86400000).toISOString();
+    return db.prepare(
+      `SELECT wc.* FROM work_comments wc
+       LEFT JOIN works w ON wc.work_id = w.work_id
+       WHERE wc.reply_status = 'prepared'
+         AND (w.published_at >= ? OR (w.published_at IS NULL AND wc.first_seen_at >= ?))
+       ORDER BY COALESCE(w.published_at, wc.first_seen_at) ASC LIMIT ?`
+    ).all(since, since, limit);
+  }
   return db.prepare(
     "SELECT * FROM work_comments WHERE reply_status = 'prepared' ORDER BY first_seen_at ASC LIMIT ?"
   ).all(limit);
@@ -108,4 +118,11 @@ export function markCommentSkipped(commentId, reason) {
   db.prepare(
     "UPDATE work_comments SET reply_status = 'skipped', reply_reason = ?, last_seen_at = ? WHERE id = ?"
   ).run(reason || null, new Date().toISOString(), commentId);
+}
+
+export function findCommentByActorAndText(actorName, commentTextPrefix) {
+  const db = getDb();
+  return db.prepare(
+    "SELECT * FROM work_comments WHERE actor_name = ? AND comment_text LIKE ? LIMIT 1"
+  ).get(actorName, `${commentTextPrefix}%`);
 }
