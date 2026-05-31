@@ -244,7 +244,7 @@ export async function findCommentInWorkModal(page, item, { maxScrolls = 10 } = {
   }
 }
 
-export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alreadyRepliedKeys = new Set(), selfNickname = '' } = {}) {
+export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alreadyRepliedKeys = new Set(), selfNickname = '' } = {}) {
   const allComments = [];
 
   try {
@@ -253,7 +253,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
       const commentArea = document.querySelector('.comment-mainContent');
       if (!commentArea) return { comments: [], canScroll: false };
 
-      const items = commentArea.querySelectorAll('.comment-item-info-wrap');
+      const items = commentArea.querySelectorAll('[data-e2e="comment-item"]');
       const comments = [];
 
       for (let i = 0; i < items.length; i++) {
@@ -271,8 +271,8 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
 
         for (let k = 1; k < lines.length; k++) {
           const line = lines[k];
-          if (line === '回复' || line === '赞' || line === '分享' || line === '回复中') continue;
-          if (line === '互相关注' || line === '朋友' || line === '关注') continue;
+          if (line === '回复' || line === '赞' || line === '分享' || line === '回复中' || line === '...') continue;
+          if (line === '互相关注' || line === '朋友' || line === '关注' || line === '作者' || line === '作者赞过') continue;
           if (/^\d+$/.test(line) || (/^[刚昨前天周月年]/.test(line) && line.length < 10)) continue;
           if (/^\d+[秒分时天周月年]前/.test(line) || /^\d{1,2}:\d{2}/.test(line) || /^\d+月\d+日/.test(line)) continue;
           if (line.includes('·') && line.length < 30) continue;
@@ -285,8 +285,8 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
         if (!commentText) {
           for (let k = lines.length - 1; k >= 1; k--) {
             const line = lines[k];
-            if (line === '回复' || line === '赞' || line === '分享' || line === '回复中') continue;
-            if (line === '互相关注' || line === '朋友' || line === '关注') continue;
+            if (line === '回复' || line === '赞' || line === '分享' || line === '回复中' || line === '...' || line === '作者') continue;
+            if (line === '互相关注' || line === '朋友' || line === '关注' || line === '作者赞过') continue;
             if (/^\d+$/.test(line) || (/^[刚昨前天周月年]/.test(line) && line.length < 10)) continue;
             if (/^\d+[秒分时天周月年]前/.test(line) || /^\d{1,2}:\d{2}/.test(line)) continue;
             if (line.includes('·') && line.length < 30) continue;
@@ -297,12 +297,12 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
           }
         }
 
-        const commentItem = items[i].closest('[data-e2e="comment-item"]') || items[i].parentElement?.parentElement;
-        const subReplyContainers = commentItem ? commentItem.querySelectorAll('.comment-item-info-wrap') : items[i].querySelectorAll('.comment-item-info-wrap');
+        const commentItem = items[i];
+        const subReplyContainers = commentItem.querySelectorAll('.comment-item-info-wrap');
         const allSubReplies = [...subReplyContainers];
         if (allSubReplies.length > 1 && selfNickname) {
           for (const sub of allSubReplies) {
-            if (sub === items[i]) continue;
+            if (sub === items[i].querySelector('.comment-item-info-wrap')) continue;
             const subText = (sub.innerText || '').trim();
             const subLines = subText.split('\n').map(l => l.trim()).filter(Boolean);
             if (subLines.length > 0 && subLines[0] === selfNickname) {
@@ -312,21 +312,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
           }
         }
 
-        if (!hasMyReply && selfNickname && commentItem) {
-          const statsContainer = commentItem.querySelector('.comment-item-stats-container');
-          if (statsContainer) {
-            const spans = statsContainer.querySelectorAll('span');
-            for (const span of spans) {
-              if ((span.innerText || '').trim() === '回复') {
-                const rect = span.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0) {
-                  break;
-                }
-              }
-            }
-          }
-          const itemFullText = (commentItem.innerText || '').trim();
-          const lines = itemFullText.split('\n').map(l => l.trim()).filter(Boolean);
+        if (!hasMyReply && selfNickname) {
           for (let li = 0; li < lines.length; li++) {
             if (lines[li] === selfNickname && li > 0) {
               hasMyReply = true;
@@ -361,17 +347,50 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
       for (let s = 0; s < maxScrolls; s++) {
         const scrolled = await page.evaluate(() => {
           const commentArea = document.querySelector('.comment-mainContent');
-          if (!commentArea) return { atEnd: true };
+          if (!commentArea) return { atEnd: true, noMore: false };
+          const END_PATTERNS = ['暂时没有更多评论', '没有更多评论', '暂无更多评论', '已经到底了', '没有更多了', '— 已到底 —'];
+          const areaText = (commentArea.innerText || '').trim();
+          for (const pat of END_PATTERNS) {
+            if (areaText.includes(pat)) return { atEnd: true, noMore: true };
+          }
           const prev = commentArea.scrollTop;
           commentArea.scrollTop = commentArea.scrollHeight;
-          return { atEnd: commentArea.scrollTop === prev };
+          return { atEnd: commentArea.scrollTop === prev, noMore: false };
         });
-        if (scrolled.atEnd) break;
-        await page.waitForTimeout(600);
+        if (scrolled.noMore) {
+          console.error(`[work-modal] 检测到"没有更多评论"，停止滚动`);
+          break;
+        }
+        if (scrolled.atEnd) {
+          await page.waitForTimeout(1500);
+          const recheck = await page.evaluate(() => {
+            const commentArea = document.querySelector('.comment-mainContent');
+            if (!commentArea) return { atEnd: true, noMore: false };
+            const END_PATTERNS = ['暂时没有更多评论', '没有更多评论', '暂无更多评论', '已经到底了', '没有更多了'];
+            const areaText = (commentArea.innerText || '').trim();
+            for (const pat of END_PATTERNS) {
+              if (areaText.includes(pat)) return { atEnd: true, noMore: true };
+            }
+            const prev = commentArea.scrollTop;
+            commentArea.scrollTop = commentArea.scrollHeight;
+            return { atEnd: commentArea.scrollTop === prev, noMore: false };
+          });
+          if (recheck.noMore) {
+            console.error(`[work-modal] 重检: 没有更多评论`);
+            break;
+          }
+          if (recheck.atEnd) break;
+        }
+
+        await page.waitForTimeout(1200);
 
         result = await collect();
         const newComments = result.comments.filter(c => !allComments.some(e => e.commentKey === c.commentKey));
         allComments.push(...newComments);
+
+        if (s % 10 === 9) {
+          console.error(`[work-modal] 滚动 ${s + 1} 次，累计 ${allComments.length} 条评论`);
+        }
 
         if (!result.canScroll) break;
       }
