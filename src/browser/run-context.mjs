@@ -19,6 +19,7 @@ const DEFAULT_OPTIONS = {
   profileSettleMs: 6000,
   videoSettleMs: 5000,
   revisit: false,
+  noRevisit: false,
   preview: false,
 };
 
@@ -54,6 +55,7 @@ export function parseCommonArgs(argv) {
       '--keep-open-on-error': 'keepOpenOnError',
       '--pause-on-error': 'pauseOnError',
       '--revisit': 'revisit',
+      '--no-revisit': 'noRevisit',
       '--preview': 'preview',
     };
 

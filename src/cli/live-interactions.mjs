@@ -50,9 +50,26 @@ function updateEventWorkInfo(db, eventId, workId, workUrl, workTitle, rawPayload
   db.prepare(`UPDATE interaction_events SET ${fields.join(', ')} WHERE id = ?`).run(...params);
 }
 
-function updateEventStatus(db, eventId, status) {
-  db.prepare("UPDATE interaction_events SET status = ?, updated_at = ? WHERE id = ?")
-    .run(status, new Date().toISOString(), eventId);
+function addRevisitCandidate(candidates, notification, reason) {
+  const key = notification.actorProfileKey || notification.actorProfileUrl || notification.username;
+  if (!key) return;
+  const existing = candidates.get(key);
+  if (existing) {
+    if (!existing.reasons.includes(reason)) existing.reasons.push(reason);
+    if (notification.eventId) existing.eventIds.push(notification.eventId);
+    if (notification.content) existing.rawTexts.push(notification.content.slice(0, 200));
+  } else {
+    candidates.set(key, {
+      key,
+      actorName: notification.username || '',
+      actorProfileUrl: notification.actorProfileUrl || '',
+      actorProfileKey: notification.actorProfileKey || '',
+      reasons: [reason],
+      eventIds: notification.eventId ? [notification.eventId] : [],
+      comments: [],
+      rawTexts: notification.content ? [notification.content.slice(0, 200)] : [],
+    });
+  }
 }
 
 async function replyToOneComment(page, comment, workCtx, db, run, options) {
@@ -74,7 +91,7 @@ async function replyToOneComment(page, comment, workCtx, db, run, options) {
 
   console.log(`[live]     回复: ${comment.actorName} "${comment.commentText.slice(0, 30)}"`);
 
-  if (options.dryRun) {
+  if (options.dryRun && !options.preview) {
     r.status = 'skipped';
     r.reason = 'dry-run 模式';
     r.code = RESULT_CODES.DRY_RUN_REQUIRED;
@@ -154,8 +171,8 @@ async function replyToOneComment(page, comment, workCtx, db, run, options) {
 async function processWorkModal(page, notification, db, run, options, state) {
   const r = {
     eventId: notification.eventId || 0,
-    actorName: notification.actorName || notification.username || '',
-    commentText: notification.commentText || notification.content || '',
+    actorName: notification.username || '',
+    commentText: notification.content || '',
     status: 'skipped',
     reason: '',
     step: '',
@@ -228,13 +245,6 @@ async function processWorkModal(page, notification, db, run, options, state) {
   }, selfProfile);
 
   if (ownerResult.isOwnWork === false) {
-    if (options.revisit) {
-      console.log(`[live]   非 own 作品，--revisit 模式：仅记录，不回复评论`);
-      r.status = 'skipped';
-      r.reason = `非 own 作品(revisit) (${ownerResult.ownerCheckMethod})`;
-      if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', '', 'revisit', r.reason, null);
-      return r;
-    }
     r.status = 'skipped';
     r.reason = `作品不属于当前账号 (${ownerResult.ownerCheckMethod})`;
     console.log(`[live]   跳过: ${r.reason}`);
@@ -253,7 +263,6 @@ async function processWorkModal(page, notification, db, run, options, state) {
     }
     console.log(`[live]   ⚠ 无法验证作品归属，但通知暗示为自身作品 (${notification.action})，继续执行`);
   }
-
 
   r.step = 'scan-unreplied';
   console.log(`[live]   扫描未回复评论...`);
@@ -323,6 +332,82 @@ async function processWorkModal(page, notification, db, run, options, state) {
   return r;
 }
 
+async function processRevisitCandidates(page, revisitList, db, run, options) {
+  const revisitResults = [];
+
+  for (let i = 0; i < revisitList.length; i++) {
+    const candidate = revisitList[i];
+    console.log(`[live] 回访 ${i + 1}/${revisitList.length} actor=${candidate.actorName} reasons=${candidate.reasons.join(',')}`);
+
+    if (options.dryRun) {
+      console.log(`[live]   (dry-run) 将回访 ${candidate.actorName}`);
+      revisitResults.push({ actorName: candidate.actorName, status: 'skipped', reason: 'dry-run' });
+      continue;
+    }
+
+    try {
+      const profileUrl = candidate.actorProfileUrl || (candidate.actorProfileKey ? `https://www.douyin.com/user/${candidate.actorProfileKey}` : null);
+      if (!profileUrl) {
+        console.log(`[live]   跳过：无主页 URL`);
+        revisitResults.push({ actorName: candidate.actorName, status: 'skipped', reason: 'no_profile_url' });
+        continue;
+      }
+
+      console.log(`[live]   打开主页: ${profileUrl}`);
+      await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.waitForTimeout(3000);
+
+      const firstWork = await page.evaluate(() => {
+        const links = document.querySelectorAll('a[href*="/video/"], a[href*="/note/"]');
+        for (const link of links) {
+          const href = link.getAttribute('href') || '';
+          const rect = link.getBoundingClientRect();
+          if (rect.width > 50 && rect.height > 50) {
+            return { href, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
+          }
+        }
+        return null;
+      });
+
+      if (!firstWork) {
+        console.log(`[live]   未找到作品，跳过`);
+        revisitResults.push({ actorName: candidate.actorName, status: 'skipped', reason: 'no_work_found' });
+        continue;
+      }
+
+      console.log(`[live]   打开最近作品...`);
+      await page.mouse.click(firstWork.x, firstWork.y);
+      await page.waitForTimeout(3000);
+
+      const likeResult = await page.evaluate(() => {
+        const likeBtn = document.querySelector('[data-e2e*="like"]') || document.querySelector('[class*="like"]');
+        if (!likeBtn) return { ok: false, reason: 'no_like_button' };
+        const text = (likeBtn.innerText || '').trim();
+        const alreadyLiked = text.includes('已赞') || text.includes('已点赞');
+        if (alreadyLiked) return { ok: true, method: 'already_liked' };
+        likeBtn.click();
+        return { ok: true, method: 'click_like' };
+      });
+
+      if (likeResult.ok) {
+        console.log(`[live]   点赞成功 (${likeResult.method})`);
+        revisitResults.push({ actorName: candidate.actorName, status: 'succeeded', reason: likeResult.method });
+        run.succeeded++;
+      } else {
+        console.log(`[live]   点赞失败: ${likeResult.reason}`);
+        revisitResults.push({ actorName: candidate.actorName, status: 'blocked', reason: likeResult.reason });
+      }
+
+      await page.waitForTimeout(2000);
+    } catch (err) {
+      console.log(`[live]   回访异常: ${err.message}`);
+      revisitResults.push({ actorName: candidate.actorName, status: 'blocked', reason: err.message });
+    }
+  }
+
+  return revisitResults;
+}
+
 async function returnToNotificationPanel(page) {
   await page.goto('https://www.douyin.com/user/self', { waitUntil: 'domcontentloaded', timeout: 15000 });
   await page.waitForTimeout(2000);
@@ -343,8 +428,16 @@ async function returnToNotificationPanel(page) {
   return true;
 }
 
+function classifyNotification(n) {
+  const action = n.action || '';
+  if (action.includes('评论了你的作品') || action.includes('评论了你的视频')) return 'comment_on_my_work';
+  if (action.includes('回复了你的评论')) return 'reply_to_my_comment';
+  if (action.includes('赞了你的作品') || action.includes('赞了你的评论') || action.includes('赞了你的视频')) return 'like_received';
+  return 'unknown';
+}
+
 async function main() {
-  console.error('[interactions:live] 当前链路：实时评论回复（通知 → modal → 批量回复未回复评论）');
+  console.error('[interactions:live] 两阶段流程：第一阶段=通知页处理+评论回复，第二阶段=统一回访');
 
   runMigrations();
 
@@ -360,6 +453,8 @@ async function main() {
     visitedModalIds: new Set(),
     repliedCommentKeys: new Set(),
   };
+
+  const revisitCandidates = commonArgs.options.noRevisit ? null : new Map();
 
   try {
     console.error('[live] 启动浏览器...');
@@ -387,15 +482,18 @@ async function main() {
     console.error('[live] 通知面板已就绪');
 
     const modeLabel = commonArgs.options.preview ? 'preview(预演)' : (commonArgs.options.dryRun ? 'dry-run' : 'execute');
-    console.log(`[live] 模式: ${modeLabel}${commonArgs.options.revisit ? ' + revisit' : ''}`);
+    console.log(`[live] 模式: ${modeLabel}${commonArgs.options.noRevisit ? ' + no-revisit' : ''}`);
+    console.log(`[live] 第一阶段：处理通知页`);
 
     const seenNotifKeys = new Set();
     const maxScrollRounds = 5;
+    let phase1EndedReason = '';
 
     for (let scrollRound = 0; scrollRound < maxScrollRounds; scrollRound++) {
       const batchResult = await extractVisibleNotifications(page);
       if (!batchResult || !batchResult.ok) {
         console.error(`[live] 第 ${scrollRound + 1} 轮采集通知失败`);
+        phase1EndedReason = '采集失败';
         break;
       }
 
@@ -407,8 +505,31 @@ async function main() {
         return true;
       });
 
-      const commentNotifs = newNotifs.filter(n => n.eventType === 'comment');
-      console.log(`[live] 第 ${scrollRound + 1} 轮: 通知 ${notifications.length} 条，新增 ${newNotifs.length} 条，评论 ${commentNotifs.length} 条`);
+      const commentNotifs = newNotifs.filter(n => classifyNotification(n) === 'comment_on_my_work');
+      const likeNotifs = newNotifs.filter(n => classifyNotification(n) === 'like_received');
+      const replyNotifs = newNotifs.filter(n => classifyNotification(n) === 'reply_to_my_comment');
+      const unknownNotifs = newNotifs.filter(n => classifyNotification(n) === 'unknown');
+
+      console.log(`[live] 第 ${scrollRound + 1} 轮: 通知 ${notifications.length} 条，新增 ${newNotifs.length} 条 (评论${commentNotifs.length} 点赞${likeNotifs.length} 回复${replyNotifs.length} 未知${unknownNotifs.length})`);
+
+      for (const n of likeNotifs) {
+        if (revisitCandidates) {
+          addRevisitCandidate(revisitCandidates, n, 'like_received');
+          console.log(`[live] 点赞通知：actor=${n.username} -> 加入回访候选，稍后统一回访`);
+        } else {
+          console.log(`[live] noRevisit=true，本轮不收集回访候选`);
+        }
+      }
+
+      for (const n of replyNotifs) {
+        console.log(`[live] 回复了我的评论：actor=${n.username} -> 跳过，需要主人确认`);
+        results.push({ actorName: n.username, status: 'skipped', reason: 'reply_to_my_comment: 不回复，不加入回访列表' });
+      }
+
+      for (const n of unknownNotifs) {
+        console.log(`[live] 未知通知类型：actor=${n.username} action="${n.action}" -> 跳过`);
+        results.push({ actorName: n.username, status: 'skipped', reason: 'unknown: 不处理，不加入回访列表' });
+      }
 
       for (const n of commentNotifs) {
         const commentKey = `${(n.username || '')}::${(n.content || '').slice(0, 60)}`;
@@ -417,25 +538,34 @@ async function main() {
           continue;
         }
 
+        console.log(`[live] 评论通知：actor=${n.username} -> 进入 modal 回复`);
         const result = await processWorkModal(page, n, db, run, commonArgs.options, state);
         results.push(result);
 
+        if (revisitCandidates && (result.status === 'succeeded' || result.status === 'sent_unverified')) {
+          addRevisitCandidate(revisitCandidates, n, 'comment_on_my_work');
+          console.log(`[live] 评论人加入回访候选: actor=${n.username}`);
+        }
+
         if (run.processed >= commonArgs.options.maxItems) {
           console.log(`[live] 已达到 maxItems ${commonArgs.options.maxItems}`);
+          phase1EndedReason = 'maxItems';
           break;
         }
 
         const backOk = await returnToNotificationPanel(page);
         if (!backOk) {
-          console.error('[live] 无法返回通知面板，终止');
+          console.error('[live] 无法返回通知面板，终止第一阶段');
+          phase1EndedReason = '通知面板不可用';
           break;
         }
       }
 
-      if (run.processed >= commonArgs.options.maxItems) break;
+      if (phase1EndedReason) break;
 
       if (batchResult.data.noMoreData) {
         console.log(`[live] 没有更多通知`);
+        phase1EndedReason = '没有更多通知';
         break;
       }
 
@@ -444,10 +574,29 @@ async function main() {
         const scrollResult = await scrollPanelDown(page);
         if (!scrollResult.scrolled || scrollResult.reachedBottom) {
           console.log(`[live] 无法继续滚动`);
+          phase1EndedReason = '无法继续滚动';
           break;
         }
         await page.waitForTimeout(1500);
       }
+    }
+
+    if (!phase1EndedReason) phase1EndedReason = '滚动轮数上限';
+    console.log(`[live] 通知页处理完成 (${phase1EndedReason})`);
+    if (revisitCandidates) {
+      console.log(`[live] 回访候选去重后：${revisitCandidates.size} 人`);
+    }
+
+    if (!commonArgs.options.noRevisit && revisitCandidates && revisitCandidates.size > 0) {
+      console.log(`[live] 第二阶段：统一回访开始`);
+      const revisitList = Array.from(revisitCandidates.values());
+      const revisitResults = await processRevisitCandidates(page, revisitList, db, run, commonArgs.options);
+      results.push(...revisitResults.map(r => ({ ...r, phase: 'revisit' })));
+      console.log(`[live] 统一回访完成`);
+    } else if (commonArgs.options.noRevisit) {
+      console.log(`[live] --no-revisit：跳过统一回访阶段`);
+    } else {
+      console.log(`[live] 无回访候选，跳过第二阶段`);
     }
 
   } catch (err) {
@@ -468,12 +617,22 @@ async function main() {
     writeJSON(resultPath, {
       mode: commonArgs.options.dryRun ? 'dry-run' : 'execute',
       results,
-      summary: { total: results.length, succeeded, blocked, skipped, sentUnverified, maxItems: commonArgs.options.maxItems, visitedWorks: state.visitedModalIds.size, repliedComments: state.repliedCommentKeys.size },
+      summary: {
+        total: results.length,
+        succeeded,
+        blocked,
+        skipped,
+        sentUnverified,
+        maxItems: commonArgs.options.maxItems,
+        visitedWorks: state.visitedModalIds.size,
+        repliedComments: state.repliedCommentKeys.size,
+        revisitCandidates: revisitCandidates ? revisitCandidates.size : 0,
+      },
     });
 
     console.log(`[live] 结果已保存: ${resultPath}`);
     console.log(`[live] ${succeeded} 成功 / ${sentUnverified} 未确认 / ${blocked} 阻塞 / ${skipped} 跳过`);
-    console.log(`[live] 访问作品 ${state.visitedModalIds.size} 个，回复评论 ${state.repliedCommentKeys.size} 条`);
+    console.log(`[live] 访问作品 ${state.visitedModalIds.size} 个，回复评论 ${state.repliedCommentKeys.size} 条，回访候选 ${revisitCandidates ? revisitCandidates.size : 0} 人`);
 
     saveRunSummary(run);
 
