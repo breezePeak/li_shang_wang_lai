@@ -75,15 +75,58 @@ async function main() {
   const restEveryTasksRange = getRange(returnVisitConfig.restEveryTasksRange, 8, 12);
   const restDurationMs = returnVisitConfig.restDurationMs || [60000, 180000];
 
-  const tasks = listReturnVisitExecuteTasks({
+  const allTasks = listReturnVisitExecuteTasks({
     limit: maxItems,
     maxRetryCount,
   });
 
+  const tasks = [];
+  const taskResults = [];
+  let done = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const task of allTasks) {
+    const hasComment = task.generatedComment && String(task.generatedComment).trim();
+    const hasWorkUrl = task.targetWork?.workUrl && String(task.targetWork.workUrl).trim();
+
+    const isTargetStatus = [
+      RETURN_VISIT_STATUS.PENDING_EXECUTE,
+      RETURN_VISIT_STATUS.EXECUTING,
+      RETURN_VISIT_STATUS.FAILED_LIKE,
+      RETURN_VISIT_STATUS.FAILED_COMMENT
+    ].includes(task.status);
+
+    if (!isTargetStatus || !hasComment || !hasWorkUrl || task.commentStatus === 'posted') {
+      if (!hasComment) {
+        log(args.json, `[return-visit:execute] task ${task.taskId} skipped due to empty generatedComment`);
+        updateReturnVisitTask(task.taskId, {
+          status: RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT,
+          lastError: 'no_generated_comment'
+        });
+        taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT, reason: 'no_generated_comment' });
+        failed++;
+      } else if (!hasWorkUrl) {
+        log(args.json, `[return-visit:execute] task ${task.taskId} skipped due to empty workUrl`);
+        updateReturnVisitTask(task.taskId, {
+          status: RETURN_VISIT_STATUS.FAILED_COLLECT,
+          lastError: 'no_work_url'
+        });
+        taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.FAILED_COLLECT, reason: 'no_work_url' });
+        failed++;
+      } else {
+        log(args.json, `[return-visit:execute] task ${task.taskId} filtered out (status: ${task.status}, commentStatus: ${task.commentStatus})`);
+      }
+      continue;
+    }
+
+    tasks.push(task);
+  }
+
   log(args.json, `[return-visit:execute] loaded executable tasks: ${tasks.length}`);
   if (tasks.length === 0) {
     if (args.json) {
-      printJsonResult('return-visit:execute', { tasks: [] }, { loaded: 0, done: 0, skipped: 0, failed: 0 });
+      printJsonResult('return-visit:execute', { tasks: taskResults }, { loaded: allTasks.length, done, skipped, failed });
     }
     return;
   }
@@ -107,30 +150,15 @@ async function main() {
     throw err;
   }
 
-  let done = 0;
-  let skipped = 0;
-  let failed = 0;
   let consecutiveFailures = 0;
   let processedSinceRest = 0;
   let restAfter = randomInRange(restEveryTasksRange[0], restEveryTasksRange[1]);
-  const taskResults = [];
 
   for (let index = 0; index < tasks.length; index++) {
     const task = tasks[index];
     if (consecutiveFailures >= maxConsecutiveFailures) {
       log(args.json, `[return-visit:execute] 连续失败 ${consecutiveFailures} 个任务，暂停本轮执行`);
       break;
-    }
-
-    if (!task.generatedComment || !String(task.generatedComment).trim()) {
-      markReturnVisitFailure(task, {
-        status: RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT,
-        error: 'no_generated_comment',
-      });
-      taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT, reason: 'no_generated_comment' });
-      failed++;
-      consecutiveFailures++;
-      continue;
     }
 
     updateReturnVisitTask(task.taskId, {

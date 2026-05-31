@@ -79,6 +79,8 @@ export async function navigateToVideo(page, videoUrl, options = {}) {
 export async function checkLikeState(page) {
   try {
     const state = await page.evaluate(() => {
+      document.querySelectorAll('[data-temp-like-btn]').forEach(el => el.removeAttribute('data-temp-like-btn'));
+
       // ---- helpers ----
       function isDouyinRedColor(val) {
         if (!val) return false;
@@ -307,7 +309,8 @@ export async function checkLikeState(page) {
       })();
 
       if (actionBarCheck) {
-        const { diag, actionItemCount, actionItemsDiag } = actionBarCheck;
+        const { likeItem, diag, actionItemCount, actionItemsDiag } = actionBarCheck;
+        likeItem.setAttribute('data-temp-like-btn', 'true');
         // check liked signals — f7caOKG9 class OR douyin red via isDouyinRedColor
         const cls = diag.className || '';
         const hasLikedClass = /\bf7caOKG9\b/.test(cls);
@@ -475,9 +478,11 @@ export async function checkLikeState(page) {
           const redItem = panel.find(p => p.anyRed);
 
           if (redItem) {
+            redItem.el.setAttribute('data-temp-like-btn', 'true');
             return { liked: true, confidence: 'confirmed', signal: 'rightside-svg-red', diag: { tag: redItem.el.tagName.toLowerCase(), text: redItem.text } };
           }
           if (neutral) {
+            neutral.el.setAttribute('data-temp-like-btn', 'true');
             return { liked: false, confidence: 'confirmed', signal: 'rightside-svg-neutral', diag: { tag: neutral.el.tagName.toLowerCase(), text: neutral.text } };
           }
         }
@@ -489,42 +494,49 @@ export async function checkLikeState(page) {
       }
 
       for (const c of candidates) {
-        const { diag, fullText } = c;
+        const { el, diag, fullText } = c;
 
         // 2a: class-based liked detection
         if (hasLikedClass(diag.className)) {
+          el.setAttribute('data-temp-like-btn', 'true');
           return { liked: true, confidence: 'confirmed', signal: 'liked-class:' + diag.tag, diag };
         }
 
         // 2b: color-based liked detection
         if (isDouyinRedColor(diag.color)) {
+          el.setAttribute('data-temp-like-btn', 'true');
           return { liked: true, confidence: 'confirmed', signal: 'red-color:' + diag.tag, diag };
         }
         if (isDouyinRedColor(diag.backgroundColor)) {
+          el.setAttribute('data-temp-like-btn', 'true');
           return { liked: true, confidence: 'confirmed', signal: 'red-bg:' + diag.tag, diag };
         }
 
         // 2c: SVG fill-based liked detection
         if (diag.svgFill && (diag.svgFill === '#FF0040' || diag.svgFill === '#FE2C55' || diag.svgFill === 'red')) {
+          el.setAttribute('data-temp-like-btn', 'true');
           return { liked: true, confidence: 'confirmed', signal: 'red-svg-fill:' + diag.tag, diag };
         }
         if (diag.pathFill && (diag.pathFill === '#FF0040' || diag.pathFill === '#FE2C55' || diag.pathFill === 'red')) {
+          el.setAttribute('data-temp-like-btn', 'true');
           return { liked: true, confidence: 'confirmed', signal: 'red-path-fill:' + diag.tag, diag };
         }
 
         // 2d: explicit like button with count → neutral (already checked for red)
         const t = fullText || diag.text || '';
         if (/[赞]\s*\d/.test(t)) {
+          el.setAttribute('data-temp-like-btn', 'true');
           return { liked: false, confidence: 'confirmed', signal: 'like-count-neutral', diag };
         }
       }
 
       // ---- Phase 3: find a clear unlike button ----
       for (const c of candidates) {
-        const { diag } = c;
+        const { el, diag } = c;
         const hasText = diag.text && (diag.text.startsWith('点赞') || diag.text.startsWith('赞'));
         const hasAria = (diag.ariaLabel || '').includes('赞');
         if (hasText || hasAria) {
+          el.setAttribute('data-temp-like-btn', 'true');
           return { liked: false, confidence: 'confirmed', signal: 'neutral-like-btn', diag };
         }
       }
@@ -685,16 +697,16 @@ export async function clickLike(page, { execute = false } = {}) {
       );
     }
 
-    const barResult = await findDouyinActionBarLikeItem(page);
-    if (!barResult.ok) {
+    const likeState = await checkLikeState(page);
+    if (!likeState.ok) {
       return blocking(
         RESULT_CODES.BLOCKED,
-        '找不到点赞按钮',
+        `找不到点赞按钮或状态未知: ${likeState.message}`,
         { data: {} }
       );
     }
 
-    if (barResult.data.isLiked) {
+    if (likeState.data?.alreadyLiked) {
       return blocking(
         RESULT_CODES.ALREADY_LIKED,
         '已经点过赞，跳过',
@@ -702,11 +714,29 @@ export async function clickLike(page, { execute = false } = {}) {
       );
     }
 
-    const likeItem = page.locator('.t5VMknM2 .MinpposV > .AOWKbsTg').first();
-    await likeItem.click();
-    console.error('[video-page] 已点击点赞按钮 (action bar)');
-    await page.waitForTimeout(2000);
-    return success({ clicked: true });
+    const targetBtn = page.locator('[data-temp-like-btn="true"]').first();
+    const count = await targetBtn.count();
+    if (count > 0) {
+      await targetBtn.click();
+      console.error(`[video-page] 已点击点赞按钮 (${likeState.data?.signal || 'marked-btn'})`);
+      await page.waitForTimeout(2000);
+      return success({ clicked: true });
+    }
+
+    // 备用兜底
+    const fallbackBtn = page.locator('.t5VMknM2 .MinpposV > .AOWKbsTg').first();
+    if (await fallbackBtn.count() > 0) {
+      await fallbackBtn.click();
+      console.error('[video-page] 已点击点赞按钮 (action bar fallback)');
+      await page.waitForTimeout(2000);
+      return success({ clicked: true });
+    }
+
+    return blocking(
+      RESULT_CODES.BLOCKED,
+      '找不到点赞按钮，且所有兜底策略失效',
+      { data: {} }
+    );
   } catch (err) {
     return blocking(
       RESULT_CODES.BLOCKED,
@@ -718,25 +748,15 @@ export async function clickLike(page, { execute = false } = {}) {
 
 export async function confirmLikeSucceeded(page) {
   try {
-    const barResult = await findDouyinActionBarLikeItem(page);
-    if (!barResult.ok) {
-      return blocking(
-        RESULT_CODES.BLOCKED,
-        '点击点赞按钮后无法确认已赞 (action bar not found)',
-        { data: {} }
-      );
-    }
-
-    const info = barResult.data;
-    if (info.isLiked) {
-      const signal = /\bf7caOKG9\b/.test(info.className) ? 'liked-class' : 'red-fill';
-      return success({ signal });
+    const state = await checkLikeState(page);
+    if (state.ok && state.data?.alreadyLiked) {
+      return success({ signal: state.data.signal });
     }
 
     return blocking(
       RESULT_CODES.BLOCKED,
       '点击点赞按钮后无法确认已赞，请检查页面状态',
-      { data: { pathFill: info.pathFill, className: info.className } }
+      { data: { state: state.data || null } }
     );
   } catch (err) {
     return blocking(
@@ -837,6 +857,77 @@ export async function extractVideoCommentContext(page) {
   }
 }
 
+async function ensureCommentPanelOpen(page) {
+  try {
+    const commentBtns = [
+      page.locator('.t5VMknM2 .MinpposV > .AOWKbsTg').nth(1), // action bar 第二个
+      page.locator('[data-e2e="video-comment"]'),
+      page.locator('[data-e2e="comment-icon"]'),
+      page.locator('[aria-label*="评论"]'),
+      page.locator('[title*="评论"]'),
+      page.locator('svg').filter({ has: page.locator('path[d*="comment"]') }).locator('..')
+    ];
+    for (const btn of commentBtns) {
+      if (await btn.count() > 0 && await btn.first().isVisible()) {
+        await btn.first().click();
+        console.error('[video-page] 已点击评论按钮，尝试打开评论面板');
+        await page.waitForTimeout(1500);
+        return true;
+      }
+    }
+  } catch (err) {
+    console.error(`[video-page] 展开评论面板异常: ${err.message}`);
+  }
+  return false;
+}
+
+const inputSelectors = [
+  '[contenteditable="true"][data-placeholder*="评"]',
+  '[contenteditable="true"][placeholder*="评"]',
+  '[contenteditable="true"][data-placeholder*="说点什么"]',
+  '[contenteditable="true"][placeholder*="说点什么"]',
+  '[contenteditable="true"][data-placeholder*="善语"]',
+  '[contenteditable="true"][placeholder*="善语"]',
+  '[contenteditable="true"]',
+  'textarea[placeholder*="评"]',
+  'textarea[placeholder*="说点什么"]',
+  'textarea[placeholder*="善语"]',
+  'input[placeholder*="评"]',
+  'input[placeholder*="说点什么"]',
+  'textarea',
+  'input'
+];
+
+async function findCommentInput(page) {
+  for (const selector of inputSelectors) {
+    const el = page.locator(selector).first();
+    if (await el.count() > 0 && await el.isVisible()) {
+      return el;
+    }
+  }
+
+  // 尝试滚动评论区容器
+  console.error('[video-page] 尝试滚动以寻找评论输入框...');
+  await page.evaluate(() => {
+    window.scrollTo(0, document.body.scrollHeight);
+    const containers = document.querySelectorAll('[class*="comment"], [id*="comment"]');
+    for (const c of containers) {
+      c.scrollIntoView?.({ block: 'end' });
+    }
+  });
+  await page.waitForTimeout(1000);
+
+  // 滚动后再试一次
+  for (const selector of inputSelectors) {
+    const el = page.locator(selector).first();
+    if (await el.count() > 0 && await el.isVisible()) {
+      return el;
+    }
+  }
+
+  return null;
+}
+
 export async function postVideoComment(page, text, { execute = false } = {}) {
   try {
     if (!text || !text.trim()) {
@@ -857,19 +948,45 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
 
     const trimmed = text.trim();
 
-    const input = page.locator(
-      '[contenteditable="true"][data-placeholder*="评"], ' +
-      '[contenteditable="true"][placeholder*="评"], ' +
-      'textarea[placeholder*="评"], ' +
-      'input[placeholder*="评"]'
-    ).first();
+    // 1. 尝试打开评论面板
+    let clickCommentPanelSuccess = await ensureCommentPanelOpen(page);
 
-    const inputCount = await input.count();
-    if (inputCount === 0) {
+    // 2. 寻找输入框
+    let input = await findCommentInput(page);
+
+    // 3. 收集 Debug 诊断信息
+    if (!input) {
+      const debugInfo = await page.evaluate(() => {
+        const editables = document.querySelectorAll('[contenteditable="true"]');
+        const textareas = document.querySelectorAll('textarea');
+        const inputs = document.querySelectorAll('input');
+        const placeHolders = [];
+        
+        const collect = (el) => {
+          const ph = el.getAttribute('placeholder') || el.getAttribute('data-placeholder') || '';
+          if (ph) placeHolders.push(ph);
+        };
+        editables.forEach(collect);
+        textareas.forEach(collect);
+        inputs.forEach(collect);
+        
+        return {
+          url: window.location.href,
+          title: document.title,
+          editableCount: editables.length,
+          textareaCount: textareas.length,
+          inputCount: inputs.length,
+          placeholders: placeHolders,
+          commentContainers: document.querySelectorAll('[class*="comment"], [id*="comment"]').length
+        };
+      });
+
+      console.error('[video-page] 评论框未找到！当前页面 DOM Debug 诊断信息:', JSON.stringify(debugInfo));
+
       return blocking(
         RESULT_CODES.COMMENT_INPUT_NOT_FOUND,
         '找不到视频评论区输入框',
-        { data: {} }
+        { data: { clickCommentPanelSuccess, debugInfo } }
       );
     }
 
@@ -878,17 +995,33 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
     await page.keyboard.type(trimmed, { delay: 50 });
     await page.waitForTimeout(500);
 
-    const sendBtn = page.locator('button').filter({ hasText: /^发送$|^发布$/ }).first();
-    const sendCount = await sendBtn.count();
-    if (sendCount === 0) {
-      return blocking(
-        RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND,
-        '找不到发送/发布按钮',
-        { data: {} }
-      );
+    const sendBtnSelectors = [
+      'button:has-text("发送")',
+      'button:has-text("发布")',
+      '[data-e2e="comment-submit"]',
+      'button[class*="submit"]',
+      'button[class*="send"]',
+      'button[class*="publish"]'
+    ];
+
+    let clickedSend = false;
+    for (const sel of sendBtnSelectors) {
+      const btn = page.locator(sel).first();
+      if (await btn.count() > 0 && await btn.isVisible()) {
+        await btn.click();
+        clickedSend = true;
+        console.error(`[video-page] 已通过按钮发送评论 (${sel})`);
+        break;
+      }
     }
 
-    await sendBtn.click();
+    if (!clickedSend) {
+      console.error('[video-page] 找不到发送按钮，尝试使用 Control+Enter 兜底发送');
+      await page.keyboard.press('Control+Enter');
+      await page.waitForTimeout(500);
+      clickedSend = true;
+    }
+
     console.error('[video-page] 已提交评论');
     await page.waitForTimeout(2000);
 
