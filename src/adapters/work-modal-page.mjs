@@ -836,8 +836,20 @@ export async function sendReplyInWorkModal(page, replyText) {
 
     await page.waitForTimeout(800);
 
-    const editorLocator = page.locator('.comment-input-container [contenteditable="true"]').first();
-    await editorLocator.press('Enter');
+    const focused = await page.evaluate(() => {
+      const active = document.activeElement;
+      if (active && active.closest?.('.comment-input-container')) return true;
+
+      const editor = document.querySelector('.comment-input-container [contenteditable="true"]');
+      if (!editor) return false;
+      editor.focus();
+      return document.activeElement === editor || !!document.activeElement?.closest?.('.comment-input-container');
+    });
+    if (!focused) {
+      return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '回复输入框已消失或未聚焦，未发送', { recoverable: true });
+    }
+
+    await page.keyboard.press('Enter');
     console.error(`[work-modal] 按 Enter 发送`);
     await page.waitForTimeout(2000);
 
