@@ -1,25 +1,25 @@
 /* ==========================================================================
-   礼尚往来驾驶舱极致极客暗黑设计系统 (Linear / Vercel Premium Tech-Dark CSS)
+   礼尚往来驾驶舱极致极客暗黑设计系统 (Sunset Amber & Warm Obsidian Theme)
    ========================================================================== */
 :root {
   --font-family: 'Outfit', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   
-  /* 极致碳黑极简深邃调色盘 */
-  --bg-main: #030205; /* 纯粹深邃碳黑 */
-  --bg-card: rgba(10, 11, 16, 0.42); /* 极透极薄磨砂玻璃底 */
-  --bg-card-hover: rgba(16, 17, 26, 0.62);
-  --border-color: rgba(255, 255, 255, 0.05); /* 1px 极细精密白描边 */
-  --border-glow: rgba(124, 58, 237, 0.45); /* 亮紫色霓虹发光边 */
+  /* 暖曜碳黑与夕阳琥珀奢华调色盘 */
+  --bg-main: #070506; /* 极具温度的高对比暖曜石黑 */
+  --bg-card: rgba(12, 10, 12, 0.45); /* 暗红褐高透明磨砂玻璃底 */
+  --bg-card-hover: rgba(22, 18, 20, 0.65);
+  --border-color: rgba(250, 240, 230, 0.055); /* 1px 极细精密暖白金描边 */
+  --border-glow: rgba(245, 158, 11, 0.45); /* 亮琥珀色发光聚焦边 */
   
-  --primary-glow: linear-gradient(135deg, #7c3aed, #db2777); /* 经典紫粉流光 */
-  --accent-glow: linear-gradient(135deg, #06b6d4, #3b82f6); /* 亮蓝青流光 */
-  --green-glow: linear-gradient(135deg, #10b981, #059669); /* 状态绿流光 */
+  --primary-glow: linear-gradient(135deg, #f97316, #db2777); /* 暖橙到夕阳红渐变 */
+  --accent-glow: linear-gradient(135deg, #f59e0b, #ea580c); /* 琥珀金到橘红渐变 */
+  --green-glow: linear-gradient(135deg, #10b981, #059669); /* 状态绿 */
   
-  --text-main: #f3f4f6; /* 高对比度浅白 */
-  --text-muted: #8e939e; /* 经典 Linear 灰 */
+  --text-main: #f9fafb; /* 极高对比度温暖浅白 */
+  --text-muted: #9ca3af; /* 温暖木炭灰 */
   
-  --shadow-main: 0 16px 40px -10px rgba(0, 0, 0, 0.9); /* 高清晰碳黑阴影 */
-  --shadow-glow: 0 0 35px 0 rgba(124, 58, 237, 0.07);
+  --shadow-main: 0 16px 40px -10px rgba(0, 0, 0, 0.95); /* 极清晰暗黑阴影 */
+  --shadow-glow: 0 0 35px 0 rgba(245, 158, 11, 0.06);
   
   --transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -41,7 +41,7 @@ body {
 }
 
 /* ==========================================================================
-   多色脉动星云呼吸背景 (Mesh Gradient Nebula Backdrops)
+   多色脉动暖晚霞星云呼吸背景 (Mesh Gradient Sunset Nebula Backdrops)
    ========================================================================== */
 .bg-glow {
   position: absolute;
@@ -49,14 +49,14 @@ body {
   filter: blur(150px);
   z-index: -1;
   pointer-events: none;
-  opacity: 0.22;
+  opacity: 0.28;
   animation: pulseNebula 26s infinite alternate ease-in-out;
 }
 
 .glow-1 {
   width: 650px;
   height: 650px;
-  background: radial-gradient(circle, rgba(124, 58, 237, 0.28) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(249, 115, 22, 0.24) 0%, transparent 70%); /* 暖橙色光晕 */
   top: -220px;
   right: -120px;
 }
@@ -64,7 +64,7 @@ body {
 .glow-2 {
   width: 550px;
   height: 550px;
-  background: radial-gradient(circle, rgba(219, 39, 119, 0.18) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(219, 39, 119, 0.16) 0%, transparent 70%); /* 夕阳红色光晕 */
   bottom: -180px;
   left: -180px;
   animation-delay: -6s;
@@ -73,7 +73,7 @@ body {
 .glow-3 {
   width: 480px;
   height: 480px;
-  background: radial-gradient(circle, rgba(6, 182, 212, 0.15) 0%, transparent 75%);
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.18) 0%, transparent 75%); /* 琥珀金光晕 */
   top: 25%;
   left: 8%;
   animation-delay: -12s;
@@ -82,7 +82,7 @@ body {
 .glow-4 {
   width: 550px;
   height: 550px;
-  background: radial-gradient(circle, rgba(124, 58, 237, 0.12) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(236, 72, 153, 0.14) 0%, transparent 70%); /* 桃花粉光晕 */
   bottom: 22%;
   right: 12%;
   animation-delay: -18s;
@@ -90,7 +90,7 @@ body {
 
 @keyframes pulseNebula {
   0% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(40px, -50px) scale(1.12) rotate(20deg); opacity: 0.26; }
+  50% { transform: translate(40px, -50px) scale(1.12) rotate(20deg); opacity: 0.32; }
   100% { transform: translate(-30px, 30px) scale(0.92) rotate(-10deg); }
 }
 
@@ -128,7 +128,7 @@ body {
   justify-content: center;
   font-size: 20px;
   color: #fff;
-  box-shadow: 0 0 20px rgba(124, 58, 237, 0.35);
+  box-shadow: 0 0 20px rgba(249, 115, 22, 0.35); /* 暖发光 */
 }
 
 .logo-text h1 {
@@ -186,91 +186,6 @@ body {
 @keyframes pulse {
   0% { transform: scale(1); opacity: 1; }
   100% { transform: scale(2.6); opacity: 0; }
-}
-
-/* ==========================================================================
-   Metrics 仪表盘大盘 (Premium Metric Cards)
-   ========================================================================== */
-.stats-container {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 20px;
-  margin-bottom: 40px;
-}
-
-.stat-card {
-  background: var(--bg-card);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--border-color);
-  border-radius: 16px;
-  padding: 22px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  position: relative;
-  overflow: hidden;
-  box-shadow: var(--shadow-main);
-  transition: var(--transition);
-}
-
-.stat-card::before {
-  content: '';
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-}
-
-.stat-total::before { background-color: #06b6d4; box-shadow: 0 0 6px #06b6d4; }
-.stat-likes::before { background-color: #db2777; box-shadow: 0 0 6px #db2777; }
-.stat-comments::before { background-color: #7c3aed; box-shadow: 0 0 6px #7c3aed; }
-.stat-replies::before { background-color: #10b981; box-shadow: 0 0 6px #10b981; }
-
-.stat-card:hover {
-  transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow: var(--shadow-main), var(--shadow-glow);
-}
-
-.stat-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.03);
-  transition: var(--transition);
-}
-
-.stat-card:hover .stat-icon {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.stat-info h3 {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-muted);
-  letter-spacing: 0.5px;
-}
-
-.stat-value {
-  font-size: 26px;
-  font-weight: 800;
-  margin-top: 4px;
-  display: block;
-  font-family: 'Outfit', sans-serif;
-  letter-spacing: -0.03em;
-  background: linear-gradient(to bottom, #fff, #e5e7eb);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
 }
 
 /* ==========================================================================
@@ -356,9 +271,9 @@ body {
 }
 
 .badge {
-  background: rgba(124, 58, 237, 0.12);
-  border: 1px solid rgba(124, 58, 237, 0.25);
-  color: #a78bfa;
+  background: rgba(249, 115, 22, 0.12);
+  border: 1px solid rgba(249, 115, 22, 0.25);
+  color: #fdba74;
   font-size: 11px;
   font-weight: 700;
   padding: 1px 8px;
@@ -378,13 +293,13 @@ body {
 }
 
 /* ==========================================================================
-   Vercel 级极简控制面板与过滤器组合 (Luxe Control Panel)
+   Vercel 级极简控制面板与过滤器组合 (Luxe Warm Control Panel)
    ========================================================================== */
 .control-panel {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(10, 11, 16, 0.28);
+  background: rgba(12, 10, 12, 0.3);
   backdrop-filter: blur(15px);
   -webkit-backdrop-filter: blur(15px);
   border: 1px solid var(--border-color);
@@ -414,7 +329,7 @@ body {
 
 .search-box input {
   width: 100%;
-  background: #000000; /* 极致黑色底 */
+  background: #000000;
   border: 1px solid rgba(255, 255, 255, 0.04);
   border-radius: 6px;
   padding: 9px 12px 9px 34px;
@@ -426,8 +341,8 @@ body {
 }
 
 .search-box input:focus {
-  border-color: rgba(124, 58, 237, 0.6);
-  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.3);
+  border-color: rgba(249, 115, 22, 0.6);
+  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.3);
 }
 
 .filters-group {
@@ -467,7 +382,7 @@ body {
 }
 
 .select-wrapper select:focus {
-  border-color: rgba(124, 58, 237, 0.6);
+  border-color: rgba(249, 115, 22, 0.6);
 }
 
 .select-wrapper::after {
@@ -512,7 +427,7 @@ body {
 .view-btn.active {
   background: var(--primary-glow);
   color: #fff;
-  box-shadow: 0 2px 6px rgba(124, 58, 237, 0.3);
+  box-shadow: 0 2px 6px rgba(249, 115, 22, 0.35);
 }
 
 /* ==========================================================================
@@ -607,7 +522,7 @@ body {
 }
 
 .badge-pending { background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.2); color: #fbbf24; }
-.badge-ready { background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); color: #60a5fa; }
+.badge-ready { background: rgba(249, 115, 22, 0.08); border: 1px solid rgba(249, 115, 22, 0.2); color: #fdba74; }
 .badge-fail { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); color: #f87171; }
 
 .work-block {
@@ -635,7 +550,7 @@ body {
 
 .work-link {
   font-size: 10.5px;
-  color: #60a5fa;
+  color: #fdba74;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
@@ -644,7 +559,7 @@ body {
 }
 
 .work-link:hover {
-  color: #3b82f6;
+  color: #f97316;
 }
 
 .comment-input-area {
@@ -677,8 +592,8 @@ body {
 }
 
 .comment-textarea:focus {
-  border-color: rgba(124, 58, 237, 0.6);
-  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.2);
+  border-color: rgba(249, 115, 22, 0.6);
+  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.2);
 }
 
 .card-actions {
@@ -705,11 +620,11 @@ body {
 .btn-primary {
   background: var(--primary-glow);
   color: #fff;
-  box-shadow: 0 4px 10px rgba(124, 58, 237, 0.25);
+  box-shadow: 0 4px 10px rgba(249, 115, 22, 0.25);
 }
 
 .btn-primary:hover {
-  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.4);
+  box-shadow: 0 4px 14px rgba(249, 115, 22, 0.4);
   transform: translateY(-1px);
 }
 
@@ -781,13 +696,13 @@ body {
 }
 
 /* ==========================================================================
-   表格内隐下划线霓虹聚焦评论框 (Borderless In-place Input)
+   表格内隐下划线暖橙霓虹聚焦评论框 (Borderless In-place Input - Warm Neon)
    ========================================================================== */
 .table-comment-input {
   width: 100%;
-  background-color: transparent !important; /* 彻底融于行背景 */
-  border: none !important; /* 无边框 */
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03) !important; /* 极细微描底 */
+  background-color: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03) !important;
   border-radius: 0 !important;
   padding: 6px 4px !important;
   color: var(--text-main);
@@ -798,7 +713,7 @@ body {
 }
 
 .table-comment-input:focus {
-  border-bottom: 1.5px solid #7c3aed !important; /* Focus时下方霓虹亮起 */
+  border-bottom: 1.5px solid #f97316 !important; /* Focus时下方暖橙下划线亮起 */
   background-color: transparent !important;
   box-shadow: none !important;
 }
@@ -855,7 +770,7 @@ body {
 }
 
 .status-dot.pending { background-color: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
-.status-dot.ready { background-color: #3b82f6; box-shadow: 0 0 6px #3b82f6; }
+.status-dot.ready { background-color: #f97316; box-shadow: 0 0 6px #f97316; }
 .status-dot.failed { background-color: #ef4444; box-shadow: 0 0 6px #ef4444; }
 
 /* 作品外链裁剪 */
@@ -934,13 +849,13 @@ body {
 }
 
 .custom-checkbox:hover input ~ .checkbox-checkmark {
-  border-color: rgba(124, 58, 237, 0.5);
+  border-color: rgba(249, 115, 22, 0.5);
 }
 
 .custom-checkbox input:checked ~ .checkbox-checkmark {
   background: var(--primary-glow);
   border-color: transparent;
-  box-shadow: 0 0 8px rgba(124, 58, 237, 0.45);
+  box-shadow: 0 0 8px rgba(249, 115, 22, 0.45);
 }
 
 .checkbox-checkmark::after {
@@ -1138,91 +1053,6 @@ body {
   to { opacity: 0; transform: translateX(40px); }
 }
 
-/* ==========================================================================
-   悬浮发光彩虹双色跑马灯批量操作条 (Luxe Floating Glowing Bulk Action Bar)
-   ========================================================================== */
-.bulk-floating-bar {
-  position: fixed;
-  bottom: -110px; /* 初始隐藏 */
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1000;
-  width: 90%;
-  max-width: 800px;
-  border-radius: 16px;
-  padding: 1px; /* 露出一像素流光外框 */
-  background: linear-gradient(90deg, #7c3aed, #06b6d4, #db2777, #7c3aed);
-  background-size: 300% 300%;
-  animation: rainbowBorder 6s infinite linear;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(124, 58, 237, 0.2);
-  transition: bottom 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s ease;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.bulk-floating-bar.active {
-  bottom: 30px; /* 滑入激活 */
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.bulk-bar-content {
-  background: rgba(4, 4, 6, 0.88); /* 极致极简碳黑 */
-  backdrop-filter: blur(30px) saturate(180%);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
-  border-radius: 15px;
-  padding: 12px 22px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-@keyframes rainbowBorder {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-.bulk-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.bulk-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: var(--primary-glow);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  box-shadow: 0 0 10px rgba(124, 58, 237, 0.35);
-}
-
-.bulk-count {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-main);
-}
-
-.bulk-count strong {
-  color: #a78bfa;
-  font-size: 15px;
-  margin: 0 2px;
-  text-shadow: 0 0 8px rgba(124, 58, 237, 0.3);
-}
-
-.bulk-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
 .bulk-actions .btn {
   padding: 8px 14px;
   font-size: 12px;
@@ -1265,7 +1095,7 @@ body {
   overflow: hidden;
 }
 
-/* 缓缓流动的发光光纤粒子 (向右流动的激光粒子效果) */
+/* 缓缓流动的发光光纤粒子 (向右流动的暖色激光粒子效果) */
 .timeline-flow-line::after {
   content: '';
   position: absolute;
@@ -1273,7 +1103,7 @@ body {
   left: -50%;
   width: 50%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, #7c3aed, #06b6d4, transparent);
+  background: linear-gradient(90deg, transparent, #f97316, #f59e0b, transparent);
   animation: fiberFlow 5.5s infinite linear;
 }
 
@@ -1323,8 +1153,8 @@ body {
 /* 轨道发光特效在节点上的反射 */
 .timeline-node:hover .node-dot {
   color: #fff;
-  border-color: #7c3aed;
-  box-shadow: 0 0 20px rgba(124, 58, 237, 0.45);
+  border-color: #f97316;
+  box-shadow: 0 0 20px rgba(249, 115, 22, 0.45);
   transform: scale(1.1);
 }
 
@@ -1383,8 +1213,8 @@ body {
 
 /* Hover 上浮与发光微交互 */
 .timeline-node:hover .timeline-placard {
-  border-color: rgba(124, 58, 237, 0.35);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), 0 0 20px rgba(124, 58, 237, 0.08);
+  border-color: rgba(249, 115, 22, 0.35);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), 0 0 20px rgba(249, 115, 22, 0.08);
 }
 
 .timeline-node:hover .placard-up {
@@ -1397,7 +1227,7 @@ body {
 
 .timeline-node:hover .placard-up::before, 
 .timeline-node:hover .placard-down::before {
-  border-left-color: rgba(124, 58, 237, 0.4);
+  border-left-color: rgba(249, 115, 22, 0.4);
 }
 
 /* 悬挂指标标题与大数码 */
@@ -1423,15 +1253,15 @@ body {
 /* 上色点缀每一路节点上的发光效果 */
 #node-1:hover .node-dot { border-color: #06b6d4; box-shadow: 0 0 15px rgba(6, 182, 212, 0.4); }
 #node-2:hover .node-dot { border-color: #db2777; box-shadow: 0 0 15px rgba(219, 39, 119, 0.4); }
-#node-3:hover .node-dot { border-color: #7c3aed; box-shadow: 0 0 15px rgba(124, 58, 237, 0.4); }
-#node-4:hover .node-dot { border-color: #10b981; box-shadow: 0 0 15px rgba(16, 185, 129, 0.4); }
-#node-5:hover .node-dot { border-color: #f59e0b; box-shadow: 0 0 15px rgba(245, 158, 11, 0.4); }
+#node-3:hover .node-dot { border-color: #f97316; box-shadow: 0 0 15px rgba(249, 115, 22, 0.4); }
+#node-4:hover .node-dot { border-color: #ec4899; box-shadow: 0 0 15px rgba(236, 72, 153, 0.4); }
+#node-5:hover .node-dot { border-color: #eab308; box-shadow: 0 0 15px rgba(234, 179, 8, 0.4); }
 
 #node-1:hover .timeline-placard { border-color: rgba(6, 182, 212, 0.3); }
 #node-2:hover .timeline-placard { border-color: rgba(219, 39, 119, 0.3); }
-#node-3:hover .timeline-placard { border-color: rgba(124, 58, 237, 0.3); }
-#node-4:hover .timeline-placard { border-color: rgba(16, 185, 129, 0.3); }
-#node-5:hover .timeline-placard { border-color: rgba(245, 158, 11, 0.3); }
+#node-3:hover .timeline-placard { border-color: rgba(249, 115, 22, 0.3); }
+#node-4:hover .timeline-placard { border-color: rgba(236, 72, 153, 0.3); }
+#node-5:hover .timeline-placard { border-color: rgba(234, 179, 8, 0.3); }
 
 /* 时间线大容器自适应高度 */
 @media (max-width: 900px) {
@@ -1461,4 +1291,95 @@ body {
   .timeline-placard::before {
     display: none;
   }
+}
+
+/* ==========================================================================
+   悬浮发光暖色流光跑马灯批量操作条 (Luxe Floating Glowing Bulk Action Bar - Warm)
+   ========================================================================== */
+.bulk-floating-bar {
+  position: fixed;
+  bottom: -110px; /* 初始隐藏 */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: 90%;
+  max-width: 800px;
+  border-radius: 16px;
+  padding: 1px; /* 露出一像素温暖跑马灯外框 */
+  background: linear-gradient(90deg, #ff4500, #ff8c00, #eab308, #ec4899, #ff4500);
+  background-size: 300% 300%;
+  animation: rainbowBorder 6s infinite linear;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(249, 115, 22, 0.2);
+  transition: bottom 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s ease;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bulk-floating-bar.active {
+  bottom: 30px; /* 滑入激活 */
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.bulk-bar-content {
+  background: rgba(4, 4, 6, 0.88); /* 极致极简曜石暖黑 */
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border-radius: 15px;
+  padding: 12px 22px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+@keyframes rainbowBorder {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.bulk-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bulk-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--primary-glow);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.35);
+}
+
+.bulk-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.bulk-count strong {
+  color: #fdba74;
+  font-size: 15px;
+  margin: 0 2px;
+  text-shadow: 0 0 8px rgba(249, 115, 22, 0.3);
+}
+
+.bulk-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.bulk-actions .btn {
+  padding: 8px 14px;
+  font-size: 12px;
+  border-radius: 6px;
 }
