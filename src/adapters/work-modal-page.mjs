@@ -612,10 +612,12 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
         let actorName = '';
         let commentText = '';
         let hasMyReply = false;
+        let isSelfComment = false;
         let commentKey = '';
 
         const nameLine = lines[0];
         if (nameLine.length > 0 && nameLine.length < 50) actorName = nameLine;
+        isSelfComment = !!(selfNickname && actorName === selfNickname);
 
         for (let k = 1; k < lines.length; k++) {
           const line = lines[k];
@@ -677,6 +679,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
           actorName,
           commentText: commentText.slice(0, 300),
           hasMyReply,
+          isSelfComment,
           alreadyReplied: alreadyRepliedKeys.has(commentKey),
           commentKey,
           y: Math.round(rect.y),
@@ -760,7 +763,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
       }
     }
 
-    const unreplied = allComments.filter(c => !c.hasMyReply && !c.alreadyReplied && c.commentText.length > 0);
+    const unreplied = allComments.filter(c => !c.isSelfComment && !c.hasMyReply && !c.alreadyReplied && c.commentText.length > 0);
 
     console.error(`[work-modal] 评论扫描: 总 ${allComments.length} 条，我未回复 ${unreplied.length} 条`);
 
@@ -782,12 +785,11 @@ export async function openReplyBoxByIndex(page, commentIndex) {
       const commentArea = document.querySelector('.comment-mainContent');
       if (!commentArea) return { ok: false, reason: 'comment-mainContent not found' };
 
-      const infoWraps = commentArea.querySelectorAll('.comment-item-info-wrap');
-      if (commentIndex < 0 || commentIndex >= infoWraps.length) return { ok: false, reason: `index ${commentIndex} out of range (0-${infoWraps.length - 1})` };
+      const commentItems = commentArea.querySelectorAll('[data-e2e="comment-item"]');
+      if (commentIndex < 0 || commentIndex >= commentItems.length) return { ok: false, reason: `index ${commentIndex} out of range (0-${commentItems.length - 1})` };
 
-      const targetInfoWrap = infoWraps[commentIndex];
-
-      const commentItem = targetInfoWrap.closest('[data-e2e="comment-item"]') || targetInfoWrap.parentElement?.parentElement;
+      const commentItem = commentItems[commentIndex];
+      const targetInfoWrap = commentItem.querySelector('.comment-item-info-wrap') || commentItem;
 
       if (commentItem) {
         const statsContainer = commentItem.querySelector('.comment-item-stats-container');

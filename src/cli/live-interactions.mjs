@@ -71,6 +71,15 @@ function addRevisitCandidateDB(notification, reason) {
   return result;
 }
 
+function normalizeNotificationWorkLookup(workId) {
+  const id = (workId || '').trim();
+  if (!id) return { workId: '', modalId: '' };
+  if (id.startsWith('modal-')) return { workId: id, modalId: id.slice('modal-'.length) };
+  if (id.startsWith('video-')) return { workId: id, modalId: id.slice('video-'.length) };
+  if (id.startsWith('note-')) return { workId: id, modalId: id.slice('note-'.length) };
+  return { workId: id, modalId: id };
+}
+
 async function replyToOneComment(page, comment, workCtx, db, run, options) {
   const r = {
     actorName: comment.actorName,
@@ -193,15 +202,15 @@ async function processWorkModal(page, notification, db, run, options, state) {
 
   // 终极前置去重：在点击缩略图进入视频 Modal 前，通过超链接中的作品 ID 或缩略图 Key 实施完美阻断
   if (notification.workId) {
-    const cleanId = notification.workId.replace('video-', '').replace('note-', '');
-    const existingWork = findWorkByModalId(cleanId) || findWorkByWorkId(cleanId);
-    if (existingWork || state.visitedModalIds.has(cleanId)) {
+    const lookup = normalizeNotificationWorkLookup(notification.workId);
+    const existingWork = findWorkByModalId(lookup.modalId) || findWorkByWorkId(lookup.workId) || findWorkByWorkId(lookup.modalId);
+    if (existingWork || state.visitedModalIds.has(lookup.modalId) || state.visitedModalIds.has(lookup.workId)) {
       r.status = 'skipped';
       r.reason = `作品已采集过 (workId=${notification.workId})`;
       console.log(`[live]   【前置排重拦截成功】检测到超链接作品ID已采集或已访问过，直接跳过点击缩略图: ${notification.workId}`);
       if (r.eventId) {
-        const matched = existingWork || { work_id: cleanId, work_url: notification.workUrl, work_title: notification.workTitle };
-        updateEventWorkInfo(db, r.eventId, matched.work_id || cleanId, matched.work_url, matched.work_title, null);
+        const matched = existingWork || { work_id: lookup.workId, work_url: notification.workUrl, work_title: notification.workTitle };
+        updateEventWorkInfo(db, r.eventId, matched.work_id || lookup.workId, matched.work_url, matched.work_title, null);
       }
       return r;
     }
@@ -322,7 +331,7 @@ async function processWorkModal(page, notification, db, run, options, state) {
   }
 
   const selfProfile = getSelfProfile();
-  const selfNickname = selfProfile.nickname || '';
+  const selfNickname = selfProfile.nickname || workCtx.authorName || '';
 
   if (workCtx.isOwnWorkByUrl) {
     console.log(`[live]   URL 含 /user/self，确认为 own 作品`);
@@ -476,11 +485,12 @@ function findTargetScannedComment(unreplied, comment) {
   const commentText = (comment.comment_text || '').trim();
   const prefix = commentText.slice(0, 20);
 
+  if (!actorName || !prefix) return null;
+
   return unreplied.find(c => {
     if (actorName && c.actorName !== actorName) return false;
-    if (!prefix) return false;
     return (c.commentText || '').includes(prefix);
-  }) || unreplied.find(c => prefix && (c.commentText || '').includes(prefix));
+  }) || null;
 }
 
 async function executePreparedReplies(page, db, run, options) {
@@ -507,7 +517,7 @@ async function executePreparedReplies(page, db, run, options) {
 
   const results = [];
   const selfProfile = getSelfProfile();
-  const selfNickname = selfProfile.nickname || '';
+  const configuredSelfNickname = selfProfile.nickname || '';
 
   for (let i = 0; i < preparedComments.length; i++) {
     const comment = preparedComments[i];
@@ -566,6 +576,7 @@ async function executePreparedReplies(page, db, run, options) {
         continue;
       }
 
+      const selfNickname = configuredSelfNickname || work.author_name || '';
       const scanResult = await findUnrepliedCommentsInModal(page, { selfNickname });
       if (!scanResult.ok) {
         result.reason = `scan_failed:${scanResult.message}`;

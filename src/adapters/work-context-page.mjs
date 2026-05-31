@@ -166,10 +166,21 @@ export async function clickNotificationWorkThumbnail(page, { skipItemTexts = [],
       }
     }
 
-    candidates.sort((a, b) => b.priority - a.priority);
+    const targetRequested = !!(targetActorName || targetContent);
+    const targetCandidates = candidates.filter(c => c.matchesTarget);
+    const selectableCandidates = targetRequested ? targetCandidates : candidates;
 
-    if (candidates.length === 0) return { ok: false, reason: 'no comment_on_my_work thumbnail found' };
-    const best = candidates[0];
+    selectableCandidates.sort((a, b) => b.priority - a.priority);
+
+    if (selectableCandidates.length === 0) {
+      return {
+        ok: false,
+        reason: targetRequested
+          ? 'target notification thumbnail not found'
+          : 'no comment_on_my_work thumbnail found',
+      };
+    }
+    const best = selectableCandidates[0];
     best.clicked = true;
     return best;
   }, { TARGET_PATTERNS, ALL_ACTION_PATTERNS, skipItemTexts, targetActorName, targetContent });
