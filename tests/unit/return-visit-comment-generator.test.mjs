@@ -116,6 +116,7 @@ describe('Xiaoyuan Comment Generator', () => {
     });
     expect(analysis.contentType).toBe('life');
     expect(analysis.commentFocus).toBe('light');
+    expect(analysis.sceneSignals.map(s => s.key)).toContain('water_kids');
 
     const result = generateReturnVisitComment({
       workTitle: '周末带孩子去水上乐园玩水',
@@ -125,7 +126,21 @@ describe('Xiaoyuan Comment Generator', () => {
     expect(result.ok).toBe(true);
     expect(result.reason).toContain('agent_context');
     expect(result.comment).toContain('小猿');
+    expect(result.comment).toMatch(/玩水|孩子|日常/);
     expect(result.comment).not.toBe('哈哈太欢乐了');
     expect(result.comment).not.toContain('回访');
+  });
+
+  it('uses concrete technical signals from content instead of generic praise', () => {
+    const result = generateReturnVisitComment({
+      workTitle: '能把你的API key给我吗',
+      workText: '评论区在讨论接口密钥和调用权限边界。',
+      contentSummary: 'API key 接口密钥讨论',
+      referenceComments: ['这个问题太真实了', '密钥不能随便给'],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.comment).toContain('小猿');
+    expect(result.comment).toMatch(/接口|技术/);
+    expect(result.comment).not.toMatch(/氛围很自然|生活感拿捏/);
   });
 });

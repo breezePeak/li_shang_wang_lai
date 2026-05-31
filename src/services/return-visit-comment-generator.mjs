@@ -78,6 +78,25 @@ function analyzeReferenceComments(referenceComments) {
   return 'general';
 }
 
+function extractSceneSignals(fullText) {
+  const text = String(fullText || '');
+  const signalRules = [
+    { key: 'water_kids', pattern: /玩水|游泳|水上乐园|泳池|孩子|小孩|亲子/, subject: '玩水日常', detail: '孩子状态真自然' },
+    { key: 'life_record', pattern: /生活|日常|记录|随拍|vlog|真实生活/, subject: '日常记录', detail: '生活感很足' },
+    { key: 'api_key', pattern: /API\s*key|apikey|接口密钥|密钥/i, subject: '接口问题', detail: '互动点挺具体' },
+    { key: 'coding', pattern: /代码|编程|开发|前端|后端|接口|工程|AI|模型|调试/, subject: '技术内容', detail: '问题切得挺准' },
+    { key: 'tutorial', pattern: /教程|步骤|方法|技巧|教学|干货|怎么|如何/, subject: '步骤讲解', detail: '细节挺清楚' },
+    { key: 'food', pattern: /美食|吃|餐|饭|菜|探店|味道/, subject: '美食分享', detail: '烟火气很足' },
+    { key: 'travel', pattern: /旅行|旅游|风景|景色|城市|打卡|出游/, subject: '出游记录', detail: '画面感挺强' },
+    { key: 'pet', pattern: /猫|狗|宠物|毛孩子|小猫|小狗/, subject: '宠物日常', detail: '状态很可爱' },
+  ];
+  const signals = [];
+  for (const rule of signalRules) {
+    if (rule.pattern.test(text)) signals.push(rule);
+  }
+  return signals;
+}
+
 export function analyzeReturnVisitContext(input = {}) {
   const workTitle = String(input.workTitle || '').trim();
   const workText = String(input.workText || '').trim();
@@ -88,6 +107,7 @@ export function analyzeReturnVisitContext(input = {}) {
   const contentType = stripped.length < 8 ? 'generic' : classifyContentType(fullText);
   const commentFocus = analyzeReferenceComments(referenceComments);
   const contentDeficient = normalizeText([workTitle, workText, contentSummary].filter(Boolean).join(' ')).length < 8;
+  const sceneSignals = extractSceneSignals(fullText);
 
   return {
     workTitle,
@@ -99,6 +119,7 @@ export function analyzeReturnVisitContext(input = {}) {
     contentType,
     commentFocus,
     contentDeficient,
+    sceneSignals,
   };
 }
 
@@ -136,8 +157,13 @@ function chooseCandidatesByType(type, seed) {
 }
 
 function buildAgentCandidates(analysis) {
-  const { contentType, commentFocus } = analysis;
+  const { contentType, commentFocus, sceneSignals } = analysis;
   const candidates = [];
+
+  for (const signal of sceneSignals || []) {
+    candidates.push(`小猿看完觉得${signal.subject}很有现场感，${signal.detail}。`);
+    candidates.push(`小猿觉得这段${signal.subject}挺真实，${signal.detail}。`);
+  }
 
   if (commentFocus === 'light') {
     candidates.push('小猿看完觉得氛围很轻松，评论区也挺有共鸣。');
