@@ -30,10 +30,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 function recordAction(db, eventId, planId, targetTitle, targetUrl, actionText, status, reason, evidenceJson) {
+  const eid = eventId || null;
   db.prepare(`
     INSERT INTO actions (event_id, plan_id, action_type, target_title, target_url, action_text, status, reason, evidence_json, executed_at)
     VALUES (?, ?, 'reply_comment', ?, ?, ?, ?, ?, ?, ?)
-  `).run(eventId, planId, targetTitle, targetUrl, actionText, status, reason || null, evidenceJson || null, new Date().toISOString());
+  `).run(eid, planId, targetTitle, targetUrl, actionText, status, reason || null, evidenceJson || null, new Date().toISOString());
 }
 
 function updateEventWorkInfo(db, eventId, workId, workUrl, workTitle, rawPayloadJson) {
@@ -238,30 +239,35 @@ async function processWorkModal(page, notification, db, run, options, state) {
 
   const selfProfile = getSelfProfile();
   const selfNickname = selfProfile.nickname || '';
-  const ownerResult = checkWorkOwner({
-    authorProfileKey: workCtx.authorProfileKey || '',
-    authorProfileUrl: workCtx.authorProfileUrl || '',
-    authorName: workCtx.authorName || '',
-  }, selfProfile);
 
-  if (ownerResult.isOwnWork === false) {
-    r.status = 'skipped';
-    r.reason = `作品不属于当前账号 (${ownerResult.ownerCheckMethod})`;
-    console.log(`[live]   跳过: ${r.reason}`);
-    if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', '', 'skipped', r.reason, null);
-    return r;
-  }
+  if (workCtx.isOwnWorkByUrl) {
+    console.log(`[live]   URL 含 /user/self，确认为 own 作品`);
+  } else {
+    const ownerResult = checkWorkOwner({
+      authorProfileKey: workCtx.authorProfileKey || '',
+      authorProfileUrl: workCtx.authorProfileUrl || '',
+      authorName: workCtx.authorName || '',
+    }, selfProfile);
 
-  if (ownerResult.isOwnWork === null) {
-    const actionSuggestsOwn = notification.action?.includes('你的作品') || notification.action?.includes('你的评论');
-    if (!actionSuggestsOwn) {
+    if (ownerResult.isOwnWork === false) {
       r.status = 'skipped';
-      r.reason = `无法确认作品归属，需要主人确认`;
+      r.reason = `作品不属于当前账号 (${ownerResult.ownerCheckMethod})`;
       console.log(`[live]   跳过: ${r.reason}`);
       if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', '', 'skipped', r.reason, null);
       return r;
     }
-    console.log(`[live]   ⚠ 无法验证作品归属，但通知暗示为自身作品 (${notification.action})，继续执行`);
+
+    if (ownerResult.isOwnWork === null) {
+      const actionSuggestsOwn = notification.action?.includes('你的作品') || notification.action?.includes('你的评论');
+      if (!actionSuggestsOwn) {
+        r.status = 'skipped';
+        r.reason = `无法确认作品归属，需要主人确认`;
+        console.log(`[live]   跳过: ${r.reason}`);
+        if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', '', 'skipped', r.reason, null);
+        return r;
+      }
+      console.log(`[live]   ⚠ 无法验证作品归属，但通知暗示为自身作品 (${notification.action})，继续执行`);
+    }
   }
 
   r.step = 'scan-unreplied';

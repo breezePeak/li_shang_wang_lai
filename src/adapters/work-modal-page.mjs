@@ -96,6 +96,8 @@ export async function extractWorkModalContext(page) {
     authorProfileUrl = authorData.url;
   } catch {}
 
+  const isOwnWorkByUrl = currentUrl.includes('/user/self');
+
   return success({
     currentUrl,
     workId,
@@ -104,6 +106,7 @@ export async function extractWorkModalContext(page) {
     workType,
     modalId,
     isModal: true,
+    isOwnWorkByUrl,
     authorName: authorName || null,
     authorProfileKey: authorProfileKey || null,
     authorProfileUrl: authorProfileUrl || null,
