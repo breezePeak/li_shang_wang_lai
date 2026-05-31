@@ -257,8 +257,14 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
         }
 
         const subReplyContainers = items[i].querySelectorAll('.comment-item-info-wrap');
-        if (subReplyContainers.length > 0 && selfNickname) {
-          for (const sub of subReplyContainers) {
+        const parentSubReplies = items[i].parentElement?.querySelectorAll('.comment-item-info-wrap') || [];
+        const allSubReplies = [...subReplyContainers];
+        for (const r of parentSubReplies) {
+          if (!allSubReplies.includes(r) && r !== items[i]) allSubReplies.push(r);
+        }
+        if (allSubReplies.length > 0 && selfNickname) {
+          for (const sub of allSubReplies) {
+            if (sub === items[i]) continue;
             const subText = (sub.innerText || '').trim();
             const subLines = subText.split('\n').map(l => l.trim()).filter(Boolean);
             if (subLines.length > 0 && subLines[0] === selfNickname) {
@@ -347,16 +353,47 @@ export async function openReplyBoxByIndex(page, commentIndex) {
       if (commentIndex < 0 || commentIndex >= items.length) return { ok: false, reason: `index ${commentIndex} out of range (0-${items.length - 1})` };
 
       const targetItem = items[commentIndex];
-      const spans = targetItem.querySelectorAll('span');
-      for (const span of spans) {
-        if ((span.innerText || '').trim() === '回复') {
-          const rect = span.getBoundingClientRect();
-          span.click();
-          return { ok: true, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
+
+      const searchScopes = [
+        targetItem,
+        targetItem.parentElement,
+        targetItem.parentElement?.parentElement,
+      ].filter(Boolean);
+
+      for (const scope of searchScopes) {
+        const spans = scope.querySelectorAll('span');
+        for (const span of spans) {
+          if ((span.innerText || '').trim() === '回复') {
+            const rect = span.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              span.click();
+              return { ok: true, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2), scope: scope === targetItem ? 'self' : scope === targetItem.parentElement ? 'parent' : 'grandparent' };
+            }
+          }
         }
       }
 
-      return { ok: false, reason: '回复 span not found in comment item' };
+      const allReplySpans = commentArea.querySelectorAll('span');
+      const itemRect = targetItem.getBoundingClientRect();
+      let closestReply = null;
+      let closestDist = Infinity;
+      for (const span of allReplySpans) {
+        if ((span.innerText || '').trim() !== '回复') continue;
+        const rect = span.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        const dy = Math.abs(rect.y - itemRect.y);
+        if (dy < 80 && dy < closestDist) {
+          closestDist = dy;
+          closestReply = span;
+        }
+      }
+      if (closestReply) {
+        const rect = closestReply.getBoundingClientRect();
+        closestReply.click();
+        return { ok: true, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2), scope: 'proximity' };
+      }
+
+      return { ok: false, reason: '回复 span not found in comment item or nearby' };
     }, commentIndex);
 
     if (!clicked.ok) {
