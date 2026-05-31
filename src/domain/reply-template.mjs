@@ -10,7 +10,7 @@ function isMostlyEmoji(text) {
   return nonSpace > 0 && emojiCount / nonSpace >= 0.5;
 }
 
-export function generateReplyText(commentText) {
+export function generateReplyText(commentText, { workTitle = '' } = {}) {
   if (!commentText || typeof commentText !== 'string') {
     return { replyText: '感谢支持。', reason: 'template:default' };
   }
@@ -19,6 +19,9 @@ export function generateReplyText(commentText) {
 
   for (const pat of QUESTION_PATTERNS) {
     if (pat.test(text)) {
+      if (workTitle) {
+        return { replyText: `关于「${workTitle}」这个问题挺关键，后面我可以单独展开讲一下。`, reason: 'template:question_with_title' };
+      }
       return { replyText: '这个问题挺关键，后面我可以单独展开讲一下。', reason: 'template:question' };
     }
   }
@@ -31,6 +34,10 @@ export function generateReplyText(commentText) {
 
   if (text.length <= 3 || isMostlyEmoji(text)) {
     return { replyText: '感谢支持。', reason: 'template:short' };
+  }
+
+  if (workTitle) {
+    return { replyText: `感谢评论，一起交流。`, reason: 'template:default_with_title' };
   }
 
   return { replyText: '感谢评论，一起交流。', reason: 'template:default' };
