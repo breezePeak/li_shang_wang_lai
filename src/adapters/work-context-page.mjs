@@ -89,9 +89,10 @@ export function checkWorkOwner(workContext, selfProfile) {
 }
 
 export async function clickNotificationWorkThumbnail(page) {
-  const ACTION_PATTERNS = ['评论了你的作品', '回复了你的评论'];
+  const TARGET_PATTERN = '评论了你的作品';
+  const ALL_ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '评论了你的作品', '回复了你的评论'];
 
-  const thumbResult = await page.evaluate((ACTION_PATTERNS) => {
+  const thumbResult = await page.evaluate(({ TARGET_PATTERN, ALL_ACTION_PATTERNS }) => {
     function findNotificationPanel() {
       for (const el of document.querySelectorAll('*')) {
         const t = (el.innerText || '').trim();
@@ -112,39 +113,57 @@ export async function clickNotificationWorkThumbnail(page) {
     const panel = findNotificationPanel();
     if (!panel) return { ok: false, reason: 'panel not found' };
 
+    const panelRect = panel.getBoundingClientRect();
     const allElements = panel.querySelectorAll('*');
+    const candidates = [];
+
     for (const el of allElements) {
       const rect = el.getBoundingClientRect();
       if (rect.width < 30 || rect.height < 20) continue;
+      if (rect.height > panelRect.height * 0.4) continue;
       const text = (el.innerText || '').trim();
       if (text.length < 5) continue;
-      let actionCount = 0;
-      for (const pat of ACTION_PATTERNS) {
+
+      if (!text.includes(TARGET_PATTERN)) continue;
+
+      let totalActionCount = 0;
+      for (const pat of ALL_ACTION_PATTERNS) {
         let idx = text.indexOf(pat);
-        while (idx !== -1) { actionCount++; idx = text.indexOf(pat, idx + 1); }
+        while (idx !== -1) { totalActionCount++; idx = text.indexOf(pat, idx + 1); }
       }
-      if (actionCount === 1) {
-        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-        if (lines.length >= 2) {
-          const imgs = el.querySelectorAll('img');
-          for (const img of imgs) {
-            const src = img.getAttribute('src') || '';
-            if (src.includes('aweme-avatar')) continue;
-            const imgRect = img.getBoundingClientRect();
-            if (imgRect.width < 20 || imgRect.height < 20) continue;
-            return {
-              ok: true,
-              x: Math.round(imgRect.x + imgRect.width / 2),
-              y: Math.round(imgRect.y + imgRect.height / 2),
-              itemText: text.slice(0, 100),
-            };
-          }
+      if (totalActionCount !== 1) continue;
+
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length < 2) continue;
+
+      const imgs = el.querySelectorAll('img');
+      for (const img of imgs) {
+        const src = img.getAttribute('src') || '';
+        if (src.includes('aweme-avatar')) continue;
+        const imgRect = img.getBoundingClientRect();
+        if (imgRect.width < 20 || imgRect.height < 20) continue;
+        const isLikelyAvatar = imgRect.width <= 60 && imgRect.height <= 60;
+        if (imgRect.y < 0 || imgRect.y > window.innerHeight || imgRect.bottom < 0 || imgRect.top > window.innerHeight) {
+          el.scrollIntoView({ block: 'center', behavior: 'instant' });
         }
+        const finalRect = img.getBoundingClientRect();
+        candidates.push({
+          ok: true,
+          x: Math.round(finalRect.x + finalRect.width / 2),
+          y: Math.round(finalRect.y + finalRect.height / 2),
+          itemText: text.slice(0, 100),
+          imgW: Math.round(finalRect.width),
+          imgH: Math.round(finalRect.height),
+          priority: isLikelyAvatar ? 0 : 1,
+        });
       }
     }
 
-    return { ok: false, reason: 'no thumbnail found' };
-  }, ACTION_PATTERNS);
+    candidates.sort((a, b) => b.priority - a.priority);
+
+    if (candidates.length === 0) return { ok: false, reason: 'no comment_on_my_work thumbnail found' };
+    return candidates[0];
+  }, { TARGET_PATTERN, ALL_ACTION_PATTERNS });
 
   if (!thumbResult.ok) {
     return { ok: false, code: 'THUMBNAIL_NOT_FOUND', message: thumbResult.reason };

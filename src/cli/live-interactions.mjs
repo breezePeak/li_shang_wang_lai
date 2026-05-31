@@ -16,6 +16,7 @@ import {
   fillReplyInWorkModal,
   sendReplyInWorkModal,
   verifyReplyInWorkModal,
+  detectVideoRemoved,
 } from '../adapters/work-modal-page.mjs';
 import { clickNotificationWorkThumbnail } from '../adapters/work-context-page.mjs';
 import { checkWorkOwner, getSelfProfile } from '../adapters/work-context-page.mjs';
@@ -30,11 +31,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 function recordAction(db, eventId, planId, targetTitle, targetUrl, actionText, status, reason, evidenceJson) {
-  const eid = eventId || null;
+  if (!eventId) return;
   db.prepare(`
     INSERT INTO actions (event_id, plan_id, action_type, target_title, target_url, action_text, status, reason, evidence_json, executed_at)
     VALUES (?, ?, 'reply_comment', ?, ?, ?, ?, ?, ?, ?)
-  `).run(eid, planId, targetTitle, targetUrl, actionText, status, reason || null, evidenceJson || null, new Date().toISOString());
+  `).run(eventId, planId, targetTitle, targetUrl, actionText, status, reason || null, evidenceJson || null, new Date().toISOString());
 }
 
 function updateEventWorkInfo(db, eventId, workId, workUrl, workTitle, rawPayloadJson) {
@@ -200,10 +201,28 @@ async function processWorkModal(page, notification, db, run, options, state) {
     return r;
   }
 
+  await page.waitForTimeout(2000);
+
+  const earlyRemoved = await detectVideoRemoved(page);
+  if (earlyRemoved) {
+    r.status = 'skipped';
+    r.reason = `作品已删除/不可见: ${earlyRemoved}`;
+    console.log(`[live]   跳过: ${r.reason}`);
+    if (r.eventId) recordAction(db, r.eventId, null, '', '', '', 'skipped', r.reason, null);
+    return r;
+  }
+
   r.step = 'wait-modal';
   console.log(`[live]   等待作品 modal...`);
   const modalResult = await waitForWorkModal(page);
   if (!modalResult.ok) {
+    if (modalResult.videoRemoved) {
+      r.status = 'skipped';
+      r.reason = `作品已删除/不可见: ${modalResult.message}`;
+      console.log(`[live]   跳过: ${r.reason}`);
+      if (r.eventId) recordAction(db, r.eventId, null, '', '', '', 'skipped', r.reason, null);
+      return r;
+    }
     r.status = 'blocked';
     r.reason = `modal 未出现: ${modalResult.message}`;
     r.code = modalResult.code;
@@ -439,6 +458,7 @@ function classifyNotification(n) {
   if (action.includes('评论了你的作品') || action.includes('评论了你的视频')) return 'comment_on_my_work';
   if (action.includes('回复了你的评论')) return 'reply_to_my_comment';
   if (action.includes('赞了你的作品') || action.includes('赞了你的评论') || action.includes('赞了你的视频')) return 'like_received';
+  if (action.includes('关注了你') || action.includes('关注了')) return 'follow';
   return 'unknown';
 }
 
@@ -514,9 +534,10 @@ async function main() {
       const commentNotifs = newNotifs.filter(n => classifyNotification(n) === 'comment_on_my_work');
       const likeNotifs = newNotifs.filter(n => classifyNotification(n) === 'like_received');
       const replyNotifs = newNotifs.filter(n => classifyNotification(n) === 'reply_to_my_comment');
+      const followNotifs = newNotifs.filter(n => classifyNotification(n) === 'follow');
       const unknownNotifs = newNotifs.filter(n => classifyNotification(n) === 'unknown');
 
-      console.log(`[live] 第 ${scrollRound + 1} 轮: 通知 ${notifications.length} 条，新增 ${newNotifs.length} 条 (评论${commentNotifs.length} 点赞${likeNotifs.length} 回复${replyNotifs.length} 未知${unknownNotifs.length})`);
+      console.log(`[live] 第 ${scrollRound + 1} 轮: 通知 ${notifications.length} 条，新增 ${newNotifs.length} 条 (评论${commentNotifs.length} 点赞${likeNotifs.length} 回复${replyNotifs.length} 关注${followNotifs.length} 未知${unknownNotifs.length})`);
 
       for (const n of likeNotifs) {
         if (revisitCandidates) {
@@ -530,6 +551,11 @@ async function main() {
       for (const n of replyNotifs) {
         console.log(`[live] 回复了我的评论：actor=${n.username} -> 跳过，需要主人确认`);
         results.push({ actorName: n.username, status: 'skipped', reason: 'reply_to_my_comment: 不回复，不加入回访列表' });
+      }
+
+      for (const n of followNotifs) {
+        console.log(`[live] 关注通知：actor=${n.username} -> 跳过`);
+        results.push({ actorName: n.username, status: 'skipped', reason: 'follow: 不处理' });
       }
 
       for (const n of unknownNotifs) {

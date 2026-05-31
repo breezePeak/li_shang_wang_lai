@@ -115,13 +115,47 @@ export async function extractWorkModalContext(page) {
 
 export async function waitForWorkModal(page, { timeoutMs = 10000 } = {}) {
   try {
+    const removed = await detectVideoRemoved(page);
+    if (removed) {
+      return blocking(RESULT_CODES.BLOCKED, `作品已删除/不可见: ${removed}`, { recoverable: true, videoRemoved: true });
+    }
+
     await page.waitForSelector('.modal-video-container', { state: 'visible', timeout: timeoutMs });
+
+    const removedAfter = await detectVideoRemoved(page);
+    if (removedAfter) {
+      return blocking(RESULT_CODES.BLOCKED, `作品已删除/不可见: ${removedAfter}`, { recoverable: true, videoRemoved: true });
+    }
+
     await page.waitForSelector('.comment-mainContent', { state: 'visible', timeout: 5000 });
     await page.evaluate(MATCH_COMMENT_INNER);
     return success({ modalVisible: true });
   } catch (err) {
+    const removed = await detectVideoRemoved(page).catch(() => '');
+    if (removed) {
+      return blocking(RESULT_CODES.BLOCKED, `作品已删除/不可见: ${removed}`, { recoverable: true, videoRemoved: true });
+    }
     return blocking(RESULT_CODES.BLOCKED, `作品 modal 未出现: ${err.message}`, { recoverable: false });
   }
+}
+
+export async function detectVideoRemoved(page) {
+  return await page.evaluate(() => {
+    const REMOVED_PATTERNS = ['视频不见了', '作品已删除', '该作品已删除', '视频已删除', '内容不可见', '该内容不可见', '作品不可见', '视频无法播放', '看看其他推荐'];
+    const allText = (document.body?.innerText || '');
+    for (const pat of REMOVED_PATTERNS) {
+      if (allText.includes(pat)) return pat;
+    }
+    const overlays = document.querySelectorAll('[class*="error"], [class*="empty"], [class*="removed"], [class*="deleted"], [class*="not-found"]');
+    for (const el of overlays) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 200 && rect.height > 100) {
+        const text = (el.innerText || '').trim();
+        if (text.length > 0) return text.slice(0, 80);
+      }
+    }
+    return null;
+  });
 }
 
 const MATCH_COMMENT_INNER = `
@@ -256,13 +290,10 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
           }
         }
 
-        const subReplyContainers = items[i].querySelectorAll('.comment-item-info-wrap');
-        const parentSubReplies = items[i].parentElement?.querySelectorAll('.comment-item-info-wrap') || [];
+        const commentItem = items[i].closest('[data-e2e="comment-item"]') || items[i].parentElement?.parentElement;
+        const subReplyContainers = commentItem ? commentItem.querySelectorAll('.comment-item-info-wrap') : items[i].querySelectorAll('.comment-item-info-wrap');
         const allSubReplies = [...subReplyContainers];
-        for (const r of parentSubReplies) {
-          if (!allSubReplies.includes(r) && r !== items[i]) allSubReplies.push(r);
-        }
-        if (allSubReplies.length > 0 && selfNickname) {
+        if (allSubReplies.length > 1 && selfNickname) {
           for (const sub of allSubReplies) {
             if (sub === items[i]) continue;
             const subText = (sub.innerText || '').trim();
@@ -274,11 +305,23 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
           }
         }
 
-        if (!hasMyReply && subReplyContainers.length === 0 && selfNickname) {
-          const replyBlocks = items[i].querySelectorAll('[class*="reply"], [class*="sub-comment"]');
-          for (const block of replyBlocks) {
-            const blockText = (block.innerText || '').trim();
-            if (blockText.includes(selfNickname)) {
+        if (!hasMyReply && selfNickname && commentItem) {
+          const statsContainer = commentItem.querySelector('.comment-item-stats-container');
+          if (statsContainer) {
+            const spans = statsContainer.querySelectorAll('span');
+            for (const span of spans) {
+              if ((span.innerText || '').trim() === '回复') {
+                const rect = span.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                  break;
+                }
+              }
+            }
+          }
+          const itemFullText = (commentItem.innerText || '').trim();
+          const lines = itemFullText.split('\n').map(l => l.trim()).filter(Boolean);
+          for (let li = 0; li < lines.length; li++) {
+            if (lines[li] === selfNickname && li > 0) {
               hasMyReply = true;
               break;
             }
@@ -349,15 +392,52 @@ export async function openReplyBoxByIndex(page, commentIndex) {
       const commentArea = document.querySelector('.comment-mainContent');
       if (!commentArea) return { ok: false, reason: 'comment-mainContent not found' };
 
-      const items = commentArea.querySelectorAll('.comment-item-info-wrap');
-      if (commentIndex < 0 || commentIndex >= items.length) return { ok: false, reason: `index ${commentIndex} out of range (0-${items.length - 1})` };
+      const infoWraps = commentArea.querySelectorAll('.comment-item-info-wrap');
+      if (commentIndex < 0 || commentIndex >= infoWraps.length) return { ok: false, reason: `index ${commentIndex} out of range (0-${infoWraps.length - 1})` };
 
-      const targetItem = items[commentIndex];
+      const targetInfoWrap = infoWraps[commentIndex];
+
+      const commentItem = targetInfoWrap.closest('[data-e2e="comment-item"]') || targetInfoWrap.parentElement?.parentElement;
+
+      if (commentItem) {
+        const statsContainer = commentItem.querySelector('.comment-item-stats-container');
+        if (statsContainer) {
+          const spans = statsContainer.querySelectorAll('span');
+          for (const span of spans) {
+            if ((span.innerText || '').trim() === '回复') {
+              const rect = span.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                if (rect.y < 0 || rect.y > window.innerHeight) {
+                  commentItem.scrollIntoView({ block: 'center', behavior: 'instant' });
+                }
+                span.click();
+                const newRect = span.getBoundingClientRect();
+                return { ok: true, x: Math.round(newRect.x + newRect.width / 2), y: Math.round(newRect.y + newRect.height / 2), scope: 'stats-container' };
+              }
+            }
+          }
+        }
+
+        const allSpans = commentItem.querySelectorAll('span');
+        for (const span of allSpans) {
+          if ((span.innerText || '').trim() === '回复') {
+            const rect = span.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              if (rect.y < 0 || rect.y > window.innerHeight) {
+                commentItem.scrollIntoView({ block: 'center', behavior: 'instant' });
+              }
+              span.click();
+              const newRect = span.getBoundingClientRect();
+              return { ok: true, x: Math.round(newRect.x + newRect.width / 2), y: Math.round(newRect.y + newRect.height / 2), scope: 'comment-item' };
+            }
+          }
+        }
+      }
 
       const searchScopes = [
-        targetItem,
-        targetItem.parentElement,
-        targetItem.parentElement?.parentElement,
+        targetInfoWrap.parentElement,
+        targetInfoWrap.parentElement?.parentElement,
+        targetInfoWrap.parentElement?.parentElement?.parentElement,
       ].filter(Boolean);
 
       for (const scope of searchScopes) {
@@ -367,14 +447,14 @@ export async function openReplyBoxByIndex(page, commentIndex) {
             const rect = span.getBoundingClientRect();
             if (rect.width > 0 && rect.height > 0) {
               span.click();
-              return { ok: true, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2), scope: scope === targetItem ? 'self' : scope === targetItem.parentElement ? 'parent' : 'grandparent' };
+              return { ok: true, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2), scope: 'ancestor' };
             }
           }
         }
       }
 
       const allReplySpans = commentArea.querySelectorAll('span');
-      const itemRect = targetItem.getBoundingClientRect();
+      const itemRect = targetInfoWrap.getBoundingClientRect();
       let closestReply = null;
       let closestDist = Infinity;
       for (const span of allReplySpans) {
@@ -382,7 +462,7 @@ export async function openReplyBoxByIndex(page, commentIndex) {
         const rect = span.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) continue;
         const dy = Math.abs(rect.y - itemRect.y);
-        if (dy < 80 && dy < closestDist) {
+        if (dy < 120 && dy < closestDist) {
           closestDist = dy;
           closestReply = span;
         }
@@ -405,12 +485,19 @@ export async function openReplyBoxByIndex(page, commentIndex) {
     await page.waitForTimeout(1000);
 
     const inputVisible = await page.evaluate(() => {
-      const commentArea = document.querySelector('.comment-mainContent');
-      const scope = commentArea || document.body;
-      const inputs = scope.querySelectorAll('input[type="text"]');
-      for (const input of inputs) {
+      const SEARCH_PHRASES = ['搜索', 'search', '查询'];
+      function isSearchInput(input) {
+        const ph = (input.getAttribute('placeholder') || '').toLowerCase();
+        const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
+        const combined = ph + ' ' + ariaLabel;
+        return SEARCH_PHRASES.some(s => combined.includes(s));
+      }
+      const allInputs = document.querySelectorAll('input[type="text"]');
+      for (const input of allInputs) {
         const rect = input.getBoundingClientRect();
-        if (rect.width > 50 && rect.height > 20) return true;
+        if (rect.width < 50 || rect.height < 20) continue;
+        if (isSearchInput(input)) continue;
+        return true;
       }
       return false;
     });
@@ -435,20 +522,43 @@ export async function fillReplyInWorkModal(page, replyText) {
 
   try {
     const filled = await page.evaluate((text) => {
+      const SEARCH_PHRASES = ['搜索', 'search', '查询'];
+      function isSearchInput(input) {
+        const ph = (input.getAttribute('placeholder') || '').toLowerCase();
+        const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
+        const combined = ph + ' ' + ariaLabel;
+        return SEARCH_PHRASES.some(s => combined.includes(s));
+      }
+
       const commentArea = document.querySelector('.comment-mainContent');
       const scope = commentArea || document.body;
       const inputs = scope.querySelectorAll('input[type="text"]');
+      const candidates = [];
       for (const input of inputs) {
         const rect = input.getBoundingClientRect();
         if (rect.width < 50 || rect.height < 20) continue;
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-        nativeInputValueSetter.call(input, text);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        input.focus();
-        return { ok: true };
+        if (isSearchInput(input)) continue;
+        candidates.push({ input, rect, inCommentArea: !!commentArea && commentArea.contains(input) });
       }
-      return { ok: false };
+      if (candidates.length === 0) {
+        const allInputs = document.querySelectorAll('input[type="text"]');
+        for (const input of allInputs) {
+          const rect = input.getBoundingClientRect();
+          if (rect.width < 50 || rect.height < 20) continue;
+          if (isSearchInput(input)) continue;
+          candidates.push({ input, rect, inCommentArea: false });
+        }
+      }
+      candidates.sort((a, b) => (b.inCommentArea ? 1 : 0) - (a.inCommentArea ? 1 : 0));
+      if (candidates.length === 0) return { ok: false };
+
+      const target = candidates[0].input;
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      nativeInputValueSetter.call(target, text);
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+      target.focus();
+      return { ok: true };
     }, replyText);
 
     if (!filled.ok) {
@@ -471,19 +581,43 @@ export async function sendReplyInWorkModal(page, replyText) {
 
   try {
     const filled = await page.evaluate((text) => {
+      const SEARCH_PHRASES = ['搜索', 'search', '查询'];
+      function isSearchInput(input) {
+        const ph = (input.getAttribute('placeholder') || '').toLowerCase();
+        const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
+        const combined = ph + ' ' + ariaLabel;
+        return SEARCH_PHRASES.some(s => combined.includes(s));
+      }
+
       const commentArea = document.querySelector('.comment-mainContent');
       const scope = commentArea || document.body;
       const inputs = scope.querySelectorAll('input[type="text"]');
+      const candidates = [];
       for (const input of inputs) {
         const rect = input.getBoundingClientRect();
         if (rect.width < 50 || rect.height < 20) continue;
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-        nativeInputValueSetter.call(input, text);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        return { ok: true };
+        if (isSearchInput(input)) continue;
+        candidates.push({ input, rect, inCommentArea: !!commentArea && commentArea.contains(input) });
       }
-      return { ok: false };
+      if (candidates.length === 0) {
+        const allInputs = document.querySelectorAll('input[type="text"]');
+        for (const input of allInputs) {
+          const rect = input.getBoundingClientRect();
+          if (rect.width < 50 || rect.height < 20) continue;
+          if (isSearchInput(input)) continue;
+          candidates.push({ input, rect, inCommentArea: false });
+        }
+      }
+      candidates.sort((a, b) => (b.inCommentArea ? 1 : 0) - (a.inCommentArea ? 1 : 0));
+      if (candidates.length === 0) return { ok: false };
+
+      const target = candidates[0].input;
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      nativeInputValueSetter.call(target, text);
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+      target.focus();
+      return { ok: true };
     }, replyText);
 
     if (!filled.ok) {
@@ -493,42 +627,52 @@ export async function sendReplyInWorkModal(page, replyText) {
     await page.waitForTimeout(800);
 
     const sent = await page.evaluate(() => {
-      const commentArea = document.querySelector('.comment-mainContent');
-      const scope = commentArea || document.body;
-
-      const spans = scope.querySelectorAll('span');
-      for (const span of spans) {
-        if ((span.innerText || '').trim() === '发送') {
-          span.click();
-          return { ok: true, method: 'click_send_span' };
-        }
+      const SEARCH_PHRASES = ['搜索', 'search', '查询'];
+      function isSearchInput(input) {
+        const ph = (input.getAttribute('placeholder') || '').toLowerCase();
+        const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
+        const combined = ph + ' ' + ariaLabel;
+        return SEARCH_PHRASES.some(s => combined.includes(s));
       }
 
-      const buttons = scope.querySelectorAll('button');
-      for (const btn of buttons) {
-        if ((btn.innerText || '').trim() === '发送') {
-          btn.click();
-          return { ok: true, method: 'click_send_button' };
+      const allInputs = document.querySelectorAll('input[type="text"]');
+      for (const input of allInputs) {
+        const rect = input.getBoundingClientRect();
+        if (rect.width < 50 || rect.height < 20) continue;
+        if (isSearchInput(input)) continue;
+        const val = (input.value || '').trim();
+        if (val.length > 0) {
+          input.focus();
+          return { ok: true, method: 'focus_reply_input', inputX: Math.round(rect.x), inputY: Math.round(rect.y) };
         }
       }
-
-      return { ok: false, reason: 'no_send_button' };
+      return { ok: false, reason: 'no_filled_input' };
     });
 
     if (sent.ok) {
-      console.error(`[work-modal] 点击发送成功 (${sent.method})`);
+      const inputLocator = page.locator('input[type="text"]').nth(
+        await page.evaluate(() => {
+          const SEARCH_PHRASES = ['搜索', 'search', '查询'];
+          function isSearchInput(input) {
+            const ph = (input.getAttribute('placeholder') || '').toLowerCase();
+            const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
+            return SEARCH_PHRASES.some(s => (ph + ' ' + ariaLabel).includes(s));
+          }
+          const allInputs = [...document.querySelectorAll('input[type="text"]')];
+          for (let i = 0; i < allInputs.length; i++) {
+            const rect = allInputs[i].getBoundingClientRect();
+            if (rect.width < 50 || rect.height < 20) continue;
+            if (isSearchInput(allInputs[i])) continue;
+            if ((allInputs[i].value || '').trim().length > 0) return i;
+          }
+          return 0;
+        })
+      );
+      await inputLocator.press('Enter');
+      console.error(`[work-modal] 按 Enter 发送`);
       await page.waitForTimeout(2000);
-      return success({ sent: true, method: sent.method });
+      return success({ sent: true, method: 'enter_key' });
     }
-
-    const commentArea = document.querySelector('.comment-mainContent');
-    const scope = commentArea || await page.evaluateHandle(() => document.body);
-    const inputLocator = page.locator('.comment-mainContent input[type="text"]').first();
-    await inputLocator.press('Enter');
-    console.error(`[work-modal] 按 Enter 发送`);
-    await page.waitForTimeout(2000);
-
-    return success({ sent: true, method: 'enter_key' });
   } catch (err) {
     return blocking(RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND, `发送回复异常: ${err.message}`, { recoverable: true });
   }
