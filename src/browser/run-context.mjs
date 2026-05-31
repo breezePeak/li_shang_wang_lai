@@ -22,7 +22,7 @@ const DEFAULT_OPTIONS = {
   noRevisit: false,
   preview: false,
   aiReply: false,
-  maxRevisits: 20,
+  maxRevisits: null,
   maxNotifications: 50,
   maxScrollRounds: 5,
   aiMaxComments: 10,
@@ -85,7 +85,7 @@ export function parseCommonArgs(argv) {
 
     if (arg === '--max-revisits' && i + 1 < argv.length) {
       const n = parseInt(argv[++i]);
-      options.maxRevisits = isNaN(n) || n < 1 ? 20 : n;
+      options.maxRevisits = isNaN(n) || n < 1 ? null : n;
       continue;
     }
 

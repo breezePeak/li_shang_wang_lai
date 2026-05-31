@@ -670,6 +670,41 @@ async function executePreparedReplies(page, db, run, options) {
 
 async function processRevisitCandidates(page, revisitList, db, run, options) {
   const revisitResults = [];
+  const profileSettleMs = Math.max(options.profileSettleMs || 0, 12000);
+  const betweenRevisitMs = Math.max(options.revisitIntervalMs || 0, 8000);
+
+  async function findFirstProfileWork() {
+    const attempts = 4;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const firstWork = await page.evaluate(() => {
+        const links = document.querySelectorAll('a[href*="/video/"], a[href*="/note/"]');
+        const candidates = [];
+        for (const link of links) {
+          const href = link.getAttribute('href') || '';
+          const rect = link.getBoundingClientRect();
+          if (rect.width > 50 && rect.height > 50 && rect.bottom > 0 && rect.top < window.innerHeight) {
+            candidates.push({
+              href: href.startsWith('http') ? href : `https://www.douyin.com${href}`,
+              x: Math.round(rect.x + rect.width / 2),
+              y: Math.round(rect.y + rect.height / 2),
+              top: Math.round(rect.top),
+              left: Math.round(rect.left),
+            });
+          }
+        }
+        candidates.sort((a, b) => a.top - b.top || a.left - b.left);
+        return candidates[0] || null;
+      });
+
+      if (firstWork) return firstWork;
+
+      console.log(`[live]   作品未出现，等待主页内容加载 (${attempt}/${attempts})...`);
+      await page.waitForTimeout(2500 + Math.floor(Math.random() * 1200));
+      await page.evaluate(() => window.scrollBy(0, Math.floor(260 + Math.random() * 180))).catch(() => {});
+      await page.waitForTimeout(1500 + Math.floor(Math.random() * 1000));
+    }
+    return null;
+  }
 
   for (let i = 0; i < revisitList.length; i++) {
     const candidate = revisitList[i];
@@ -692,19 +727,10 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
 
       console.log(`[live]   打开主页: ${profileUrl}`);
       await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await page.waitForTimeout(3000);
+      console.log(`[live]   等待主页作品加载 ${Math.round(profileSettleMs / 1000)}s...`);
+      await page.waitForTimeout(profileSettleMs);
 
-      const firstWork = await page.evaluate(() => {
-        const links = document.querySelectorAll('a[href*="/video/"], a[href*="/note/"]');
-        for (const link of links) {
-          const href = link.getAttribute('href') || '';
-          const rect = link.getBoundingClientRect();
-          if (rect.width > 50 && rect.height > 50) {
-            return { href, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
-          }
-        }
-        return null;
-      });
+      const firstWork = await findFirstProfileWork();
 
       if (!firstWork) {
         console.log(`[live]   未找到作品，跳过`);
@@ -715,7 +741,7 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
 
       console.log(`[live]   打开最近作品...`);
       await page.mouse.click(firstWork.x, firstWork.y);
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(Math.max(options.videoSettleMs || 0, 6000));
 
       const likeResult = await page.evaluate(() => {
         const likeBtn = document.querySelector('[data-e2e*="like"]') || document.querySelector('[class*="like"]');
@@ -743,6 +769,12 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
       console.log(`[live]   回访异常: ${err.message}`);
       markRevisitBlocked(candidate.id, err.message);
       revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: err.message });
+    } finally {
+      if (i < revisitList.length - 1) {
+        const delay = betweenRevisitMs + Math.floor(Math.random() * 4000);
+        console.log(`[live]   回访间隔等待 ${Math.round(delay / 1000)}s，避免连续切换过快`);
+        await page.waitForTimeout(delay);
+      }
     }
   }
 
@@ -968,7 +1000,8 @@ async function main() {
     const replyResults = await executePreparedReplies(page, db, run, commonArgs.options);
     results.push(...replyResults);
 
-    const pendingRevisits = commonArgs.options.noRevisit ? [] : listPendingRevisitCandidates({ limit: commonArgs.options.maxRevisits || 20 });
+    const revisitLimit = commonArgs.options.maxRevisits || commonArgs.options.maxItems || 1;
+    const pendingRevisits = commonArgs.options.noRevisit ? [] : listPendingRevisitCandidates({ limit: revisitLimit });
     if (pendingRevisits.length > 0) {
       console.log(`[live] 第四阶段：统一回访开始 (${pendingRevisits.length} 人)`);
       const revisitResults = await processRevisitCandidates(page, pendingRevisits, db, run, commonArgs.options);
