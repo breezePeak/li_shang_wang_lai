@@ -207,28 +207,139 @@ export async function findCommentInWorkModal(page, item, { maxScrolls = 10 } = {
   }
 }
 
-export async function openReplyBoxInWorkModal(page, item) {
-  const actorName = (item?.actorName || '').trim();
-  const commentText = (item?.commentText || '').trim();
-  const eventTimeText = (item?.eventTimeText || '').trim();
-
-  console.error(`[work-modal] 定位评论: actorName="${actorName}" commentText="${commentText.slice(0, 40)}"`);
+export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alreadyRepliedKeys = new Set() } = {}) {
+  const allComments = [];
 
   try {
-    const clicked = await page.evaluate(({ actorName, commentText, eventTimeText }) => {
+    const collect = () => page.evaluate((alreadyRepliedKeysArr) => {
+      const alreadyRepliedKeys = new Set(alreadyRepliedKeysArr);
+      const commentArea = document.querySelector('.comment-mainContent');
+      if (!commentArea) return { comments: [], canScroll: false };
+
+      const items = commentArea.querySelectorAll('.comment-item-info-wrap');
+      const comments = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const text = (items[i].innerText || '').trim();
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        if (lines.length < 1) continue;
+
+        let actorName = '';
+        let commentText = '';
+        let hasReply = false;
+        let commentKey = '';
+
+        const nameLine = lines[0];
+        if (nameLine.length > 0 && nameLine.length < 50) actorName = nameLine;
+
+        for (let k = 1; k < lines.length; k++) {
+          const line = lines[k];
+          if (line === '回复' || line === '赞' || line === '分享') continue;
+          if (/^\d+$/.test(line) || /^[刚昨前天周月年]/.test(line) && line.length < 10) continue;
+          if (!commentText && line.length > 0) {
+            commentText = line;
+            break;
+          }
+        }
+
+        if (!commentText) {
+          for (let k = lines.length - 1; k >= 1; k--) {
+            const line = lines[k];
+            if (line === '回复' || line === '赞' || line === '分享') continue;
+            if (line.length > 2 && line.length < 300) {
+              commentText = line;
+              break;
+            }
+          }
+        }
+
+        const subReplies = items[i].querySelectorAll('.comment-item-info-wrap');
+        hasReply = subReplies.length > 0;
+
+        if (!hasReply) {
+          const replySpans = items[i].querySelectorAll('span');
+          for (const span of replySpans) {
+            if ((span.innerText || '').trim() === '回复') {
+              const parent = span.parentElement;
+              if (parent && parent !== items[i]) {
+                const parentText = (parent.innerText || '').trim();
+                if (parentText.length > 0 && parentText.length < commentText.length) {
+                  hasReply = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        commentKey = `${actorName}::${commentText.slice(0, 60)}`;
+
+        const rect = items[i].getBoundingClientRect();
+        comments.push({
+          commentIndex: i,
+          actorName,
+          commentText: commentText.slice(0, 300),
+          hasReply,
+          alreadyReplied: alreadyRepliedKeys.has(commentKey),
+          commentKey,
+          y: Math.round(rect.y),
+          visible: rect.top >= 0 && rect.bottom <= window.innerHeight,
+        });
+      }
+
+      const canScroll = commentArea.scrollHeight > commentArea.clientHeight + 10;
+      return { comments, canScroll };
+    }, [...alreadyRepliedKeys]);
+
+    let result = await collect();
+    allComments.push(...result.comments);
+
+    if (result.canScroll) {
+      for (let s = 0; s < maxScrolls; s++) {
+        const scrolled = await page.evaluate(() => {
+          const commentArea = document.querySelector('.comment-mainContent');
+          if (!commentArea) return { atEnd: true };
+          const prev = commentArea.scrollTop;
+          commentArea.scrollTop = commentArea.scrollHeight;
+          return { atEnd: commentArea.scrollTop === prev };
+        });
+        if (scrolled.atEnd) break;
+        await page.waitForTimeout(600);
+
+        result = await collect();
+        const newComments = result.comments.filter(c => !allComments.some(e => e.commentKey === c.commentKey));
+        allComments.push(...newComments);
+
+        if (!result.canScroll) break;
+      }
+    }
+
+    const unreplied = allComments.filter(c => !c.hasReply && !c.alreadyReplied && c.commentText.length > 0);
+
+    console.error(`[work-modal] 评论扫描: 总 ${allComments.length} 条，未回复 ${unreplied.length} 条`);
+
+    return success({
+      total: allComments.length,
+      unreplied,
+      allKeys: allComments.map(c => c.commentKey),
+    });
+  } catch (err) {
+    return blocking(RESULT_CODES.COMMENT_ITEM_PARSE_FAILED, `扫描未回复评论异常: ${err.message}`, { recoverable: true });
+  }
+}
+
+export async function openReplyBoxByIndex(page, commentIndex) {
+  console.error(`[work-modal] 按索引打开回复框: commentIndex=${commentIndex}`);
+
+  try {
+    const clicked = await page.evaluate((commentIndex) => {
       const commentArea = document.querySelector('.comment-mainContent');
       if (!commentArea) return { ok: false, reason: 'comment-mainContent not found' };
 
       const items = commentArea.querySelectorAll('.comment-item-info-wrap');
-      let targetItem = null;
+      if (commentIndex < 0 || commentIndex >= items.length) return { ok: false, reason: `index ${commentIndex} out of range (0-${items.length - 1})` };
 
-      const m = matchComment(items, actorName, commentText, eventTimeText);
-      if (m && m.ok) {
-        targetItem = items[m.commentIndex];
-      }
-
-      if (!targetItem) return { ok: false, reason: 'comment not found' };
-
+      const targetItem = items[commentIndex];
       const spans = targetItem.querySelectorAll('span');
       for (const span of spans) {
         if ((span.innerText || '').trim() === '回复') {
@@ -239,7 +350,7 @@ export async function openReplyBoxInWorkModal(page, item) {
       }
 
       return { ok: false, reason: '回复 span not found in comment item' };
-    }, { actorName, commentText, eventTimeText });
+    }, commentIndex);
 
     if (!clicked.ok) {
       return blocking(RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND, clicked.reason, { recoverable: true });

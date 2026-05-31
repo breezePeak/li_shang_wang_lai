@@ -11,24 +11,21 @@ import {
 import {
   waitForWorkModal,
   extractWorkModalContext,
-  findCommentInWorkModal,
-  openReplyBoxInWorkModal,
+  findUnrepliedCommentsInModal,
+  openReplyBoxByIndex,
   sendReplyInWorkModal,
   verifyReplyInWorkModal,
 } from '../adapters/work-modal-page.mjs';
 import { clickNotificationWorkThumbnail } from '../adapters/work-context-page.mjs';
 import { checkWorkOwner, getSelfProfile } from '../adapters/work-context-page.mjs';
 import { generateReplyText } from '../domain/reply-template.mjs';
-import { normalizeCommentEvent } from '../domain/comment-event-normalization.mjs';
 import { upsertNotificationEvent } from '../db/interaction-repository.mjs';
 import { getDb } from '../db/database.mjs';
 import { runMigrations } from '../db/migrations.mjs';
 import { writeJSON, ensureDir } from '../utils/filesystem.mjs';
-import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
 import path from 'path';
-import { existsSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 function recordAction(db, eventId, planId, targetTitle, targetUrl, actionText, status, reason, evidenceJson) {
@@ -57,7 +54,83 @@ function updateEventStatus(db, eventId, status) {
     .run(status, new Date().toISOString(), eventId);
 }
 
-async function processOneCommentNotification(page, notification, db, run, options) {
+async function replyToOneComment(page, comment, workCtx, db, run, options) {
+  const r = {
+    actorName: comment.actorName,
+    commentText: comment.commentText,
+    commentKey: comment.commentKey,
+    status: 'skipped',
+    reason: '',
+    step: '',
+    code: '',
+  };
+
+  if (run.processed >= run.options.maxItems) {
+    r.reason = `已达到 maxItems ${run.options.maxItems}`;
+    return r;
+  }
+  run.processed++;
+
+  console.log(`[live]     回复: ${comment.actorName} "${comment.commentText.slice(0, 30)}"`);
+
+  if (options.dryRun) {
+    r.status = 'skipped';
+    r.reason = 'dry-run 模式';
+    r.code = RESULT_CODES.DRY_RUN_REQUIRED;
+    console.log(`[live]     (dry-run) 将回复此评论`);
+    return r;
+  }
+
+  const { replyText, reason: templateReason } = generateReplyText(comment.commentText);
+  console.log(`[live]     生成回复: "${replyText}" (${templateReason})`);
+
+  r.step = 'open-reply-box';
+  const openResult = await openReplyBoxByIndex(page, comment.commentIndex);
+  if (!openResult.ok) {
+    r.status = 'blocked';
+    r.reason = `打开回复框失败: ${openResult.message}`;
+    r.code = openResult.code;
+    console.log(`[live]     ✗ ${r.reason}`);
+    recordAction(db, 0, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'blocked', r.reason, null);
+    run.hadBlocked = true;
+    return r;
+  }
+
+  r.step = 'send-reply';
+  const sendResult = await sendReplyInWorkModal(page, replyText);
+  if (!sendResult.ok) {
+    r.status = 'blocked';
+    r.reason = `发送失败: ${sendResult.message}`;
+    r.code = sendResult.code;
+    console.log(`[live]     ✗ ${r.reason}`);
+    recordAction(db, 0, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'blocked', r.reason, null);
+    run.hadBlocked = true;
+    return r;
+  }
+
+  r.step = 'verify-reply';
+  const verifyResult = await verifyReplyInWorkModal(page, { actorName: comment.actorName, commentText: comment.commentText }, replyText);
+  if (!verifyResult.ok) {
+    r.status = 'sent_unverified';
+    r.reason = verifyResult.message;
+    r.code = verifyResult.code;
+    console.log(`[live]     ⚠ 发送后未确认: ${verifyResult.message}`);
+    recordAction(db, 0, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'sent_unverified', verifyResult.message, null);
+    run.hadBlocked = true;
+    return r;
+  }
+
+  r.status = 'succeeded';
+  r.reason = '回复成功';
+  console.log(`[live]     ✓ 回复成功: "${replyText.slice(0, 30)}"`);
+
+  recordAction(db, 0, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'succeeded', null, null);
+  run.succeeded++;
+
+  return r;
+}
+
+async function processWorkModal(page, notification, db, run, options, state) {
   const r = {
     eventId: notification.eventId || 0,
     actorName: notification.actorName || notification.username || '',
@@ -66,22 +139,16 @@ async function processOneCommentNotification(page, notification, db, run, option
     reason: '',
     step: '',
     code: '',
+    modalReplies: [],
   };
 
-  if (!r.commentText) {
+  const notifCommentKey = `${r.actorName}::${r.commentText.slice(0, 60)}`;
+  if (state.repliedCommentKeys.has(notifCommentKey)) {
     r.status = 'skipped';
-    r.reason = 'commentText 为空';
+    r.reason = '此评论已回复过，跳过';
+    console.log(`[live]   跳过已回复评论: ${r.actorName} "${r.commentText.slice(0, 30)}"`);
     return r;
   }
-
-  if (run.processed >= run.options.maxItems) {
-    r.status = 'skipped';
-    r.reason = `已达到 maxItems ${run.options.maxItems}`;
-    return r;
-  }
-  run.processed++;
-
-  console.log(`[live] 处理: ${r.actorName} "${r.commentText.slice(0, 40)}"`);
 
   r.step = 'click-thumbnail';
   console.log(`[live]   点击通知缩略图...`);
@@ -118,6 +185,14 @@ async function processOneCommentNotification(page, notification, db, run, option
   const workCtx = contextResult.data;
   console.log(`[live]   modalId=${workCtx.modalId} workType=${workCtx.workType} workTitle="${(workCtx.workTitle || '').slice(0, 40)}"`);
 
+  if (state.visitedModalIds.has(workCtx.modalId)) {
+    r.status = 'skipped';
+    r.reason = `作品 ${workCtx.modalId} 已访问过，跳过`;
+    console.log(`[live]   跳过已访问作品`);
+    return r;
+  }
+  state.visitedModalIds.add(workCtx.modalId);
+
   if (r.eventId) {
     const rawPayload = { workContextResolved: true, workContextResolveMethod: 'click_notification_thumbnail', workContext: workCtx };
     updateEventWorkInfo(db, r.eventId, workCtx.workId, workCtx.workUrl, workCtx.workTitle, JSON.stringify(rawPayload));
@@ -150,78 +225,96 @@ async function processOneCommentNotification(page, notification, db, run, option
     console.log(`[live]   ⚠ 无法验证作品归属，但通知暗示为自身作品 (${notification.action})，继续执行`);
   }
 
+  r.step = 'scan-unreplied';
+  console.log(`[live]   扫描未回复评论...`);
+  const scanResult = await findUnrepliedCommentsInModal(page, { alreadyRepliedKeys: state.repliedCommentKeys });
+  if (!scanResult.ok) {
+    r.status = 'blocked';
+    r.reason = `扫描评论失败: ${scanResult.message}`;
+    r.code = scanResult.code;
+    console.log(`[live]   ✗ ${r.reason}`);
+    return r;
+  }
+
+  const unreplied = scanResult.data.unreplied;
+  console.log(`[live]   总评论 ${scanResult.data.total} 条，未回复 ${unreplied.length} 条`);
+
+  if (unreplied.length === 0) {
+    r.status = 'skipped';
+    r.reason = '没有未回复的评论';
+    console.log(`[live]   无需回复`);
+    return r;
+  }
+
   if (options.dryRun) {
     r.status = 'skipped';
-    r.reason = 'dry-run 模式';
+    r.reason = `dry-run 模式，将回复 ${unreplied.length} 条评论`;
     r.code = RESULT_CODES.DRY_RUN_REQUIRED;
-    console.log(`[live]   (dry-run) 将回复此评论`);
+    console.log(`[live]   (dry-run) 将回复 ${unreplied.length} 条评论`);
     return r;
   }
 
-  const { replyText, reason: templateReason } = generateReplyText(r.commentText);
-  console.log(`[live]   生成回复: "${replyText}" (${templateReason})`);
+  for (const comment of unreplied) {
+    if (run.processed >= run.options.maxItems) {
+      console.log(`[live]   已达到 maxItems ${run.options.maxItems}`);
+      break;
+    }
 
-  r.step = 'open-reply-box';
-  console.log(`[live]   打开回复框...`);
-  const openResult = await openReplyBoxInWorkModal(page, {
-    actorName: r.actorName,
-    commentText: r.commentText,
-  });
-  if (!openResult.ok) {
-    r.status = 'blocked';
-    r.reason = `打开回复框失败: ${openResult.message}`;
-    r.code = openResult.code;
-    console.log(`[live]   ✗ ${r.reason}`);
-    if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'blocked', r.reason, null);
-    run.hadBlocked = true;
-    return r;
+    const replyResult = await replyToOneComment(page, comment, workCtx, db, run, options);
+    r.modalReplies.push(replyResult);
+
+    if (replyResult.status === 'succeeded' || replyResult.status === 'sent_unverified') {
+      state.repliedCommentKeys.add(comment.commentKey);
+    }
+
+    await page.waitForTimeout(1500);
   }
 
-  r.step = 'send-reply';
-  console.log(`[live]   发送回复...`);
-  const sendResult = await sendReplyInWorkModal(page, replyText);
-  if (!sendResult.ok) {
-    r.status = 'blocked';
-    r.reason = `发送失败: ${sendResult.message}`;
-    r.code = sendResult.code;
-    console.log(`[live]   ✗ ${r.reason}`);
-    if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'blocked', r.reason, null);
-    run.hadBlocked = true;
-    return r;
-  }
+  const succeededInModal = r.modalReplies.filter(x => x.status === 'succeeded').length;
+  const blockedInModal = r.modalReplies.filter(x => x.status === 'blocked').length;
+  const unverifiedInModal = r.modalReplies.filter(x => x.status === 'sent_unverified').length;
 
-  r.step = 'verify-reply';
-  console.log(`[live]   验证回复...`);
-  const verifyResult = await verifyReplyInWorkModal(page, { actorName: r.actorName, commentText: r.commentText }, replyText);
-  if (!verifyResult.ok) {
+  if (succeededInModal > 0) {
+    r.status = 'succeeded';
+    r.reason = `作品内回复 ${succeededInModal} 条成功`;
+    console.log(`[live]   ✅ 作品内回复完成: ${succeededInModal} 成功 / ${unverifiedInModal} 未确认 / ${blockedInModal} 阻塞`);
+  } else if (unverifiedInModal > 0) {
     r.status = 'sent_unverified';
-    r.reason = verifyResult.message;
-    r.code = verifyResult.code;
-    console.log(`[live]   ⚠ 发送后未确认: ${verifyResult.message}`);
-    if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'sent_unverified', verifyResult.message, null);
+    r.reason = `${unverifiedInModal} 条未确认`;
+  } else if (blockedInModal > 0) {
+    r.status = 'blocked';
+    r.reason = `${blockedInModal} 条阻塞`;
     run.hadBlocked = true;
-    return r;
+  } else {
+    r.status = 'skipped';
+    r.reason = '无有效回复';
   }
-
-  r.status = 'succeeded';
-  r.reason = '实时回复成功';
-  console.log(`[live]   ✓ 回复成功`);
-  console.log(`[live] ✅ 已真实发送 1 条评论回复`);
-  console.log(`[live]   actorName: ${r.actorName}`);
-  console.log(`[live]   workTitle: ${workCtx.workTitle || ''}`);
-  console.log(`[live]   replyText: ${replyText}`);
-
-  if (r.eventId) {
-    recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'succeeded', null, null);
-    updateEventStatus(db, r.eventId, 'succeeded');
-  }
-  run.succeeded++;
 
   return r;
 }
 
+async function returnToNotificationPanel(page) {
+  await page.goto('https://www.douyin.com/user/self', { waitUntil: 'domcontentloaded', timeout: 15000 });
+  await page.waitForTimeout(2000);
+
+  const reopened = await openNotificationPanel(page);
+  if (!reopened) {
+    console.error('[live] 返回通知面板失败');
+    return false;
+  }
+
+  const { stable, empty, panelBox } = await waitForNotificationPanelStable(page);
+  if (!stable || empty) {
+    console.error('[live] 通知面板未稳定或为空');
+    return false;
+  }
+
+  await moveMouseIntoPanel(page, panelBox);
+  return true;
+}
+
 async function main() {
-  console.error('[interactions:live] 当前链路：实时评论回复（通知 → modal → 回复）');
+  console.error('[interactions:live] 当前链路：实时评论回复（通知 → modal → 批量回复未回复评论）');
 
   runMigrations();
 
@@ -232,6 +325,11 @@ async function main() {
   let browser = null;
   let page = null;
   const results = [];
+
+  const state = {
+    visitedModalIds: new Set(),
+    repliedCommentKeys: new Set(),
+  };
 
   try {
     console.error('[live] 启动浏览器...');
@@ -260,7 +358,7 @@ async function main() {
 
     console.log(`[live] 模式: ${commonArgs.options.dryRun ? 'dry-run' : 'execute'}`);
 
-    const seenKeys = new Set();
+    const seenNotifKeys = new Set();
     const maxScrollRounds = 5;
 
     for (let scrollRound = 0; scrollRound < maxScrollRounds; scrollRound++) {
@@ -273,8 +371,8 @@ async function main() {
       const notifications = batchResult.data.notifications || [];
       const newNotifs = notifications.filter(n => {
         const key = n.notificationItemKey || `${n.username}|${n.action}|${n.content}`;
-        if (seenKeys.has(key)) return false;
-        seenKeys.add(key);
+        if (seenNotifKeys.has(key)) return false;
+        seenNotifKeys.add(key);
         return true;
       });
 
@@ -282,7 +380,13 @@ async function main() {
       console.log(`[live] 第 ${scrollRound + 1} 轮: 通知 ${notifications.length} 条，新增 ${newNotifs.length} 条，评论 ${commentNotifs.length} 条`);
 
       for (const n of commentNotifs) {
-        const result = await processOneCommentNotification(page, n, db, run, commonArgs.options);
+        const commentKey = `${(n.username || '')}::${(n.content || '').slice(0, 60)}`;
+        if (state.repliedCommentKeys.has(commentKey)) {
+          console.log(`[live]   跳过已回复通知: ${n.username} "${(n.content || '').slice(0, 30)}"`);
+          continue;
+        }
+
+        const result = await processWorkModal(page, n, db, run, commonArgs.options, state);
         results.push(result);
 
         if (run.processed >= commonArgs.options.maxItems) {
@@ -290,13 +394,10 @@ async function main() {
           break;
         }
 
-        await page.goto('https://www.douyin.com/user/self', { waitUntil: 'domcontentloaded', timeout: 15000 });
-        await page.waitForTimeout(2000);
-
-        const reopened = await openNotificationPanel(page);
-        if (reopened) {
-          const { stable: s2, empty: e2, panelBox: pb2 } = await waitForNotificationPanelStable(page);
-          if (s2 && !e2 && pb2) await moveMouseIntoPanel(page, pb2);
+        const backOk = await returnToNotificationPanel(page);
+        if (!backOk) {
+          console.error('[live] 无法返回通知面板，终止');
+          break;
         }
       }
 
@@ -336,11 +437,12 @@ async function main() {
     writeJSON(resultPath, {
       mode: commonArgs.options.dryRun ? 'dry-run' : 'execute',
       results,
-      summary: { total: results.length, succeeded, blocked, skipped, sentUnverified, maxItems: commonArgs.options.maxItems },
+      summary: { total: results.length, succeeded, blocked, skipped, sentUnverified, maxItems: commonArgs.options.maxItems, visitedWorks: state.visitedModalIds.size, repliedComments: state.repliedCommentKeys.size },
     });
 
     console.log(`[live] 结果已保存: ${resultPath}`);
     console.log(`[live] ${succeeded} 成功 / ${sentUnverified} 未确认 / ${blocked} 阻塞 / ${skipped} 跳过`);
+    console.log(`[live] 访问作品 ${state.visitedModalIds.size} 个，回复评论 ${state.repliedCommentKeys.size} 条`);
 
     saveRunSummary(run);
 
