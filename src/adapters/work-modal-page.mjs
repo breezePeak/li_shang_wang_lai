@@ -271,8 +271,11 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
 
         for (let k = 1; k < lines.length; k++) {
           const line = lines[k];
-          if (line === '回复' || line === '赞' || line === '分享') continue;
-          if (/^\d+$/.test(line) || /^[刚昨前天周月年]/.test(line) && line.length < 10) continue;
+          if (line === '回复' || line === '赞' || line === '分享' || line === '回复中') continue;
+          if (line === '互相关注' || line === '朋友' || line === '关注') continue;
+          if (/^\d+$/.test(line) || (/^[刚昨前天周月年]/.test(line) && line.length < 10)) continue;
+          if (/^\d+[秒分时天周月年]前/.test(line) || /^\d{1,2}:\d{2}/.test(line) || /^\d+月\d+日/.test(line)) continue;
+          if (line.includes('·') && line.length < 30) continue;
           if (!commentText && line.length > 0) {
             commentText = line;
             break;
@@ -282,7 +285,11 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
         if (!commentText) {
           for (let k = lines.length - 1; k >= 1; k--) {
             const line = lines[k];
-            if (line === '回复' || line === '赞' || line === '分享') continue;
+            if (line === '回复' || line === '赞' || line === '分享' || line === '回复中') continue;
+            if (line === '互相关注' || line === '朋友' || line === '关注') continue;
+            if (/^\d+$/.test(line) || (/^[刚昨前天周月年]/.test(line) && line.length < 10)) continue;
+            if (/^\d+[秒分时天周月年]前/.test(line) || /^\d{1,2}:\d{2}/.test(line)) continue;
+            if (line.includes('·') && line.length < 30) continue;
             if (line.length > 2 && line.length < 300) {
               commentText = line;
               break;
@@ -485,19 +492,15 @@ export async function openReplyBoxByIndex(page, commentIndex) {
     await page.waitForTimeout(1000);
 
     const inputVisible = await page.evaluate(() => {
-      const SEARCH_PHRASES = ['搜索', 'search', '查询'];
-      function isSearchInput(input) {
-        const ph = (input.getAttribute('placeholder') || '').toLowerCase();
-        const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
-        const combined = ph + ' ' + ariaLabel;
-        return SEARCH_PHRASES.some(s => combined.includes(s));
+      const draftEditor = document.querySelector('.comment-input-container [contenteditable="true"]');
+      if (draftEditor) {
+        const rect = draftEditor.getBoundingClientRect();
+        if (rect.width > 50 && rect.height > 10) return true;
       }
-      const allInputs = document.querySelectorAll('input[type="text"]');
-      for (const input of allInputs) {
-        const rect = input.getBoundingClientRect();
-        if (rect.width < 50 || rect.height < 20) continue;
-        if (isSearchInput(input)) continue;
-        return true;
+      const commentInput = document.querySelector('.comment-input-container');
+      if (commentInput) {
+        const rect = commentInput.getBoundingClientRect();
+        if (rect.width > 100 && rect.height > 30) return true;
       }
       return false;
     });
@@ -522,47 +525,43 @@ export async function fillReplyInWorkModal(page, replyText) {
 
   try {
     const filled = await page.evaluate((text) => {
-      const SEARCH_PHRASES = ['搜索', 'search', '查询'];
-      function isSearchInput(input) {
-        const ph = (input.getAttribute('placeholder') || '').toLowerCase();
-        const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
-        const combined = ph + ' ' + ariaLabel;
-        return SEARCH_PHRASES.some(s => combined.includes(s));
+      const editor = document.querySelector('.comment-input-container [contenteditable="true"]');
+      if (editor) {
+        const rect = editor.getBoundingClientRect();
+        if (rect.width < 50 || rect.height < 10) return { ok: false, reason: 'editor too small' };
+        editor.focus();
+        document.execCommand('insertText', false, text);
+        return { ok: true, method: 'contenteditable_execCommand' };
       }
+      return { ok: false, reason: 'no contenteditable editor in .comment-input-container' };
+    }, replyText);
 
-      const commentArea = document.querySelector('.comment-mainContent');
-      const scope = commentArea || document.body;
-      const inputs = scope.querySelectorAll('input[type="text"]');
-      const candidates = [];
-      for (const input of inputs) {
-        const rect = input.getBoundingClientRect();
-        if (rect.width < 50 || rect.height < 20) continue;
-        if (isSearchInput(input)) continue;
-        candidates.push({ input, rect, inCommentArea: !!commentArea && commentArea.contains(input) });
-      }
-      if (candidates.length === 0) {
+    if (!filled.ok) {
+      const fallback = await page.evaluate((text) => {
+        const SEARCH_PHRASES = ['搜索', 'search', '查询'];
+        function isSearchInput(input) {
+          const ph = (input.getAttribute('placeholder') || '').toLowerCase();
+          const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
+          return SEARCH_PHRASES.some(s => (ph + ' ' + ariaLabel).includes(s));
+        }
         const allInputs = document.querySelectorAll('input[type="text"]');
         for (const input of allInputs) {
           const rect = input.getBoundingClientRect();
           if (rect.width < 50 || rect.height < 20) continue;
           if (isSearchInput(input)) continue;
-          candidates.push({ input, rect, inCommentArea: false });
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          nativeInputValueSetter.call(input, text);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          input.focus();
+          return { ok: true, method: 'input_fallback' };
         }
+        return { ok: false };
+      }, replyText);
+
+      if (!fallback.ok) {
+        return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '找不到回复输入框', { recoverable: true });
       }
-      candidates.sort((a, b) => (b.inCommentArea ? 1 : 0) - (a.inCommentArea ? 1 : 0));
-      if (candidates.length === 0) return { ok: false };
-
-      const target = candidates[0].input;
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-      nativeInputValueSetter.call(target, text);
-      target.dispatchEvent(new Event('input', { bubbles: true }));
-      target.dispatchEvent(new Event('change', { bubbles: true }));
-      target.focus();
-      return { ok: true };
-    }, replyText);
-
-    if (!filled.ok) {
-      return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '找不到回复输入框', { recoverable: true });
     }
 
     console.error(`[work-modal] 已填入回复，未点击发送`);
@@ -581,43 +580,15 @@ export async function sendReplyInWorkModal(page, replyText) {
 
   try {
     const filled = await page.evaluate((text) => {
-      const SEARCH_PHRASES = ['搜索', 'search', '查询'];
-      function isSearchInput(input) {
-        const ph = (input.getAttribute('placeholder') || '').toLowerCase();
-        const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
-        const combined = ph + ' ' + ariaLabel;
-        return SEARCH_PHRASES.some(s => combined.includes(s));
+      const editor = document.querySelector('.comment-input-container [contenteditable="true"]');
+      if (editor) {
+        const rect = editor.getBoundingClientRect();
+        if (rect.width < 50 || rect.height < 10) return { ok: false, reason: 'editor too small' };
+        editor.focus();
+        document.execCommand('insertText', false, text);
+        return { ok: true, method: 'contenteditable_execCommand' };
       }
-
-      const commentArea = document.querySelector('.comment-mainContent');
-      const scope = commentArea || document.body;
-      const inputs = scope.querySelectorAll('input[type="text"]');
-      const candidates = [];
-      for (const input of inputs) {
-        const rect = input.getBoundingClientRect();
-        if (rect.width < 50 || rect.height < 20) continue;
-        if (isSearchInput(input)) continue;
-        candidates.push({ input, rect, inCommentArea: !!commentArea && commentArea.contains(input) });
-      }
-      if (candidates.length === 0) {
-        const allInputs = document.querySelectorAll('input[type="text"]');
-        for (const input of allInputs) {
-          const rect = input.getBoundingClientRect();
-          if (rect.width < 50 || rect.height < 20) continue;
-          if (isSearchInput(input)) continue;
-          candidates.push({ input, rect, inCommentArea: false });
-        }
-      }
-      candidates.sort((a, b) => (b.inCommentArea ? 1 : 0) - (a.inCommentArea ? 1 : 0));
-      if (candidates.length === 0) return { ok: false };
-
-      const target = candidates[0].input;
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-      nativeInputValueSetter.call(target, text);
-      target.dispatchEvent(new Event('input', { bubbles: true }));
-      target.dispatchEvent(new Event('change', { bubbles: true }));
-      target.focus();
-      return { ok: true };
+      return { ok: false, reason: 'no contenteditable editor' };
     }, replyText);
 
     if (!filled.ok) {
@@ -626,53 +597,12 @@ export async function sendReplyInWorkModal(page, replyText) {
 
     await page.waitForTimeout(800);
 
-    const sent = await page.evaluate(() => {
-      const SEARCH_PHRASES = ['搜索', 'search', '查询'];
-      function isSearchInput(input) {
-        const ph = (input.getAttribute('placeholder') || '').toLowerCase();
-        const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
-        const combined = ph + ' ' + ariaLabel;
-        return SEARCH_PHRASES.some(s => combined.includes(s));
-      }
+    const editorLocator = page.locator('.comment-input-container [contenteditable="true"]').first();
+    await editorLocator.press('Enter');
+    console.error(`[work-modal] 按 Enter 发送`);
+    await page.waitForTimeout(2000);
 
-      const allInputs = document.querySelectorAll('input[type="text"]');
-      for (const input of allInputs) {
-        const rect = input.getBoundingClientRect();
-        if (rect.width < 50 || rect.height < 20) continue;
-        if (isSearchInput(input)) continue;
-        const val = (input.value || '').trim();
-        if (val.length > 0) {
-          input.focus();
-          return { ok: true, method: 'focus_reply_input', inputX: Math.round(rect.x), inputY: Math.round(rect.y) };
-        }
-      }
-      return { ok: false, reason: 'no_filled_input' };
-    });
-
-    if (sent.ok) {
-      const inputLocator = page.locator('input[type="text"]').nth(
-        await page.evaluate(() => {
-          const SEARCH_PHRASES = ['搜索', 'search', '查询'];
-          function isSearchInput(input) {
-            const ph = (input.getAttribute('placeholder') || '').toLowerCase();
-            const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
-            return SEARCH_PHRASES.some(s => (ph + ' ' + ariaLabel).includes(s));
-          }
-          const allInputs = [...document.querySelectorAll('input[type="text"]')];
-          for (let i = 0; i < allInputs.length; i++) {
-            const rect = allInputs[i].getBoundingClientRect();
-            if (rect.width < 50 || rect.height < 20) continue;
-            if (isSearchInput(allInputs[i])) continue;
-            if ((allInputs[i].value || '').trim().length > 0) return i;
-          }
-          return 0;
-        })
-      );
-      await inputLocator.press('Enter');
-      console.error(`[work-modal] 按 Enter 发送`);
-      await page.waitForTimeout(2000);
-      return success({ sent: true, method: 'enter_key' });
-    }
+    return success({ sent: true, method: 'enter_key' });
   } catch (err) {
     return blocking(RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND, `发送回复异常: ${err.message}`, { recoverable: true });
   }

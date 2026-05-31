@@ -88,11 +88,11 @@ export function checkWorkOwner(workContext, selfProfile) {
   };
 }
 
-export async function clickNotificationWorkThumbnail(page, { skipItemTexts = [] } = {}) {
+export async function clickNotificationWorkThumbnail(page, { skipItemTexts = [], targetActorName = '', targetContent = '' } = {}) {
   const TARGET_PATTERN = '评论了你的作品';
   const ALL_ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '评论了你的作品', '回复了你的评论'];
 
-  const thumbResult = await page.evaluate(({ TARGET_PATTERN, ALL_ACTION_PATTERNS, skipItemTexts }) => {
+  const thumbResult = await page.evaluate(({ TARGET_PATTERN, ALL_ACTION_PATTERNS, skipItemTexts, targetActorName, targetContent }) => {
     function findNotificationPanel() {
       for (const el of document.querySelectorAll('*')) {
         const t = (el.innerText || '').trim();
@@ -139,6 +139,9 @@ export async function clickNotificationWorkThumbnail(page, { skipItemTexts = [] 
       const itemTextKey = text.slice(0, 100);
       if (skipItemTexts.some(s => s === itemTextKey)) continue;
 
+      const matchesTarget = (targetActorName && text.includes(targetActorName)) &&
+        (!targetContent || text.includes(targetContent.slice(0, 30)));
+
       const imgs = el.querySelectorAll('img');
       for (const img of imgs) {
         const src = img.getAttribute('src') || '';
@@ -157,7 +160,8 @@ export async function clickNotificationWorkThumbnail(page, { skipItemTexts = [] 
           itemText: itemTextKey,
           imgW: Math.round(finalRect.width),
           imgH: Math.round(finalRect.height),
-          priority: isLikelyAvatar ? 0 : 1,
+          priority: (isLikelyAvatar ? 0 : 1) + (matchesTarget ? 2 : 0),
+          matchesTarget,
         });
       }
     }
@@ -165,8 +169,10 @@ export async function clickNotificationWorkThumbnail(page, { skipItemTexts = [] 
     candidates.sort((a, b) => b.priority - a.priority);
 
     if (candidates.length === 0) return { ok: false, reason: 'no comment_on_my_work thumbnail found' };
-    return candidates[0];
-  }, { TARGET_PATTERN, ALL_ACTION_PATTERNS, skipItemTexts });
+    const best = candidates[0];
+    best.clicked = true;
+    return best;
+  }, { TARGET_PATTERN, ALL_ACTION_PATTERNS, skipItemTexts, targetActorName, targetContent });
 
   if (!thumbResult.ok) {
     return { ok: false, code: 'THUMBNAIL_NOT_FOUND', message: thumbResult.reason };
@@ -175,7 +181,46 @@ export async function clickNotificationWorkThumbnail(page, { skipItemTexts = [] 
   console.error(`[work-context] 点击作品缩略图 at (${thumbResult.x}, ${thumbResult.y})，通知: "${thumbResult.itemText}"`);
 
   const urlBefore = page.url();
-  await page.mouse.click(thumbResult.x, thumbResult.y);
+
+  // Try DOM click first (keeps panel open), fallback to mouse click
+  const clickViaDom = await page.evaluate(({ x, y }) => {
+    const panel = (function findNotificationPanel() {
+      for (const el of document.querySelectorAll('*')) {
+        const t = (el.innerText || '').trim();
+        if (t.startsWith('互动消息') || t.startsWith('全部消息')) {
+          const r = el.getBoundingClientRect();
+          if (r.width < 100 || r.height < 30) continue;
+          let c = el.parentElement;
+          for (let i = 0; i < 6 && c && c !== document.body; i++) {
+            const cr = c.getBoundingClientRect();
+            if (cr.width > 250 && cr.height > 300) return c;
+            c = c.parentElement;
+          }
+        }
+      }
+      return null;
+    })();
+
+    if (!panel) return { ok: false };
+
+    const imgs = panel.querySelectorAll('img');
+    for (const img of imgs) {
+      const rect = img.getBoundingClientRect();
+      const cx = rect.x + rect.width / 2;
+      const cy = rect.y + rect.height / 2;
+      if (Math.abs(cx - x) < 5 && Math.abs(cy - y) < 5) {
+        img.click();
+        return { ok: true };
+      }
+    }
+    return { ok: false };
+  }, { x: thumbResult.x, y: thumbResult.y });
+
+  if (!clickViaDom.ok) {
+    console.error('[work-context] DOM click 失败，尝试 mouse.click');
+    await page.mouse.click(thumbResult.x, thumbResult.y);
+  }
+
   await page.waitForTimeout(3000);
 
   const urlAfter = page.url();

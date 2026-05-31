@@ -190,8 +190,12 @@ async function processWorkModal(page, notification, db, run, options, state) {
   }
 
   r.step = 'click-thumbnail';
-  console.log(`[live]   点击通知缩略图...`);
-  const clickResult = await clickNotificationWorkThumbnail(page, { skipItemTexts: state.skippedThumbnailTexts });
+  console.log(`[live]   点击通知缩略图 (target: ${notification.username})...`);
+  const clickResult = await clickNotificationWorkThumbnail(page, {
+    skipItemTexts: state.skippedThumbnailTexts,
+    targetActorName: notification.username || '',
+    targetContent: notification.content || '',
+  });
   if (!clickResult.ok) {
     r.status = 'blocked';
     r.reason = `点击缩略图失败: ${clickResult.message || clickResult.code}`;
@@ -350,57 +354,9 @@ async function processWorkModal(page, notification, db, run, options, state) {
   }
   console.log(`[live]   work_comments表: 新增 ${commentsUpserted} 条`);
 
-  if (unreplied.length === 0) {
-    r.status = 'skipped';
-    r.reason = '没有未回复的评论';
-    console.log(`[live]   无需回复`);
-    return r;
-  }
-
-  if (options.dryRun && !options.preview) {
-    r.status = 'skipped';
-    r.reason = `dry-run 模式，将回复 ${unreplied.length} 条评论`;
-    r.code = RESULT_CODES.DRY_RUN_REQUIRED;
-    console.log(`[live]   (dry-run) 将回复 ${unreplied.length} 条评论`);
-    return r;
-  }
-
-  for (const comment of unreplied) {
-    if (run.processed >= run.options.maxItems) {
-      console.log(`[live]   已达到 maxItems ${run.options.maxItems}`);
-      break;
-    }
-
-    const replyResult = await replyToOneComment(page, comment, workCtx, db, run, options);
-    r.modalReplies.push(replyResult);
-
-    if (replyResult.status === 'succeeded' || replyResult.status === 'sent_unverified') {
-      state.repliedCommentKeys.add(comment.commentKey);
-    }
-
-    await page.waitForTimeout(1500);
-  }
-
-  const succeededInModal = r.modalReplies.filter(x => x.status === 'succeeded').length;
-  const blockedInModal = r.modalReplies.filter(x => x.status === 'blocked').length;
-  const unverifiedInModal = r.modalReplies.filter(x => x.status === 'sent_unverified').length;
-
-  if (succeededInModal > 0) {
-    r.status = 'succeeded';
-    r.reason = `作品内回复 ${succeededInModal} 条成功`;
-    console.log(`[live]   ✅ 作品内回复完成: ${succeededInModal} 成功 / ${unverifiedInModal} 未确认 / ${blockedInModal} 阻塞`);
-  } else if (unverifiedInModal > 0) {
-    r.status = 'sent_unverified';
-    r.reason = `${unverifiedInModal} 条未确认`;
-  } else if (blockedInModal > 0) {
-    r.status = 'blocked';
-    r.reason = `${blockedInModal} 条阻塞`;
-    run.hadBlocked = true;
-  } else {
-    r.status = 'skipped';
-    r.reason = '无有效回复';
-  }
-
+  r.status = 'succeeded';
+  r.reason = `采集完成: ${scanResult.data.total} 条评论，${unreplied.length} 条待回复，${commentsUpserted} 条新入库`;
+  console.log(`[live]   ✅ ${r.reason}`);
   return r;
 }
 
