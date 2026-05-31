@@ -1,25 +1,25 @@
 /* ==========================================================================
-   礼尚往来驾驶舱极致极客暗黑设计系统 (Sunset Amber & Warm Obsidian Theme)
+   礼尚往来驾驶舱温润晚霞奶油设计系统 (Sunset Creamy & Soft Amber Theme)
    ========================================================================== */
 :root {
   --font-family: 'Outfit', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   
-  /* 暖曜碳黑与夕阳琥珀奢华调色盘 */
-  --bg-main: #070506; /* 极具温度的高对比暖曜石黑 */
-  --bg-card: rgba(12, 10, 12, 0.45); /* 暗红褐高透明磨砂玻璃底 */
-  --bg-card-hover: rgba(22, 18, 20, 0.65);
-  --border-color: rgba(250, 240, 230, 0.055); /* 1px 极细精密暖白金描边 */
-  --border-glow: rgba(245, 158, 11, 0.45); /* 亮琥珀色发光聚焦边 */
+  /* 极致尊贵明亮的温润晚霞奶油调色盘 */
+  --bg-main: #faf6ee; /* 融入极微暖黄调性的明亮奶油米白底 */
+  --bg-card: rgba(255, 254, 252, 0.75); /* 奶油白高透明磨砂玻璃底 */
+  --bg-card-hover: rgba(255, 253, 247, 0.9);
+  --border-color: rgba(139, 92, 26, 0.12); /* 1px 精密极淡暖金沙描边 */
+  --border-glow: rgba(249, 115, 22, 0.6); /* 亮橙聚焦霓虹聚焦边 */
   
   --primary-glow: linear-gradient(135deg, #f97316, #db2777); /* 暖橙到夕阳红渐变 */
   --accent-glow: linear-gradient(135deg, #f59e0b, #ea580c); /* 琥珀金到橘红渐变 */
   --green-glow: linear-gradient(135deg, #10b981, #059669); /* 状态绿 */
   
-  --text-main: #f9fafb; /* 极高对比度温暖浅白 */
-  --text-muted: #9ca3af; /* 温暖木炭灰 */
+  --text-main: #2c2421; /* 极高清晰度曜木暖褐碳黑 */
+  --text-muted: #786b64; /* 温暖沙碳灰 */
   
-  --shadow-main: 0 16px 40px -10px rgba(0, 0, 0, 0.95); /* 极清晰暗黑阴影 */
-  --shadow-glow: 0 0 35px 0 rgba(245, 158, 11, 0.06);
+  --shadow-main: 0 16px 40px -10px rgba(139, 92, 26, 0.06); /* 精细暖褐羽落阴影 */
+  --shadow-glow: 0 0 35px 0 rgba(249, 115, 22, 0.08);
   
   --transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -49,14 +49,14 @@ body {
   filter: blur(150px);
   z-index: -1;
   pointer-events: none;
-  opacity: 0.28;
+  opacity: 0.55; /* 浅色底上星云发光稍微加强以提供极佳的氤氲感 */
   animation: pulseNebula 26s infinite alternate ease-in-out;
 }
 
 .glow-1 {
   width: 650px;
   height: 650px;
-  background: radial-gradient(circle, rgba(249, 115, 22, 0.24) 0%, transparent 70%); /* 暖橙色光晕 */
+  background: radial-gradient(circle, rgba(249, 115, 22, 0.12) 0%, transparent 70%); /* 暖橙色光晕 */
   top: -220px;
   right: -120px;
 }
@@ -64,7 +64,7 @@ body {
 .glow-2 {
   width: 550px;
   height: 550px;
-  background: radial-gradient(circle, rgba(219, 39, 119, 0.16) 0%, transparent 70%); /* 夕阳红色光晕 */
+  background: radial-gradient(circle, rgba(219, 39, 119, 0.08) 0%, transparent 70%); /* 夕阳红色光晕 */
   bottom: -180px;
   left: -180px;
   animation-delay: -6s;
@@ -73,7 +73,7 @@ body {
 .glow-3 {
   width: 480px;
   height: 480px;
-  background: radial-gradient(circle, rgba(245, 158, 11, 0.18) 0%, transparent 75%); /* 琥珀金光晕 */
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.1) 0%, transparent 75%); /* 琥珀金光晕 */
   top: 25%;
   left: 8%;
   animation-delay: -12s;
@@ -82,7 +82,7 @@ body {
 .glow-4 {
   width: 550px;
   height: 550px;
-  background: radial-gradient(circle, rgba(236, 72, 153, 0.14) 0%, transparent 70%); /* 桃花粉光晕 */
+  background: radial-gradient(circle, rgba(236, 72, 153, 0.08) 0%, transparent 70%); /* 桃花粉光晕 */
   bottom: 22%;
   right: 12%;
   animation-delay: -18s;
@@ -90,7 +90,7 @@ body {
 
 @keyframes pulseNebula {
   0% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(40px, -50px) scale(1.12) rotate(20deg); opacity: 0.32; }
+  50% { transform: translate(40px, -50px) scale(1.12) rotate(20deg); opacity: 0.65; }
   100% { transform: translate(-30px, 30px) scale(0.92) rotate(-10deg); }
 }
 
@@ -135,7 +135,7 @@ body {
   font-size: 20px;
   font-weight: 800;
   letter-spacing: 0.5px;
-  background: linear-gradient(to right, #fff, var(--text-muted));
+  background: linear-gradient(to right, #431407, var(--text-muted)); /* 优雅的深红褐到沙碳灰渐变 */
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -148,7 +148,7 @@ body {
 }
 
 .header-status {
-  background: rgba(10, 11, 16, 0.3);
+  background: rgba(255, 255, 255, 0.55); /* 奶油色高透明状态底 */
   backdrop-filter: blur(12px);
   border: 1px solid var(--border-color);
   padding: 8px 16px;
@@ -233,7 +233,7 @@ body {
 }
 
 .tab-btn.active {
-  color: #fff;
+  color: #ea580c; /* 激活时使用温馨的夕阳橙红字 */
 }
 
 .tab-btn.active::after {
@@ -273,7 +273,7 @@ body {
 .badge {
   background: rgba(249, 115, 22, 0.12);
   border: 1px solid rgba(249, 115, 22, 0.25);
-  color: #fdba74;
+  color: #ea580c; /* 暖橙色徽章字 */
   font-size: 11px;
   font-weight: 700;
   padding: 1px 8px;
@@ -283,7 +283,7 @@ body {
 .badge-replies {
   background: rgba(16, 185, 129, 0.1);
   border: 1px solid rgba(16, 185, 129, 0.2);
-  color: #34d399;
+  color: #059669;
 }
 
 .pane-subtitle {
@@ -299,7 +299,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(12, 10, 12, 0.3);
+  background: var(--bg-card); /* 奶油高透面板玻璃底 */
   backdrop-filter: blur(15px);
   -webkit-backdrop-filter: blur(15px);
   border: 1px solid var(--border-color);
@@ -329,8 +329,8 @@ body {
 
 .search-box input {
   width: 100%;
-  background: #000000;
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: #ffffff; /* 高对比纯白输入底 */
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   padding: 9px 12px 9px 34px;
   color: var(--text-main);
@@ -342,7 +342,7 @@ body {
 
 .search-box input:focus {
   border-color: rgba(249, 115, 22, 0.6);
-  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.3);
+  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.2);
 }
 
 .filters-group {
@@ -366,8 +366,8 @@ body {
 }
 
 .select-wrapper select {
-  background: #000000;
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: #ffffff; /* 纯白下拉选择底 */
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   padding: 8px 26px 8px 30px;
   color: var(--text-main);
@@ -398,10 +398,10 @@ body {
 
 .view-switcher {
   display: flex;
-  background: #000000;
+  background: #ffffff; /* 纯白 switcher */
   padding: 3px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color);
 }
 
 .view-btn {
@@ -526,8 +526,8 @@ body {
 .badge-fail { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); color: #f87171; }
 
 .work-block {
-  background-color: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.03);
+  background-color: rgba(245, 158, 11, 0.04); /* 明亮温和的微磨砂奶油黄 */
+  border: 1px solid rgba(139, 92, 26, 0.08);
   border-radius: 10px;
   padding: 12px;
   margin-bottom: 15px;
@@ -550,7 +550,7 @@ body {
 
 .work-link {
   font-size: 10.5px;
-  color: #fdba74;
+  color: #ea580c; /* 浅色下的暖橙连接 */
   text-decoration: none;
   display: inline-flex;
   align-items: center;
@@ -577,8 +577,8 @@ body {
 }
 
 .comment-textarea {
-  background-color: #000000;
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background-color: #ffffff; /* 纯白高对比输入底 */
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 8px 10px;
   color: var(--text-main);
@@ -629,19 +629,19 @@ body {
 }
 
 .btn-secondary {
-  background-color: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background-color: rgba(0, 0, 0, 0.03); /* 浅灰底 */
+  border: 1px solid rgba(0, 0, 0, 0.06);
   color: var(--text-main);
 }
 
 .btn-secondary:hover {
-  background-color: rgba(255, 255, 255, 0.06);
+  background-color: rgba(0, 0, 0, 0.06);
 }
 
 .btn-danger {
   background-color: rgba(239, 68, 68, 0.08);
   border: 1px solid rgba(239, 68, 68, 0.2);
-  color: #f87171;
+  color: #dc2626; /* 高对比度红 */
 }
 
 .btn-danger:hover {
@@ -670,7 +670,7 @@ body {
 
 .compact-table td {
   padding: 8px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(139, 92, 26, 0.05); /* 精致淡金沙隔线 */
   color: var(--text-main);
   vertical-align: middle;
   transition: var(--transition);
@@ -681,7 +681,7 @@ body {
 }
 
 .compact-table tbody tr:hover {
-  background-color: rgba(255, 255, 255, 0.015);
+  background-color: rgba(249, 115, 22, 0.03); /* 极轻柔暖橙 Hover 底 */
 }
 
 .compact-table tbody tr:last-child td {
@@ -702,7 +702,7 @@ body {
   width: 100%;
   background-color: transparent !important;
   border: none !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03) !important;
+  border-bottom: 1px solid rgba(139, 92, 26, 0.08) !important; /* 浅色暖沙边 */
   border-radius: 0 !important;
   padding: 6px 4px !important;
   color: var(--text-main);
@@ -736,7 +736,7 @@ body {
   font-weight: 700;
   color: #fff;
   font-size: 12px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
   flex-shrink: 0;
 }
 
@@ -807,8 +807,8 @@ body {
 }
 
 .btn-mini-secondary {
-  background-color: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background-color: rgba(0, 0, 0, 0.03); /* 浅灰底 */
+  border: 1px solid rgba(0, 0, 0, 0.06);
   color: var(--text-main);
 }
 
@@ -839,8 +839,8 @@ body {
 .checkbox-checkmark {
   height: 16px;
   width: 16px;
-  background-color: #000000;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background-color: #ffffff; /* 纯白高对比复选框底 */
+  border: 1px solid rgba(139, 92, 26, 0.15); /* 暖金沙边 */
   border-radius: 4px;
   transition: var(--transition);
   display: flex;
@@ -1010,8 +1010,8 @@ body {
 }
 
 .toast {
-  background: rgba(4, 4, 6, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.95); /* 晶莹奶油高透明 Toast 底 */
+  border: 1px solid var(--border-color);
   box-shadow: var(--shadow-main);
   backdrop-filter: blur(15px);
   -webkit-backdrop-filter: blur(15px);
@@ -1022,6 +1022,7 @@ body {
   gap: 10px;
   animation: slideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   min-width: 260px;
+  color: var(--text-main);
 }
 
 .toast.success { border-left: 3px solid #10b981; }
@@ -1090,7 +1091,7 @@ body {
   transform: translateY(-50%);
   width: 100%;
   height: 2px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(139, 92, 26, 0.06); /* 浅色暖沙轨道线 */
   border-radius: 2px;
   overflow: hidden;
 }
@@ -1138,21 +1139,21 @@ body {
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: #000000;
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: #ffffff; /* 纯白节点圆环 */
+  border: 1px solid rgba(139, 92, 26, 0.15);
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-muted);
   font-size: 13px;
   transition: var(--transition);
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 4px 10px rgba(139, 92, 26, 0.06);
   z-index: 10;
 }
 
 /* 轨道发光特效在节点上的反射 */
 .timeline-node:hover .node-dot {
-  color: #fff;
+  color: #ea580c; /* Hover时节点中心图标点亮为暖橙 */
   border-color: #f97316;
   box-shadow: 0 0 20px rgba(249, 115, 22, 0.45);
   transform: scale(1.1);
@@ -1162,7 +1163,7 @@ body {
 .timeline-placard {
   position: absolute;
   width: 165px;
-  background: rgba(4, 4, 6, 0.88); /* 极致碳黑底 */
+  background: rgba(255, 255, 255, 0.95); /* 温润高对比奶油白看板底 */
   backdrop-filter: blur(15px);
   -webkit-backdrop-filter: blur(15px);
   border: 1px solid var(--border-color);
@@ -1198,7 +1199,7 @@ body {
   transform: translateX(-50%);
   width: 1px;
   height: 26px;
-  border-left: 1px dashed rgba(255, 255, 255, 0.12);
+  border-left: 1px dashed rgba(139, 92, 26, 0.15); /* 精致金沙虚引线 */
   transition: var(--transition);
   pointer-events: none;
 }
@@ -1214,7 +1215,7 @@ body {
 /* Hover 上浮与发光微交互 */
 .timeline-node:hover .timeline-placard {
   border-color: rgba(249, 115, 22, 0.35);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), 0 0 20px rgba(249, 115, 22, 0.08);
+  box-shadow: var(--shadow-main), 0 0 20px rgba(249, 115, 22, 0.08);
 }
 
 .timeline-node:hover .placard-up {
@@ -1230,7 +1231,7 @@ body {
   border-left-color: rgba(249, 115, 22, 0.4);
 }
 
-/* 悬挂指标标题与大数码 */
+/* 悬挂指标指标数 */
 .placard-name {
   font-size: 11px;
   font-weight: 500;
@@ -1245,7 +1246,7 @@ body {
   margin-top: 4px;
   font-family: 'Outfit', sans-serif;
   letter-spacing: -0.02em;
-  background: linear-gradient(to bottom, #fff, #d1d5db);
+  background: linear-gradient(to bottom, #431407, #7c2d12); /* 尊贵的深褐焦糖金渐变数值 */
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -1309,7 +1310,7 @@ body {
   background: linear-gradient(90deg, #ff4500, #ff8c00, #eab308, #ec4899, #ff4500);
   background-size: 300% 300%;
   animation: rainbowBorder 6s infinite linear;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(249, 115, 22, 0.2);
+  box-shadow: var(--shadow-main), 0 0 30px rgba(249, 115, 22, 0.12);
   transition: bottom 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s ease;
   opacity: 0;
   pointer-events: none;
@@ -1322,7 +1323,7 @@ body {
 }
 
 .bulk-bar-content {
-  background: rgba(4, 4, 6, 0.88); /* 极致极简曜石暖黑 */
+  background: rgba(255, 255, 255, 0.92); /* 奶油高透明晶莹玻璃批量底 */
   backdrop-filter: blur(30px) saturate(180%);
   -webkit-backdrop-filter: blur(30px) saturate(180%);
   border-radius: 15px;
@@ -1366,10 +1367,10 @@ body {
 }
 
 .bulk-count strong {
-  color: #fdba74;
+  color: #ea580c; /* 高对比度夕阳暖橙计数 */
   font-size: 15px;
   margin: 0 2px;
-  text-shadow: 0 0 8px rgba(249, 115, 22, 0.3);
+  text-shadow: 0 0 8px rgba(249, 115, 22, 0.2);
 }
 
 .bulk-actions {
