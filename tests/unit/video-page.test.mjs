@@ -63,10 +63,9 @@ describe('video-page adapters mock testing', () => {
   it('postVideoComment auto opens comment panel and types comment', async () => {
     const mockPage = {
       locator: vi.fn().mockImplementation((selector) => {
-        // 匹配要打开的评论面板按钮，输入框，以及发送按钮
         return createMockLocator(selector, [
           '[data-e2e="video-comment"]',
-          '[contenteditable="true"]',
+          '[contenteditable="true"][data-placeholder*="评"]',
           '发送',
           'submit'
         ]);

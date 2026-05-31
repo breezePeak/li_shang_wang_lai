@@ -888,21 +888,39 @@ const inputSelectors = [
   '[contenteditable="true"][placeholder*="说点什么"]',
   '[contenteditable="true"][data-placeholder*="善语"]',
   '[contenteditable="true"][placeholder*="善语"]',
-  '[contenteditable="true"]',
+  '[contenteditable="true"][data-placeholder*="留下"]',
+  '[contenteditable="true"][placeholder*="留下"]',
   'textarea[placeholder*="评"]',
   'textarea[placeholder*="说点什么"]',
   'textarea[placeholder*="善语"]',
-  'input[placeholder*="评"]',
-  'input[placeholder*="说点什么"]',
-  'textarea',
-  'input'
+  'textarea[placeholder*="留下"]',
+  '[class*="comment"] [contenteditable="true"]',
+  '[class*="comment"] textarea',
+  '[id*="comment"] [contenteditable="true"]',
+  '[id*="comment"] textarea'
 ];
 
 async function findCommentInput(page) {
+  const isSearchInput = async (el) => {
+    try {
+      const ph = await el.evaluate(node => {
+        const p = node.getAttribute('placeholder') || node.getAttribute('data-placeholder') || '';
+        const id = node.id || '';
+        const cls = typeof node.className === 'string' ? node.className : '';
+        return `${p} ${id} ${cls}`;
+      });
+      return /搜|search/i.test(ph);
+    } catch {
+      return false;
+    }
+  };
+
   for (const selector of inputSelectors) {
     const el = page.locator(selector).first();
     if (await el.count() > 0 && await el.isVisible()) {
-      return el;
+      if (!(await isSearchInput(el))) {
+        return el;
+      }
     }
   }
 
@@ -921,7 +939,9 @@ async function findCommentInput(page) {
   for (const selector of inputSelectors) {
     const el = page.locator(selector).first();
     if (await el.count() > 0 && await el.isVisible()) {
-      return el;
+      if (!(await isSearchInput(el))) {
+        return el;
+      }
     }
   }
 
