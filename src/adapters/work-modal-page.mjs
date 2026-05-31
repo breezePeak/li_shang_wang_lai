@@ -819,6 +819,13 @@ export async function sendReplyInWorkModal(page, replyText) {
 
   try {
     const filled = await page.evaluate((text) => {
+      const SEARCH_PHRASES = ['搜索', 'search', '查询'];
+      function isSearchInput(input) {
+        const ph = (input.getAttribute('placeholder') || '').toLowerCase();
+        const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
+        return SEARCH_PHRASES.some(s => (ph + ' ' + ariaLabel).includes(s));
+      }
+
       const editor = document.querySelector('.comment-input-container [contenteditable="true"]');
       if (editor) {
         const rect = editor.getBoundingClientRect();
@@ -827,7 +834,22 @@ export async function sendReplyInWorkModal(page, replyText) {
         document.execCommand('insertText', false, text);
         return { ok: true, method: 'contenteditable_execCommand' };
       }
-      return { ok: false, reason: 'no contenteditable editor' };
+
+      const inputs = document.querySelectorAll('input[type="text"], textarea');
+      for (const input of inputs) {
+        const rect = input.getBoundingClientRect();
+        if (rect.width < 50 || rect.height < 20) continue;
+        if (isSearchInput(input)) continue;
+        const valueSetter = Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype, 'value')?.set;
+        if (valueSetter) valueSetter.call(input, text);
+        else input.value = text;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.focus();
+        return { ok: true, method: input.tagName === 'TEXTAREA' ? 'textarea_fallback' : 'input_fallback' };
+      }
+
+      return { ok: false, reason: 'no reply input found' };
     }, replyText);
 
     if (!filled.ok) {
@@ -839,6 +861,7 @@ export async function sendReplyInWorkModal(page, replyText) {
     const focused = await page.evaluate(() => {
       const active = document.activeElement;
       if (active && active.closest?.('.comment-input-container')) return true;
+      if (active?.tagName === 'INPUT' || active?.tagName === 'TEXTAREA') return true;
 
       const editor = document.querySelector('.comment-input-container [contenteditable="true"]');
       if (!editor) return false;
