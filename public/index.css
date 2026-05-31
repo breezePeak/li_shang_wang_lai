@@ -1228,3 +1228,237 @@ body {
   font-size: 12px;
   border-radius: 6px;
 }
+
+/* ==========================================================================
+   科幻发光流动水平时间线面板样式 (Luxe Flowing Horizontal Timeline)
+   ========================================================================== */
+.timeline-container {
+  width: 100%;
+  background: var(--bg-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 110px 30px; /* 上下预留足够高度错落悬挂面板 */
+  margin-bottom: 40px;
+  box-shadow: var(--shadow-main);
+  position: relative;
+  overflow: visible; /* 必须支持卡片溢出显影 */
+}
+
+.timeline-track-wrapper {
+  position: relative;
+  width: 100%;
+  height: 4px;
+}
+
+/* 贯穿中轴的基础暗色轨道线 */
+.timeline-flow-line {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 100%;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+/* 缓缓流动的发光光纤粒子 (向右流动的激光粒子效果) */
+.timeline-flow-line::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -50%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, #7c3aed, #06b6d4, transparent);
+  animation: fiberFlow 5.5s infinite linear;
+}
+
+@keyframes fiberFlow {
+  0% { left: -50%; }
+  100% { left: 100%; }
+}
+
+/* 5节点水平均分排布 */
+.timeline-nodes-flow {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 5%;
+}
+
+.timeline-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+}
+
+/* 核心圆环脉冲节点 */
+.node-dot {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #000000;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  transition: var(--transition);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.6);
+  z-index: 10;
+}
+
+/* 轨道发光特效在节点上的反射 */
+.timeline-node:hover .node-dot {
+  color: #fff;
+  border-color: #7c3aed;
+  box-shadow: 0 0 20px rgba(124, 58, 237, 0.45);
+  transform: scale(1.1);
+}
+
+/* 垂挂小看板容器 (Placards) */
+.timeline-placard {
+  position: absolute;
+  width: 165px;
+  background: rgba(4, 4, 6, 0.88); /* 极致碳黑底 */
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow-main);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: var(--transition);
+  z-index: 5;
+}
+
+/* 节点1, 3, 5: 向上垂挂 */
+.placard-up {
+  bottom: 50px;
+  transform: translate(-50%, 0);
+  left: 50%;
+}
+
+/* 节点2, 4: 向下垂挂 */
+.placard-down {
+  top: 50px;
+  transform: translate(-50%, 0);
+  left: 50%;
+}
+
+/* 垂挂连结虚引线 */
+.placard-up::before, .placard-down::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1px;
+  height: 26px;
+  border-left: 1px dashed rgba(255, 255, 255, 0.12);
+  transition: var(--transition);
+  pointer-events: none;
+}
+
+.placard-up::before {
+  bottom: -26px;
+}
+
+.placard-down::before {
+  top: -26px;
+}
+
+/* Hover 上浮与发光微交互 */
+.timeline-node:hover .timeline-placard {
+  border-color: rgba(124, 58, 237, 0.35);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), 0 0 20px rgba(124, 58, 237, 0.08);
+}
+
+.timeline-node:hover .placard-up {
+  transform: translate(-50%, -6px);
+}
+
+.timeline-node:hover .placard-down {
+  transform: translate(-50%, 6px);
+}
+
+.timeline-node:hover .placard-up::before, 
+.timeline-node:hover .placard-down::before {
+  border-left-color: rgba(124, 58, 237, 0.4);
+}
+
+/* 悬挂指标标题与大数码 */
+.placard-name {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  text-align: center;
+}
+
+.placard-value {
+  font-size: 20px;
+  font-weight: 800;
+  margin-top: 4px;
+  font-family: 'Outfit', sans-serif;
+  letter-spacing: -0.02em;
+  background: linear-gradient(to bottom, #fff, #d1d5db);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* 上色点缀每一路节点上的发光效果 */
+#node-1:hover .node-dot { border-color: #06b6d4; box-shadow: 0 0 15px rgba(6, 182, 212, 0.4); }
+#node-2:hover .node-dot { border-color: #db2777; box-shadow: 0 0 15px rgba(219, 39, 119, 0.4); }
+#node-3:hover .node-dot { border-color: #7c3aed; box-shadow: 0 0 15px rgba(124, 58, 237, 0.4); }
+#node-4:hover .node-dot { border-color: #10b981; box-shadow: 0 0 15px rgba(16, 185, 129, 0.4); }
+#node-5:hover .node-dot { border-color: #f59e0b; box-shadow: 0 0 15px rgba(245, 158, 11, 0.4); }
+
+#node-1:hover .timeline-placard { border-color: rgba(6, 182, 212, 0.3); }
+#node-2:hover .timeline-placard { border-color: rgba(219, 39, 119, 0.3); }
+#node-3:hover .timeline-placard { border-color: rgba(124, 58, 237, 0.3); }
+#node-4:hover .timeline-placard { border-color: rgba(16, 185, 129, 0.3); }
+#node-5:hover .timeline-placard { border-color: rgba(245, 158, 11, 0.3); }
+
+/* 时间线大容器自适应高度 */
+@media (max-width: 900px) {
+  .timeline-container {
+    padding: 30px 15px;
+    height: auto;
+  }
+  .timeline-track-wrapper {
+    height: auto;
+  }
+  .timeline-flow-line {
+    display: none;
+  }
+  .timeline-nodes-flow {
+    position: static;
+    transform: none;
+    flex-direction: column;
+    gap: 30px;
+    padding: 0;
+  }
+  .timeline-placard {
+    position: static;
+    transform: none !important;
+    width: 100%;
+    margin-top: 8px;
+  }
+  .timeline-placard::before {
+    display: none;
+  }
+}

@@ -32,42 +32,58 @@
       </div>
     </header>
 
-    <!-- Stats Panel 统计仪表盘 -->
-    <section class="stats-container">
-      <div class="stat-card stat-total">
-        <div class="stat-icon"><i class="fa-solid fa-database"></i></div>
-        <div class="stat-info">
-          <h3>累计回访用户</h3>
-          <span class="stat-value" id="stat-total-tasks">0</span>
-        </div>
-        <div class="card-glow"></div>
-      </div>
+    <!-- Stats Timeline Flow 统计流光时间线 -->
+    <section class="timeline-container" id="timeline-flow-board">
+      <div class="timeline-track-wrapper">
+        <!-- 缓缓流动的发光光纤粒子线 -->
+        <div class="timeline-flow-line"></div>
+        
+        <div class="timeline-nodes-flow">
+          <!-- 节点 1 (上悬挂) -->
+          <div class="timeline-node" id="node-1">
+            <div class="node-dot"><i class="fa-solid fa-database"></i></div>
+            <div class="timeline-placard placard-up">
+              <span class="placard-name">累计回访用户</span>
+              <span class="placard-value" id="stat-total-tasks">0</span>
+            </div>
+          </div>
 
-      <div class="stat-card stat-likes">
-        <div class="stat-icon"><i class="fa-solid fa-heart"></i></div>
-        <div class="stat-info">
-          <h3>待点赞作品</h3>
-          <span class="stat-value" id="stat-pending-likes">0</span>
-        </div>
-        <div class="card-glow"></div>
-      </div>
+          <!-- 节点 2 (下悬挂) -->
+          <div class="timeline-node" id="node-2">
+            <div class="node-dot"><i class="fa-solid fa-heart"></i></div>
+            <div class="timeline-placard placard-down">
+              <span class="placard-name">待回访作品</span>
+              <span class="placard-value" id="stat-pending-likes">0</span>
+            </div>
+          </div>
 
-      <div class="stat-card stat-comments">
-        <div class="stat-icon"><i class="fa-solid fa-comment-dots"></i></div>
-        <div class="stat-info">
-          <h3>待审核回访评论</h3>
-          <span class="stat-value" id="stat-pending-comments">0</span>
-        </div>
-        <div class="card-glow"></div>
-      </div>
+          <!-- 节点 3 (上悬挂) -->
+          <div class="timeline-node" id="node-3">
+            <div class="node-dot"><i class="fa-solid fa-comment-dots"></i></div>
+            <div class="timeline-placard placard-up">
+              <span class="placard-name">待审核评论</span>
+              <span class="placard-value" id="stat-pending-comments">0</span>
+            </div>
+          </div>
 
-      <div class="stat-card stat-replies">
-        <div class="stat-icon"><i class="fa-solid fa-reply-all"></i></div>
-        <div class="stat-info">
-          <h3>暂缓回复评论</h3>
-          <span class="stat-value" id="stat-pending-replies">0</span>
+          <!-- 节点 4 (下悬挂) -->
+          <div class="timeline-node" id="node-4">
+            <div class="node-dot"><i class="fa-solid fa-reply-all"></i></div>
+            <div class="timeline-placard placard-down">
+              <span class="placard-name">暂缓回复评论</span>
+              <span class="placard-value" id="stat-pending-replies">0</span>
+            </div>
+          </div>
+
+          <!-- 节点 5 (上悬挂) -->
+          <div class="timeline-node" id="node-5">
+            <div class="node-dot"><i class="fa-solid fa-circle-check"></i></div>
+            <div class="timeline-placard placard-up">
+              <span class="placard-name">成功互访达成</span>
+              <span class="placard-value" id="stat-completed-tasks">0</span>
+            </div>
+          </div>
         </div>
-        <div class="card-glow"></div>
       </div>
     </section>
 

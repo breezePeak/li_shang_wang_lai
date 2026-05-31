@@ -48,6 +48,7 @@ function renderStats() {
   document.getElementById('stat-pending-likes').textContent = statsData.pendingLikes || 0;
   document.getElementById('stat-pending-comments').textContent = statsData.pendingComments || 0;
   document.getElementById('stat-pending-replies').textContent = statsData.pendingReplies || 0;
+  document.getElementById('stat-completed-tasks').textContent = statsData.completedTasks || 0;
 }
 
 // 2. 获取回访审核任务
