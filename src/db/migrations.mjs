@@ -231,6 +231,64 @@ export function runMigrations(dbPath = DB_PATH) {
     );
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS return_visit_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL UNIQUE,
+      identity_key TEXT NOT NULL UNIQUE,
+      user_id TEXT,
+      user_name TEXT NOT NULL,
+      user_profile_url TEXT,
+      source_type TEXT NOT NULL DEFAULT 'other',
+      source_types_json TEXT,
+      source_event_ids_json TEXT,
+      action_type TEXT NOT NULL DEFAULT 'like_and_comment'
+        CHECK (action_type IN ('like_and_comment')),
+      status TEXT NOT NULL DEFAULT 'pending_visit'
+        CHECK (status IN (
+          'pending_visit',
+          'collecting_content',
+          'content_collected',
+          'comment_generated',
+          'pending_execute',
+          'executing',
+          'done',
+          'skipped_no_work',
+          'skipped_private',
+          'skipped_no_suitable_work',
+          'failed_collect',
+          'failed_generate_comment',
+          'failed_like',
+          'failed_comment',
+          'failed'
+        )),
+      target_work_id TEXT,
+      target_work_url TEXT,
+      target_work_title TEXT,
+      target_work_text TEXT,
+      target_work_summary TEXT,
+      target_work_publish_time TEXT,
+      reference_comments_json TEXT,
+      generated_comment TEXT,
+      like_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (like_status IN ('pending','already_liked','liked','failed')),
+      comment_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (comment_status IN ('pending','generated','posted','failed')),
+      collected_at TEXT,
+      generated_at TEXT,
+      executed_at TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_return_visit_status_updated
+      ON return_visit_tasks(status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_return_visit_retry
+      ON return_visit_tasks(retry_count);
+  `);
+
   // Migrate: add published_at column to works
   const checkWorks = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='works'").get();
   const worksSql = checkWorks ? (checkWorks.sql || '') : '';

@@ -44,15 +44,17 @@
     "visits:discover": "node ./src/cli/discover-visits.mjs",
     "visits:review": "node ./src/cli/review-visits.mjs",
     "visits:live-review": "node ./src/cli/live-review-visits.mjs",
+    "return-visit:prepare": "node ./src/cli/execute-return-visit-prepare.mjs",
+    "return-visit:execute": "node ./src/cli/execute-return-visit.mjs",
     "notify:inspect": "node ./src/cli/inspect-notifications.mjs",
     "icon:profile": "node ./.sisyphus/icon-profile.mjs",
     "dev:inspect-page": "node ./src/cli/dev-inspect-page.mjs",
     "history": "node ./src/cli/show-history.mjs",
     "server": "node ./src/server.mjs",
     "test": "npm run test:live",
-    "test:live": "vitest run tests/unit/notification-action-router.test.mjs tests/unit/migrations-actions-status.test.mjs tests/unit/interaction-repository.test.mjs tests/unit/notification-dedup.test.mjs tests/unit/work-modal-page.test.mjs tests/unit/work-context-owner-check.test.mjs tests/unit/reply-template.test.mjs tests/unit/like-state-detection.test.mjs tests/unit/like-plan-safety.test.mjs",
+    "test:live": "vitest run tests/unit/notification-action-router.test.mjs tests/unit/migrations-actions-status.test.mjs tests/unit/interaction-repository.test.mjs tests/unit/notification-dedup.test.mjs tests/unit/work-modal-page.test.mjs tests/unit/work-context-owner-check.test.mjs tests/unit/reply-template.test.mjs tests/unit/like-state-detection.test.mjs tests/unit/like-plan-safety.test.mjs tests/unit/return-visit-comment-generator.test.mjs tests/unit/return-visit-task-service.test.mjs",
     "test:full": "vitest run",
-    "test:watch": "vitest tests/unit/notification-action-router.test.mjs tests/unit/migrations-actions-status.test.mjs tests/unit/interaction-repository.test.mjs tests/unit/notification-dedup.test.mjs tests/unit/work-modal-page.test.mjs tests/unit/work-context-owner-check.test.mjs tests/unit/reply-template.test.mjs tests/unit/like-state-detection.test.mjs tests/unit/like-plan-safety.test.mjs"
+    "test:watch": "vitest tests/unit/notification-action-router.test.mjs tests/unit/migrations-actions-status.test.mjs tests/unit/interaction-repository.test.mjs tests/unit/notification-dedup.test.mjs tests/unit/work-modal-page.test.mjs tests/unit/work-context-owner-check.test.mjs tests/unit/reply-template.test.mjs tests/unit/like-state-detection.test.mjs tests/unit/like-plan-safety.test.mjs tests/unit/return-visit-comment-generator.test.mjs tests/unit/return-visit-task-service.test.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",

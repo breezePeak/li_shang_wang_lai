@@ -33,6 +33,7 @@ export function loadConfig() {
     browser: { ...DEFAULTS.browser, ...(userConfig.browser || {}) },
     comments: { ...DEFAULTS.comments, ...(userConfig.comments || {}) },
     likes: { ...DEFAULTS.likes, ...(userConfig.likes || {}) },
+    returnVisit: { ...DEFAULTS.returnVisit, ...(userConfig.returnVisit || {}) },
     safety: { ...DEFAULTS.safety, ...(userConfig.safety || {}) },
   };
 }
