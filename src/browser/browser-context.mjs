@@ -79,7 +79,10 @@ export async function createBrowserContext(options = {}) {
   const context = await chromium.launchPersistentContext(profileDir, {
     headless,
     slowMo,
-    args: enableReuse ? [`--remote-debugging-port=${CDP_PORT}`] : [],
+    args: [
+      '--no-sandbox',
+      ...(enableReuse ? [`--remote-debugging-port=${CDP_PORT}`] : []),
+    ],
     viewport: { width: 1280, height: 800 },
   });
 
