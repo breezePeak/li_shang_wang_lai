@@ -689,10 +689,14 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
         const candidates = [];
         for (const link of links) {
           const href = link.getAttribute('href') || '';
+          const text = (link.innerText || link.textContent || '').trim();
+          const imgAlt = Array.from(link.querySelectorAll('img')).map(img => img.getAttribute('alt') || '').filter(Boolean).join(' ');
           const rect = link.getBoundingClientRect();
           if (rect.width > 50 && rect.height > 50 && rect.bottom > 0 && rect.top < window.innerHeight) {
             candidates.push({
               href: href.startsWith('http') ? href : `https://www.douyin.com${href}`,
+              text: text.slice(0, 200),
+              imgAlt: imgAlt.slice(0, 200),
               x: Math.round(rect.x + rect.width / 2),
               y: Math.round(rect.y + rect.height / 2),
               top: Math.round(rect.top),
@@ -714,6 +718,62 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
     return null;
   }
 
+  function parseCandidateComments(candidate) {
+    try {
+      const parsed = JSON.parse(candidate.comments_json || '[]');
+      return Array.isArray(parsed) ? parsed.filter(Boolean).map(String).slice(0, 8) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async function openProfileAndFindWork(profileUrl, phaseLabel) {
+    console.log(`[live]   ${phaseLabel}打开主页: ${profileUrl}`);
+    await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    console.log(`[live]   等待主页作品加载 ${Math.round(profileSettleMs / 1000)}s...`);
+    await page.waitForTimeout(profileSettleMs);
+    return await findFirstProfileWork();
+  }
+
+  async function extractRevisitProfileContext(firstWork = null) {
+    return await page.evaluate((work) => {
+      const bodyText = document.body?.innerText || '';
+      const title = document.title || '';
+      const nickname =
+        document.querySelector('[data-e2e="user-info"]')?.innerText ||
+        document.querySelector('[class*="nickname"]')?.innerText ||
+        '';
+      const desc =
+        document.querySelector('[class*="signature"]')?.innerText ||
+        document.querySelector('[class*="desc"]')?.innerText ||
+        '';
+      const visibleWorks = [];
+      const links = document.querySelectorAll('a[href*="/video/"], a[href*="/note/"]');
+      for (const link of links) {
+        const rect = link.getBoundingClientRect();
+        if (rect.width < 50 || rect.height < 50 || rect.bottom <= 0 || rect.top >= window.innerHeight) continue;
+        const href = link.getAttribute('href') || '';
+        const text = (link.innerText || link.textContent || '').trim();
+        const imgAlt = Array.from(link.querySelectorAll('img')).map(img => img.getAttribute('alt') || '').filter(Boolean).join(' ');
+        visibleWorks.push({
+          href: href.startsWith('http') ? href : `https://www.douyin.com${href}`,
+          text: text.slice(0, 160),
+          imgAlt: imgAlt.slice(0, 160),
+        });
+        if (visibleWorks.length >= 6) break;
+      }
+      return {
+        profileTitle: title.slice(0, 160),
+        profileText: bodyText.slice(0, 1200),
+        nickname: nickname.trim().slice(0, 120),
+        signature: desc.trim().slice(0, 240),
+        firstWorkText: work?.text || '',
+        firstWorkImgAlt: work?.imgAlt || '',
+        visibleWorks,
+      };
+    }, firstWork);
+  }
+
   async function extractRevisitWorkContext() {
     return await page.evaluate(() => {
       const workTitle =
@@ -724,10 +784,10 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
         '';
       const workText = (document.body?.innerText || '').slice(0, 1200);
       const referenceComments = [];
-      const commentItems = document.querySelectorAll('[data-e2e="comment-item"], [class*="comment-item"], [class*="commentItem"]');
+      const commentItems = document.querySelectorAll('[data-e2e="comment-item"], [class*="comment-item"], [class*="commentItem"], .comment-item-info-wrap, .comment-mainContent [class*="content"]');
       for (const item of commentItems) {
         const text = (item.innerText || '').trim();
-        if (text && text.length < 120) referenceComments.push(text);
+        if (text && text.length < 180) referenceComments.push(text);
         if (referenceComments.length >= 8) break;
       }
       return {
@@ -757,12 +817,7 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
         continue;
       }
 
-      console.log(`[live]   打开主页: ${profileUrl}`);
-      await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      console.log(`[live]   等待主页作品加载 ${Math.round(profileSettleMs / 1000)}s...`);
-      await page.waitForTimeout(profileSettleMs);
-
-      const firstWork = await findFirstProfileWork();
+      const firstWork = await openProfileAndFindWork(profileUrl, '只读分析：');
 
       if (!firstWork) {
         console.log(`[live]   未找到作品，跳过`);
@@ -771,7 +826,10 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
         continue;
       }
 
-      console.log(`[live]   打开最近作品...`);
+      const profileContext = await extractRevisitProfileContext(firstWork);
+      const sourceComments = parseCandidateComments(candidate);
+
+      console.log(`[live]   只读分析：打开最近作品采集作品信息和评论...`);
       await page.mouse.click(firstWork.x, firstWork.y);
       await page.waitForTimeout(Math.min(Math.max(options.videoSettleMs || 0, 3000), 5000));
       const modalResult = await waitForWorkModal(page, { timeoutMs: 15000, closeAutoPlay: true });
@@ -779,6 +837,53 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
         console.log(`[live]   作品评论区未就绪: ${modalResult.message}`);
         markRevisitBlocked(candidate.id, modalResult.message || 'work_modal_not_ready');
         revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: modalResult.message || 'work_modal_not_ready' });
+        continue;
+      }
+
+      const readWorkContext = await extractRevisitWorkContext();
+      const workContext = {
+        ...readWorkContext,
+        contentSummary: [
+          profileContext.profileTitle,
+          profileContext.nickname,
+          profileContext.signature,
+          profileContext.firstWorkText,
+          profileContext.firstWorkImgAlt,
+          profileContext.visibleWorks.map(w => `${w.text} ${w.imgAlt}`.trim()).filter(Boolean).join(' '),
+        ].filter(Boolean).join('\n').slice(0, 1200),
+        referenceComments: [
+          ...sourceComments,
+          ...(readWorkContext.referenceComments || []),
+        ].filter(Boolean).slice(0, 12),
+      };
+
+      const generated = generateReturnVisitComment(workContext);
+      if (!generated.ok || !generated.comment) {
+        const reason = generated.reason || 'generate_comment_failed';
+        console.log(`[live]   生成回访评论失败: ${reason}`);
+        markRevisitBlocked(candidate.id, reason);
+        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason });
+        continue;
+      }
+
+      console.log(`[live]   已生成回访评论 (${generated.reason || 'generated'}): "${generated.comment}"`);
+
+      const actionWork = await openProfileAndFindWork(profileUrl, '执行动作：');
+      if (!actionWork) {
+        console.log(`[live]   执行动作前未找到作品，跳过`);
+        markRevisitSkipped(candidate.id, 'no_work_found_before_action');
+        revisitResults.push({ actorName: candidate.actor_name, status: 'skipped', reason: 'no_work_found_before_action' });
+        continue;
+      }
+
+      console.log(`[live]   执行动作：打开最近作品...`);
+      await page.mouse.click(actionWork.x, actionWork.y);
+      await page.waitForTimeout(Math.min(Math.max(options.videoSettleMs || 0, 3000), 5000));
+      const actionModalResult = await waitForWorkModal(page, { timeoutMs: 15000, closeAutoPlay: true });
+      if (!actionModalResult.ok) {
+        console.log(`[live]   执行动作时作品评论区未就绪: ${actionModalResult.message}`);
+        markRevisitBlocked(candidate.id, actionModalResult.message || 'work_modal_not_ready_before_action');
+        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: actionModalResult.message || 'work_modal_not_ready_before_action' });
         continue;
       }
 
@@ -794,16 +899,6 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
 
       console.log(`[live]   点赞完成 (${likeMethod})`);
       await page.waitForTimeout(2500 + Math.floor(Math.random() * 1500));
-
-      const workContext = await extractRevisitWorkContext();
-      const generated = generateReturnVisitComment(workContext);
-      if (!generated.ok || !generated.comment) {
-        const reason = generated.reason || 'generate_comment_failed';
-        console.log(`[live]   生成回访评论失败: ${reason}`);
-        markRevisitBlocked(candidate.id, reason);
-        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason });
-        continue;
-      }
 
       console.log(`[live]   发送回访评论: "${generated.comment}"`);
       const commentResult = await postVideoComment(page, generated.comment, { execute: true });
