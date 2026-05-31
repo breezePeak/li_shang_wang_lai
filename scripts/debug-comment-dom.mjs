@@ -10,20 +10,20 @@ async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
 
   console.log('[1] 启动浏览器...');
-  const ctx = await createBrowserContext({ headless: false });
-  const page = ctx.pages()[0] || await ctx.newPage();
+  const { browser, context } = await createBrowserContext({ headless: false });
+  const page = context.pages()[0] || await context.newPage();
 
   console.log('[2] 打开通知页...');
   await ensureNotificationPageReady(page);
   const opened = await openNotificationPanel(page);
-  if (!opened) { console.error('无法打开通知面板'); await ctx.close(); return; }
+  if (!opened) { console.error('无法打开通知面板'); await context.close(); return; }
   const { stable, empty, panelBox } = await waitForNotificationPanelStable(page);
-  if (!stable || empty) { console.error('面板未稳定'); await ctx.close(); return; }
+  if (!stable || empty) { console.error('面板未稳定'); await context.close(); return; }
   await moveMouseIntoPanel(page, panelBox);
 
   console.log('[3] 点击评论通知缩略图...');
   const clickResult = await clickNotificationWorkThumbnail(page);
-  if (!clickResult.ok) { console.error('点击失败'); await ctx.close(); return; }
+  if (!clickResult.ok) { console.error('点击失败'); await context.close(); return; }
 
   console.log('[4] 等待 modal...');
   await page.waitForSelector('.modal-video-container', { state: 'visible', timeout: 10000 });
@@ -155,7 +155,7 @@ async function main() {
 
   console.log('\n[6] 浏览器保持打开 30 秒...');
   await page.waitForTimeout(30000);
-  await ctx.close();
+  await context.close();
 }
 
 main().catch(err => { console.error('错误:', err.message); process.exit(1); });
