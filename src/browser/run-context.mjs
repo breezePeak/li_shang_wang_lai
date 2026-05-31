@@ -18,6 +18,8 @@ const DEFAULT_OPTIONS = {
   observeMs: 5000,
   profileSettleMs: 6000,
   videoSettleMs: 5000,
+  revisit: false,
+  preview: false,
 };
 
 export function chinaTimestamp() {
@@ -51,6 +53,8 @@ export function parseCommonArgs(argv) {
       '--keep-open': 'keepOpen',
       '--keep-open-on-error': 'keepOpenOnError',
       '--pause-on-error': 'pauseOnError',
+      '--revisit': 'revisit',
+      '--preview': 'preview',
     };
 
     if (boolFlags[arg]) {

@@ -13,6 +13,7 @@ import {
   extractWorkModalContext,
   findUnrepliedCommentsInModal,
   openReplyBoxByIndex,
+  fillReplyInWorkModal,
   sendReplyInWorkModal,
   verifyReplyInWorkModal,
 } from '../adapters/work-modal-page.mjs';
@@ -97,6 +98,26 @@ async function replyToOneComment(page, comment, workCtx, db, run, options) {
   }
 
   r.step = 'send-reply';
+  if (options.preview) {
+    console.log(`[live]     [预演] 填入回复但不发送...`);
+    const fillResult = await fillReplyInWorkModal(page, replyText);
+    if (!fillResult.ok) {
+      r.status = 'blocked';
+      r.reason = `填入回复失败: ${fillResult.message}`;
+      r.code = fillResult.code;
+      console.log(`[live]     ✗ ${r.reason}`);
+      recordAction(db, 0, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'blocked', r.reason, null);
+      run.hadBlocked = true;
+      return r;
+    }
+    r.status = 'succeeded';
+    r.reason = '预演：已填入回复，未发送';
+    console.log(`[live]     ✓ [预演] 已填入: "${replyText.slice(0, 30)}"`);
+    recordAction(db, 0, null, workCtx.workTitle || '', workCtx.workUrl || '', replyText, 'preview', r.reason, null);
+    run.succeeded++;
+    return r;
+  }
+
   const sendResult = await sendReplyInWorkModal(page, replyText);
   if (!sendResult.ok) {
     r.status = 'blocked';
@@ -199,6 +220,7 @@ async function processWorkModal(page, notification, db, run, options, state) {
   }
 
   const selfProfile = getSelfProfile();
+  const selfNickname = selfProfile.nickname || '';
   const ownerResult = checkWorkOwner({
     authorProfileKey: workCtx.authorProfileKey || '',
     authorProfileUrl: workCtx.authorProfileUrl || '',
@@ -206,6 +228,13 @@ async function processWorkModal(page, notification, db, run, options, state) {
   }, selfProfile);
 
   if (ownerResult.isOwnWork === false) {
+    if (options.revisit) {
+      console.log(`[live]   非 own 作品，--revisit 模式：仅记录，不回复评论`);
+      r.status = 'skipped';
+      r.reason = `非 own 作品(revisit) (${ownerResult.ownerCheckMethod})`;
+      if (r.eventId) recordAction(db, r.eventId, null, workCtx.workTitle || '', workCtx.workUrl || '', '', 'revisit', r.reason, null);
+      return r;
+    }
     r.status = 'skipped';
     r.reason = `作品不属于当前账号 (${ownerResult.ownerCheckMethod})`;
     console.log(`[live]   跳过: ${r.reason}`);
@@ -225,9 +254,10 @@ async function processWorkModal(page, notification, db, run, options, state) {
     console.log(`[live]   ⚠ 无法验证作品归属，但通知暗示为自身作品 (${notification.action})，继续执行`);
   }
 
+
   r.step = 'scan-unreplied';
   console.log(`[live]   扫描未回复评论...`);
-  const scanResult = await findUnrepliedCommentsInModal(page, { alreadyRepliedKeys: state.repliedCommentKeys });
+  const scanResult = await findUnrepliedCommentsInModal(page, { alreadyRepliedKeys: state.repliedCommentKeys, selfNickname });
   if (!scanResult.ok) {
     r.status = 'blocked';
     r.reason = `扫描评论失败: ${scanResult.message}`;
@@ -246,7 +276,7 @@ async function processWorkModal(page, notification, db, run, options, state) {
     return r;
   }
 
-  if (options.dryRun) {
+  if (options.dryRun && !options.preview) {
     r.status = 'skipped';
     r.reason = `dry-run 模式，将回复 ${unreplied.length} 条评论`;
     r.code = RESULT_CODES.DRY_RUN_REQUIRED;
@@ -356,7 +386,8 @@ async function main() {
     await moveMouseIntoPanel(page, panelBox);
     console.error('[live] 通知面板已就绪');
 
-    console.log(`[live] 模式: ${commonArgs.options.dryRun ? 'dry-run' : 'execute'}`);
+    const modeLabel = commonArgs.options.preview ? 'preview(预演)' : (commonArgs.options.dryRun ? 'dry-run' : 'execute');
+    console.log(`[live] 模式: ${modeLabel}${commonArgs.options.revisit ? ' + revisit' : ''}`);
 
     const seenNotifKeys = new Set();
     const maxScrollRounds = 5;

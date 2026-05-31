@@ -207,11 +207,11 @@ export async function findCommentInWorkModal(page, item, { maxScrolls = 10 } = {
   }
 }
 
-export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alreadyRepliedKeys = new Set() } = {}) {
+export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alreadyRepliedKeys = new Set(), selfNickname = '' } = {}) {
   const allComments = [];
 
   try {
-    const collect = () => page.evaluate((alreadyRepliedKeysArr) => {
+    const collect = () => page.evaluate(({ alreadyRepliedKeysArr, selfNickname }) => {
       const alreadyRepliedKeys = new Set(alreadyRepliedKeysArr);
       const commentArea = document.querySelector('.comment-mainContent');
       if (!commentArea) return { comments: [], canScroll: false };
@@ -226,7 +226,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
 
         let actorName = '';
         let commentText = '';
-        let hasReply = false;
+        let hasMyReply = false;
         let commentKey = '';
 
         const nameLine = lines[0];
@@ -253,21 +253,25 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
           }
         }
 
-        const subReplies = items[i].querySelectorAll('.comment-item-info-wrap');
-        hasReply = subReplies.length > 0;
+        const subReplyContainers = items[i].querySelectorAll('.comment-item-info-wrap');
+        if (subReplyContainers.length > 0 && selfNickname) {
+          for (const sub of subReplyContainers) {
+            const subText = (sub.innerText || '').trim();
+            const subLines = subText.split('\n').map(l => l.trim()).filter(Boolean);
+            if (subLines.length > 0 && subLines[0] === selfNickname) {
+              hasMyReply = true;
+              break;
+            }
+          }
+        }
 
-        if (!hasReply) {
-          const replySpans = items[i].querySelectorAll('span');
-          for (const span of replySpans) {
-            if ((span.innerText || '').trim() === '回复') {
-              const parent = span.parentElement;
-              if (parent && parent !== items[i]) {
-                const parentText = (parent.innerText || '').trim();
-                if (parentText.length > 0 && parentText.length < commentText.length) {
-                  hasReply = true;
-                  break;
-                }
-              }
+        if (!hasMyReply && subReplyContainers.length === 0 && selfNickname) {
+          const replyBlocks = items[i].querySelectorAll('[class*="reply"], [class*="sub-comment"]');
+          for (const block of replyBlocks) {
+            const blockText = (block.innerText || '').trim();
+            if (blockText.includes(selfNickname)) {
+              hasMyReply = true;
+              break;
             }
           }
         }
@@ -279,7 +283,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
           commentIndex: i,
           actorName,
           commentText: commentText.slice(0, 300),
-          hasReply,
+          hasMyReply,
           alreadyReplied: alreadyRepliedKeys.has(commentKey),
           commentKey,
           y: Math.round(rect.y),
@@ -289,7 +293,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
 
       const canScroll = commentArea.scrollHeight > commentArea.clientHeight + 10;
       return { comments, canScroll };
-    }, [...alreadyRepliedKeys]);
+    }, { alreadyRepliedKeysArr: [...alreadyRepliedKeys], selfNickname });
 
     let result = await collect();
     allComments.push(...result.comments);
@@ -314,9 +318,9 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 10, alre
       }
     }
 
-    const unreplied = allComments.filter(c => !c.hasReply && !c.alreadyReplied && c.commentText.length > 0);
+    const unreplied = allComments.filter(c => !c.hasMyReply && !c.alreadyReplied && c.commentText.length > 0);
 
-    console.error(`[work-modal] 评论扫描: 总 ${allComments.length} 条，未回复 ${unreplied.length} 条`);
+    console.error(`[work-modal] 评论扫描: 总 ${allComments.length} 条，我未回复 ${unreplied.length} 条`);
 
     return success({
       total: allComments.length,
@@ -379,6 +383,42 @@ export async function openReplyBoxByIndex(page, commentIndex) {
     return success({ replyBoxOpened: true });
   } catch (err) {
     return blocking(RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND, `打开回复框异常: ${err.message}`, { recoverable: true });
+  }
+}
+
+export async function fillReplyInWorkModal(page, replyText) {
+  if (!replyText || !replyText.trim()) {
+    return blocking(RESULT_CODES.EMPTY_REPLY_TEXT, '回复内容为空', { recoverable: false });
+  }
+
+  console.error(`[work-modal] 填入回复(预演): "${replyText.slice(0, 60)}"`);
+
+  try {
+    const filled = await page.evaluate((text) => {
+      const commentArea = document.querySelector('.comment-mainContent');
+      const scope = commentArea || document.body;
+      const inputs = scope.querySelectorAll('input[type="text"]');
+      for (const input of inputs) {
+        const rect = input.getBoundingClientRect();
+        if (rect.width < 50 || rect.height < 20) continue;
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        nativeInputValueSetter.call(input, text);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.focus();
+        return { ok: true };
+      }
+      return { ok: false };
+    }, replyText);
+
+    if (!filled.ok) {
+      return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '找不到回复输入框', { recoverable: true });
+    }
+
+    console.error(`[work-modal] 已填入回复，未点击发送`);
+    return success({ filled: true, sent: false, method: 'preview' });
+  } catch (err) {
+    return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, `填入回复异常: ${err.message}`, { recoverable: true });
   }
 }
 
