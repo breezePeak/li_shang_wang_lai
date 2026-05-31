@@ -54,6 +54,76 @@ export async function waitRandom(page, range, fallbackMin, fallbackMax) {
   return ms;
 }
 
+/**
+ * 新增: 控制视频播放观看频率与时长
+ */
+export async function handleVideoWatch(page, watchPolicy = 'seconds', watchSeconds = [5, 8]) {
+  try {
+    const videoInfo = await page.evaluate(() => {
+      const video = document.querySelector('video');
+      if (!video) return null;
+      return {
+        duration: video.duration || 0,
+        paused: video.paused,
+        currentTime: video.currentTime || 0
+      };
+    });
+
+    if (!videoInfo) {
+      console.log('[return-visit:watch] 页面上未找到 video 元素，自动跳过播放等待逻辑');
+      return;
+    }
+
+    const duration = videoInfo.duration;
+    // 若视频处于暂停状态，自动尝试唤醒播放
+    await page.evaluate(() => {
+      const video = document.querySelector('video');
+      if (video && video.paused) {
+        video.play().catch(() => {});
+      }
+    });
+
+    if (watchPolicy === 'full') {
+      console.log(`[return-visit:watch] 完播模式启动。视频总时长: ${duration.toFixed(1)}s，开始等待播放结束...`);
+      const startTime = Date.now();
+      const maxWaitMs = duration > 0 ? (duration + 5) * 1000 : 30000;
+
+      while (Date.now() - startTime < maxWaitMs) {
+        const playState = await page.evaluate(() => {
+          const video = document.querySelector('video');
+          if (!video) return { ended: true };
+          return {
+            currentTime: video.currentTime || 0,
+            duration: video.duration || 0,
+            ended: video.ended || false
+          };
+        });
+
+        if (playState.ended || (playState.duration > 0 && playState.currentTime >= playState.duration - 0.5)) {
+          console.log(`[return-visit:watch] 完播已达成。播放进度: ${playState.currentTime.toFixed(1)}s / ${playState.duration.toFixed(1)}s`);
+          break;
+        }
+        await page.waitForTimeout(1000);
+      }
+    } else {
+      let [min, max] = normalizeRange(watchSeconds, 5, 8);
+      let targetSeconds = randomInRange(min, max);
+
+      if (duration > 0 && targetSeconds > duration) {
+        targetSeconds = Math.ceil(duration);
+        console.log(`[return-visit:watch] 视频总时长 (${duration.toFixed(1)}s) 短于设定的秒数。调整为完播，等待 ${targetSeconds} 秒...`);
+      } else {
+        console.log(`[return-visit:watch] 观看指定时长模式。视频时长: ${duration.toFixed(1)}s，正在等待观看 ${targetSeconds} 秒...`);
+      }
+
+      await page.waitForTimeout(targetSeconds * 1000);
+      console.log(`[return-visit:watch] 已完成视频播放，共观看 ${targetSeconds} 秒。`);
+    }
+  } catch (err) {
+    console.error(`[return-visit:watch] 播放把控等待执行异常: ${err.message}`);
+  }
+}
+
 async function resolveWorkForExecution(page, task, options = {}) {
   const { pageLoadRetryCount = 1, maxWorksToCheck = 3, maxReferenceComments = 5 } = options;
   const knownWorkUrl = task?.targetWork?.workUrl || null;
@@ -96,6 +166,8 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     maxWorksToCheck = 3,
     maxReferenceComments = 5,
     waitBetweenLikeAndCommentMs = [2000, 6000],
+    watchPolicy = 'seconds',
+    watchSeconds = [5, 8],
   } = options;
 
   if (!task?.generatedComment || !String(task.generatedComment).trim()) {
@@ -135,6 +207,10 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   }
 
   const resolvedWork = resolved.work;
+
+  // 频率与时长调控防线: 点赞评论动作下发前强行进行观看拦截
+  await handleVideoWatch(page, watchPolicy, watchSeconds);
+
   const nextLikeStatus = { value: task.likeStatus || 'pending' };
   const nextCommentStatus = { value: task.commentStatus || 'pending' };
 

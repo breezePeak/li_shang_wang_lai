@@ -22,6 +22,8 @@ function parseArgs(argv) {
     headless: false,
     dryRun: false,
     maxItems: null,
+    watchPolicy: null,
+    watchSeconds: null,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -31,6 +33,8 @@ function parseArgs(argv) {
     else if (arg === '--headless') args.headless = true;
     else if (arg === '--dry-run') args.dryRun = true;
     else if (arg === '--max-items' && i + 1 < argv.length) args.maxItems = Math.max(1, parseInt(argv[++i], 10) || 1);
+    else if (arg === '--watch-policy' && i + 1 < argv.length) args.watchPolicy = argv[++i];
+    else if (arg === '--watch-seconds' && i + 1 < argv.length) args.watchSeconds = argv[++i];
   }
 
   return args;
@@ -74,6 +78,25 @@ async function main() {
   const waitBetweenLikeAndCommentMs = returnVisitConfig.waitBetweenLikeAndCommentMs || [2000, 6000];
   const restEveryTasksRange = getRange(returnVisitConfig.restEveryTasksRange, 8, 12);
   const restDurationMs = returnVisitConfig.restDurationMs || [60000, 180000];
+
+  // 映射视频观看策略与秒数默认值
+  const watchPolicy = args.watchPolicy || returnVisitConfig.watchPolicy || 'seconds';
+  const watchSecondsRaw = args.watchSeconds || returnVisitConfig.watchSeconds || '5-8';
+
+  let watchSeconds = [5, 8];
+  if (typeof watchSecondsRaw === 'string') {
+    const parts = watchSecondsRaw.split('-');
+    if (parts.length === 2) {
+      watchSeconds = [parseInt(parts[0], 10), parseInt(parts[1], 10)];
+    } else {
+      const single = parseInt(watchSecondsRaw, 10);
+      if (!isNaN(single)) watchSeconds = [single, single];
+    }
+  } else if (Array.isArray(watchSecondsRaw)) {
+    watchSeconds = watchSecondsRaw;
+  } else if (typeof watchSecondsRaw === 'number') {
+    watchSeconds = [watchSecondsRaw, watchSecondsRaw];
+  }
 
   const allTasks = listReturnVisitExecuteTasks({
     limit: maxItems,
@@ -176,6 +199,8 @@ async function main() {
       pageLoadRetryCount,
       maxWorksToCheck,
       waitBetweenLikeAndCommentMs,
+      watchPolicy,
+      watchSeconds,
     });
 
     if (result.resolvedWork) {
