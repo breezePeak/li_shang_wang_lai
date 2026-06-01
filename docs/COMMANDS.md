@@ -463,6 +463,8 @@ npm run comments:prepare-replies -- --max-items 5 --reply-max-length 40
 
 从数据库读取待回复评论，结合作品内容和已采集参考评论生成回复，并写回数据库。该命令不打开浏览器，不执行真实回复。
 
+默认完整工作流不使用该命令。默认评论回复流程使用 `replies:export` 导出临时文件、agent 填写结果文件、`replies:apply -- --commit` 更新数据库，再执行 `replies:execute -- --execute`。
+
 ### 命令特有参数
 
 | 参数 | 类型 | 默认值 | 说明 |
