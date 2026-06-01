@@ -451,6 +451,8 @@ npm run replies:apply -- --input replies.json --commit
 
 将导出的回复文件应用到数据库。
 
+使用 `--commit` 成功写库且无错误后，命令会自动删除 `--input` 指定的临时结果文件。`--dry-run` 不会删除文件。
+
 ---
 
 ## 21. comments:prepare-replies

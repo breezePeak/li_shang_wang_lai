@@ -87,11 +87,11 @@ agent 必须严格遵守本文件定义的工作流顺序。
 ```text
 replies:export 导出 pending 评论临时文件
 → agent 只编辑临时结果文件，填写 action/replyText/reason
-→ replies:apply -- --commit 读取结果文件并更新数据库
+→ replies:apply -- --commit 读取结果文件并更新数据库，并在成功后自动删除结果文件
 → replies:execute -- --execute 读取数据库 prepared 回复并执行真实回复
 ```
 
-agent 不直接修改数据库，不直接把回复写入数据库；所有数据库状态变更必须由 CLI 完成。
+agent 不直接修改数据库，不直接把回复写入数据库；所有数据库状态变更和临时结果文件删除都必须由 CLI 完成。
 
 回访流程分两个阶段：
 
@@ -196,7 +196,7 @@ cd "$PROJECT_DIR" && npm run return-visit:execute
 1. `interactions:scan` 从通知中心采集过去 7 天内的点赞和评论互动，并写入数据库。
 2. `replies:export` 从数据库读取 `work_comments.reply_status = pending` 的待回复评论，导出临时 JSON 文件。
 3. agent 读取导出的临时文件，按 `skills/creator-comment-suggestion/SKILL.md` 为每条评论填写 `action`、`replyText`、`reason`，生成结果 JSON 文件。
-4. `replies:apply -- --input <结果文件> --commit` 读取结果文件，校验 `commentId` 和 `commentKey`，并由 CLI 将数据库状态更新为 `prepared` 或 `skipped`。
+4. `replies:apply -- --input <结果文件> --commit` 读取结果文件，校验 `commentId` 和 `commentKey`，并由 CLI 将数据库状态更新为 `prepared` 或 `skipped`；成功写库且无错误后自动删除该结果文件。
 5. `replies:execute -- --execute` 从数据库读取 prepared 回复，打开对应作品或评论位置，执行真实评论回复，并更新数据库结果。
 6. `return-visit:prepare` 根据互动事件生成或更新回访任务，进入对方主页，采集作品上下文和参考评论，并生成回访评论。
 7. `return-visit:execute` 执行真实回访，并写入执行结果。
@@ -210,12 +210,13 @@ work_comments.reply_status = pending
 → replies:export 导出 pending 评论临时文件
 → agent 填写 reply-result-v1 临时结果文件
 → replies:apply -- --commit 校验结果文件并由 CLI 写回数据库
+→ CLI 成功写库后自动删除结果文件
 → work_comments.reply_status = prepared
 → replies:execute -- --execute 逐条读取 prepared 回复并执行真实回复
 → 成功后更新为 succeeded，无法确认则 sent_unverified，失败阻断则 blocked
 ```
 
-`actions:pending` 只用于可选查看待处理概况，不属于默认主流程。默认主流程中，agent 根据 `replies:export` 生成的临时文件逐条填写回复；数据库更新只能通过 `replies:apply -- --commit` 完成。
+`actions:pending` 只用于可选查看待处理概况，不属于默认主流程。默认主流程中，agent 根据 `replies:export` 生成的临时文件逐条填写回复；数据库更新和结果文件删除只能通过 `replies:apply -- --commit` 完成。
 
 默认完整流程对应当前真实代码：
 
@@ -354,6 +355,7 @@ cd "$PROJECT_DIR" && npm run replies:apply -- --input data/tmp/prepared-replies.
 - 校验每条 `commentId` 和 `commentKey` 是否匹配数据库
 - 对 `action = reply` 的记录写入 `reply_text`，并标记为 `prepared`
 - 对 `action = skip` 的记录标记为 `skipped`
+- 成功写库且无错误后自动删除 `--input` 指定的结果文件
 
 当前真实参数：
 

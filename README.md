@@ -116,7 +116,7 @@ npm run auth
 | 扫描互动 | `npm run interactions:scan -- --type all --days 7` | 扫描最近 7 天的评论和点赞互动 |
 | 查看待处理 | `npm run actions:pending` | 查看数据库中等待处理的互动任务 |
 | 导出待回复评论 | `npm run replies:export -- --out data/tmp/pending-replies.json --limit 20 --pretty` | 导出待回复评论临时文件 |
-| 应用回复结果 | `npm run replies:apply -- --input data/tmp/prepared-replies.json --commit` | 读取已填好的回复结果并更新数据库 |
+| 应用回复结果 | `npm run replies:apply -- --input data/tmp/prepared-replies.json --commit` | 读取已填好的回复结果并更新数据库，成功后自动删除该临时文件 |
 | 执行评论回复 | `npm run replies:execute -- --execute` | 读取已准备回复并执行真实回复 |
 | 执行回访 | `npm run return-visit:prepare`<br>`npm run return-visit:execute` | 先准备回访任务，再执行点赞和评论 |
 

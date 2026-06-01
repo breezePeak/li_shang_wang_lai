@@ -13,6 +13,15 @@ function parseArgs(argv) {
   return args;
 }
 
+function removeInputFile(filePath) {
+  try {
+    fs.unlinkSync(filePath);
+    console.error(`[replies:apply] 已删除输入文件: ${filePath}`);
+  } catch (err) {
+    console.error(`[replies:apply] ⚠ 删除输入文件失败: ${err.message}`);
+  }
+}
+
 function main() {
   runMigrations();
   const db = getDb();
@@ -123,6 +132,11 @@ function main() {
   console.error(`\n[replies:apply] 完成: ${applied} 条回复, ${skipped} 条跳过, ${errors} 条错误`);
   if (args.dryRun) {
     console.error('[replies:apply] dry-run 模式，未写入数据库');
+    return;
+  }
+
+  if (args.commit && errors === 0) {
+    removeInputFile(args.input);
   }
 }
 
