@@ -290,87 +290,7 @@ npm run interactions:reply -- --execute --max-items 5
 
 ---
 
-## 14. replies:export
-
-```bash
-npm run replies:export -- --limit 20 --out replies.json --pretty
-```
-
-**源文件**：`src/cli/export-pending-replies.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--limit` | int | `20` | 导出条数 |
-| `--work-id` | string | — | 按作品 ID 筛选 |
-| `--out` | string | — | 输出文件路径 |
-| `--pretty` | flag | `true` | 格式化 JSON |
-| `--no-pretty` | flag | — | 压缩 JSON |
-
-导出待回复评论为 JSON 文件。
-
----
-
-## 15. replies:apply
-
-```bash
-npm run replies:apply -- --input replies.json --commit
-```
-
-**源文件**：`src/cli/apply-prepared-replies.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--input` | string | 必填 | 输入文件路径 |
-| `--dry-run` | flag | — | 只预演 |
-| `--commit` | flag | — | 写入数据库 |
-| `--overwrite` | flag | — | 覆盖已有回复 |
-
-将导出的回复文件应用到数据库。
-
-使用 `--commit` 成功写库且无错误后，命令会自动删除 `--input` 指定的临时结果文件。`--dry-run` 不会删除文件。
-
----
-
-## 16. comments:prepare-replies
-
-```bash
-npm run comments:prepare-replies -- --max-items 5 --reply-max-length 40
-```
-
-**源文件**：`src/cli/prepare-work-comment-replies.mjs`
-
-从数据库读取待回复评论，结合作品内容和已采集参考评论生成回复，并写回数据库。该命令不打开浏览器，不执行真实回复。
-
-默认完整工作流不使用该命令。默认评论回复流程使用 `replies:export` 导出临时文件、agent 填写结果文件、`replies:apply -- --commit` 更新数据库，再执行 `replies:execute -- --execute`。
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--max-items` | int | `100` | 最多处理多少条待回复评论 |
-| `--reply-max-length` | int | `40` | 回复最大长度，最小 `10` |
-
-该命令不支持 `--execute`。
-
----
-
-## 17. replies:execute
-
-```bash
-npm run replies:execute -- --execute --max-items 5
-```
-
-**源文件**：`src/cli/execute-prepared-replies.mjs`
-
-执行已准备的回复。使用全部通用参数。
-
----
-
-## 18. likes:plan
+## 14. likes:plan
 
 ```bash
 npm run likes:plan -- --mode auto --out likes-plan.json
@@ -389,7 +309,7 @@ npm run likes:plan -- --mode auto --out likes-plan.json
 
 ---
 
-## 19. likes:reciprocate
+## 15. likes:reciprocate
 
 ```bash
 npm run likes:reciprocate -- --plan likes-plan.json --dry-run
@@ -408,7 +328,7 @@ npm run likes:reciprocate -- --plan likes-plan.json --dry-run
 
 ---
 
-## 20. visits:plan
+## 16. visits:plan
 
 ```bash
 npm run visits:plan -- --source notifications
@@ -426,7 +346,7 @@ npm run visits:plan -- --source notifications
 
 ---
 
-## 21. visits:discover
+## 17. visits:discover
 
 ```bash
 npm run visits:discover -- --max-items 5 --keep-open
@@ -463,7 +383,7 @@ npm run visits:discover -- --json --max-items 3
 
 ---
 
-## 22. visits:review
+## 18. visits:review
 
 ```bash
 npm run visits:review -- --json --max-items 5
@@ -475,7 +395,7 @@ npm run visits:review -- --json --max-items 5
 
 ---
 
-## 23. visits:live-review
+## 19. visits:live-review
 
 ```bash
 npm run visits:live-review -- --comment-mode skill --json --max-items 1
@@ -516,7 +436,7 @@ npm run visits:live-review -- --safe-observe --max-items 1
 
 ---
 
-## 24. return-visit:prepare
+## 20. return-visit:prepare
 
 ```bash
 npm run return-visit:prepare -- --max-items 5
@@ -539,7 +459,7 @@ npm run return-visit:prepare -- --max-items 5
 
 ---
 
-## 25. return-visit:execute
+## 21. return-visit:execute
 
 ```bash
 npm run return-visit:execute -- --max-items 3
@@ -563,7 +483,7 @@ npm run return-visit:execute -- --max-items 3
 
 ---
 
-## 26. notify:inspect
+## 22. notify:inspect
 
 ```bash
 npm run notify:inspect
@@ -575,7 +495,7 @@ npm run notify:inspect
 
 ---
 
-## 27. interactions:inspect
+## 23. interactions:inspect
 
 ```bash
 npm run interactions:inspect
@@ -587,7 +507,7 @@ npm run interactions:inspect
 
 ---
 
-## 28. history
+## 24. history
 
 ```bash
 npm run history
@@ -599,7 +519,7 @@ npm run history
 
 ---
 
-## 29. dev:inspect-page
+## 25. dev:inspect-page
 
 ```bash
 npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
@@ -620,7 +540,7 @@ npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
 
 ---
 
-## 30. debug:like-dom
+## 26. debug:like-dom
 
 ```bash
 npm run debug:like-dom
