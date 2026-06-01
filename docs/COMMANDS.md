@@ -252,45 +252,7 @@ npm run comments:execute -- --action-id 42 --dry-run
 
 ---
 
-## 11. interactions:live
-
-```bash
-npm run interactions:live -- --max-items 5 --execute
-```
-
-**源文件**：`src/cli/live-interactions.mjs`
-
-实时交互模式：打开通知面板，逐条处理评论通知，自动生成回复并执行。
-
-使用全部通用参数。这是功能最完整的交互式命令。
-
----
-
-## 12. interactions:collect
-
-```bash
-npm run interactions:collect -- --max-notifications 30
-```
-
-**源文件**：`src/cli/live-interactions.mjs`（加 `--collect-only`）
-
-只采集通知，不生成回复。等价于 `interactions:live --collect-only`。
-
----
-
-## 13. interactions:reply
-
-```bash
-npm run interactions:reply -- --execute --max-items 5
-```
-
-**源文件**：`src/cli/live-reply.mjs`
-
-基于已入库的 work/comment 数据，生成回复并执行。使用全部通用参数。
-
----
-
-## 14. return-visit:prepare
+## 11. return-visit:prepare
 
 ```bash
 npm run return-visit:prepare -- --max-items 5
@@ -313,7 +275,7 @@ npm run return-visit:prepare -- --max-items 5
 
 ---
 
-## 15. return-visit:execute
+## 12. return-visit:execute
 
 ```bash
 npm run return-visit:execute -- --max-items 3
@@ -337,7 +299,7 @@ npm run return-visit:execute -- --max-items 3
 
 ---
 
-## 16. notify:inspect
+## 13. notify:inspect
 
 ```bash
 npm run notify:inspect
@@ -349,7 +311,7 @@ npm run notify:inspect
 
 ---
 
-## 17. interactions:inspect
+## 14. interactions:inspect
 
 ```bash
 npm run interactions:inspect
@@ -361,7 +323,7 @@ npm run interactions:inspect
 
 ---
 
-## 18. history
+## 15. history
 
 ```bash
 npm run history
@@ -373,7 +335,7 @@ npm run history
 
 ---
 
-## 19. dev:inspect-page
+## 16. dev:inspect-page
 
 ```bash
 npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
@@ -394,7 +356,7 @@ npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
 
 ---
 
-## 20. debug:like-dom
+## 17. debug:like-dom
 
 ```bash
 npm run debug:like-dom
@@ -406,7 +368,7 @@ npm run debug:like-dom
 
 ---
 
-## 21. debug:like-state
+## 18. debug:like-state
 
 ```bash
 npm run debug:like-state
@@ -465,4 +427,4 @@ npm run debug:like-state
 | 风控停止 | 遇到验证码、登录失效、页面异常时立刻停止 |
 | skill + maxItems=1 | skill 模式传入 `--selected-comment-text` 时必须 `--max-items 1` |
 | 页面未稳定即阻断 | `waitForProfileSettled` / `waitForVideoSettled` 失败时 blocked |
-| 作品缺少标题即阻断 | `interactions:reply` 中作品无标题时 blocked |
+| 作品缺少标题即阻断 | 回访执行中作品无标题时 blocked |

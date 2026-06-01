@@ -403,7 +403,6 @@ cd "$PROJECT_DIR" && npm run replies:execute -- --execute
 
 不要把默认评论回复写成单条命令，也不要跳过临时文件阶段。
 
-`interactions:reply -- --execute` 是旧的一步式兼容命令，默认完整流程不要使用它。只有用户明确要求“一步生成并执行评论回复”时，才可以使用。
 
 默认不要使用计划文件流程。
 
