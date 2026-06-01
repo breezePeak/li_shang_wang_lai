@@ -57,7 +57,7 @@
 主流程必须以真实 CLI 为准。当前项目保留的主流程是：
 
 ```text
-评论回复：interactions:scan -> actions:pending -> comments:prepare -> comments:execute-all --execute
+评论回复：interactions:scan -> actions:pending -> comments:prepare --items-file/--items-json -> comments:execute-all --action-ids/--all-prepared --execute
 回访：interactions:scan -> return-visit:prepare -> return-visit:execute --execute
 ```
 

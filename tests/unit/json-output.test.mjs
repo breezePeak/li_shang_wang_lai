@@ -48,6 +48,19 @@ describe('P0-1: pure --json stdout contract', () => {
     expect(typeof parsed.ok).toBe('boolean');
   });
 
+  it('comments:prepare batch --items-json stdout must parse as single JSON', () => {
+    const result = runCli('prepare-comment-reply.mjs', [
+      '--items-json', '[{"eventId":999001,"replyText":"小虾先记下啦"},{"eventId":999002,"replyText":"小虾觉得挺有意思"}]',
+      '--json',
+    ]);
+    const parsed = parseStdout(result);
+    expect(parsed).not.toBeNull();
+    expect(parsed.ok).toBe(true);
+    expect(parsed.command).toBe('comments:prepare');
+    expect(Array.isArray(parsed.data.results)).toBe(true);
+    expect(parsed.data.results).toHaveLength(2);
+  });
+
   it('comments:execute-all validate-only --json stdout must parse as single JSON', () => {
     const result = runCli('execute-all-comment-replies.mjs', [
       '--action-id', '999',

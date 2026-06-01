@@ -28,8 +28,8 @@
 ```bash
 npm run interactions:scan -- --type all --days 7
 npm run actions:pending
-npm run comments:prepare -- --event-id <event_id> --reply-text "<回复文本>"
-npm run comments:execute-all -- --action-id <action_id> --execute
+npm run comments:prepare -- --items-file replies.json
+npm run comments:execute-all -- --action-ids 1,2,3 --execute
 ```
 
 批量执行 prepared 评论回复：
@@ -114,17 +114,21 @@ npm run actions:pending -- --type comment --json
 ## 5. comments:prepare
 
 ```bash
-npm run comments:prepare -- --event-id 42 --reply-text "谢谢支持"
+npm run comments:prepare -- --items-json '[{"eventId":42,"replyText":"谢谢支持"},{"eventId":43,"replyText":"小虾先记下啦"}]'
+npm run comments:prepare -- --items-file replies.json
+npm run comments:prepare -- --event-id 42 --reply-text "谢谢支持"  # 兼容单条
 ```
 
 源文件：`src/cli/prepare-comment-reply.mjs`
 
-用评论事件创建 `prepared` 回复动作。最小必填参数是 `--event-id` 和 `--reply-text`。
+批量或单条创建 `prepared` 回复动作。主流程应优先使用 `--items-json` 或 `--items-file` 批量准备；`--event-id` + `--reply-text` 仅用于单条兼容或临时调试。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--event-id` | 必填 | 评论事件 ID |
-| `--reply-text` | 必填 | 回复文本 |
+| `--event-id` | `null` | 单条模式的评论事件 ID |
+| `--reply-text` | `null` | 单条模式的回复文本 |
+| `--items-json` | `''` | JSON 数组，批量准备回复 |
+| `--items-file` | `''` | JSON 文件路径，批量准备回复 |
 | `--decision` | `reply` | `reply` / `manual_review` / `ignore` |
 | `--risk-level` | `low` | `low` / `medium` / `high` |
 | `--decision-reason` | `''` | 决策理由 |
@@ -137,10 +141,21 @@ npm run comments:prepare -- --event-id 42 --reply-text "谢谢支持"
 安全规则：
 
 - 缺少必填参数时一次性输出所有缺失项。
+- 批量输入格式为 JSON 数组，每项至少包含 `eventId` 和 `replyText`。
+- 批量项可覆盖 `decision`、`riskLevel`、`relevance`、`workContextId`、`commentCategory`、`replyMode` 等字段；未提供时使用 CLI 默认值。
 - 只有 `decision=reply`、`risk-level=low`、`relevance != irrelevant` 可创建动作。
-- `auto_simple` 必须使用模板池文本。
-- `auto_natural` 允许 Agent 自然回复，但会做长度和禁用词校验。
+- `auto_simple` 只用于调用方已经选择模板池文本的场景。
+- `auto_natural` 是主流程默认模式，用于接收 `skills/creator-comment-suggestion/SKILL.md` 生成的一条自然回复，并做长度和禁用词校验。
 - 同一事件已有成功回复或 active 回复动作时会阻断。
+
+`replies.json` 示例：
+
+```json
+[
+  { "eventId": 42, "replyText": "小虾先记下啦" },
+  { "eventId": 43, "replyText": "这个小虾也觉得挺有意思" }
+]
+```
 
 ## 6. comments:execute-all
 

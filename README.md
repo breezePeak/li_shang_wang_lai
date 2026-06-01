@@ -93,8 +93,8 @@ npm run auth
 | 初始化数据库 | `npm run db:init` |
 | 扫描互动 | `npm run interactions:scan -- --type all --days 7` |
 | 查看待处理 | `npm run actions:pending` |
-| 准备评论回复 | `npm run comments:prepare -- --event-id <event_id> --reply-text "回复内容"` |
-| 执行评论回复 | `npm run comments:execute-all -- --action-id <action_id> --execute` |
+| 批量准备评论回复 | `npm run comments:prepare -- --items-file replies.json` |
+| 批量执行评论回复 | `npm run comments:execute-all -- --action-ids 1,2,3 --execute` |
 | 准备回访 | `npm run return-visit:prepare` |
 | 执行回访 | `npm run return-visit:execute -- --execute` |
 | 恢复 blocked 评论动作 | `npm run actions:reset-blocked -- --action-id <action_id>` |
