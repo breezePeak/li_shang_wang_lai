@@ -612,8 +612,22 @@ export async function findCommentInWorkModal(page, item, { maxScrolls = 10 } = {
   }
 }
 
-export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alreadyRepliedKeys = new Set(), selfNickname = '' } = {}) {
+export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alreadyRepliedKeys = new Set(), selfNickname = '', maxAgeDays = null, oldCommentStopCount = 3 } = {}) {
   const allComments = [];
+  const cutoffMs = maxAgeDays ? Date.now() - maxAgeDays * 86400000 : null;
+
+  const isOlderThanWindow = (comment) => {
+    if (!cutoffMs || !comment.eventTimeText) return false;
+    const parsed = parseDouyinTimeText(comment.eventTimeText);
+    if (!parsed) return false;
+    return new Date(parsed).getTime() < cutoffMs;
+  };
+
+  const hasConsecutiveOldAtTail = () => {
+    if (!cutoffMs || oldCommentStopCount <= 0 || allComments.length < oldCommentStopCount) return false;
+    const tail = allComments.slice(-oldCommentStopCount);
+    return tail.length === oldCommentStopCount && tail.every(isOlderThanWindow);
+  };
 
   try {
     const collect = () => page.evaluate(({ alreadyRepliedKeysArr, selfNickname }) => {
@@ -631,6 +645,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
 
         let actorName = '';
         let commentText = '';
+        let eventTimeText = '';
         let hasMyReply = false;
         let isSelfComment = false;
         let commentKey = '';
@@ -638,6 +653,13 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
         const nameLine = lines[0];
         if (nameLine.length > 0 && nameLine.length < 50) actorName = nameLine;
         isSelfComment = !!(selfNickname && actorName === selfNickname);
+
+        for (const line of lines) {
+          if (/^刚刚$/.test(line) || /^昨天/.test(line) || /^前天/.test(line) || /^\d+[秒分时天周月年]前/.test(line) || /^\d+月\d+日/.test(line) || /^\d{4}-\d{2}-\d{2}/.test(line)) {
+            eventTimeText = line;
+            break;
+          }
+        }
 
         for (let k = 1; k < lines.length; k++) {
           const line = lines[k];
@@ -698,6 +720,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
           commentIndex: i,
           actorName,
           commentText: commentText.slice(0, 300),
+          eventTimeText,
           hasMyReply,
           isSelfComment,
           alreadyReplied: alreadyRepliedKeys.has(commentKey),
@@ -714,7 +737,9 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
     let result = await collect();
     allComments.push(...result.comments);
 
-    if (result.canScroll) {
+    if (hasConsecutiveOldAtTail()) {
+      console.error(`[work-modal] 连续 ${oldCommentStopCount} 条评论超过 ${maxAgeDays} 天，停止该作品评论采集`);
+    } else if (result.canScroll) {
       for (let s = 0; s < maxScrolls; s++) {
         const scrolled = await page.evaluate(() => {
           const commentArea = document.querySelector('.comment-mainContent');
@@ -775,6 +800,11 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
         const newComments = result.comments.filter(c => !allComments.some(e => e.commentKey === c.commentKey));
         allComments.push(...newComments);
 
+        if (hasConsecutiveOldAtTail()) {
+          console.error(`[work-modal] 连续 ${oldCommentStopCount} 条评论超过 ${maxAgeDays} 天，停止该作品评论采集`);
+          break;
+        }
+
         if (s % 10 === 9) {
           console.error(`[work-modal] 滚动 ${s + 1} 次，累计 ${allComments.length} 条评论`);
         }
@@ -783,13 +813,16 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
       }
     }
 
-    const unreplied = allComments.filter(c => !c.isSelfComment && !c.hasMyReply && !c.alreadyReplied && c.commentText.length > 0);
+    const inWindowComments = cutoffMs
+      ? allComments.filter(c => !isOlderThanWindow(c))
+      : allComments;
+    const unreplied = inWindowComments.filter(c => !c.isSelfComment && !c.hasMyReply && !c.alreadyReplied && c.commentText.length > 0);
 
-    console.error(`[work-modal] 评论扫描: 总 ${allComments.length} 条，我未回复 ${unreplied.length} 条`);
+    console.error(`[work-modal] 评论扫描: 总 ${allComments.length} 条，时间窗口内 ${inWindowComments.length} 条，我未回复 ${unreplied.length} 条`);
 
     return success({
       total: allComments.length,
-      comments: allComments,
+      comments: inWindowComments,
       unreplied,
       allKeys: allComments.map(c => c.commentKey),
     });

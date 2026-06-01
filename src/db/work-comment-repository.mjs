@@ -126,3 +126,25 @@ export function findCommentByActorAndText(actorName, commentTextPrefix) {
     "SELECT * FROM work_comments WHERE actor_name = ? AND comment_text LIKE ? LIMIT 1"
   ).get(actorName, `${commentTextPrefix}%`);
 }
+
+export function listReplyTrackedCommentKeysForWork({ workId, modalId } = {}) {
+  const db = getDb();
+  const params = [];
+  const clauses = [];
+  if (workId) {
+    clauses.push('work_id = ?');
+    params.push(workId);
+  }
+  if (modalId) {
+    clauses.push('modal_id = ?');
+    params.push(modalId);
+  }
+  if (clauses.length === 0) return [];
+
+  return db.prepare(`
+    SELECT actor_name, comment_text, comment_key
+    FROM work_comments
+    WHERE (${clauses.join(' OR ')})
+      AND reply_status IN ('prepared','succeeded','sent_unverified')
+  `).all(...params).map(row => row.comment_key || `${row.actor_name || ''}::${String(row.comment_text || '').slice(0, 60)}`);
+}

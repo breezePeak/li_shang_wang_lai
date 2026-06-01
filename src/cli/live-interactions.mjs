@@ -27,7 +27,7 @@ import { classifyNotificationAction } from '../domain/notification-action-router
 import { analyzeReturnVisitContext, generateReturnVisitComment } from '../services/return-visit-comment-generator.mjs';
 import { upsertNotificationEvent } from '../db/interaction-repository.mjs';
 import { upsertWorkContext, findWorkByModalId, findWorkByWorkId, findWorkByThumbnailKey } from '../db/work-repository.mjs';
-import { upsertWorkComment, listPendingCommentsGroupedByWork, listPreparedComments, markCommentReplyPrepared, markCommentReplied, markCommentSentUnverified, markCommentBlocked, markCommentSkipped, findCommentByActorAndText } from '../db/work-comment-repository.mjs';
+import { upsertWorkComment, listPendingCommentsGroupedByWork, listPreparedComments, markCommentReplyPrepared, markCommentReplied, markCommentSentUnverified, markCommentBlocked, markCommentSkipped, findCommentByActorAndText, listReplyTrackedCommentKeysForWork } from '../db/work-comment-repository.mjs';
 import { upsertRevisitCandidate, listPendingRevisitCandidates, markRevisitDone, markRevisitSkipped, markRevisitBlocked } from '../db/revisit-repository.mjs';
 import { getDb } from '../db/database.mjs';
 import { runMigrations } from '../db/migrations.mjs';
@@ -373,7 +373,14 @@ async function processWorkModal(page, notification, db, run, options, state) {
 
   r.step = 'scan-unreplied';
   console.log(`[live]   扫描未回复评论...`);
-  const scanResult = await findUnrepliedCommentsInModal(page, { alreadyRepliedKeys: state.repliedCommentKeys, selfNickname });
+  const dbTrackedKeys = listReplyTrackedCommentKeysForWork({ workId: workCtx.workId, modalId: workCtx.modalId });
+  const alreadyRepliedKeys = new Set([...state.repliedCommentKeys, ...dbTrackedKeys]);
+  const scanResult = await findUnrepliedCommentsInModal(page, {
+    alreadyRepliedKeys,
+    selfNickname,
+    maxAgeDays: options.days || null,
+    oldCommentStopCount: 3,
+  });
   if (!scanResult.ok) {
     r.status = 'blocked';
     r.reason = `扫描评论失败: ${scanResult.message}`;
@@ -388,6 +395,7 @@ async function processWorkModal(page, notification, db, run, options, state) {
   const scannedComments = (scanResult.data.comments || []).map(c => ({
     actorName: c.actorName || '',
     commentText: c.commentText || '',
+    eventTimeText: c.eventTimeText || '',
     hasMyReply: !!c.hasMyReply,
     isSelfComment: !!c.isSelfComment,
     alreadyReplied: !!c.alreadyReplied,
@@ -410,8 +418,14 @@ async function processWorkModal(page, notification, db, run, options, state) {
 
   // Upsert work_comments to DB
   let commentsUpserted = 0;
+  let commentsDeduped = 0;
   for (const comment of unreplied) {
     const commentKey = `${comment.actorName}::${comment.commentText.slice(0, 80)}`;
+    const existingComment = findCommentByActorAndText(comment.actorName || '', (comment.commentText || '').slice(0, 60));
+    if (existingComment && ['pending', 'prepared', 'succeeded', 'sent_unverified'].includes(existingComment.reply_status)) {
+      commentsDeduped++;
+      continue;
+    }
     const upsertResult = upsertWorkComment({
       workId: workCtx.workId,
       workUrl: workCtx.workUrl,
@@ -420,7 +434,7 @@ async function processWorkModal(page, notification, db, run, options, state) {
       actorProfileUrl: '',
       actorProfileKey: '',
       commentText: comment.commentText,
-      eventTimeText: '',
+      eventTimeText: comment.eventTimeText || '',
       commentKey,
       sourceEventId: r.eventId || null,
       sourceNotificationKey: notification.notificationItemKey || null,
@@ -430,7 +444,7 @@ async function processWorkModal(page, notification, db, run, options, state) {
     comment.dbId = upsertResult.id;
     comment.commentKey = commentKey;
   }
-  console.log(`[live]   work_comments表: 新增 ${commentsUpserted} 条`);
+  console.log(`[live]   work_comments表: 新增 ${commentsUpserted} 条，数据库去重 ${commentsDeduped} 条`);
 
   if (notification.thumbnailKey && state.visitedThumbnailKeys) {
     state.visitedThumbnailKeys.add(notification.thumbnailKey);
@@ -1057,6 +1071,13 @@ function routeNotification(n) {
   return classifyNotificationAction(n.rawText || `${n.username || ''}\n${n.content || ''}\n${n.action || ''}`);
 }
 
+function isTimeTextOlderThanDays(timeText, days) {
+  if (!days || !timeText) return false;
+  const parsed = parseDouyinTimeText(timeText);
+  if (!parsed) return false;
+  return new Date(parsed).getTime() < Date.now() - days * 86400000;
+}
+
 async function main() {
   console.error('[interactions:live] 主流程：通知扫描入库 -> 生成回复 -> 执行回复 -> 统一回访');
 
@@ -1144,8 +1165,23 @@ async function main() {
       for (const n of newNotifs) {
         const route = routeNotification(n);
         n.route = route;
+      }
+
+      const relevantNotifs = newNotifs.filter(n => n.route?.notificationAction === 'comment_on_my_work' || n.route?.notificationAction === 'like_received');
+      const oldRelevantNotifs = commonArgs.options.days
+        ? relevantNotifs.filter(n => isTimeTextOlderThanDays(n.timeText || '', commonArgs.options.days))
+        : [];
+      if (commonArgs.options.days) {
+        newNotifs = newNotifs.filter(n => {
+          const action = n.route?.notificationAction;
+          if (action !== 'comment_on_my_work' && action !== 'like_received') return true;
+          return !isTimeTextOlderThanDays(n.timeText || '', commonArgs.options.days);
+        });
+      }
+
+      for (const n of newNotifs) {
         const eventResult = upsertNotificationEvent({
-          eventType: route.eventType === 'unknown' ? (n.eventType || 'comment') : route.eventType,
+          eventType: n.route.eventType === 'unknown' ? (n.eventType || 'comment') : n.route.eventType,
           actorName: n.username || '',
           actorProfileKey: n.actorProfileKey || '',
           actorProfileUrl: n.actorProfileUrl || '',
@@ -1156,7 +1192,7 @@ async function main() {
           notificationItemKey: n.notificationItemKey || '',
           action: n.action || '',
           content: n.content || '',
-          rawPayloadJson: JSON.stringify({ ...n, route }),
+          rawPayloadJson: JSON.stringify({ ...n, route: n.route }),
         });
         n.eventId = eventResult.eventId;
       }
@@ -1167,6 +1203,9 @@ async function main() {
       const unknownNotifs = newNotifs.filter(n => n.route?.notificationAction === 'unknown');
 
       console.log(`[live] 第 ${scrollRound + 1} 轮: 通知 ${notifications.length} 条，新增 ${newNotifs.length} 条 (评论${commentNotifs.length} 点赞${likeNotifs.length} 回复${replyNotifs.length} 未知${unknownNotifs.length})`);
+      if (commonArgs.options.days && oldRelevantNotifs.length > 0) {
+        console.log(`[live]   跳过超过 ${commonArgs.options.days} 天的评论/点赞通知 ${oldRelevantNotifs.length} 条`);
+      }
 
       for (const n of likeNotifs) {
         if (!commonArgs.options.noRevisit) {
@@ -1237,6 +1276,12 @@ async function main() {
       }
 
       if (phase1EndedReason) break;
+
+      if (commonArgs.options.days && relevantNotifs.length > 0 && relevantNotifs.length === oldRelevantNotifs.length) {
+        console.log(`[live] 已遇到超过 ${commonArgs.options.days} 天的通知边界，停止继续滚动`);
+        phase1EndedReason = 'days-window-ended';
+        break;
+      }
 
       if (processedNotifications >= maxNotifications) {
         console.log(`[live] 已达到 maxNotifications ${maxNotifications}`);

@@ -137,6 +137,21 @@ async function main() {
       maxWorksToCheck,
       pageLoadRetryCount,
       maxReferenceComments: 5,
+      validateWork: (work) => {
+        const analysis = analyzeReturnVisitContext({
+          workTitle: work.workTitle,
+          workText: work.workText,
+          contentSummary: work.contentSummary,
+          referenceComments: work.referenceComments || [],
+        });
+        if (!analysis.workTitle && analysis.referenceComments.length === 0) {
+          return { ok: false, reason: 'revisit_context_missing_work_and_comments' };
+        }
+        if (analysis.sceneSignals.length === 0) {
+          return { ok: false, reason: 'revisit_context_no_scene_signal' };
+        }
+        return { ok: true };
+      },
     });
 
     if (!collected.ok) {

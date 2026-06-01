@@ -201,6 +201,7 @@ export async function collectCandidateWorkFromProfile(page, profileUrl, options 
     maxWorksToCheck = 3,
     pageLoadRetryCount = 1,
     maxReferenceComments = 5,
+    validateWork = null,
   } = options;
 
   const profile = normalizeDouyinUrl(profileUrl || '') || profileUrl;
@@ -233,6 +234,18 @@ export async function collectCandidateWorkFromProfile(page, profileUrl, options 
 
     if (!result.ok) continue;
     if (!result.sufficient) continue;
+
+    if (typeof validateWork === 'function') {
+      const validation = validateWork(result.work);
+      if (!validation?.ok) {
+        checkedWorks[checkedWorks.length - 1] = {
+          workUrl,
+          ok: true,
+          reason: validation?.reason || 'work_validator_rejected',
+        };
+        continue;
+      }
+    }
 
     return {
       ok: true,
