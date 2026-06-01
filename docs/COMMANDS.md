@@ -207,54 +207,7 @@ npm run comments:classify -- --text "求教程" --json
 
 ---
 
-## 9. comments:plan
-
-```bash
-npm run comments:plan -- --status new --max-items 10 --output plan.json
-```
-
-**源文件**：`src/cli/plan-comment-replies.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--max-items` | int | — | 限制生成条数 |
-| `--status` | string | — | 按状态筛选事件 |
-| `--output` | string | — | 输出计划文件路径 |
-| `--include-missing-work-title` | flag | — | 包含缺少作品标题的评论 |
-
-根据数据库事件生成评论回复计划文件。
-
----
-
-## 10. comments:approve-plan
-
-```bash
-npm run comments:approve-plan -- --plan plan.json --all
-npm run comments:approve-plan -- --plan plan.json --event-id e1 --event-id e2
-```
-
-**源文件**：`src/cli/approve-comment-plan.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--plan` | string | 必填 | 计划文件路径 |
-| `--all` | flag | — | 全部审批 |
-| `--none` | flag | — | 全部拒绝 |
-| `--event-id` | string[] | — | 指定审批的事件 ID（可多次使用） |
-| `--index` | int[] | — | 指定审批的序号（可多次使用） |
-| `--reason` | string | — | 审批理由 |
-| `--dry-run` | flag | — | 只预演不修改 |
-| `--output` | string | — | 输出路径 |
-
-审批或拒绝评论回复计划中的条目。
-
----
-
-## 11. comments:prepare
+## 9. comments:prepare
 
 ```bash
 npm run comments:prepare -- --event-id 42 --reply-text "谢谢支持" --decision approve
@@ -281,7 +234,7 @@ npm run comments:prepare -- --event-id 42 --reply-text "谢谢支持" --decision
 
 ---
 
-## 12. comments:execute
+## 10. comments:execute
 
 ```bash
 npm run comments:execute -- --action-id 42 --dry-run
@@ -299,80 +252,7 @@ npm run comments:execute -- --action-id 42 --dry-run
 
 ---
 
-## 13. comments:reply
-
-```bash
-npm run comments:reply -- --plan plan.json --dry-run --max-items 5
-npm run comments:reply -- --plan plan.json --execute --max-items 3
-```
-
-**源文件**：`src/cli/execute-comment-replies.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--plan` | string | 必填 | 计划文件路径 |
-
-按作品分组批量执行评论回复。复用同一个浏览器和评论管理页，同一作品下多条评论只切换作品一次。
-
-### 分组逻辑
-
-- 分组键优先级：`workId` > `workUrl` > `workTitle` > `__unknown_work__`
-- 分组键带前缀（`workId:xxx`、`workUrl:xxx`、`workTitle:xxx`），防止不同字段值相同导致撞组
-- 空字符串、纯空格、null、undefined 归入 `__unknown_work__` 组
-- 保持 group 出现顺序和组内 item 顺序
-
-### 安全逻辑
-
-- 未审批（`approved !== true`）跳过
-- `replyText` 为空阻断
-- 已 `succeeded` 的 action 跳过（防重复）
-- `max-items` 控制真实执行数量
-- 作品缺少 `workTitle` 时整组 blocked
-- `selectWorkByTitle` 后二次 `getSelectedWorkTitle` 校验
-- 作品选择失败只 blocked 当前 group，继续下一个 group
-- dry-run 成功/失败都写 actions 表
-
----
-
-## 14. comments:verify
-
-```bash
-npm run comments:verify -- --result result.json
-```
-
-**源文件**：`src/cli/verify-comment-replies.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--result` | string | — | 结果文件路径 |
-
-校验评论回复是否真实出现在页面上。
-
----
-
-## 15. comments:resume
-
-```bash
-npm run comments:resume -- --result result.json
-```
-
-**源文件**：`src/cli/resume-comment-replies.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--result` | string | — | 结果文件路径 |
-
-从中断的结果文件恢复执行。
-
----
-
-## 16. interactions:live
+## 11. interactions:live
 
 ```bash
 npm run interactions:live -- --max-items 5 --execute
@@ -386,7 +266,7 @@ npm run interactions:live -- --max-items 5 --execute
 
 ---
 
-## 17. interactions:collect
+## 12. interactions:collect
 
 ```bash
 npm run interactions:collect -- --max-notifications 30
@@ -398,7 +278,7 @@ npm run interactions:collect -- --max-notifications 30
 
 ---
 
-## 18. interactions:reply
+## 13. interactions:reply
 
 ```bash
 npm run interactions:reply -- --execute --max-items 5
@@ -410,7 +290,7 @@ npm run interactions:reply -- --execute --max-items 5
 
 ---
 
-## 19. replies:export
+## 14. replies:export
 
 ```bash
 npm run replies:export -- --limit 20 --out replies.json --pretty
@@ -432,7 +312,7 @@ npm run replies:export -- --limit 20 --out replies.json --pretty
 
 ---
 
-## 20. replies:apply
+## 15. replies:apply
 
 ```bash
 npm run replies:apply -- --input replies.json --commit
@@ -455,7 +335,7 @@ npm run replies:apply -- --input replies.json --commit
 
 ---
 
-## 21. comments:prepare-replies
+## 16. comments:prepare-replies
 
 ```bash
 npm run comments:prepare-replies -- --max-items 5 --reply-max-length 40
@@ -478,7 +358,7 @@ npm run comments:prepare-replies -- --max-items 5 --reply-max-length 40
 
 ---
 
-## 22. replies:execute
+## 17. replies:execute
 
 ```bash
 npm run replies:execute -- --execute --max-items 5
@@ -490,7 +370,7 @@ npm run replies:execute -- --execute --max-items 5
 
 ---
 
-## 23. likes:plan
+## 18. likes:plan
 
 ```bash
 npm run likes:plan -- --mode auto --out likes-plan.json
@@ -509,7 +389,7 @@ npm run likes:plan -- --mode auto --out likes-plan.json
 
 ---
 
-## 24. likes:reciprocate
+## 19. likes:reciprocate
 
 ```bash
 npm run likes:reciprocate -- --plan likes-plan.json --dry-run
@@ -528,7 +408,7 @@ npm run likes:reciprocate -- --plan likes-plan.json --dry-run
 
 ---
 
-## 25. visits:plan
+## 20. visits:plan
 
 ```bash
 npm run visits:plan -- --source notifications
@@ -546,7 +426,7 @@ npm run visits:plan -- --source notifications
 
 ---
 
-## 26. visits:discover
+## 21. visits:discover
 
 ```bash
 npm run visits:discover -- --max-items 5 --keep-open
@@ -583,7 +463,7 @@ npm run visits:discover -- --json --max-items 3
 
 ---
 
-## 27. visits:review
+## 22. visits:review
 
 ```bash
 npm run visits:review -- --json --max-items 5
@@ -595,7 +475,7 @@ npm run visits:review -- --json --max-items 5
 
 ---
 
-## 28. visits:live-review
+## 23. visits:live-review
 
 ```bash
 npm run visits:live-review -- --comment-mode skill --json --max-items 1
@@ -636,7 +516,7 @@ npm run visits:live-review -- --safe-observe --max-items 1
 
 ---
 
-## 29. return-visit:prepare
+## 24. return-visit:prepare
 
 ```bash
 npm run return-visit:prepare -- --max-items 5
@@ -659,7 +539,7 @@ npm run return-visit:prepare -- --max-items 5
 
 ---
 
-## 30. return-visit:execute
+## 25. return-visit:execute
 
 ```bash
 npm run return-visit:execute -- --max-items 3
@@ -683,7 +563,7 @@ npm run return-visit:execute -- --max-items 3
 
 ---
 
-## 31. notify:inspect
+## 26. notify:inspect
 
 ```bash
 npm run notify:inspect
@@ -695,7 +575,7 @@ npm run notify:inspect
 
 ---
 
-## 32. interactions:inspect
+## 27. interactions:inspect
 
 ```bash
 npm run interactions:inspect
@@ -707,7 +587,7 @@ npm run interactions:inspect
 
 ---
 
-## 33. history
+## 28. history
 
 ```bash
 npm run history
@@ -719,7 +599,7 @@ npm run history
 
 ---
 
-## 34. dev:inspect-page
+## 29. dev:inspect-page
 
 ```bash
 npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
@@ -740,7 +620,7 @@ npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
 
 ---
 
-## 35. debug:like-dom
+## 30. debug:like-dom
 
 ```bash
 npm run debug:like-dom
@@ -752,7 +632,7 @@ npm run debug:like-dom
 
 ---
 
-## 36. debug:like-state
+## 31. debug:like-state
 
 ```bash
 npm run debug:like-state
@@ -811,4 +691,4 @@ npm run debug:like-state
 | 风控停止 | 遇到验证码、登录失效、页面异常时立刻停止 |
 | skill + maxItems=1 | skill 模式传入 `--selected-comment-text` 时必须 `--max-items 1` |
 | 页面未稳定即阻断 | `waitForProfileSettled` / `waitForVideoSettled` 失败时 blocked |
-| 作品缺少标题即阻断 | `comments:reply` 中作品无 `workTitle` 时整组 blocked |
+| 作品缺少标题即阻断 | `interactions:reply` 中作品无标题时 blocked |

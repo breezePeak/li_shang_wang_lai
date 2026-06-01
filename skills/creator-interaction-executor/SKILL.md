@@ -46,7 +46,6 @@ agent 必须严格遵守本文件定义的工作流顺序。
 
 默认不额外添加 `--max-items`，各命令处理上限以当前代码或配置默认值为准。
 
-默认评论回复使用临时回复文件流转，不使用旧 `comments:plan` 计划文件流程。
 
 默认不添加 `--json`。
 
@@ -368,9 +367,7 @@ cd "$PROJECT_DIR" && npm run replies:apply -- --input data/tmp/prepared-replies.
 
 默认真实入库必须使用 `--commit`。如果用户要求先检查，可以先用 `--dry-run`，但 dry-run 不会写数据库。
 
-默认不要使用 `comments:plan`。
-
-默认不要使用 `comments:reply -- --plan <计划文件路径>`。
+默认不要使用计划文件流程。
 
 只有用户明确提供计划文件，或者明确要求使用计划文件流程时，才走计划文件流程。
 
@@ -408,9 +405,7 @@ cd "$PROJECT_DIR" && npm run replies:execute -- --execute
 
 `interactions:reply -- --execute` 是旧的一步式兼容命令，默认完整流程不要使用它。只有用户明确要求“一步生成并执行评论回复”时，才可以使用。
 
-默认不要使用 `comments:plan`。
-
-默认不要使用 `comments:reply -- --plan <计划文件路径>`。
+默认不要使用计划文件流程。
 
 只有用户明确提供计划文件，或者明确要求使用计划文件流程时，才走计划文件流程。
 
@@ -565,11 +560,11 @@ cd "$PROJECT_DIR" && npm run return-visit:execute
 
 只有用户明确要求“预演”“试运行”“先检查不执行”时，才使用 `--dry-run`。
 
-## 关于旧计划文件
+## 关于计划文件
 
-默认不要生成或读取旧 `comments:plan` 计划文件。
+默认不要生成或读取计划文件。
 
-这里的旧计划文件不包括默认流程中的临时回复文件：
+这里的计划文件不包括默认流程中的临时回复文件：
 
 ```text
 data/tmp/pending-replies.json
@@ -577,13 +572,6 @@ data/tmp/prepared-replies.json
 ```
 
 临时回复文件是默认评论回复工作流的必需步骤。
-
-不要默认执行：
-
-```bash
-npm run comments:plan
-npm run comments:reply -- --plan <计划文件路径>
-```
 
 只有用户明确提供计划文件，或者明确要求使用计划文件流程时，才使用计划文件相关命令。
 
@@ -621,8 +609,8 @@ npm run comments:reply -- --plan <计划文件路径>
 - 修改数据库结构
 - 默认添加 `--json`
 - 默认执行 `--dry-run`
-- 默认生成旧 `comments:plan` 计划文件
-- 默认读取旧 `comments:plan` 计划文件
+- 默认生成计划文件
+- 默认读取计划文件
 - 发送空评论
 - 发送广告评论
 - 发送引流评论

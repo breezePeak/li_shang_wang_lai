@@ -95,7 +95,6 @@ npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" \
     --work-context-id <作品ID> --json
 ```
 
-> **旧命令兼容**：`npm run comments:plan` 和 `npm run comments:reply -- --plan <文件>` 仍可用，但不作为 Skill 主流程推荐。
 
 ### 回访候选预览（仅预览，五阶段）
 
