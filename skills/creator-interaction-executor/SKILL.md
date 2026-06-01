@@ -182,12 +182,8 @@ skills/creator-comment-suggestion/SKILL.md
 
 ```bash
 cd "$PROJECT_DIR" && npm run interactions:scan -- --type all --days 7
-cd "$PROJECT_DIR" && npm run replies:export -- --out data/tmp/pending-replies.json --limit 20 --pretty
-# agent 读取 data/tmp/pending-replies.json，生成 data/tmp/prepared-replies.json
-cd "$PROJECT_DIR" && npm run replies:apply -- --input data/tmp/prepared-replies.json --commit
-cd "$PROJECT_DIR" && npm run replies:execute -- --execute
 cd "$PROJECT_DIR" && npm run return-visit:prepare
-cd "$PROJECT_DIR" && npm run return-visit:execute
+cd "$PROJECT_DIR" && npm run return-visit:execute -- --execute
 ```
 
 流程说明：
@@ -452,7 +448,7 @@ cd "$PROJECT_DIR" && npm run return-visit:prepare
 执行命令：
 
 ```bash
-cd "$PROJECT_DIR" && npm run return-visit:execute
+cd "$PROJECT_DIR" && npm run return-visit:execute -- --execute
 ```
 
 该阶段负责：
@@ -488,7 +484,7 @@ cd "$PROJECT_DIR" && npm run return-visit:execute
 
 ```bash
 cd "$PROJECT_DIR" && npm run return-visit:prepare
-cd "$PROJECT_DIR" && npm run return-visit:execute
+cd "$PROJECT_DIR" && npm run return-visit:execute -- --execute
 ```
 
 回访流程固定包含：

@@ -20,7 +20,8 @@ function parseArgs(argv) {
     json: false,
     keepOpen: false,
     headless: false,
-    dryRun: false,
+    dryRun: true,
+    execute: false,
     maxItems: null,
     watchPolicy: null,
     watchSeconds: null,
@@ -31,7 +32,8 @@ function parseArgs(argv) {
     if (arg === '--json') args.json = true;
     else if (arg === '--keep-open') args.keepOpen = true;
     else if (arg === '--headless') args.headless = true;
-    else if (arg === '--dry-run') args.dryRun = true;
+    else if (arg === '--dry-run') { args.dryRun = true; args.execute = false; }
+    else if (arg === '--execute') { args.execute = true; args.dryRun = false; }
     else if (arg === '--max-items' && i + 1 < argv.length) args.maxItems = Math.max(1, parseInt(argv[++i], 10) || 1);
     else if (arg === '--watch-policy' && i + 1 < argv.length) args.watchPolicy = argv[++i];
     else if (arg === '--watch-seconds' && i + 1 < argv.length) args.watchSeconds = argv[++i];
@@ -94,7 +96,7 @@ async function main() {
   const config = loadConfig();
   const returnVisitConfig = config.returnVisit || {};
 
-  const executeMode = !args.dryRun;
+  const executeMode = args.execute;
   const maxItems = args.maxItems || returnVisitConfig.executeMaxItems || 20;
   const maxRetryCount = Number(returnVisitConfig.maxRetryCount ?? 2);
   const maxWorksToCheck = Number(returnVisitConfig.maxWorksToCheck ?? 3);
