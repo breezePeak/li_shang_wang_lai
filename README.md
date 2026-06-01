@@ -1,43 +1,16 @@
 # 礼尚往来 · li_shang_wang_lai
 
-一个基于 Playwright 的抖音创作者互动助手。
+基于 Node.js、Playwright 和 SQLite 的抖音创作者互动助手。
 
-用于帮助创作者扫描评论和点赞互动，整理待处理任务，准备评论回复，生成回访任务，并在用户确认后执行评论回复或作品回访。
+项目用于辅助创作者扫描互动、准备评论回复、准备回访任务，并在显式执行模式下完成评论回复或回访点赞 + 评论。默认状态是安全的：没有 `--execute` 时不会执行真实点赞、评论或回复。
 
-> 礼尚往来：别人给你点赞或评论，你可以回看对方作品，并进行自然、克制、可追踪的互动。
+## 文档边界
 
-## Skill 入口说明
-
-根目录 `skill.md` 是 Hermes / OpenClaw 的主调度入口，只负责识别用户意图并路由到正确文档或子 Skill。
-
-- `README.md` 负责安装和使用说明。
-- `docs/COMMANDS.md` 负责命令索引和参数说明。
-- `skills/` 目录负责具体业务流程和评论生成规则。
-
-不建议删除根目录 `skill.md`，否则 Agent 可能无法稳定识别入口，容易凭记忆回答或只说“正在执行”但没有实际调用命令。
-
----
-
-## 项目能做什么
-
-当前项目主要支持：
-
-- 扫描抖音通知中心；
-- 采集评论互动；
-- 采集点赞互动；
-- 查看待处理互动；
-- 准备评论回复；
-- 执行已确认的评论回复；
-- 从互动事件生成回访任务；
-- 进入互动用户主页；
-- 查找最近合适作品；
-- 采集作品内容和参考评论；
-- 生成回访评论；
-- 执行回访：点赞 + 评论；
-- 记录执行结果；
-- 保存失败截图和调试信息。
-
----
+- `README.md`：项目介绍、安装方式、环境要求、首次初始化、常用入口命令。
+- `skill.md`：Hermes / OpenClaw 主入口调度，不写完整流程细节。
+- `docs/COMMANDS.md`：命令参考手册，和 `package.json` scripts、实际 CLI 参数保持一致。
+- `skills/creator-interaction-executor/SKILL.md`：互动执行流程。
+- `skills/creator-comment-suggestion/SKILL.md`：只生成一条评论回复建议，不执行命令。
 
 ## 环境要求
 
@@ -47,19 +20,9 @@
 | npm | 随 Node.js 安装 |
 | 浏览器 | Playwright Chromium |
 | 数据库 | SQLite |
-| 账号 | 已完成抖音登录 |
+| 账号 | 抖音创作者账号，需完成浏览器登录 |
 
-安装 Playwright Chromium：
-
-```bash
-npx playwright install chromium
-```
-
----
-
-## 如何安装
-
-### 安装到 Hermes
+## 安装到 Hermes
 
 macOS / Linux：
 
@@ -85,9 +48,7 @@ npm run db:init
 npm run auth
 ```
 
----
-
-### 安装到 OpenClaw
+## 安装到 OpenClaw
 
 macOS / Linux：
 
@@ -113,30 +74,32 @@ npm run db:init
 npm run auth
 ```
 
----
+## 首次初始化
 
-
----
-
-## 常用命令
-
-| 功能 | 命令 | 说明 |
-|---|---|---|
-| 登录账号 | `npm run auth` | 打开浏览器，手动完成抖音登录 |
-| 扫描互动 | `npm run interactions:scan -- --type all --days 7` | 扫描最近 7 天的评论和点赞互动 |
-| 查看待处理 | `npm run actions:pending` | 查看数据库中等待处理的互动任务 |
-| 准备评论回复 | `npm run comments:prepare -- --event-id <id> --reply-text "xxx"` | 为单条评论准备回复 |
-| 执行评论回复 | `npm run comments:execute-all -- --action-id <id> --execute` | 真实执行评论回复 |
-| 准备回访 | `npm run return-visit:prepare` | 进入好友主页，采集上下文，生成回访评论 |
-| 执行回访 | `npm run return-visit:execute -- --execute` | 执行点赞 + 评论回访 |
-
-更多命令参数见：
-
-```text
-docs/COMMANDS.md
+```bash
+npm install
+npx playwright install chromium
+npm run db:init
+npm run auth
 ```
 
----
+`npm run auth` 会打开浏览器检测抖音登录态。检测到已登录后自动关闭浏览器并返回认证成功；60 秒未检测到登录态时提示扫码登录；最多等待 5 分钟。
+
+## 常用入口命令
+
+| 功能 | 命令 |
+|---|---|
+| 登录认证 | `npm run auth` |
+| 初始化数据库 | `npm run db:init` |
+| 扫描互动 | `npm run interactions:scan -- --type all --days 7` |
+| 查看待处理 | `npm run actions:pending` |
+| 准备评论回复 | `npm run comments:prepare -- --event-id <event_id> --reply-text "回复内容"` |
+| 执行评论回复 | `npm run comments:execute-all -- --action-id <action_id> --execute` |
+| 准备回访 | `npm run return-visit:prepare` |
+| 执行回访 | `npm run return-visit:execute -- --execute` |
+| 恢复 blocked 评论动作 | `npm run actions:reset-blocked -- --action-id <action_id>` |
+
+完整命令参数见 `docs/COMMANDS.md`。
 
 ## 免责声明
 

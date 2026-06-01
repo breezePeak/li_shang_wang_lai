@@ -1,82 +1,73 @@
 ---
 name: creator-interaction-executor
-description: 执行礼尚往来项目的创作者互动流程。基于当前真实 CLI：interactions:scan、actions:pending、comments:prepare、comments:execute-all、return-visit:prepare、return-visit:execute。
+description: 执行礼尚往来项目的创作者互动流程。当前主流程基于真实 CLI：interactions:scan、actions:pending、comments:prepare、comments:execute-all、return-visit:prepare、return-visit:execute。
 ---
 
 # 创作者互动执行
 
-本技能用于执行 `li_shang_wang_lai` 项目的互动流程。执行前必须核对当前项目的 `package.json` scripts，并以实际 scripts 为准。
+本 Skill 只写互动执行流程：采集、待处理、评论回复准备、评论回复执行、回访准备、回访执行。
 
-本技能只调用项目已有 CLI，不直接写 Playwright 脚本，不直接修改 SQLite，不绕过登录、验证码、滑块或平台风控。
+执行前必须读取当前 `package.json` scripts，并在必要时核对 `docs/COMMANDS.md`。不得凭提示词或记忆进入旧流程。
 
-## 项目目录
+## 基本规则
 
-优先使用当前目录；如果当前目录没有 `package.json`，按 README 的安装目录寻找项目。
+- 只调用项目已有 CLI，不直接写 Playwright 脚本。
+- 不直接修改 SQLite。
+- 不绕过登录、验证码、滑块或平台风控。
+- 所有 `npm run` 参数必须放在 `--` 后面。
+- 没有 `--execute` 时不得执行真实点赞、评论或回复。
+- 命令失败后停止后续真实动作，先读取错误并诊断。
 
-任何 `npm run` 参数都必须放在 `--` 后面。
-
-## 当前真实命令
+## 当前主流程命令
 
 | 阶段 | npm script | 说明 |
 |---|---|---|
-| 登录认证 | `auth` | 打开浏览器并自动检测登录态 |
-| 扫描互动 | `interactions:scan` | 打开通知页采集评论和点赞 |
+| 登录认证 | `auth` | 打开浏览器并检测登录态 |
+| 扫描互动 | `interactions:scan` | 采集评论和点赞互动 |
 | 查看待处理 | `actions:pending` | 输出 eventId、actionId、状态和分类摘要 |
 | 准备评论回复 | `comments:prepare` | 用 eventId 和回复文本创建 prepared action |
-| 执行评论回复 | `comments:execute-all` | 直接处理 prepared action，可批量真实发送 |
-| 重置 blocked | `actions:reset-blocked` | 将 blocked action 恢复为 prepared |
-| 准备回访 | `return-visit:prepare` | 采集对方作品上下文并生成回访评论 |
-| 执行回访 | `return-visit:execute` | 真实执行回访点赞和评论 |
+| 执行评论回复 | `comments:execute-all` | 处理 prepared action；带 `--execute` 才真实发送 |
+| 恢复 blocked | `actions:reset-blocked` | 将 blocked 评论动作恢复为 prepared |
+| 准备回访 | `return-visit:prepare` | 采集主页、作品内容、参考评论并生成回访评论 |
+| 执行回访 | `return-visit:execute` | 带 `--execute` 才真实点赞 + 评论 |
 
-旧的导出/应用/手动审批/二次确认流程已经删除。不要让 agent 进入手动分段链路。
+## 不属于主流程的入口
 
-## 默认完整流程
+| 入口 | 分类 | 处理规则 |
+|---|---|---|
+| `likes:reciprocate` | 兼容旧 Agent | 真实回赞已禁用，不推荐使用 |
+| `likes:plan` | 只读预览 | 可查看点赞候选，不执行 |
+| `actions:plan` | 只读辅助 | 可查看候选，不作为执行链路入口 |
+| `comments:classify` | 本地辅助 | 可分类评论，不执行 |
+| `notify:inspect` / `interactions:inspect` / `debug:*` / `dev:inspect-page` | 调试命令 | 只在排查问题时使用 |
 
-当用户要求“跑完整礼尚往来流程”时，按顺序执行：
+旧评论导出/应用/手动审批/二次确认流程已删除。不要调用不存在的旧命令，也不要编造审批或确认步骤。
+
+## 评论回复流程
+
+1. 扫描互动：
 
 ```bash
 npm run interactions:scan -- --type all --days 7
+```
+
+2. 查看待处理：
+
+```bash
 npm run actions:pending
 ```
 
-然后根据 `actions:pending` 中的待处理评论逐条或批量准备回复。评论文案必须遵守：
+3. 为评论生成一条回复建议。
 
-```text
-skills/creator-comment-suggestion/SKILL.md
-```
+回复文本必须来自 `skills/creator-comment-suggestion/SKILL.md` 的规则：只生成一条自然、简短、可直接发送的回复。
 
-评论回复默认流程：
-
-```bash
-npm run comments:prepare -- --event-id <event_id> --reply-text "<自然简短回复>"
-npm run comments:execute-all -- --action-id <action_id> --execute
-```
-
-批量执行：
-
-```bash
-npm run comments:execute-all -- --action-ids 1,2,3 --execute
-npm run comments:execute-all -- --all-prepared --max-items 20 --execute
-```
-
-回访流程：
-
-```bash
-npm run return-visit:prepare
-npm run return-visit:execute
-```
-
-默认扫描最近 7 天互动。默认不要添加 `--json`，除非需要机器解析输出。
-
-## comments:prepare 默认值
-
-`comments:prepare` 最小可用命令：
+4. 创建 prepared action：
 
 ```bash
 npm run comments:prepare -- --event-id <event_id> --reply-text "<回复文本>"
 ```
 
-省略时 CLI 使用这些默认值：
+`comments:prepare` 默认值：
 
 ```text
 --decision reply
@@ -86,13 +77,56 @@ npm run comments:prepare -- --event-id <event_id> --reply-text "<回复文本>"
 --comment-category unclear
 ```
 
-`auto_simple` 只能使用模板池文本。`auto_natural` 允许 Agent 生成的自然回复，但会做长度和禁用词安全检查。
+5. 先校验可执行性：
 
-如果缺少必填参数，CLI 会一次性列出所有缺失项。
+```bash
+npm run comments:execute-all -- --action-id <action_id>
+```
+
+6. 真实执行：
+
+```bash
+npm run comments:execute-all -- --action-id <action_id> --execute
+```
+
+批量真实执行：
+
+```bash
+npm run comments:execute-all -- --action-ids 1,2,3 --execute
+npm run comments:execute-all -- --all-prepared --max-items 20 --execute
+```
+
+## 回访流程
+
+1. 扫描互动：
+
+```bash
+npm run interactions:scan -- --type all --days 7
+```
+
+2. 准备回访任务：
+
+```bash
+npm run return-visit:prepare
+```
+
+该命令会从互动事件创建或更新回访任务，进入用户主页，采集作品内容和参考评论，生成回访评论。它不会点赞，也不会发表评论。
+
+3. 先 dry-run 检查：
+
+```bash
+npm run return-visit:execute
+```
+
+4. 真实执行点赞 + 评论：
+
+```bash
+npm run return-visit:execute -- --execute
+```
 
 ## blocked 恢复
 
-浏览器崩溃、页面定位失败或 profile lock 导致 action 变成 `blocked` 后，不要手改数据库。使用：
+浏览器崩溃、页面定位失败或 profile lock 导致评论 action 变成 `blocked` 后，不要手改数据库。
 
 ```bash
 npm run actions:reset-blocked -- --action-id <action_id>
@@ -101,14 +135,16 @@ npm run comments:execute-all -- --action-id <action_id> --execute
 
 ## ID 规则
 
-扫描产生 `eventId`，`comments:prepare` 产生 `actionId`。
-
-准备回复时用 `eventId`；执行、重试和重置时用 `actionId`。
+- 扫描产生 `eventId`。
+- `comments:prepare` 产生 `actionId`。
+- 准备回复时用 `eventId`。
+- 执行、重试和重置评论回复时用 `actionId`。
+- 回访任务使用 `return-visit:prepare` 内部生成的 taskId，通常不需要手动传入。
 
 ## 安全限制
 
-- 不绕过登录、验证码、滑块或平台风控。
-- 不直接修改数据库。
 - 不发送空评论、广告、引流、互关、互赞、辱骂或骚扰内容。
 - 不在命令失败后继续执行后续真实动作。
-- 不调用旧的导出/应用/手动审批/二次确认命令。
+- 评论回复必须先有 prepared action。
+- 回访必须先经过 `return-visit:prepare`，不得跳过上下文采集直接执行。
+- 页面未稳定、登录失效、点赞状态未知、重复执行风险或发送结果未确认时必须阻断。

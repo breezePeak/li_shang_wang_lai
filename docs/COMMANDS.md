@@ -1,63 +1,51 @@
 # 命令参考手册
 
-本文档详细说明 `li_shang_wang_lai` 所有 CLI 命令的用法、参数和默认值。
+本文档只记录 `package.json` scripts 暴露的 CLI 命令、实际参数和入口分类。主流程以当前代码验证结果为准。
 
----
+## 入口分类
 
-## 通用参数
+| 分类 | 命令 |
+|---|---|
+| 主流程 | `auth`、`db:init`、`interactions:scan`、`actions:pending`、`comments:prepare`、`comments:execute-all`、`return-visit:prepare`、`return-visit:execute` |
+| 恢复入口 | `actions:reset-blocked` |
+| 只读/辅助入口 | `actions:plan`、`likes:plan`、`comments:classify`、`history` |
+| 兼容入口 | `likes:reciprocate` |
+| 调试/开发入口 | `notify:inspect`、`interactions:inspect`、`debug:like-dom`、`debug:like-state`、`dev:inspect-page`、`server`、`icon:profile` |
 
-以下参数由 `parseCommonArgs` 解析，大部分命令都支持：
+旧评论导出/应用/手动审批/二次确认链路已删除，不属于可用入口。
 
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--dry-run` | bool | `true` | 只预演，不执行真实操作 |
-| `--execute` | bool | `false` | 真实执行（与 `--dry-run` 互斥） |
-| `--json` | bool | `false` | JSON 模式输出，适合 Agent 调用 |
-| `--debug` | bool | `true` | 打印调试日志 |
-| `--keep-open` | bool | `false` | 结束后保持浏览器打开 |
-| `--keep-open-on-error` | bool | `true` | 出错时保持浏览器打开 |
-| `--pause-on-error` | bool | `true` | 出错时暂停等待人工处理 |
-| `--max-items` | int | `1` | 本轮最大处理条数 |
-| `--comment-mode` | string | `skill` | 评论模式：`local` / `agent` / `skill` |
-| `--selected-comment-text` | string | `null` | skill 模式下外部 Agent 传回的评论文本 |
-| `--reply-mode` | string | `null` | 回复模式 |
-| `--risk-level` | string | `null` | 风险等级：`low` / `medium` / `high` |
-| `--manual-review-method` | string | `null` | 人工审核方式 |
-| `--observe-ms` | int | `5000` | 人工观察停留时间（ms） |
-| `--profile-settle-ms` | int | `6000` | 主页稳定等待时间（ms） |
-| `--video-settle-ms` | int | `5000` | 视频页稳定等待时间（ms） |
-| `--safe-observe` | flag | — | 保守观察模式（等价 `observeMs=5000, profileSettleMs=8000, videoSettleMs=8000, keepOpen=true, maxItems=1`） |
-| `--revisit` | bool | `false` | 允许回访 |
-| `--no-revisit` | bool | `false` | 禁止回访 |
-| `--preview` | bool | `false` | 预演模式 |
-| `--ai-reply` | bool | `false` | AI 回复模式 |
-| `--max-revisits` | int | `null` | 最大回访数 |
-| `--max-notifications` | int | `50` | 最大通知采集数 |
-| `--max-scroll-rounds` | int | `5` | 通知面板最大滚动轮数 |
-| `--ai-max-comments` | int | `10` | AI 单次最大评论数 |
-| `--ai-timeout-ms` | int | `30000` | AI 调用超时（ms） |
-| `--reply-max-length` | int | `40` | 回复最大字符数 |
-| `--revisit-like-only` | bool | `true` | 回访只点赞不评论 |
-| `--days` | int | `null` | 限定最近 N 天的事件 |
-| `--write-run-files` | bool | `false` | 写入运行摘要文件 |
+## 安全默认值
 
-### `--json` 模式的特殊行为
+- 评论回复：`comments:execute-all` 不带 `--execute` 时只做数据门禁校验，不真实发送。
+- 回访：`return-visit:execute` 不带 `--execute` 时为 dry-run，不真实点赞或评论。
+- 旧回赞：`likes:reciprocate --execute` 固定返回 `FEATURE_DISABLED`，不真实点赞。
+- 所有真实动作必须经过登录态、页面稳定、状态判断、重复判断和失败阻断。
 
-- `keepOpen` / `keepOpenOnError` / `pauseOnError` 强制为 `false`
-- `observeMs` 降到 1000ms（Agent 不需要长停顿）
-- `profileSettleMs` / `videoSettleMs` 保留至少 3000ms（页面未稳定不能读 DOM）
+## 主流程
 
-### `--safe-observe` 模式
+评论回复：
 
-等价于同时设置：
-
-```
---observe-ms 5000 --profile-settle-ms 8000 --video-settle-ms 8000 --keep-open --max-items 1
+```bash
+npm run interactions:scan -- --type all --days 7
+npm run actions:pending
+npm run comments:prepare -- --event-id <event_id> --reply-text "<回复文本>"
+npm run comments:execute-all -- --action-id <action_id> --execute
 ```
 
-适合首次使用或网络不稳定时。
+批量执行 prepared 评论回复：
 
----
+```bash
+npm run comments:execute-all -- --action-ids 1,2,3 --execute
+npm run comments:execute-all -- --all-prepared --max-items 20 --execute
+```
+
+回访：
+
+```bash
+npm run interactions:scan -- --type all --days 7
+npm run return-visit:prepare
+npm run return-visit:execute -- --execute
+```
 
 ## 1. auth
 
@@ -65,13 +53,11 @@
 npm run auth
 ```
 
-**源文件**：`src/auth-douyin.mjs`
+源文件：`src/auth-douyin.mjs`
 
-打开浏览器并检测抖音登录态。检测到已登录后自动关闭浏览器并返回认证成功；60 秒未检测到登录态时提示扫码登录；最多等待 5 分钟，超时后关闭浏览器并返回验证失败。登录态保存在 `.playwright/` 目录下，后续命令复用。
+打开浏览器并检测抖音登录态。检测到已登录后关闭浏览器并返回认证成功；60 秒未检测到登录态时提示扫码登录；最多等待 5 分钟，超时后关闭浏览器并返回验证失败。
 
-无需任何参数。
-
----
+参数：无。
 
 ## 2. db:init
 
@@ -79,251 +65,248 @@ npm run auth
 npm run db:init
 ```
 
-**源文件**：`src/db/migrations.mjs`
+源文件：`src/db/migrations.mjs`
 
-初始化 SQLite 数据库，创建 `interaction_events`、`actions` 等表。
+初始化 SQLite 数据库并执行迁移。
 
-无需任何参数。
-
----
+参数：无。
 
 ## 3. interactions:scan
 
 ```bash
-npm run interactions:scan -- --type all --json --debug
+npm run interactions:scan -- --type all --days 7
 ```
 
-**源文件**：`src/cli/scan-interactions.mjs`
+源文件：`src/cli/scan-interactions.mjs`
 
-打开抖音通知中心，采集评论和点赞通知，写入本地数据库。
+打开抖音通知中心或评论管理页，采集评论和点赞互动，写入本地数据库。
 
-### 命令特有参数
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--type` | `all` | `all` / `comment` / `like` |
+| `--days` | `null` | 限定最近 N 天通知 |
+| `--json` | `false` | JSON 输出 |
+| `--debug` | `true` | 调试日志 |
+| `--keep-open` | `false` | 结束后保持浏览器打开 |
+| `--keep-open-on-error` | `true` | 出错时保持浏览器打开 |
+| `--pause-on-error` | `true` | 出错时暂停等待人工处理 |
+| `--max-items` | `1` | 通用运行上限 |
+| `--write-run-files` | `false` | 写入运行摘要文件 |
+| `--pause-after-open` | `0` | 打开通知面板后停顿毫秒数 |
+| `--debug-notification-dom` | `false` | 保存通知 DOM 调试信息 |
 
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--type` | string | `all` | 扫描类型：`all` / `comment` / `like` |
-| `--pause-after-open` | int | `0` | 打开通知面板后停顿 ms |
-| `--debug-notification-dom` | flag | — | 打印通知 DOM 调试信息 |
-
-### 流程
-
-```
-打开浏览器 → 导航到通知页面 → 打开通知面板 → 等待面板稳定
-→ 滚动采集通知 → 去重 → 入库 → 关闭面板
-```
-
----
-
-## 4. actions:plan
+## 4. actions:pending
 
 ```bash
-npm run actions:plan -- --json
+npm run actions:pending
+npm run actions:pending -- --type comment --json
 ```
 
-**源文件**：`src/cli/plan-actions.mjs`
+源文件：`src/cli/report-pending.mjs`
 
-从数据库中读取已入库事件，生成两类候选：
+列出当前待处理事件、最近动作状态、blocked 项和 unstable 项。输出中包含 `eventId`，如已有动作也会包含 `actionId`。
 
-- `replyCommentCandidates`：评论回复候选
-- `visitWorkCandidates`：好友/互关用户作品回访候选
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--type` | `null` | 可选 `comment` / `like` |
+| `--json` | `false` | JSON 输出 |
 
-无命令特有参数（使用通用参数）。
-
----
-
-## 5. actions:pending
-
-```bash
-npm run actions:pending -- --json
-```
-
-**源文件**：`src/cli/report-pending.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--type` | string | — | 筛选类型 |
-| `--json` | bool | `false` | JSON 输出 |
-
-列出当前待处理（pending）的事件和动作。
-
----
-
-## 6. likes:plan
-
-```bash
-npm run likes:plan -- --json
-```
-
-**源文件**：`src/cli/plan-likes.mjs`
-
-只读预览点赞候选，所有候选都带 `previewOnly: true` 和 `executeAllowed: false`。该命令不会执行真实点赞。
-
----
-
-## 7. likes:reciprocate
-
-```bash
-npm run likes:reciprocate -- --execute --plan plan.json
-```
-
-**源文件**：`src/cli/execute-reciprocal-likes.mjs`
-
-真实回赞入口当前默认禁用，`--execute` 会返回 `FEATURE_DISABLED`。保留该命令是为了兼容旧 Agent 和测试安全门禁；真实回访请使用 `return-visit:prepare` / `return-visit:execute`。
-
----
-
-## 8. comments:classify
-
-```bash
-npm run comments:classify -- --text "求教程" --json
-```
-
-**源文件**：`src/cli/classify-comment.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--text` | string | 必填 | 要分类的评论文本 |
-| `--json` | bool | `false` | JSON 输出 |
-
-本地评论分类器，返回分类结果（`needs_review` / `ignore` / `auto_simple`）和风险等级。不依赖 Agent。
-
----
-
-## 9. comments:prepare
+## 5. comments:prepare
 
 ```bash
 npm run comments:prepare -- --event-id 42 --reply-text "谢谢支持"
 ```
 
-**源文件**：`src/cli/prepare-comment-reply.mjs`
+源文件：`src/cli/prepare-comment-reply.mjs`
 
-### 命令特有参数
+用评论事件创建 `prepared` 回复动作。最小必填参数是 `--event-id` 和 `--reply-text`。
 
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--event-id` | int | 必填 | 事件 ID |
-| `--reply-text` | string | — | 回复文本 |
-| `--decision` | string | `reply` | 决定：`reply` / `manual_review` / `ignore` |
-| `--risk-level` | string | `low` | 风险等级 |
-| `--decision-reason` | string | — | 决定理由 |
-| `--relevance` | string | `neutral` | 相关性 |
-| `--work-context-id` | string | — | 作品上下文 ID |
-| `--comment-category` | string | `unclear` | 评论分类 |
-| `--reply-mode` | string | `auto_natural` | 回复模式：`auto_natural` / `auto_simple` / `needs_review` / `ignore` |
-| `--json` | bool | `false` | JSON 输出 |
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--event-id` | 必填 | 评论事件 ID |
+| `--reply-text` | 必填 | 回复文本 |
+| `--decision` | `reply` | `reply` / `manual_review` / `ignore` |
+| `--risk-level` | `low` | `low` / `medium` / `high` |
+| `--decision-reason` | `''` | 决策理由 |
+| `--relevance` | `neutral` | `relevant` / `neutral` / `irrelevant` |
+| `--work-context-id` | `''` | 作品上下文 ID |
+| `--comment-category` | `unclear` | 评论分类 |
+| `--reply-mode` | `auto_natural` | `auto_natural` / `auto_simple` / `needs_review` / `ignore` |
+| `--json` | `false` | JSON 输出 |
 
-为单条评论准备回复，记录决定和元数据。最小命令只需要 `--event-id` 和 `--reply-text`。缺少必填参数时会一次性输出所有缺失项。
+安全规则：
 
-`auto_simple` 要求回复文本来自模板池；`auto_natural` 允许 Agent 生成的自然回复，但会校验长度和禁用词。
+- 缺少必填参数时一次性输出所有缺失项。
+- 只有 `decision=reply`、`risk-level=low`、`relevance != irrelevant` 可创建动作。
+- `auto_simple` 必须使用模板池文本。
+- `auto_natural` 允许 Agent 自然回复，但会做长度和禁用词校验。
+- 同一事件已有成功回复或 active 回复动作时会阻断。
 
----
-
-## 10. comments:execute-all
+## 6. comments:execute-all
 
 ```bash
+npm run comments:execute-all -- --action-id 42
 npm run comments:execute-all -- --action-id 42 --execute
 npm run comments:execute-all -- --action-ids 42,43 --execute
 npm run comments:execute-all -- --all-prepared --max-items 20 --execute
 ```
 
-**源文件**：`src/cli/execute-all-comment-replies.mjs`
+源文件：`src/cli/execute-all-comment-replies.mjs`
 
-### 命令特有参数
+处理 `prepared` 评论回复动作。不带 `--execute` 时只做门禁校验；带 `--execute` 才打开页面并真实发送回复。
 
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--action-id` | int | — | 单条动作 ID |
-| `--action-ids` | csv | — | 批量动作 ID，例如 `1,2,3` |
-| `--all-prepared` | flag | — | 处理所有 prepared 动作 |
-| `--max-items` | int | `20` | 本轮最多处理条数 |
-| `--execute` | bool | `false` | 是否真实发送；不加时只做数据门禁校验 |
-| `--json` | bool | `false` | JSON 输出 |
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--action-id` | `null` | 单个 action ID |
+| `--action-ids` | `[]` | 逗号分隔 action ID |
+| `--all-prepared` | `false` | 处理所有 prepared 动作 |
+| `--max-items` | `20` | 本轮最多处理条数 |
+| `--execute` | `false` | 真实发送回复 |
+| `--json` | `false` | JSON 输出 |
 
-评论回复默认入口。只处理 `prepared` 动作；旧手动分段链路已删除。加 `--execute` 后逐条打开页面并真实发送。
+安全规则：
 
----
+- 只处理 `prepared` 动作。
+- 执行前检查原评论、回复文本、重复成功记录、unstable 事件和 evidence 门禁。
+- 发送失败、页面定位失败或状态不确定会进入 blocked。
 
-## 11. actions:reset-blocked
-
-```bash
-npm run actions:reset-blocked -- --action-id 42 --json
-```
-
-**源文件**：`src/cli/reset-blocked-action.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--action-id` | int | 必填 | 要恢复的 blocked 动作 ID |
-| `--json` | bool | `false` | JSON 输出 |
-
-将 blocked 评论回复动作恢复到 `prepared`，用于浏览器崩溃、profile 锁定、页面临时异常后的重试。不要手动改 SQLite。
-
----
-
-## 12. return-visit:prepare
+## 7. actions:reset-blocked
 
 ```bash
-npm run return-visit:prepare -- --max-items 5
+npm run actions:reset-blocked -- --action-id 42
 ```
 
-**源文件**：`src/cli/execute-return-visit-prepare.mjs`
+源文件：`src/cli/reset-blocked-action.mjs`
 
-准备回访任务：从互动事件创建或更新回访任务，进入用户主页和作品页采集上下文，生成回访评论并写入数据库。该命令不会点赞，也不会发表评论。
+将 blocked 评论回复动作恢复为 `prepared`，用于浏览器崩溃、页面临时异常或 profile lock 后重试。
 
-### 命令特有参数
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--action-id` | 必填 | 要恢复的 action ID |
+| `--json` | `false` | JSON 输出 |
 
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--max-items` | int | 配置 `returnVisit.prepareMaxItems` 或 `20` | 本轮最多准备多少个回访任务 |
-| `--event-limit` | int | 配置 `returnVisit.taskEventLimit` 或 `500` | 从互动事件创建任务时读取的事件上限 |
-| `--event-status` | string | 配置 `returnVisit.eventSourceStatus` 或 `new` | 用于创建回访任务的互动事件状态 |
-| `--keep-open` | flag | `false` | 复用并保留浏览器 |
-| `--headless` | flag | `false` | 无头运行 |
-| `--json` | flag | `false` | JSON 输出 |
-
----
-
-## 13. return-visit:execute
+## 8. return-visit:prepare
 
 ```bash
-npm run return-visit:execute -- --max-items 3
+npm run return-visit:prepare
+npm run return-visit:prepare -- --max-items 5 --json
 ```
 
-**源文件**：`src/cli/execute-return-visit.mjs`
+源文件：`src/cli/execute-return-visit-prepare.mjs`
 
-执行回访任务：读取待执行回访任务，打开准备阶段选中的作品，检查点赞状态，点赞并发送已生成评论。该命令没有 `--execute` 参数；默认不加 `--dry-run` 即真实执行。
+从互动事件创建或更新回访任务，进入用户主页和作品页采集上下文，生成回访评论并写入数据库。该命令不会点赞，也不会发表评论。
 
-### 命令特有参数
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--max-items` | 配置 `returnVisit.prepareMaxItems` 或 `20` | 本轮最多准备任务数 |
+| `--event-limit` | 配置 `returnVisit.taskEventLimit` 或 `500` | 从互动事件读取的上限 |
+| `--event-status` | 配置 `returnVisit.eventSourceStatus` 或 `new` | 用于创建任务的事件状态 |
+| `--keep-open` | `false` | 复用并保留浏览器 |
+| `--headless` | `false` | 无头运行 |
+| `--json` | `false` | JSON 输出 |
 
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--max-items` | int | 配置 `returnVisit.executeMaxItems` 或 `20` | 本轮最多执行多少个回访任务 |
-| `--dry-run` | flag | `false` | 只预演，不真实点赞或评论 |
-| `--watch-policy` | string | 配置 `returnVisit.watchPolicy` 或 `seconds` | 看视频策略 |
-| `--watch-seconds` | string | 配置 `returnVisit.watchSeconds` 或 `5-8` | 看视频秒数，可传单个数字或 `min-max` |
-| `--keep-open` | flag | `false` | 复用并保留浏览器 |
-| `--headless` | flag | `false` | 无头运行 |
-| `--json` | flag | `false` | JSON 输出 |
-
----
-
-## 14. notify:inspect
+## 9. return-visit:execute
 
 ```bash
-npm run notify:inspect
+npm run return-visit:execute
+npm run return-visit:execute -- --execute
+npm run return-visit:execute -- --max-items 3 --execute
 ```
 
-**源文件**：`src/cli/inspect-notifications.mjs`
+源文件：`src/cli/execute-return-visit.mjs`
 
-检查通知面板 DOM 结构，用于调试。
+读取 `pending_execute` 等可执行回访任务，打开准备阶段选中的作品，检查点赞状态，并在 `--execute` 模式下执行点赞 + 评论。不带 `--execute` 时为 dry-run，不真实点赞或评论。
 
----
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--max-items` | 配置 `returnVisit.executeMaxItems` 或 `20` | 本轮最多执行任务数 |
+| `--execute` | `false` | 真实点赞并评论 |
+| `--dry-run` | `true` | 只预演，不真实点赞或评论 |
+| `--watch-policy` | 配置 `returnVisit.watchPolicy` 或 `seconds` | 看视频策略 |
+| `--watch-seconds` | 配置 `returnVisit.watchSeconds` 或 `5-8` | 看视频秒数 |
+| `--keep-open` | `false` | 复用并保留浏览器 |
+| `--headless` | `false` | 无头运行 |
+| `--json` | `false` | JSON 输出 |
+
+安全规则：
+
+- 任务必须有生成好的回访评论和目标作品 URL。
+- 点赞前必须确认点赞状态。
+- 已点赞时跳过点赞，不重复点击。
+- 评论发送后会确认结果；未确认会阻断并记录失败。
+- 连续失败达到配置上限时暂停本轮执行。
+
+## 10. actions:plan
+
+```bash
+npm run actions:plan -- --json
+```
+
+源文件：`src/cli/plan-actions.mjs`
+
+只读辅助入口：从事件生成评论回复候选和回访候选预览。当前主流程不依赖该命令；Agent 不应把它作为执行链路入口。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--json` | `false` | JSON 输出 |
+| `--limit` | `200` | 读取事件数 |
+| `--commit` | `false` | 当前未实现，仍按只读运行 |
+
+## 11. likes:plan
+
+```bash
+npm run likes:plan -- --json
+```
+
+源文件：`src/cli/plan-likes.mjs`
+
+只读点赞候选预览。所有候选都带 `previewOnly: true` 和 `executeAllowed: false`。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--json` | `false` | JSON 输出 |
+| `--limit` | `200` | 读取事件数 |
+
+## 12. likes:reciprocate
+
+```bash
+npm run likes:reciprocate -- --dry-run --plan plan.json
+```
+
+源文件：`src/cli/execute-reciprocal-likes.mjs`
+
+兼容旧 Agent 的入口，不推荐使用。真实回赞已禁用，`--execute` 固定返回 `FEATURE_DISABLED`。真实回访必须使用 `return-visit:prepare` / `return-visit:execute -- --execute`。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--plan` | `null` | 旧计划文件路径 |
+| `--dry-run` | `false` | 预览模式 |
+| `--execute` | `false` | 固定禁用，返回 `FEATURE_DISABLED` |
+
+## 13. comments:classify
+
+```bash
+npm run comments:classify -- --text "求教程" --json
+```
+
+源文件：`src/cli/classify-comment.mjs`
+
+本地评论分类器，返回分类、风险等级和回复模式。不执行任何平台动作。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--text` | 必填 | 要分类的评论文本 |
+| `--json` | `false` | JSON 输出 |
+
+## 14. history
+
+```bash
+npm run history
+```
+
+源文件：`src/cli/show-history.mjs`
+
+查看历史运行记录。
 
 ## 15. interactions:inspect
 
@@ -331,23 +314,19 @@ npm run notify:inspect
 npm run interactions:inspect
 ```
 
-**源文件**：`src/cli/inspect-interactions.mjs`
+源文件：`src/cli/inspect-interactions.mjs`
 
-检查已入库的交互事件，用于调试。
+调试命令：检查已入库互动事件。
 
----
-
-## 16. history
+## 16. notify:inspect
 
 ```bash
-npm run history
+npm run notify:inspect
 ```
 
-**源文件**：`src/cli/show-history.mjs`
+源文件：`src/cli/inspect-notifications.mjs`
 
-查看历史运行记录。
-
----
+调试命令：检查通知面板 DOM 结构。
 
 ## 17. dev:inspect-page
 
@@ -355,20 +334,16 @@ npm run history
 npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
 ```
 
-**源文件**：`src/cli/dev-inspect-page.mjs`
+源文件：`src/cli/dev-inspect-page.mjs`
 
-### 命令特有参数
+开发调试工具：打开指定页面并检查 DOM。
 
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--url` | string | — | 要打开的 URL |
-| `--keep-open` | flag | — | 保持浏览器打开 |
-| `--label` | string | — | 页面标签 |
-| `--wait-after-enter-ms` | int | — | 进入后等待时间 |
-
-开发调试工具：打开页面并检查 DOM。
-
----
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--url` | `null` | 要打开的 URL |
+| `--keep-open` | `false` | 保持浏览器打开 |
+| `--label` | `''` | 页面标签 |
+| `--wait-after-enter-ms` | `0` | 进入后等待毫秒数 |
 
 ## 18. debug:like-dom
 
@@ -376,11 +351,9 @@ npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
 npm run debug:like-dom
 ```
 
-**源文件**：`scripts/debug-like-dom.mjs`
+源文件：`scripts/debug-like-dom.mjs`
 
 调试点赞按钮 DOM 结构。
-
----
 
 ## 19. debug:like-state
 
@@ -388,57 +361,26 @@ npm run debug:like-dom
 npm run debug:like-state
 ```
 
-**源文件**：`scripts/debug-like-state.mjs`
+源文件：`scripts/debug-like-state.mjs`
 
 调试点赞状态检测逻辑。
 
----
+## 20. server
 
-## 页面稳定等待（page-settle）
+```bash
+npm run server
+```
 
-**源文件**：`src/browser/page-settle.mjs`
+源文件：`src/server.mjs`
 
-三个核心函数控制页面切换节奏：
+本地开发服务入口，用于内部页面或调试接口，不属于 CLI 主流程。
 
-### waitForHumanObservation(page, label, ms, logger)
+## 21. icon:profile
 
-人工观察停留。打印 `[label]，停留 Nms 供人工确认...` 后等待指定时间。
+```bash
+npm run icon:profile
+```
 
-### waitForProfileSettled(page, options)
+源文件：`.sisyphus/icon-profile.mjs`
 
-主页稳定等待：
-
-1. 等待 `body` 可见
-2. 等待至少 `profileSettleMs`（默认 6000ms）
-3. 检查视频链接是否存在
-4. 如果不存在，额外等 3000ms 后再检查
-5. 仍然不存在则返回 `blocked`
-
-### waitForVideoSettled(page, options)
-
-视频页稳定等待：
-
-1. 等待 `body` 可见
-2. 检查 URL 包含 `/video/` 或 `/note/`
-3. 等待至少 `videoSettleMs`（默认 5000ms）
-4. 检查点赞按钮或视频播放器元素是否存在
-5. 如果不存在，额外等 3000ms 后再检查
-6. 仍然不存在则返回 `blocked`
-
----
-
-## 安全规则汇总
-
-| 规则 | 约束 |
-|---|---|
-| 默认只读 | 默认仅允许扫描、汇总和生成候选 |
-| 明确执行 | 真实动作必须显式传入 `--execute` |
-| 单条执行 | 真实执行默认最多 1 条（`--max-items 1`） |
-| prepared 后执行 | 评论回复从 prepared action 直接执行 |
-| 状态未知即阻断 | 页面定位、关系判断或点赞状态不确定时不得继续 |
-| 防重复 | 已成功执行过的事件或目标不得重复操作 |
-| 可追溯 | 保存计划、执行结果、运行摘要和异常证据 |
-| 风控停止 | 遇到验证码、登录失效、页面异常时立刻停止 |
-| skill + maxItems=1 | skill 模式传入 `--selected-comment-text` 时必须 `--max-items 1` |
-| 页面未稳定即阻断 | `waitForProfileSettled` / `waitForVideoSettled` 失败时 blocked |
-| 作品缺少标题即阻断 | 回访执行中作品无标题时 blocked |
+内部图标资料工具，不属于互动主流程。

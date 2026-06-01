@@ -26,8 +26,6 @@
     "likes:reciprocate": "node ./src/cli/execute-reciprocal-likes.mjs",
     "comments:prepare": "node ./src/cli/prepare-comment-reply.mjs",
     "comments:execute-all": "node ./src/cli/execute-all-comment-replies.mjs",
-
-
     "actions:reset-blocked": "node ./src/cli/reset-blocked-action.mjs",
     "actions:plan": "node ./src/cli/plan-actions.mjs",
     "comments:classify": "node ./src/cli/classify-comment.mjs",
