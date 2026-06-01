@@ -35,6 +35,65 @@ function log(msg) {
   console.error(msg);
 }
 
+async function validateActionForMode(action, commonArgs, { isDryRun, isExecute }) {
+  if (commonArgs.options.dryRun && commonArgs.options.execute) {
+    return { ok: false, code: RESULT_CODES.BLOCKED, message: '--dry-run 与 --execute 不可同时使用' };
+  }
+
+  if (isDryRun && action.status !== 'approved') {
+    return { ok: false, code: RESULT_CODES.ACTION_NOT_APPROVED, message: `dry-run 要求动作状态为 approved，当前: ${action.status}` };
+  }
+
+  if (isExecute && action.status !== 'execute_confirmed') {
+    return { ok: false, code: RESULT_CODES.BLOCKED, message: `真实发送要求先完成 dry-run 并二次确认（当前状态: ${action.status}）。请先执行 actions:confirm-execute。` };
+  }
+
+  if (!action.commentText || action.commentText.trim().length === 0) {
+    return { ok: false, code: RESULT_CODES.BLOCKED, message: `无法获取原始评论内容（eventId=${action.eventId}），无法定位目标评论` };
+  }
+
+  if (!action.actionText || action.actionText.trim().length === 0) {
+    return { ok: false, code: RESULT_CODES.EMPTY_REPLY_TEXT, message: '回复内容为空' };
+  }
+
+  if (hasSucceededAction(action.eventId, 'reply_comment')) {
+    return { ok: false, code: RESULT_CODES.DUPLICATE_ACTION, message: '该评论已有成功回复记录' };
+  }
+
+  try {
+    const { getAction } = await import('../db/action-repository.mjs');
+    const fullAction = getAction(action.actionId);
+    const evidence = fullAction?.evidence_json ? JSON.parse(fullAction.evidence_json) : {};
+
+    const { getEvent } = await import('../db/interaction-repository.mjs');
+    const event = getEvent(action.eventId);
+    if (event && event.status === 'unstable') {
+      return { ok: false, code: RESULT_CODES.BLOCKED, message: `事件 #${action.eventId} 仍处于 unstable 状态，无法执行。` };
+    }
+    if (evidence.autoExecuteAllowed === true && commonArgs.options.execute) {
+      return { ok: false, code: RESULT_CODES.BLOCKED, message: 'autoExecuteAllowed 当前必须为 false，不允许自动真实发送。' };
+    }
+    if (isExecute) {
+      if (evidence.decision && evidence.decision !== 'reply') {
+        return { ok: false, code: RESULT_CODES.BLOCKED, message: `决策为 "${evidence.decision}"，不允许真实发送。` };
+      }
+      if (evidence.riskLevel && evidence.riskLevel !== 'low') {
+        return { ok: false, code: RESULT_CODES.BLOCKED, message: `风险等级为 "${evidence.riskLevel}"，不允许真实发送。` };
+      }
+      if (evidence.relevance === 'irrelevant') {
+        return { ok: false, code: RESULT_CODES.BLOCKED, message: '相关性为 irrelevant，不允许真实发送。' };
+      }
+      if (evidence.replyMode === 'ignore') {
+        return { ok: false, code: RESULT_CODES.BLOCKED, message: 'replyMode=ignore 的评论不允许发送。' };
+      }
+    }
+  } catch (err) {
+    return { ok: false, code: RESULT_CODES.BLOCKED, message: `门禁检查异常: ${err.message}` };
+  }
+
+  return { ok: true };
+}
+
 async function main() {
   runMigrations();
 
@@ -54,97 +113,26 @@ async function main() {
       `找不到动作 ID=${cmdArgs.actionId}`, { recoverable: false }); return;
   }
 
-  // --dry-run and --execute conflict
-  if (commonArgs.options.dryRun && commonArgs.options.execute) {
-    printJsonError('comments:execute', RESULT_CODES.BLOCKED,
-      '--dry-run 与 --execute 不可同时使用', { recoverable: false }); return;
-  }
-
   const isDryRun = commonArgs.options.dryRun && !commonArgs.options.execute;
   const isExecute = commonArgs.options.execute;
 
-  // State machine enforcement
+  const validation = await validateActionForMode(action, commonArgs, { isDryRun, isExecute });
+  if (!validation.ok) {
+    printJsonError('comments:execute', validation.code, validation.message, { recoverable: false }); return;
+  }
+
   if (isDryRun) {
-    if (action.status !== 'approved') {
-      printJsonError('comments:execute', RESULT_CODES.ACTION_NOT_APPROVED,
-        `dry-run 要求动作状态为 approved，当前: ${action.status}`, { recoverable: false }); return;
-    }
-  }
-
-  if (isExecute) {
-    if (action.status !== 'execute_confirmed') {
-      printJsonError('comments:execute', RESULT_CODES.BLOCKED,
-        `真实发送要求先完成 dry-run 并二次确认（当前状态: ${action.status}）。请先执行 actions:confirm-execute。`, { recoverable: false }); return;
-    }
-  }
-
-  // Validate comment text and reply text are available
-  if (!action.commentText || action.commentText.trim().length === 0) {
-    printJsonError('comments:execute', RESULT_CODES.BLOCKED,
-      `无法获取原始评论内容（eventId=${action.eventId}），无法定位目标评论`, { recoverable: false }); return;
-  }
-
-  if (!action.actionText || action.actionText.trim().length === 0) {
-    printJsonError('comments:execute', RESULT_CODES.EMPTY_REPLY_TEXT,
-      '回复内容为空', { recoverable: false }); return;
-  }
-
-  // Check duplicate — never re-reply to same comment
-  if (hasSucceededAction(action.eventId, 'reply_comment')) {
-    printJsonError('comments:execute', RESULT_CODES.DUPLICATE_ACTION,
-      '该评论已有成功回复记录', { recoverable: false }); return;
-  }
-
-  // --- Policy/audit gate check (defense in depth) ---
-  let policyGateOk = true;
-  let policyGateReason = '';
-  try {
-    // Read full action record to get evidence_json with policy audit fields
-    const { getAction } = await import('../db/action-repository.mjs');
-    const fullAction = getAction(action.actionId);
-    const evidence = fullAction?.evidence_json ? JSON.parse(fullAction.evidence_json) : {};
-
-    // Check event status
-    const { getEvent } = await import('../db/interaction-repository.mjs');
-    const event = getEvent(action.eventId);
-    if (event && event.status === 'unstable') {
-      policyGateOk = false;
-      policyGateReason = `事件 #${action.eventId} 仍处于 unstable 状态，无法执行。`;
-    }
-
-    // Check autoExecuteAllowed
-    if (evidence.autoExecuteAllowed === true && commonArgs.options.execute) {
-      policyGateOk = false;
-      policyGateReason = 'autoExecuteAllowed 当前必须为 false，不允许自动真实发送。';
-    }
-
-    // Execute requires decision=reply + riskLevel=low + relevance != irrelevant
-    if (isExecute) {
-      if (evidence.decision && evidence.decision !== 'reply') {
-        policyGateOk = false;
-        policyGateReason = `决策为 "${evidence.decision}"，不允许真实发送。`;
-      }
-      if (evidence.riskLevel && evidence.riskLevel !== 'low') {
-        policyGateOk = false;
-        policyGateReason = `风险等级为 "${evidence.riskLevel}"，不允许真实发送。`;
-      }
-      if (evidence.relevance === 'irrelevant') {
-        policyGateOk = false;
-        policyGateReason = '相关性为 irrelevant，不允许真实发送。';
-      }
-      if (evidence.replyMode === 'ignore') {
-        policyGateOk = false;
-        policyGateReason = 'replyMode=ignore 的评论不允许发送。';
-      }
-    }
-  } catch (err) {
-    policyGateOk = false;
-    policyGateReason = `门禁检查异常: ${err.message}`;
-  }
-
-  if (!policyGateOk) {
-    printJsonError('comments:execute', RESULT_CODES.BLOCKED,
-      policyGateReason, { recoverable: false }); return;
+    await updateActionStatus(action.actionId, 'dry_run_ok');
+    printJsonResult('comments:execute', {
+      actionId: action.actionId,
+      mode: 'dry-run',
+      status: 'dry_run_ok',
+      actorName: action.actorName,
+      commentText: action.commentText,
+      replyText: action.actionText,
+      browserOpened: false,
+    }, { actionId: action.actionId });
+    return;
   }
 
   const run = createRunContext('comment-execute', commonArgs.options);

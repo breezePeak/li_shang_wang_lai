@@ -40,3 +40,23 @@ export function isAllowedTemplate(text) {
 export function getTemplatesForCategory(category) {
   return REPLY_TEMPLATES[category] || [];
 }
+
+export function validateNaturalReply(text, { maxLength = 40 } = {}) {
+  const value = String(text || '').trim();
+  const errors = [];
+
+  if (!value) errors.push('回复内容不能为空');
+  if (value.length > maxLength) errors.push(`回复过长：${value.length} 字，最多 ${maxLength} 字`);
+
+  const forbiddenWords = [
+    '回访', '互关', '互赞', '已赞', '三连', '求关注', '私信', '加V', '加微信',
+    '联系方式', '引流', '广告', '刷赞', '刷粉', '代运营', '推广', '互粉',
+  ];
+  const matched = forbiddenWords.filter(word => value.includes(word));
+  if (matched.length > 0) errors.push(`包含禁用词：${matched.join(', ')}`);
+
+  return {
+    ok: errors.length === 0,
+    errors,
+  };
+}

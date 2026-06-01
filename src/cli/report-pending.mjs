@@ -101,7 +101,7 @@ function main() {
 
     // Query latest action status for each event
     const latestActions = db.prepare(`
-      SELECT a.event_id, a.status as actionStatus, a.action_text as actionText
+      SELECT a.id as actionId, a.event_id, a.status as actionStatus, a.action_text as actionText
       FROM actions a
       WHERE a.id IN (
         SELECT MAX(id) FROM actions GROUP BY event_id
@@ -109,7 +109,7 @@ function main() {
     `).all();
     const actionMap = {};
     for (const act of latestActions) {
-      actionMap[act.event_id] = { actionStatus: act.actionStatus, actionText: act.actionText };
+      actionMap[act.event_id] = { actionId: act.actionId, actionStatus: act.actionStatus, actionText: act.actionText };
     }
 
     const comments = [];
@@ -126,6 +126,7 @@ function main() {
         commentText: ev.comment_text || '',
         eventTimeText: ev.event_time_text || '',
         eventStatus: ev.status,
+        ...(latestAction ? { actionId: latestAction.actionId } : {}),
         ...(latestAction ? { latestActionStatus: latestAction.actionStatus } : {}),
       };
 
@@ -203,9 +204,10 @@ function main() {
       console.error('===== 待处理互动摘要 =====');
       console.error('');
       console.error(`未处理评论: ${comments.length} 条`);
-      for (const c of comments) {
-        const actionTag = c.latestActionStatus ? ` [${c.latestActionStatus}]` : '';
-        console.error(`  [${c.eventId}]${actionTag} ${c.actorName} 在《${c.myWorkTitle}》评论: ${c.commentText.slice(0, 40)}`);
+        for (const c of comments) {
+          const actionTag = c.latestActionStatus ? ` [${c.latestActionStatus}]` : '';
+        const idTag = c.actionId ? ` action#${c.actionId}` : '';
+        console.error(`  [${c.eventId}]${actionTag}${idTag} ${c.actorName} 在《${c.myWorkTitle}》评论: ${c.commentText.slice(0, 40)}`);
       }
       console.error('');
       console.error(`未处理点赞: ${likes.length} 条`);
@@ -232,4 +234,3 @@ function main() {
 }
 
 main();
-

@@ -19,13 +19,14 @@
 //   仅 decision=reply + riskLevel=low 可以创建动作
 //   replyMode=ignore 禁止创建动作
 //   replyMode=auto_simple 仅从模板池选回复，autoExecuteAllowed 固定 false
+//   replyMode=auto_natural 允许经长度和安全词校验的 Agent 自然回复
 
 import { runMigrations } from '../db/migrations.mjs';
 import { createAction, hasSucceededAction, hasActiveAction } from '../db/action-repository.mjs';
 import { getEvents, updateEventStatus } from '../db/interaction-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
-import { isAllowedTemplate } from '../domain/reply-templates.mjs';
+import { isAllowedTemplate, validateNaturalReply } from '../domain/reply-templates.mjs';
 import { readFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -41,7 +42,18 @@ function loadWorkContext() {
 }
 
 function parseArgs(argv) {
-  const args = { eventId: null, replyText: null, json: false, decision: null, riskLevel: null, decisionReason: '', relevance: null, workContextId: '', commentCategory: null, replyMode: null };
+  const args = {
+    eventId: null,
+    replyText: null,
+    json: false,
+    decision: 'reply',
+    riskLevel: 'low',
+    decisionReason: '',
+    relevance: 'neutral',
+    workContextId: '',
+    commentCategory: 'unclear',
+    replyMode: 'auto_natural',
+  };
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--event-id' && argv[i + 1]) args.eventId = parseInt(argv[++i]);
@@ -65,13 +77,14 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
 
   // Validation
-  if (!args.eventId) {
-    printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
-      '缺少参数 --event-id', { recoverable: false }); return;
-  }
-  if (!args.replyText || args.replyText.trim().length === 0) {
-    printJsonError('comments:prepare', RESULT_CODES.EMPTY_REPLY_TEXT,
-      '回复内容不能为空，请提供 --reply-text', { recoverable: false }); return;
+  const missing = [];
+  if (!args.eventId) missing.push('--event-id');
+  if (!args.replyText || args.replyText.trim().length === 0) missing.push('--reply-text');
+  if (missing.length > 0) {
+    printJsonError('comments:prepare',
+      missing.includes('--reply-text') ? RESULT_CODES.EMPTY_REPLY_TEXT : RESULT_CODES.BLOCKED,
+      `缺少必填参数：${missing.join(', ')}。可选参数默认值：--decision reply --risk-level low --relevance neutral --reply-mode auto_natural --comment-category unclear。`,
+      { recoverable: false, data: { missing } }); return;
   }
 
   // Check the event exists and is a comment
@@ -123,7 +136,7 @@ function main() {
   }
 
   // Reply mode validation
-  const validReplyModes = ['auto_simple', 'needs_review', 'ignore'];
+  const validReplyModes = ['auto_simple', 'auto_natural', 'needs_review', 'ignore'];
   const validCategories = ['praise', 'encouragement', 'useful', 'question', 'request', 'risk', 'spam', 'unclear'];
 
   if (!args.replyMode || !validReplyModes.includes(args.replyMode)) {
@@ -152,6 +165,13 @@ function main() {
     if (!isAllowedTemplate(args.replyText)) {
       printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
         `replyMode=auto_simple 的回复必须从安全模板池中选取。"${args.replyText.slice(0, 40)}" 不在允许的模板列表中。`, { recoverable: false }); return;
+    }
+  }
+  if (args.replyMode === 'auto_natural') {
+    const natural = validateNaturalReply(args.replyText);
+    if (!natural.ok) {
+      printJsonError('comments:prepare', RESULT_CODES.BLOCKED,
+        `replyMode=auto_natural 的回复未通过安全校验：${natural.errors.join('；')}`, { recoverable: false }); return;
     }
   }
 

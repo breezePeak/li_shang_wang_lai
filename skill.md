@@ -30,7 +30,7 @@
 
 - 当前目录是否是项目根目录。
 - 是否存在 `package.json`、`README.md`、`skill.md`、`skills.json`、`skills/`、`docs/COMMANDS.md`。
-- `package.json` 是否包含关键 scripts，例如 `auth`、`db:init`、`interactions:scan`、`comments:prepare`、`comments:execute`、`return-visit:prepare`、`return-visit:execute`。
+- `package.json` 是否包含关键 scripts，例如 `auth`、`db:init`、`interactions:scan`、`actions:pending`、`comments:prepare`、`comments:execute-all`、`comments:execute`、`actions:reset-blocked`、`return-visit:prepare`、`return-visit:execute`。
 - `node_modules/` 是否存在，依赖是否已安装。
 - Node/npm 是否可用。
 

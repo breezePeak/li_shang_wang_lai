@@ -150,10 +150,36 @@ npm run actions:pending -- --json
 
 ---
 
-## 6. actions:approve
+## 6. likes:plan
+
+```bash
+npm run likes:plan -- --json
+```
+
+**源文件**：`src/cli/plan-likes.mjs`
+
+只读预览点赞候选，所有候选都带 `previewOnly: true` 和 `executeAllowed: false`。该命令不会执行真实点赞。
+
+---
+
+## 7. likes:reciprocate
+
+```bash
+npm run likes:reciprocate -- --execute --plan plan.json
+```
+
+**源文件**：`src/cli/execute-reciprocal-likes.mjs`
+
+真实回赞入口当前默认禁用，`--execute` 会返回 `FEATURE_DISABLED`。保留该命令是为了兼容旧 Agent 和测试安全门禁；真实回访请使用 `return-visit:prepare` / `return-visit:execute`。
+
+---
+
+## 8. actions:approve
 
 ```bash
 npm run actions:approve -- --action-id 42 --json
+npm run actions:approve -- --action-ids 42,43 --json
+npm run actions:approve -- --all-prepared --json
 ```
 
 **源文件**：`src/cli/approve-action.mjs`
@@ -163,16 +189,20 @@ npm run actions:approve -- --action-id 42 --json
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `--action-id` | int | 必填 | 要审批的动作 ID |
+| `--action-ids` | csv | — | 批量审批多个动作 ID，例如 `1,2,3` |
+| `--all-prepared` | flag | — | 批量审批所有 prepared 动作，最多 200 条 |
 | `--json` | bool | `false` | JSON 输出 |
 
 审批指定动作，允许后续执行。
 
 ---
 
-## 7. actions:confirm-execute
+## 9. actions:confirm-execute
 
 ```bash
 npm run actions:confirm-execute -- --action-id 42 --json
+npm run actions:confirm-execute -- --action-ids 42,43 --json
+npm run actions:confirm-execute -- --all-dry-run-ok --json
 ```
 
 **源文件**：`src/cli/confirm-execute.mjs`
@@ -182,13 +212,15 @@ npm run actions:confirm-execute -- --action-id 42 --json
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `--action-id` | int | 必填 | 要确认执行的动作 ID |
+| `--action-ids` | csv | — | 批量确认多个动作 ID，例如 `1,2,3` |
+| `--all-dry-run-ok` | flag | — | 批量确认所有 dry_run_ok 动作，最多 200 条 |
 | `--json` | bool | `false` | JSON 输出 |
 
 将已审批动作标记为 `execute_confirmed`，允许真实执行。
 
 ---
 
-## 8. comments:classify
+## 10. comments:classify
 
 ```bash
 npm run comments:classify -- --text "求教程" --json
@@ -207,10 +239,10 @@ npm run comments:classify -- --text "求教程" --json
 
 ---
 
-## 9. comments:prepare
+## 11. comments:prepare
 
 ```bash
-npm run comments:prepare -- --event-id 42 --reply-text "谢谢支持" --decision approve
+npm run comments:prepare -- --event-id 42 --reply-text "谢谢支持"
 ```
 
 **源文件**：`src/cli/prepare-comment-reply.mjs`
@@ -221,20 +253,22 @@ npm run comments:prepare -- --event-id 42 --reply-text "谢谢支持" --decision
 |---|---|---|---|
 | `--event-id` | int | 必填 | 事件 ID |
 | `--reply-text` | string | — | 回复文本 |
-| `--decision` | string | — | 决定：`approve` / `skip` / `block` |
-| `--risk-level` | string | — | 风险等级 |
+| `--decision` | string | `reply` | 决定：`reply` / `manual_review` / `ignore` |
+| `--risk-level` | string | `low` | 风险等级 |
 | `--decision-reason` | string | — | 决定理由 |
-| `--relevance` | string | — | 相关性 |
+| `--relevance` | string | `neutral` | 相关性 |
 | `--work-context-id` | string | — | 作品上下文 ID |
-| `--comment-category` | string | — | 评论分类 |
-| `--reply-mode` | string | — | 回复模式 |
+| `--comment-category` | string | `unclear` | 评论分类 |
+| `--reply-mode` | string | `auto_natural` | 回复模式：`auto_natural` / `auto_simple` / `needs_review` / `ignore` |
 | `--json` | bool | `false` | JSON 输出 |
 
-为单条评论准备回复，记录决定和元数据。
+为单条评论准备回复，记录决定和元数据。最小命令只需要 `--event-id` 和 `--reply-text`。缺少必填参数时会一次性输出所有缺失项。
+
+`auto_simple` 要求回复文本来自模板池；`auto_natural` 允许 Agent 生成的自然回复，但会校验长度和禁用词。
 
 ---
 
-## 10. comments:execute
+## 12. comments:execute
 
 ```bash
 npm run comments:execute -- --action-id 42 --dry-run
@@ -248,11 +282,59 @@ npm run comments:execute -- --action-id 42 --dry-run
 |---|---|---|---|
 | `--action-id` | int | 必填 | 动作 ID |
 
-执行单条评论回复。遵循动作状态机：`approved` → `execute_confirmed` → `succeeded`。
+执行单条评论回复。遵循动作状态机：`approved` → `dry_run_ok` → `execute_confirmed` → `succeeded`。
+
+`--dry-run` 只做数据库和安全门禁校验，不打开浏览器；`--execute` 才会打开页面并真实发送。
 
 ---
 
-## 11. return-visit:prepare
+## 13. comments:execute-all
+
+```bash
+npm run comments:execute-all -- --action-id 42 --execute
+npm run comments:execute-all -- --action-ids 42,43 --execute
+npm run comments:execute-all -- --all-prepared --max-items 20 --execute
+npm run comments:execute-all -- --all-ready --max-items 20 --execute
+```
+
+**源文件**：`src/cli/execute-all-comment-replies.mjs`
+
+### 命令特有参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `--action-id` | int | — | 单条动作 ID |
+| `--action-ids` | csv | — | 批量动作 ID，例如 `1,2,3` |
+| `--all-prepared` | flag | — | 处理所有 prepared 动作 |
+| `--all-ready` | flag | — | 处理 prepared / approved / dry_run_ok / execute_confirmed 动作 |
+| `--max-items` | int | `20` | 本轮最多处理条数 |
+| `--execute` | bool | `false` | 是否真实发送；不加时只推进到 execute_confirmed |
+| `--json` | bool | `false` | JSON 输出 |
+
+新流程默认入口。内部自动完成 approve → dry-run 数据校验 → confirm；加 `--execute` 后继续逐条调用 `comments:execute -- --execute` 真实发送。
+
+---
+
+## 14. actions:reset-blocked
+
+```bash
+npm run actions:reset-blocked -- --action-id 42 --json
+```
+
+**源文件**：`src/cli/reset-blocked-action.mjs`
+
+### 命令特有参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `--action-id` | int | 必填 | 要恢复的 blocked 动作 ID |
+| `--json` | bool | `false` | JSON 输出 |
+
+将 blocked 评论回复动作恢复到 `approved`，用于浏览器崩溃、profile 锁定、页面临时异常后的重试。不要手动改 SQLite。
+
+---
+
+## 15. return-visit:prepare
 
 ```bash
 npm run return-visit:prepare -- --max-items 5
@@ -275,7 +357,7 @@ npm run return-visit:prepare -- --max-items 5
 
 ---
 
-## 12. return-visit:execute
+## 16. return-visit:execute
 
 ```bash
 npm run return-visit:execute -- --max-items 3
@@ -299,7 +381,7 @@ npm run return-visit:execute -- --max-items 3
 
 ---
 
-## 13. notify:inspect
+## 17. notify:inspect
 
 ```bash
 npm run notify:inspect
@@ -311,7 +393,7 @@ npm run notify:inspect
 
 ---
 
-## 14. interactions:inspect
+## 18. interactions:inspect
 
 ```bash
 npm run interactions:inspect
@@ -323,7 +405,7 @@ npm run interactions:inspect
 
 ---
 
-## 15. history
+## 19. history
 
 ```bash
 npm run history
@@ -335,7 +417,7 @@ npm run history
 
 ---
 
-## 16. dev:inspect-page
+## 20. dev:inspect-page
 
 ```bash
 npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
@@ -356,7 +438,7 @@ npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
 
 ---
 
-## 17. debug:like-dom
+## 21. debug:like-dom
 
 ```bash
 npm run debug:like-dom
@@ -368,7 +450,7 @@ npm run debug:like-dom
 
 ---
 
-## 18. debug:like-state
+## 22. debug:like-state
 
 ```bash
 npm run debug:like-state
