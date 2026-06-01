@@ -251,6 +251,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
             if (consecutiveOldRelevantCount >= 3) {
               console.error(`[scan]   连续 ${consecutiveOldRelevantCount} 条评论/点赞通知超过 ${notificationDays} 天，停止继续滚动`);
               stopDueToOldRelevant = true;
+              break;
             }
             continue;
           }

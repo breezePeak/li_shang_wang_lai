@@ -44,11 +44,19 @@ async function fetchStats() {
 }
 
 function renderStats() {
-  document.getElementById('stat-total-tasks').textContent = statsData.totalTasks || 0;
-  document.getElementById('stat-pending-likes').textContent = statsData.pendingLikes || 0;
-  document.getElementById('stat-pending-comments').textContent = statsData.pendingComments || 0;
-  document.getElementById('stat-pending-replies').textContent = statsData.pendingReplies || 0;
-  document.getElementById('stat-completed-tasks').textContent = statsData.completedTasks || 0;
+  setText('stat-collected-total', statsData.collectedTotal || 0);
+  setText('stat-collected-likes', statsData.collectedLikes || 0);
+  setText('stat-collected-comments', statsData.collectedComments || 0);
+  setText('stat-total-tasks', statsData.totalTasks || 0);
+  setText('stat-pending-likes', statsData.pendingLikes || 0);
+  setText('stat-pending-comments', statsData.pendingComments || 0);
+  setText('stat-pending-replies', statsData.pendingReplies || 0);
+  setText('stat-completed-tasks', statsData.completedTasks || 0);
+}
+
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
 }
 
 // 2. 获取回访审核任务

@@ -1083,6 +1083,80 @@ body {
   height: 4px;
 }
 
+.collection-snapshot {
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 112px;
+  padding: 10px 9px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-main);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  z-index: 12;
+}
+
+.collection-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ea580c;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.collection-total {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.collection-total span {
+  font-family: 'Outfit', sans-serif;
+  font-size: 24px;
+  line-height: 1;
+  font-weight: 800;
+  color: #431407;
+}
+
+.collection-total small {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.collection-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.collection-breakdown span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.collection-breakdown i {
+  width: 12px;
+  color: #ea580c;
+  text-align: center;
+}
+
+.collection-breakdown strong {
+  min-width: 18px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  color: #7c2d12;
+}
+
 /* 贯穿中轴的基础暗色轨道线 */
 .timeline-flow-line {
   position: absolute;
@@ -1123,7 +1197,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 5%;
+  padding: 0 5% 0 16%;
 }
 
 .timeline-node {
@@ -1272,6 +1346,19 @@ body {
   }
   .timeline-track-wrapper {
     height: auto;
+  }
+  .collection-snapshot {
+    position: static;
+    transform: none;
+    width: 100%;
+    margin-bottom: 22px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .collection-breakdown {
+    flex-direction: row;
+    gap: 12px;
   }
   .timeline-flow-line {
     display: none;

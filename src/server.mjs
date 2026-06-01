@@ -43,6 +43,20 @@ app.get('/api/stats', (req, res) => {
     // 总任务数
     const totalTasks = db.prepare("SELECT COUNT(*) as count FROM return_visit_tasks").get().count;
 
+    // 通知采集入库数
+    const collectedTotal = db.prepare(`
+      SELECT COUNT(*) as count FROM interaction_events
+      WHERE event_type IN ('like', 'comment')
+    `).get().count;
+    const collectedLikes = db.prepare(`
+      SELECT COUNT(*) as count FROM interaction_events
+      WHERE event_type = 'like'
+    `).get().count;
+    const collectedComments = db.prepare(`
+      SELECT COUNT(*) as count FROM interaction_events
+      WHERE event_type = 'comment'
+    `).get().count;
+
     // 各状态任务数量分布
     const statusRows = db.prepare(`
       SELECT status, COUNT(*) as count FROM return_visit_tasks GROUP BY status
@@ -60,6 +74,9 @@ app.get('/api/stats', (req, res) => {
         pendingReplies,
         completedTasks,
         totalTasks,
+        collectedTotal,
+        collectedLikes,
+        collectedComments,
         statusDistribution
       }
     });
