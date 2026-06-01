@@ -48,21 +48,9 @@ describe('P0-1: pure --json stdout contract', () => {
     expect(typeof parsed.ok).toBe('boolean');
   });
 
-  it('actions:approve --json stdout must parse as single JSON', () => {
-    const result = runCli('approve-action.mjs', [
-      '--action-id', '999',
-      '--json',
-    ]);
-    const parsed = parseStdout(result);
-    expect(parsed).not.toBeNull();
-    expect(parsed.ok).toBe(false); // action 999 shouldn't exist
-    expect(parsed.code).toBeDefined();
-  });
-
-  it('comments:execute --dry-run --json stdout must parse as single JSON', () => {
+  it('comments:execute validate-only --json stdout must parse as single JSON', () => {
     const result = runCli('execute-comment-reply.mjs', [
       '--action-id', '999',
-      '--dry-run',
       '--json',
     ]);
     const parsed = parseStdout(result);

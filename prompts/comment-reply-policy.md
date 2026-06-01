@@ -99,7 +99,7 @@
 ### autoExecuteAllowed
 - 当前默认固定为 **false**；
 - 所有 auto_simple 评论仅创建候选，不自动执行真实回复；
-- 仍需用户 approve → dry-run → confirm-execute → execute 完整链路。
+- 由 `comments:execute-all` 处理 prepared 回复；不要使用旧的手动分段链路。
 
 ## 模板池（src/domain/reply-templates.mjs）
 
@@ -135,9 +135,9 @@ npm run comments:prepare -- --event-id <id> --reply-text "<模板回复>" \
 ## Agent 行为约束
 
 - Agent **可以**参考账号人格和作品上下文生成低风险候选回复文本，供用户确认
-- Agent **不得**自行 approve、confirm-execute 或真实发送
+- Agent **不得**调用旧的手动分段命令
 - 回复文本最终由用户确认；用户可修改 Agent 生成的候选回复
-- 即使决策为 `reply + low`，仍需经过完整的用户确认链路（approve → dry-run → confirm-execute → execute）
+- 决策为 `reply + low` 后，使用 `comments:execute-all` 处理 prepared action
 - 任何 `decision=manual_review` 或 `riskLevel=medium` 的评论，Agent 应向用户说明原因并请求人工判断
 - `decision=ignore` 或 `riskLevel=high` 的评论，Agent 应报告并跳过
 - 高风险运营/安全类评论（刷赞、刷粉、破解、Cookie/Token 等），Agent 必须立即标记 ignore+high，不得生成任何回复文本

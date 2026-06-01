@@ -3,8 +3,6 @@ import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { runMigrations } from '../db/migrations.mjs';
 import {
-  approveAction,
-  confirmExecuteAction,
   getAction,
   getActionWithEvent,
   getActionsByStatus,
@@ -23,7 +21,6 @@ function parseArgs(argv) {
     actionId: null,
     actionIds: [],
     allPrepared: false,
-    allReady: false,
     execute: false,
     maxItems: 20,
     json: false,
@@ -33,7 +30,6 @@ function parseArgs(argv) {
     if (argv[i] === '--action-id' && argv[i + 1]) args.actionId = parseInt(argv[++i]);
     if (argv[i] === '--action-ids' && argv[i + 1]) args.actionIds = argv[++i].split(',').map(v => parseInt(v.trim())).filter(Boolean);
     if (argv[i] === '--all-prepared') args.allPrepared = true;
-    if (argv[i] === '--all-ready') args.allReady = true;
     if (argv[i] === '--execute') args.execute = true;
     if (argv[i] === '--json') args.json = true;
     if (argv[i] === '--max-items' && argv[i + 1]) {
@@ -48,10 +44,6 @@ function parseArgs(argv) {
 function collectActionIds(args) {
   if (args.allPrepared) {
     return getActionsByStatus('prepared', args.maxItems).map(action => action.id);
-  }
-  if (args.allReady) {
-    const statuses = ['prepared', 'approved', 'dry_run_ok', 'execute_confirmed'];
-    return statuses.flatMap(status => getActionsByStatus(status, args.maxItems).map(action => action.id)).slice(0, args.maxItems);
   }
   if (args.actionIds.length > 0) return args.actionIds.slice(0, args.maxItems);
   if (args.actionId) return [args.actionId];
@@ -90,38 +82,21 @@ function validateDataGate(action) {
   return null;
 }
 
-function advanceToConfirmed(actionId) {
+function validatePreparedAction(actionId) {
   const action = getActionWithEvent(actionId);
   if (!action) return { actionId, ok: false, error: `找不到动作 ID=${actionId}` };
 
-  if (!['prepared', 'approved', 'dry_run_ok', 'execute_confirmed'].includes(action.status)) {
+  if (action.status !== 'prepared') {
     return { actionId, ok: false, status: action.status, error: `状态 ${action.status} 不可由 execute-all 处理` };
   }
 
   const gateError = validateDataGate(action);
   if (gateError) return { actionId, ok: false, status: action.status, error: gateError };
 
-  let status = action.status;
-  if (status === 'prepared') {
-    if (!approveAction(actionId)) return { actionId, ok: false, status, error: '审批状态流转失败' };
-    updateEventStatus(action.eventId, 'approved');
-    status = 'approved';
-  }
-
-  if (status === 'approved') {
-    updateActionStatus(actionId, 'dry_run_ok');
-    status = 'dry_run_ok';
-  }
-
-  if (status === 'dry_run_ok') {
-    if (!confirmExecuteAction(actionId)) return { actionId, ok: false, status, error: '确认发送状态流转失败' };
-    status = 'execute_confirmed';
-  }
-
   return {
     actionId,
     ok: true,
-    status,
+    status: 'prepared',
     actorName: action.actorName,
     replyText: action.actionText,
   };
@@ -153,19 +128,19 @@ function main() {
 
   if (actionIds.length === 0) {
     printJsonError('comments:execute-all', RESULT_CODES.BLOCKED,
-      '缺少参数 --action-id、--action-ids、--all-prepared 或 --all-ready', { recoverable: false });
+      '缺少参数 --action-id、--action-ids 或 --all-prepared', { recoverable: false });
     return;
   }
 
   const results = [];
   for (const actionId of actionIds) {
-    const advanced = advanceToConfirmed(actionId);
-    if (!advanced.ok) {
-      results.push(advanced);
+    const validated = validatePreparedAction(actionId);
+    if (!validated.ok) {
+      results.push(validated);
       continue;
     }
     if (!args.execute) {
-      results.push({ ...advanced, mode: 'prepared-only', next: `npm run comments:execute-all -- --action-id ${actionId} --execute` });
+      results.push({ ...validated, mode: 'validate-only', next: `npm run comments:execute-all -- --action-id ${actionId} --execute` });
       continue;
     }
     results.push(executeOne(actionId));

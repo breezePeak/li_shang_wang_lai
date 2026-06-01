@@ -1,5 +1,4 @@
-// 动作请求数据层 — 统一管理 actions 表的 CRUD
-// 替代旧的手工编辑 JSON 计划方式，提供命令式审批流程支持。
+// 动作请求数据层 — 统一管理 actions 表的 CRUD。
 
 import { getDb } from './database.mjs';
 
@@ -18,51 +17,7 @@ export function createAction({ eventId, actionType, targetTitle, targetUrl = nul
 }
 
 /**
- * 审批一条动作（状态改为 'approved'）
- * Records approvedAt in evidence_json audit timeline.
- * @returns {boolean} 是否成功
- */
-export function approveAction(actionId) {
-  const db = getDb();
-  const now = new Date().toISOString();
-  const result = db.prepare(`
-    UPDATE actions SET status = 'approved' WHERE id = ? AND status = 'prepared'
-  `).run(actionId);
-
-  if (result.changes > 0) {
-    _appendAuditTime(actionId, 'approvedAt', now);
-  }
-  return result.changes > 0;
-}
-
-function _appendAuditTime(actionId, key, timestamp) {
-  const db = getDb();
-  const existing = db.prepare('SELECT evidence_json FROM actions WHERE id = ?').get(actionId);
-  const audit = existing?.evidence_json ? JSON.parse(existing.evidence_json) : {};
-  audit[key] = timestamp;
-  db.prepare('UPDATE actions SET evidence_json = ? WHERE id = ?')
-    .run(JSON.stringify(audit), actionId);
-}
-
-/**
- * 二次确认发送（dry-run 成功后，用户明确说"发送"）
- * 状态从 dry_run_ok 变为 execute_confirmed
- */
-export function confirmExecuteAction(actionId) {
-  const db = getDb();
-  const now = new Date().toISOString();
-  const result = db.prepare(`
-    UPDATE actions SET status = 'execute_confirmed' WHERE id = ? AND status = 'dry_run_ok'
-  `).run(actionId);
-
-  if (result.changes > 0) {
-    _appendAuditTime(actionId, 'executeConfirmedAt', now);
-  }
-  return result.changes > 0;
-}
-
-/**
- * 更新动作状态（dry_run_ok, succeeded, blocked, skipped 等）
+ * 更新动作状态（succeeded, blocked, skipped 等）
  * Preserves existing evidence_json when none provided; merges runtime audit fields.
  */
 export function updateActionStatus(actionId, status, reason = null, evidenceJson = null, screenshotPath = null) {
@@ -94,11 +49,6 @@ export function updateActionStatus(actionId, status, reason = null, evidenceJson
   // Append audit timeline timestamp for specific state transitions.
   // CRITICAL: must merge into mergedEvidence (not re-read from DB) to preserve
   // the policy+runtime fields that were already merged above.
-  if (status === 'dry_run_ok') {
-    const audit = mergedEvidence ? JSON.parse(mergedEvidence) : {};
-    audit.dryRunAt = now;
-    mergedEvidence = JSON.stringify(audit);
-  }
   if (status === 'succeeded') {
     const audit = mergedEvidence ? JSON.parse(mergedEvidence) : {};
     audit.executedAt = now;
@@ -155,14 +105,14 @@ export function getActionWithEvent(actionId) {
 }
 
 /**
- * 检查某事件是否已有活跃的同类动作（prepared/approved/dry_run_ok/execute_confirmed）
+ * 检查某事件是否已有活跃的同类动作（prepared）
  */
 export function hasActiveAction(eventId, actionType) {
   const db = getDb();
   const row = db.prepare(
     `SELECT id FROM actions
      WHERE event_id = ? AND action_type = ?
-       AND status IN ('prepared', 'approved', 'dry_run_ok', 'execute_confirmed')
+       AND status = 'prepared'
      LIMIT 1`
   ).get(eventId, actionType);
   return !!row;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateReplyText, buildPlanItemFromEvent } from '../../src/domain/reply-template.mjs';
+import { generateReplyText } from '../../src/domain/reply-template.mjs';
 
 describe('generateReplyText', () => {
   it('returns template:question for 怎么', () => {
@@ -133,91 +133,5 @@ describe('generateReplyText', () => {
     });
     expect(result.reason).toBe('template:default_context:ai_tooling');
     expect(result.replyText).toContain('AI工具实践');
-  });
-});
-
-describe('buildPlanItemFromEvent', () => {
-  const mockEvent = {
-    id: 42,
-    actor_name: '张三',
-    actor_profile_url: 'https://example.com/profile/zhangsan',
-    my_work_title: '我的视频作品',
-    target_work_id: 'w123',
-    target_work_url: 'https://example.com/work/123',
-    comment_text: '写得不错',
-    event_time_text: '05-30 14:00',
-    raw_payload_json: '{"large": "should not appear"}',
-  };
-
-  it('sets approved to false', () => {
-    const item = buildPlanItemFromEvent(mockEvent);
-    expect(item.approved).toBe(false);
-  });
-
-  it('maps eventId from id', () => {
-    const item = buildPlanItemFromEvent(mockEvent);
-    expect(item.eventId).toBe(42);
-  });
-
-  it('preserves workTitle from my_work_title', () => {
-    const item = buildPlanItemFromEvent(mockEvent);
-    expect(item.workTitle).toBe('我的视频作品');
-  });
-
-  it('preserves actorName from actor_name', () => {
-    const item = buildPlanItemFromEvent(mockEvent);
-    expect(item.actorName).toBe('张三');
-  });
-
-  it('preserves actorProfileUrl', () => {
-    const item = buildPlanItemFromEvent(mockEvent);
-    expect(item.actorProfileUrl).toBe('https://example.com/profile/zhangsan');
-  });
-
-  it('preserves commentText from comment_text', () => {
-    const item = buildPlanItemFromEvent(mockEvent);
-    expect(item.commentText).toBe('写得不错');
-  });
-
-  it('preserves eventTimeText from event_time_text', () => {
-    const item = buildPlanItemFromEvent(mockEvent);
-    expect(item.eventTimeText).toBe('05-30 14:00');
-  });
-
-  it('generates replyText from template', () => {
-    const item = buildPlanItemFromEvent(mockEvent);
-    expect(item.replyText).toBe('感谢支持，一起交流。');
-    expect(item.reason).toBe('template:praise');
-  });
-
-  it('maps workId from target_work_id', () => {
-    const item = buildPlanItemFromEvent(mockEvent);
-    expect(item.workId).toBe('w123');
-  });
-
-  it('maps workUrl from target_work_url', () => {
-    const item = buildPlanItemFromEvent(mockEvent);
-    expect(item.workUrl).toBe('https://example.com/work/123');
-  });
-
-  it('returns null for null event', () => {
-    expect(buildPlanItemFromEvent(null)).toBeNull();
-  });
-
-  it('returns null for event without id', () => {
-    expect(buildPlanItemFromEvent({})).toBeNull();
-  });
-
-  it('handles event with missing optional fields', () => {
-    const sparse = { id: 99, comment_text: '好' };
-    const item = buildPlanItemFromEvent(sparse);
-    expect(item.eventId).toBe(99);
-    expect(item.workTitle).toBe('');
-    expect(item.workUrl).toBe('');
-    expect(item.actorName).toBe('');
-    expect(item.actorProfileUrl).toBe('');
-    expect(item.commentText).toBe('好');
-    expect(item.replyText).toBe('感谢支持。');
-    expect(item.reason).toBe('template:short');
   });
 });

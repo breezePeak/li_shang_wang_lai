@@ -43,17 +43,6 @@ export function runMigrations(dbPath = DB_PATH) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
-    CREATE TABLE IF NOT EXISTS action_plans (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      plan_type TEXT NOT NULL CHECK (plan_type IN ('comment_reply', 'reciprocal_like')),
-      mode TEXT NOT NULL CHECK (mode IN ('manual', 'auto')),
-      status TEXT NOT NULL DEFAULT 'draft',
-      payload_json TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      approved_at TEXT,
-      executed_at TEXT
-    );
-
     CREATE TABLE IF NOT EXISTS actions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       event_id INTEGER NOT NULL,
@@ -62,14 +51,13 @@ export function runMigrations(dbPath = DB_PATH) {
       target_url TEXT,
       target_title TEXT,
       action_text TEXT,
-      status TEXT NOT NULL CHECK (status IN ('planned','prepared','approved','dry_run_ok','execute_confirmed','running','succeeded','failed','blocked','skipped','sent_unverified')),
+      status TEXT NOT NULL CHECK (status IN ('planned','prepared','running','succeeded','failed','blocked','skipped','sent_unverified')),
       reason TEXT,
       evidence_json TEXT,
       screenshot_path TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       executed_at TEXT,
-      FOREIGN KEY(event_id) REFERENCES interaction_events(id),
-      FOREIGN KEY(plan_id) REFERENCES action_plans(id)
+      FOREIGN KEY(event_id) REFERENCES interaction_events(id)
     );
   `);
 
@@ -80,7 +68,9 @@ export function runMigrations(dbPath = DB_PATH) {
 
   const actionsSql = checkActions ? (checkActions.sql || '') : '';
   const needsActionsMigration =
-    !actionsSql.includes("execute_confirmed") ||
+    actionsSql.includes("execute_confirmed") ||
+    actionsSql.includes("dry_run_ok") ||
+    actionsSql.includes("'approved'") ||
     !actionsSql.includes("sent_unverified");
 
   if (needsActionsMigration && actionsSql) {
@@ -95,16 +85,23 @@ export function runMigrations(dbPath = DB_PATH) {
         target_url TEXT,
         target_title TEXT,
         action_text TEXT,
-        status TEXT NOT NULL CHECK (status IN ('planned','prepared','approved','dry_run_ok','execute_confirmed','running','succeeded','failed','blocked','skipped','sent_unverified')),
+        status TEXT NOT NULL CHECK (status IN ('planned','prepared','running','succeeded','failed','blocked','skipped','sent_unverified')),
         reason TEXT,
         evidence_json TEXT,
         screenshot_path TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         executed_at TEXT,
-        FOREIGN KEY(event_id) REFERENCES interaction_events(id),
-        FOREIGN KEY(plan_id) REFERENCES action_plans(id)
+        FOREIGN KEY(event_id) REFERENCES interaction_events(id)
       );
-      INSERT INTO actions_new SELECT * FROM actions;
+      INSERT INTO actions_new
+      SELECT
+        id, event_id, plan_id, action_type, target_url, target_title, action_text,
+        CASE
+          WHEN status IN ('approved','dry_run_ok','execute_confirmed') THEN 'prepared'
+          ELSE status
+        END as status,
+        reason, evidence_json, screenshot_path, created_at, executed_at
+      FROM actions;
       DROP TABLE actions;
       ALTER TABLE actions_new RENAME TO actions;
     `);
@@ -147,7 +144,7 @@ export function runMigrations(dbPath = DB_PATH) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_reply_action
     ON actions(event_id, action_type)
     WHERE action_type = 'reply_comment'
-      AND status IN ('prepared','approved','dry_run_ok','execute_confirmed');
+      AND status = 'prepared';
   `);
 
   // ---- New tables for live workflow ----

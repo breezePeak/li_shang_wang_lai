@@ -125,11 +125,8 @@ npm run auth
 | 登录账号 | `npm run auth` | 打开浏览器，手动完成抖音登录 |
 | 扫描互动 | `npm run interactions:scan -- --type all --days 7` | 扫描最近 7 天的评论和点赞互动 |
 | 查看待处理 | `npm run actions:pending` | 查看数据库中等待处理的互动任务 |
-| 准备评论回复 | `npm run comments:prepare -- --event-id <id> --reply-text "xxx" --decision approve` | 为单条评论准备回复 |
-| 审批回复 | `npm run actions:approve -- --action-id <id>` | 审批指定动作 |
-| dry-run 定位 | `npm run comments:execute -- --dry-run` | 预演定位目标评论 |
-| 确认执行 | `npm run actions:confirm-execute -- --action-id <id>` | 确认执行指定动作 |
-| 执行评论回复 | `npm run comments:execute -- --execute --max-items 1` | 真实执行评论回复 |
+| 准备评论回复 | `npm run comments:prepare -- --event-id <id> --reply-text "xxx"` | 为单条评论准备回复 |
+| 执行评论回复 | `npm run comments:execute-all -- --action-id <id> --execute` | 真实执行评论回复 |
 | 准备回访 | `npm run return-visit:prepare` | 进入好友主页，采集上下文，生成回访评论 |
 | 执行回访 | `npm run return-visit:execute -- --execute` | 执行点赞 + 评论回访 |
 

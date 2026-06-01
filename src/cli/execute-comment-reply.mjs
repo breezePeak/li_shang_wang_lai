@@ -1,10 +1,8 @@
-// 评论回复执行命令（按 actionId 单条执行）
-// 替代旧的手工传入 JSON 计划文件方式，直接通过 actionId 驱动执行。
-// 强制校验审批状态链：approved → dry_run_ok → executed
+// 评论回复执行命令（按 actionId 单条执行）。
+// 当前流程只接受 prepared 动作；不再提供手动审批/dry-run/二次确认链路。
 //
 // 用法：
-//   npm run comments:execute -- --action-id <id> --dry-run --json
-//   npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
+//   npm run comments:execute -- --action-id <id> --execute --json
 
 import { createBrowserContext } from '../browser/browser-context.mjs';
 import {
@@ -40,12 +38,8 @@ async function validateActionForMode(action, commonArgs, { isDryRun, isExecute }
     return { ok: false, code: RESULT_CODES.BLOCKED, message: '--dry-run 与 --execute 不可同时使用' };
   }
 
-  if (isDryRun && action.status !== 'approved') {
-    return { ok: false, code: RESULT_CODES.ACTION_NOT_APPROVED, message: `dry-run 要求动作状态为 approved，当前: ${action.status}` };
-  }
-
-  if (isExecute && action.status !== 'execute_confirmed') {
-    return { ok: false, code: RESULT_CODES.BLOCKED, message: `真实发送要求先完成 dry-run 并二次确认（当前状态: ${action.status}）。请先执行 actions:confirm-execute。` };
+  if (action.status !== 'prepared') {
+    return { ok: false, code: RESULT_CODES.ACTION_NOT_APPROVED, message: `执行要求动作状态为 prepared，当前: ${action.status}` };
   }
 
   if (!action.commentText || action.commentText.trim().length === 0) {
@@ -122,11 +116,10 @@ async function main() {
   }
 
   if (isDryRun) {
-    await updateActionStatus(action.actionId, 'dry_run_ok');
     printJsonResult('comments:execute', {
       actionId: action.actionId,
-      mode: 'dry-run',
-      status: 'dry_run_ok',
+      mode: 'validate-only',
+      status: 'prepared',
       actorName: action.actorName,
       commentText: action.commentText,
       replyText: action.actionText,
@@ -193,16 +186,15 @@ async function main() {
 
     if (isDryRun) {
       // Dry-run: located the comment, opened the reply box — no send
-      await updateActionStatus(action.actionId, 'dry_run_ok');
       printJsonResult('comments:execute', {
         actionId: action.actionId,
-        mode: 'dry-run',
-        status: 'dry_run_ok',
+        mode: 'validate-only',
+        status: 'prepared',
         actorName: action.actorName,
         commentText: action.commentText,
         replyText: action.actionText,
       }, { actionId: action.actionId });
-      log('[execute] dry-run 成功：已定位到目标评论，未发送。');
+      log('[execute] validate-only 成功：已定位到目标评论，未发送。');
     } else if (isExecute) {
       // P0-1 FIX: openReplyBox already called above.
       // Now sendReply fills the already-open input box and clicks send.

@@ -105,25 +105,3 @@ export function generateReplyText(commentText, { workTitle = '', workText = '', 
 
   return { replyText: '感谢评论，一起交流。', reason: 'template:default' };
 }
-
-export function buildPlanItemFromEvent(event) {
-  if (!event || !event.id) return null;
-
-  const template = generateReplyText(event.comment_text);
-
-  const item = {
-    eventId: event.id,
-    approved: false,
-    workId: event.target_work_id || '',
-    workTitle: event.my_work_title || '',
-    workUrl: event.target_work_url || '',
-    actorName: event.actor_name || '',
-    actorProfileUrl: event.actor_profile_url || '',
-    commentText: event.comment_text || '',
-    eventTimeText: event.event_time_text || '',
-    replyText: template.replyText,
-    reason: template.reason,
-  };
-
-  return item;
-}

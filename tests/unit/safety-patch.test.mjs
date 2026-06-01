@@ -357,13 +357,6 @@ describe('CLI --json mode keepOpen enforcement', () => {
     expect(typeof parsed.ok).toBe('boolean');
   });
 
-  it('actions:approve --json should exit cleanly', () => {
-    const result = runCli('approve-action.mjs', ['--action-id', '999', '--json'], 10_000);
-    const parsed = parseStdout(result);
-    expect(parsed).not.toBeNull();
-    expect(result.error).toBeFalsy();
-  });
-
   it('comments:execute --json with missing action-id exits cleanly', () => {
     const result = runCli('execute-comment-reply.mjs', ['--json'], 10_000);
     const parsed = parseStdout(result);
@@ -669,7 +662,7 @@ describe('work-context validation + audit', () => {
   });
 
   it('succeeded evidence_json preserves full audit chain (policy + timeline + runtime)', async () => {
-    const { createAction, updateActionStatus, confirmExecuteAction, getAction } = await import('../../src/db/action-repository.mjs');
+    const { createAction, updateActionStatus, getAction } = await import('../../src/db/action-repository.mjs');
     const { insertEvent } = await import('../../src/db/interaction-repository.mjs');
     const { runMigrations: initDb } = await import('../../src/db/migrations.mjs');
     initDb();
@@ -695,28 +688,13 @@ describe('work-context validation + audit', () => {
     });
     expect(actionId).toBeGreaterThan(0);
 
-    // dry-run: append dryRunAt
-    updateActionStatus(actionId, 'dry_run_ok', null, null);
-    let action = getAction(actionId);
-    let audit = JSON.parse(action.evidence_json);
-    expect(audit.decision).toBe('reply');
-    expect(audit.dryRunAt).toBeDefined();
-
-    // confirm-execute: executeConfirmedAt set by confirmExecuteAction
-    confirmExecuteAction(actionId);
-    action = getAction(actionId);
-    audit = JSON.parse(action.evidence_json);
-    expect(audit.executeConfirmedAt).toBeDefined();
-
-    // execute (succeeded): merge runtime fields + executedAt, preserving all above
+    // execute (succeeded): merge runtime fields + executedAt, preserving policy audit
     updateActionStatus(actionId, 'succeeded', null, JSON.stringify({ runtime: 'ok', dryRunConfirmed: true }));
-    action = getAction(actionId);
-    audit = JSON.parse(action.evidence_json);
+    const action = getAction(actionId);
+    const audit = JSON.parse(action.evidence_json);
     expect(audit.decision).toBe('reply');
     expect(audit.riskLevel).toBe('low');
     expect(audit.policyVersion).toBe('0.1.0');
-    expect(audit.dryRunAt).toBeDefined();
-    expect(audit.executeConfirmedAt).toBeDefined();
     expect(audit.executedAt).toBeDefined();
     expect(audit.runtime).toBe('ok');
     expect(audit.dryRunConfirmed).toBe(true);

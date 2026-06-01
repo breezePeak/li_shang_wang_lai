@@ -218,7 +218,7 @@ function main() {
   // P1-3: Check duplicate — active action already exists
   if (hasActiveAction(args.eventId, 'reply_comment')) {
     printJsonError('comments:prepare', RESULT_CODES.DUPLICATE_ACTION,
-      '该评论已有活跃的回复动作（prepared/approved/dry_run_ok），不能重复创建。请先完成或取消已有动作。', { recoverable: false }); return;
+      '该评论已有待执行回复动作（prepared），不能重复创建。请先执行或重置已有动作。', { recoverable: false }); return;
   }
 
   const matchedWork = workCtx?.works?.find(w => w.id === args.workContextId) || null;

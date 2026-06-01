@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeCommentEvent, buildRawPayloadJson } from '../../src/domain/comment-event-normalization.mjs';
-import { buildPlanItemFromEvent } from '../../src/domain/reply-template.mjs';
 
 describe('normalizeCommentEvent', () => {
   it('完整字段归一化', () => {
@@ -116,8 +115,8 @@ describe('buildRawPayloadJson', () => {
   });
 });
 
-describe('采集事件 → plan item 字段链路', () => {
-  it('完整采集事件经归一化后可生成完整 plan item', () => {
+describe('采集事件字段链路', () => {
+  it('完整采集事件经归一化后保留执行所需字段', () => {
     const raw = {
       actorName: '张三',
       actorProfileUrl: 'https://example.com/user/1',
@@ -131,37 +130,16 @@ describe('采集事件 → plan item 字段链路', () => {
     const normResult = normalizeCommentEvent(raw);
     expect(normResult.valid).toBe(true);
 
-    const dbEvent = {
-      id: 1,
-      ...normResult.event,
-      actor_profile_key: null,
-      relation: 'unknown',
-      platform_event_id: null,
-      notification_item_key: null,
-      fingerprint: 'fp-test',
-      raw_payload_json: '{}',
-      dedup_confidence: 'medium',
-      profile_resolution_status: 'unresolved',
-      scanned_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    const planItem = buildPlanItemFromEvent(dbEvent);
-    expect(planItem).not.toBeNull();
-    expect(planItem.eventId).toBe(1);
-    expect(planItem.approved).toBe(false);
-    expect(planItem.workTitle).toBe('我的作品A');
-    expect(planItem.actorName).toBe('张三');
-    expect(planItem.commentText).toBe('写得不错');
-    expect(planItem.replyText).toBeTruthy();
-    expect(planItem.workId).toBe('w001');
-    expect(planItem.workUrl).toBe('https://example.com/video/1');
-    expect(planItem.actorProfileUrl).toBe('https://example.com/user/1');
-    expect(planItem.eventTimeText).toBe('05-30 12:00');
+    expect(normResult.event.my_work_title).toBe('我的作品A');
+    expect(normResult.event.actor_name).toBe('张三');
+    expect(normResult.event.comment_text).toBe('写得不错');
+    expect(normResult.event.target_work_id).toBe('w001');
+    expect(normResult.event.target_work_url).toBe('https://example.com/video/1');
+    expect(normResult.event.actor_profile_url).toBe('https://example.com/user/1');
+    expect(normResult.event.event_time_text).toBe('05-30 12:00');
   });
 
-  it('缺 workTitle 的采集事件 → plan item 中 workTitle 为空字符串', () => {
+  it('缺 workTitle 的采集事件仍保留空标题和原评论', () => {
     const raw = {
       actorName: '李四',
       actorProfileUrl: '',
@@ -176,26 +154,9 @@ describe('采集事件 → plan item 字段链路', () => {
     expect(normResult.valid).toBe(true);
     expect(normResult.warnings).toContain('missing_work_title');
 
-    const dbEvent = {
-      id: 2,
-      ...normResult.event,
-      actor_profile_key: null,
-      relation: 'unknown',
-      platform_event_id: null,
-      notification_item_key: null,
-      fingerprint: 'fp-test-2',
-      raw_payload_json: '{}',
-      dedup_confidence: 'weak',
-      profile_resolution_status: 'unresolved',
-      scanned_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    const planItem = buildPlanItemFromEvent(dbEvent);
-    expect(planItem.workTitle).toBe('');
-    expect(planItem.actorName).toBe('李四');
-    expect(planItem.commentText).toBe('支持');
+    expect(normResult.event.my_work_title).toBe('');
+    expect(normResult.event.actor_name).toBe('李四');
+    expect(normResult.event.comment_text).toBe('支持');
   });
 
   it('缺 commentText 的采集事件 → 归一化失败，不入库', () => {

@@ -32,14 +32,14 @@ function main() {
     return;
   }
 
-  updateActionStatus(args.actionId, 'approved', 'reset from blocked for retry');
-  updateEventStatus(action.eventId, 'approved');
+  updateActionStatus(args.actionId, 'prepared', 'reset from blocked for retry');
+  updateEventStatus(action.eventId, 'planned');
 
   printJsonResult('actions:reset-blocked', {
     actionId: args.actionId,
     eventId: action.eventId,
-    status: 'approved',
-    next: `npm run comments:execute -- --action-id ${args.actionId} --dry-run`,
+    status: 'prepared',
+    next: `npm run comments:execute-all -- --action-id ${args.actionId} --execute`,
   }, { reset: 1 });
 }
 

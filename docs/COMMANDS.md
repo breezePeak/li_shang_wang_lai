@@ -67,7 +67,7 @@ npm run auth
 
 **源文件**：`src/auth-douyin.mjs`
 
-打开浏览器，扫码登录抖音。登录态保存在 `.playwright/` 目录下，后续命令复用。
+打开浏览器并检测抖音登录态。检测到已登录后自动关闭浏览器并返回认证成功；60 秒未检测到登录态时提示扫码登录；最多等待 5 分钟，超时后关闭浏览器并返回验证失败。登录态保存在 `.playwright/` 目录下，后续命令复用。
 
 无需任何参数。
 
@@ -174,53 +174,7 @@ npm run likes:reciprocate -- --execute --plan plan.json
 
 ---
 
-## 8. actions:approve
-
-```bash
-npm run actions:approve -- --action-id 42 --json
-npm run actions:approve -- --action-ids 42,43 --json
-npm run actions:approve -- --all-prepared --json
-```
-
-**源文件**：`src/cli/approve-action.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--action-id` | int | 必填 | 要审批的动作 ID |
-| `--action-ids` | csv | — | 批量审批多个动作 ID，例如 `1,2,3` |
-| `--all-prepared` | flag | — | 批量审批所有 prepared 动作，最多 200 条 |
-| `--json` | bool | `false` | JSON 输出 |
-
-审批指定动作，允许后续执行。
-
----
-
-## 9. actions:confirm-execute
-
-```bash
-npm run actions:confirm-execute -- --action-id 42 --json
-npm run actions:confirm-execute -- --action-ids 42,43 --json
-npm run actions:confirm-execute -- --all-dry-run-ok --json
-```
-
-**源文件**：`src/cli/confirm-execute.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--action-id` | int | 必填 | 要确认执行的动作 ID |
-| `--action-ids` | csv | — | 批量确认多个动作 ID，例如 `1,2,3` |
-| `--all-dry-run-ok` | flag | — | 批量确认所有 dry_run_ok 动作，最多 200 条 |
-| `--json` | bool | `false` | JSON 输出 |
-
-将已审批动作标记为 `execute_confirmed`，允许真实执行。
-
----
-
-## 10. comments:classify
+## 8. comments:classify
 
 ```bash
 npm run comments:classify -- --text "求教程" --json
@@ -239,7 +193,7 @@ npm run comments:classify -- --text "求教程" --json
 
 ---
 
-## 11. comments:prepare
+## 9. comments:prepare
 
 ```bash
 npm run comments:prepare -- --event-id 42 --reply-text "谢谢支持"
@@ -268,33 +222,12 @@ npm run comments:prepare -- --event-id 42 --reply-text "谢谢支持"
 
 ---
 
-## 12. comments:execute
-
-```bash
-npm run comments:execute -- --action-id 42 --dry-run
-```
-
-**源文件**：`src/cli/execute-comment-reply.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--action-id` | int | 必填 | 动作 ID |
-
-执行单条评论回复。遵循动作状态机：`approved` → `dry_run_ok` → `execute_confirmed` → `succeeded`。
-
-`--dry-run` 只做数据库和安全门禁校验，不打开浏览器；`--execute` 才会打开页面并真实发送。
-
----
-
-## 13. comments:execute-all
+## 10. comments:execute-all
 
 ```bash
 npm run comments:execute-all -- --action-id 42 --execute
 npm run comments:execute-all -- --action-ids 42,43 --execute
 npm run comments:execute-all -- --all-prepared --max-items 20 --execute
-npm run comments:execute-all -- --all-ready --max-items 20 --execute
 ```
 
 **源文件**：`src/cli/execute-all-comment-replies.mjs`
@@ -306,16 +239,15 @@ npm run comments:execute-all -- --all-ready --max-items 20 --execute
 | `--action-id` | int | — | 单条动作 ID |
 | `--action-ids` | csv | — | 批量动作 ID，例如 `1,2,3` |
 | `--all-prepared` | flag | — | 处理所有 prepared 动作 |
-| `--all-ready` | flag | — | 处理 prepared / approved / dry_run_ok / execute_confirmed 动作 |
 | `--max-items` | int | `20` | 本轮最多处理条数 |
-| `--execute` | bool | `false` | 是否真实发送；不加时只推进到 execute_confirmed |
+| `--execute` | bool | `false` | 是否真实发送；不加时只做数据门禁校验 |
 | `--json` | bool | `false` | JSON 输出 |
 
-新流程默认入口。内部自动完成 approve → dry-run 数据校验 → confirm；加 `--execute` 后继续逐条调用 `comments:execute -- --execute` 真实发送。
+评论回复默认入口。只处理 `prepared` 动作；旧手动分段链路已删除。加 `--execute` 后逐条打开页面并真实发送。
 
 ---
 
-## 14. actions:reset-blocked
+## 11. actions:reset-blocked
 
 ```bash
 npm run actions:reset-blocked -- --action-id 42 --json
@@ -330,11 +262,11 @@ npm run actions:reset-blocked -- --action-id 42 --json
 | `--action-id` | int | 必填 | 要恢复的 blocked 动作 ID |
 | `--json` | bool | `false` | JSON 输出 |
 
-将 blocked 评论回复动作恢复到 `approved`，用于浏览器崩溃、profile 锁定、页面临时异常后的重试。不要手动改 SQLite。
+将 blocked 评论回复动作恢复到 `prepared`，用于浏览器崩溃、profile 锁定、页面临时异常后的重试。不要手动改 SQLite。
 
 ---
 
-## 15. return-visit:prepare
+## 12. return-visit:prepare
 
 ```bash
 npm run return-visit:prepare -- --max-items 5
@@ -357,7 +289,7 @@ npm run return-visit:prepare -- --max-items 5
 
 ---
 
-## 16. return-visit:execute
+## 13. return-visit:execute
 
 ```bash
 npm run return-visit:execute -- --max-items 3
@@ -381,7 +313,7 @@ npm run return-visit:execute -- --max-items 3
 
 ---
 
-## 17. notify:inspect
+## 14. notify:inspect
 
 ```bash
 npm run notify:inspect
@@ -393,7 +325,7 @@ npm run notify:inspect
 
 ---
 
-## 18. interactions:inspect
+## 15. interactions:inspect
 
 ```bash
 npm run interactions:inspect
@@ -405,7 +337,7 @@ npm run interactions:inspect
 
 ---
 
-## 19. history
+## 16. history
 
 ```bash
 npm run history
@@ -417,7 +349,7 @@ npm run history
 
 ---
 
-## 20. dev:inspect-page
+## 17. dev:inspect-page
 
 ```bash
 npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
@@ -438,7 +370,7 @@ npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
 
 ---
 
-## 21. debug:like-dom
+## 18. debug:like-dom
 
 ```bash
 npm run debug:like-dom
@@ -450,7 +382,7 @@ npm run debug:like-dom
 
 ---
 
-## 22. debug:like-state
+## 19. debug:like-state
 
 ```bash
 npm run debug:like-state
@@ -499,10 +431,10 @@ npm run debug:like-state
 
 | 规则 | 约束 |
 |---|---|
-| 默认只读 | 默认仅允许扫描、汇总、生成候选和 dry-run |
-| 明确审批 | 真实动作必须由用户针对具体条目明确确认 |
+| 默认只读 | 默认仅允许扫描、汇总和生成候选 |
+| 明确执行 | 真实动作必须显式传入 `--execute` |
 | 单条执行 | 真实执行默认最多 1 条（`--max-items 1`） |
-| 先预览后执行 | 在执行前展示目标、内容和动作 |
+| prepared 后执行 | 评论回复从 prepared action 直接执行 |
 | 状态未知即阻断 | 页面定位、关系判断或点赞状态不确定时不得继续 |
 | 防重复 | 已成功执行过的事件或目标不得重复操作 |
 | 可追溯 | 保存计划、执行结果、运行摘要和异常证据 |
