@@ -1,530 +1,312 @@
 ---
-
 name: creator-interaction-executor
-description: Execute creator interaction workflows after explicit user confirmation, such as scanning interactions, preparing return visits, liking works, posting approved comments, and recording results. When a comment draft is needed, this skill must load and use creator-comment-suggestion from ../creator-comment-suggestion/SKILL.md.
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+description: 执行礼尚往来项目的创作者互动流程，包括扫描互动、查看待处理任务、执行评论回复、准备回访任务、预演回访和执行回访。当用户提到礼尚往来、互动扫描、评论回复、批量回复、回访、点赞评论时使用此技能。
+---
 
-# Creator Interaction Executor
+# 创作者互动执行
 
-This skill handles creator interaction workflows.
+本技能用于执行 `li_shang_wang_lai` 项目的默认互动流程。
 
-It may help inspect interactions, prepare return visits, open target works, check page state, like works, post approved comments, and record results.
+本技能只负责调用项目已有 CLI 命令，不直接编写 Playwright 脚本，不修改源码，不修改数据库结构，不自由生成评论内容，也不绕过平台登录、验证码、滑块或风控。
 
-This skill controls workflow and execution. It must not freely generate comment text. When a comment is needed, it must load and use the companion skill:
+详细命令参数、配置说明和数据库状态说明应放在项目独立文档中，例如：
 
-```text
-../creator-comment-suggestion/SKILL.md
-```
+- `docs/COMMANDS.md`
+- `docs/CONFIG.md`
+- `docs/DATABASE.md`
+- `README.md`
 
-## Required companion skill
+## 主要目标
 
-Comment generation is delegated to:
+按照正确顺序执行创作者互动流程。
 
-```text
-creator-comment-suggestion
-```
-
-Location in this skill pack:
+默认流程是：
 
 ```text
-../creator-comment-suggestion/SKILL.md
+扫描互动
+→ 查看待处理任务
+→ 执行评论回复
+→ 准备回访任务
+→ 预演回访
+→ 执行回访
 ```
 
-When this skill needs a comment draft, it must:
+这个流程必须：
 
-1. Extract or receive work context.
-2. Read or invoke `creator-comment-suggestion`.
-3. Pass the available work context to it.
-4. Receive exactly one comment suggestion.
-5. Validate the returned comment locally.
-6. Show the target and comment to the user when required.
-7. Execute only after explicit confirmation if a real platform action is involved.
+- 使用项目已有命令
+- 基于数据库状态执行
+- 按顺序执行
+- 失败后立即停止
+- 不自行改代码
+- 不自行操作浏览器绕过 CLI
 
-Do not generate comment text freely inside this skill.
+## 项目目录
 
-Do not duplicate or override the full comment-generation rules here. The source of truth for comment wording is `creator-comment-suggestion`.
+项目根目录：
 
-## Core responsibility
+```bash
+PROJECT_DIR="$HOME/.openclaw/li_shang_wang_lai"
+```
 
-This skill may help with:
+执行任何命令前，先进入项目目录：
 
-* checking interaction notifications
-* summarizing pending comments or likes
-* identifying candidate creators for return visits
-* opening a target profile or work
-* extracting work context
-* preparing a return visit
-* checking like state
-* liking a work after confirmation
-* posting an approved comment after confirmation
-* recording success, skipped, blocked, failed, or unverified results
+```bash
+cd "$PROJECT_DIR"
+```
 
-The goal is to keep creator interaction operations safe, explicit, auditable, and controlled.
+## 何时使用此技能
 
-## Host capability rule
+当用户需要以下能力时，使用此技能：
 
-This skill can only use tools and commands that are actually available in the current runtime.
+- 执行完整礼尚往来流程
+- 扫描评论和点赞互动
+- 查看待处理互动任务
+- 执行已准备好的评论回复
+- 准备回访任务
+- 预演回访执行
+- 执行真实回访
+- 调用项目 CLI，而不是手动操作页面
 
-If the host project or agent environment does not provide a required operation, report that the operation is unsupported instead of pretending it exists.
+用户可能会这样说：
 
-Examples:
+- “开始礼尚往来流程”
+- “跑完整互动流程”
+- “扫描互动并处理”
+- “执行评论回复”
+- “准备回访任务”
+- “先预演一下回访”
+- “执行回访”
+- “采集评论并回访”
+- “批量回复并回访”
 
-* If there is no tool to open a specific profile URL, do not claim that a single-person return visit can be performed.
-* If there is no command to execute a selected task, do not claim the task was executed.
-* If only preparation is supported, prepare and report the next required step.
-* If only scanning is supported, scan and summarize.
+## 何时不要使用此技能
 
-Never fabricate tool results.
+不要用此技能处理以下事情：
 
-## When to use this skill
+- 直接生成评论文案
+- 编写 Playwright 自动化代码
+- 修改项目源码
+- 修改数据库结构
+- 安装依赖
+- 初始化数据库
+- 替用户登录
+- 替用户扫码
+- 绕过登录、验证码、滑块、频率限制或平台风控
+- 生成垃圾评论
+- 生成互关、引流、广告类评论
+- 生成骚扰、辱骂、攻击性评论
+- 操作 `li_shang_wang_lai` 项目 CLI 之外的流程
 
-Use this skill for requests such as:
-
-* “看看谁给我点赞了”
-* “看看谁评论我了”
-* “帮我整理互动通知”
-* “帮我准备回访”
-* “生成待回访任务”
-* “执行待回访任务”
-* “检查执行结果”
-* “哪些互动还没处理”
-* “继续处理待回访”
-* “打开这个作品准备评论”
-* “给这个作品点个赞并评论”
-* “把这条评论发出去”
-
-Use this skill for “帮我回访这个人” only if the host environment provides a concrete target such as:
-
-* current opened profile
-* profile URL
-* user ID
-* existing task ID
-* target work URL
-* supported command for single-target preparation or execution
-
-If no such target or capability exists, explain that the current environment does not support direct single-person return visit and offer the available preparation/scanning path.
-
-## When not to use this skill
-
-Do not use this skill for:
-
-* general writing unrelated to creator interaction
-* image generation
-* unrelated social media copywriting
-* bulk spam
-* aggressive growth-hacking operations
-* evading platform restrictions
-* scraping private data
-* bypassing login, captcha, slider, or risk controls
-* executing actions without confirmation
-* unattended loops
-* generating comments directly without `creator-comment-suggestion`
-
-## Hard safety rules
-
-### 1. Default to preview
-
-Unless the user explicitly asks to execute, send, or confirm, only preview.
-
-Allowed preview actions include:
-
-* scan
-* summarize
-* prepare
-* draft
-* validate
-* dry-run
-* show candidate
-* ask for confirmation
-
-Preview mode must not:
-
-* click like
-* submit comments
-* follow users
-* repeat interactions
-* mark real actions as completed
-
-### 2. Explicit confirmation is required
-
-Real platform actions require explicit confirmation.
-
-Valid confirmation examples:
+如果需要生成评论建议，应使用或读取：
 
 ```text
-确认执行
-执行
-发送
-就发这条
-可以，发
-确认发送
+skills/creator-comment-suggestion/SKILL.md
 ```
 
-Invalid confirmation examples:
+本执行技能不应该自由发挥生成评论内容。
+
+## 默认完整流程
+
+当用户要求执行完整流程时，按顺序执行：
+
+```bash
+cd "$PROJECT_DIR" && npm run interactions:scan -- --type all --json
+cd "$PROJECT_DIR" && npm run actions:pending -- --json
+cd "$PROJECT_DIR" && npm run comments:reply
+cd "$PROJECT_DIR" && npm run return-visit:prepare -- --json --max-items 5
+cd "$PROJECT_DIR" && npm run return-visit:execute -- --dry-run --json
+cd "$PROJECT_DIR" && npm run return-visit:execute -- --json
+```
+
+如果任意命令失败，立即停止，并把失败命令和错误输出反馈给用户。
+
+不要在失败后继续执行后续命令。
+
+## 工作流一：扫描互动
+
+用于从平台通知中心采集评论、点赞等互动数据。
+
+扫描全部互动：
+
+```bash
+cd "$PROJECT_DIR" && npm run interactions:scan -- --type all --json
+```
+
+只扫描评论：
+
+```bash
+cd "$PROJECT_DIR" && npm run interactions:scan -- --type comment --json
+```
+
+只扫描点赞：
+
+```bash
+cd "$PROJECT_DIR" && npm run interactions:scan -- --type like --json
+```
+
+如果用户只要求扫描，执行完本工作流即可停止。
+
+如果用户要求完整流程，扫描完成后继续查看待处理任务。
+
+## 工作流二：查看待处理任务
+
+用于查看数据库中当前待处理的互动任务。
+
+查看全部待处理任务：
+
+```bash
+cd "$PROJECT_DIR" && npm run actions:pending -- --json
+```
+
+查看待处理评论：
+
+```bash
+cd "$PROJECT_DIR" && npm run actions:pending -- --type comment --json
+```
+
+这个步骤用于确认后续要处理哪些互动。
+
+## 工作流三：执行评论回复
+
+评论回复指的是：
 
 ```text
-看看
-准备一下
-生成一下
-感觉还行
-再优化下
-先放着
-试试看
+别人评论了我的作品
+→ 我在评论管理页回复这条评论
 ```
 
-Ambiguous messages are not confirmation.
+执行命令：
 
-### 3. Show the user what will happen
-
-Before executing a real action, show:
-
-* target user
-* target work title or URL
-* planned action
-* comment text, if a comment will be sent
-* known risks or blocked states
-
-Do not execute if the user has not seen the comment text, unless the host environment explicitly treats a previously stored approved comment as already reviewed and approved.
-
-### 4. Stop on unknown state
-
-If any critical state is unknown, stop.
-
-Critical states include:
-
-* login state
-* captcha or platform risk state
-* target profile identity
-* target work identity
-* like state
-* comment input state
-* duplicate execution state
-* comment validation state
-
-Unknown means blocked, not “try anyway”.
-
-### 5. No unattended batch execution
-
-Do not run unattended batch liking, commenting, following, or return visiting.
-
-Each real action must be traceable to a clear user request, stored task, allowed workflow, or explicit confirmation.
-
-### 6. Do not bypass platform protections
-
-If login, captcha, slider, rate limit, risk control, or suspicious activity warning appears:
-
-* stop immediately
-* report the issue
-* do not attempt bypass
-* do not suggest evasion
-
-## Comment generation flow
-
-Whenever a comment is required, use this flow:
-
-```text
-extract work context
-  ↓
-load ../creator-comment-suggestion/SKILL.md
-  ↓
-send context to creator-comment-suggestion
-  ↓
-receive exactly one comment text
-  ↓
-validate comment locally
-  ↓
-continue preparation or ask for confirmation
+```bash
+cd "$PROJECT_DIR" && npm run comments:reply
 ```
 
-The context sent to `creator-comment-suggestion` should use this structure:
+该命令应读取项目中已经准备好的回复数据，并进入评论管理页执行批量回复。
 
-```json
-{
-  "authorName": "",
-  "workTitle": "",
-  "captionText": "",
-  "hashtags": [],
-  "visibleTextSample": "",
-  "referenceComments": [],
-  "sourceCommentText": "",
-  "agentDisplayName": ""
-}
+不要手动打开评论管理页。
+
+不要自己写 Playwright 脚本替代该命令。
+
+## 工作流四：准备回访任务
+
+回访准备是回访流程的第一阶段。
+
+执行命令：
+
+```bash
+cd "$PROJECT_DIR" && npm run return-visit:prepare -- --json --max-items 5
 ```
 
-Only pass real collected or user-provided fields.
+该阶段负责：
 
-Missing fields should be empty. Do not invent missing context.
+- 从互动事件中创建或更新回访任务
+- 进入互动用户主页
+- 查找最近合适作品
+- 打开目标作品
+- 采集作品内容
+- 采集参考评论
+- 生成回访评论
+- 将任务标记为待执行
 
-## Comment local validation
+准备阶段不执行真实回访。
 
-After receiving a comment from `creator-comment-suggestion`, validate it again before use.
+准备阶段完成后，继续执行回访预演。
 
-Reject the comment if it:
+## 工作流五：预演回访
 
-* is empty
-* is not mainly Chinese
-* contains 回访、互关、互赞、已赞、已评、求关注、来看看你、支持一下、路过、打卡
-* contains 私信、加微信、加V、广告、推广、引流
-* contains 系统生成、自动回复、任务、采集、根据上下文
-* contains 主人、账号主人、我主人
-* contains emoji, emoticons, exclamation marks, or repeated punctuation
-* directly copies an existing reference comment
-* directly repeats the work title
-* fabricates behavior such as 收藏了、转发了、试过了、买了、去了
-* comments on appearance, body, age, income, location, or private details
-* makes medical, legal, financial, political, or other high-risk claims
+真实回访前先执行 dry-run。
 
-If validation fails:
+执行命令：
 
-* do not execute
-* ask `creator-comment-suggestion` for another safer comment if possible
-* or ask the user to edit manually
-* or mark the item as blocked / needs manual review, depending on host capability
-
-## Return visit meaning
-
-In this skill, a return visit means:
-
-```text
-open target work
-check like state
-like if not already liked
-post an approved comment
-verify result
-record final status
+```bash
+cd "$PROJECT_DIR" && npm run return-visit:execute -- --dry-run --json
 ```
 
-A return visit is complete only when:
+dry-run 用于检查待执行任务和页面状态。
 
-```text
-likeStatus is liked or already_liked
-and
-commentStatus is posted or confirmed
+dry-run 不执行真实点赞，不执行真实评论。
+
+如果 dry-run 失败，立即停止并反馈错误。
+
+如果 dry-run 成功，并且用户要求完整流程或确认继续执行，则进入真实回访。
+
+## 工作流六：执行回访
+
+回访执行是回访流程的第二阶段。
+
+执行命令：
+
+```bash
+cd "$PROJECT_DIR" && npm run return-visit:execute -- --json
 ```
 
-Already liked does not mean return visit is complete.
+该阶段负责：
 
-If the work is already liked, continue to the approved comment step unless duplicate-comment protection blocks it.
+- 打开准备阶段选中的目标作品
+- 检查点赞状态
+- 未点赞则点赞
+- 已点赞则继续
+- 发送已生成的回访评论
+- 记录点赞结果
+- 记录评论结果
+- 更新任务结果
 
-## Standard return visit workflow
+执行完成后，向用户报告执行结果。
 
-Use this workflow when the user asks to prepare or execute a return visit and the host environment supports the required steps.
+## 回访快捷流程
 
-```text
-receive user request
-  ↓
-identify candidate interaction or target profile/work
-  ↓
-open target profile or work
-  ↓
-extract work context
-  ↓
-load creator-comment-suggestion
-  ↓
-generate exactly one comment
-  ↓
-validate returned comment
-  ↓
-store or show prepared task
-  ↓
-wait for explicit confirmation if required
-  ↓
-open or re-check target work
-  ↓
-check like state
-  ↓
-like if not already liked
-  ↓
-locate comment input
-  ↓
-post approved comment
-  ↓
-verify result
-  ↓
-record final status
-  ↓
-report result to user
+当用户只说“执行回访”时，默认按下面顺序执行：
+
+```bash
+cd "$PROJECT_DIR" && npm run return-visit:prepare -- --json --max-items 5
+cd "$PROJECT_DIR" && npm run return-visit:execute -- --dry-run --json
+cd "$PROJECT_DIR" && npm run return-visit:execute -- --json
 ```
 
-If the host environment only supports preparation, stop after generating and validating the comment, then report the prepared result.
+如果用户明确说明“回访任务已经准备好了”，可以跳过 `return-visit:prepare`，从 dry-run 开始：
 
-If the host environment only supports executing stored tasks, do not attempt ad-hoc profile return visits.
-
-## Standard comment reply workflow
-
-Use this workflow when replying to a comment on the user's own work.
-
-```text
-receive user request
-  ↓
-identify source comment
-  ↓
-extract source comment and work context
-  ↓
-generate or receive reply text
-  ↓
-validate reply text
-  ↓
-show target comment and reply to user
-  ↓
-wait for explicit confirmation
-  ↓
-open correct comment location
-  ↓
-send approved reply
-  ↓
-verify result
-  ↓
-record final status
-  ↓
-report result to user
+```bash
+cd "$PROJECT_DIR" && npm run return-visit:execute -- --dry-run --json
+cd "$PROJECT_DIR" && npm run return-visit:execute -- --json
 ```
 
-If a reply requires a natural comment draft, use `creator-comment-suggestion` with the available context.
+## 失败处理
 
-## Duplicate protection
+命令失败时必须：
 
-Before executing, check whether the same or equivalent action already succeeded.
+- 立即停止当前流程
+- 不继续执行后续命令
+- 告诉用户失败的是哪条命令
+- 原样反馈错误输出
+- 不猜测修复
+- 不修改源码
+- 不修改数据库结构
 
-Block or skip if:
+需要进一步排查时，提示用户查看：
 
-* the same event was already processed successfully
-* the same work already has a recorded successful return visit
-* the same comment text was already posted
-* the platform visibly shows an existing comment by the same account and the workflow cannot safely distinguish it
+- `docs/COMMANDS.md`：命令参数说明
+- `docs/CONFIG.md`：配置说明
+- `docs/DATABASE.md`：数据库和状态说明
+- `README.md`：初始化、安装和环境说明
 
-Do not post repeated comments to the same work without a new explicit user instruction.
+## 硬性限制
 
-## Page interaction rules
+本技能不得：
 
-Before clicking like:
+- 绕过登录
+- 绕过验证码
+- 绕过滑块
+- 绕过平台风控
+- 替用户扫码
+- 清空或替换浏览器登录态
+- 编写自定义 Playwright 脚本
+- 修改源码
+- 修改数据库结构
+- 发送空评论
+- 发送广告评论
+- 发送引流评论
+- 发送互关评论
+- 发送辱骂或骚扰评论
+- 在命令失败后继续执行
 
-* confirm the current page is the target work
-* confirm the like button has been identified
-* confirm current like state
-* do not click if state is unknown
-
-Before posting a comment:
-
-* confirm the comment input belongs to the work comment area
-* avoid global search input
-* avoid unrelated text boxes
-* reject inputs whose placeholder, id, class, or surrounding container indicates search
-* do not use a generic input selector without comment-area constraints
-
-## Blocking conditions
-
-Stop and report blocked if:
-
-* login is required
-* captcha appears
-* slider appears
-* risk control appears
-* target profile cannot be opened
-* target work cannot be confirmed
-* target work URL is missing
-* like state is unknown
-* like button cannot be confirmed
-* comment input cannot be confirmed
-* comment text is empty
-* comment text fails validation
-* duplicate successful action exists
-* user has not explicitly confirmed
-* network or page error prevents safe verification
-* host capability for the requested operation is missing
-
-## Result states
-
-Use these final statuses:
-
-```text
-done
-skipped
-blocked
-failed
-sent_unverified
-unsupported
-```
-
-Use `done` only when the action was confirmed successful.
-
-Use `sent_unverified` when a comment appears submitted but cannot be confirmed.
-
-Use `unsupported` when the host environment lacks the required tool or command.
-
-Do not report `done` if verification failed.
-
-## Result report
-
-After execution or preparation, report clearly:
-
-* final status
-* target user
-* target work
-* like status
-* comment status
-* comment text
-* failure step if any
-* reason if any
-
-Example success report:
-
-```text
-已完成回访：
-目标用户：xxx
-目标作品：xxx
-点赞状态：已点赞
-评论状态：已发布
-评论内容：xxx
-```
-
-Example blocked report:
-
-```text
-已阻断，未执行：
-原因：点赞状态无法确认
-当前步骤：check-like-state
-```
-
-Example unsupported report:
-
-```text
-当前环境不支持直接回访指定用户：
-缺少 profileUrl / taskId / 当前目标页 或对应执行工具。
-可以先执行互动扫描，生成待回访任务后再处理。
-```
-
-Example unverified report:
-
-```text
-评论已尝试发送，但未确认成功：
-点赞状态：已点赞
-评论状态：未确认
-建议人工检查当前作品页
-```
-
-## Reporting style
-
-Be direct and concise.
-
-Do not exaggerate success.
-
-Do not say an action was completed unless it was verified.
-
-Do not hide skipped, blocked, unsupported, or failed results.
-
-Do not encourage aggressive growth tactics.
-
-## Skill boundary summary
-
-This skill controls interaction workflow and execution.
-
-`creator-comment-suggestion` controls comment wording.
-
-When in doubt:
-
-* do not execute
-* do not send
-* do not click
-* report blocked or unsupported
-* ask for explicit confirmation when required
+`npm run` 的参数必须放在 `--` 后面。

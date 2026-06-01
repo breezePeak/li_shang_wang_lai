@@ -30,6 +30,7 @@ const DEFAULT_OPTIONS = {
   replyMaxLength: 40,
   revisitLikeOnly: true,
   days: null,
+  writeRunFiles: false,
 };
 
 export function chinaTimestamp() {
@@ -68,6 +69,7 @@ export function parseCommonArgs(argv) {
       '--preview': 'preview',
       '--ai-reply': 'aiReply',
       '--revisit-like-only': 'revisitLikeOnly',
+      '--write-run-files': 'writeRunFiles',
     };
 
     if (boolFlags[arg]) {
@@ -193,7 +195,9 @@ export function createRunContext(command, options) {
   validateOptions(options, command);
 
   const outputDir = path.resolve(process.cwd(), 'data', 'runs', runId);
-  ensureDir(outputDir);
+  if (options.writeRunFiles) {
+    ensureDir(outputDir);
+  }
 
   const run = {
     runId,
@@ -228,6 +232,9 @@ export function createRunContext(command, options) {
 }
 
 export function saveRunSummary(run) {
+  if (!run.options.writeRunFiles) {
+    return;
+  }
   run.finishedAt = new Date().toISOString();
   const summaryPath = path.join(run.outputDir, 'summary.json');
   writeJSON(summaryPath, {

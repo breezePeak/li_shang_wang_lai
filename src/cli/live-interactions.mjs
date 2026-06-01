@@ -703,6 +703,7 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
   const revisitResults = [];
   const profileSettleMs = Math.max(options.profileSettleMs || 0, 12000);
   const betweenRevisitMs = Math.max(options.revisitIntervalMs || 0, 8000);
+  const writeEvidenceFiles = !!options.writeEvidenceFiles;
 
   async function findFirstProfileWork() {
     const attempts = 4;
@@ -928,9 +929,13 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
           sceneSignals: analysis.sceneSignals,
         },
       };
-      const evidencePath = path.join(run.outputDir, `revisit-analysis-${i + 1}-${safeEvidenceName(candidate.actor_name)}.json`);
-      writeJSON(evidencePath, contextEvidence);
-      console.log(`[live]   回访分析证据已保存: ${evidencePath}`);
+      const evidencePath = writeEvidenceFiles
+        ? path.join(run.outputDir, `revisit-analysis-${i + 1}-${safeEvidenceName(candidate.actor_name)}.json`)
+        : null;
+      if (evidencePath) {
+        writeJSON(evidencePath, contextEvidence);
+        console.log(`[live]   回访分析证据已保存: ${evidencePath}`);
+      }
       console.log(`[live]   回访上下文: title="${(workContext.workTitle || '').slice(0, 60)}" comments=${workContext.referenceComments.length} signals=${analysis.sceneSignals.map(s => s.key).join(',') || 'none'}`);
 
       if (!workContext.workTitle && workContext.referenceComments.length === 0) {
@@ -958,7 +963,9 @@ async function processRevisitCandidates(page, revisitList, db, run, options) {
         continue;
       }
       contextEvidence.generated = generated;
-      writeJSON(evidencePath, contextEvidence);
+      if (evidencePath) {
+        writeJSON(evidencePath, contextEvidence);
+      }
 
       console.log(`[live]   已生成回访评论 (${generated.reason || 'generated'}): "${generated.comment}"`);
 
@@ -1057,6 +1064,10 @@ async function main() {
 
   const commonArgs = parseCommonArgs(process.argv.slice(2));
   const collectOnly = commonArgs.remaining.includes('--collect-only');
+  commonArgs.options.writeEvidenceFiles = commonArgs.remaining.includes('--write-evidence');
+  if (commonArgs.options.writeEvidenceFiles) {
+    commonArgs.options.writeRunFiles = true;
+  }
   const run = createRunContext('interactions-live', commonArgs.options);
 
   const db = getDb();
@@ -1287,33 +1298,33 @@ async function main() {
     run.hadError = true;
     process.exitCode = 1;
   } finally {
-    const plansDir = path.resolve('data', 'plans');
-    ensureDir(plansDir);
-    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const resultPath = path.join(plansDir, `live-result-${ts}.json`);
-
     const succeeded = results.filter(r => r.status === 'succeeded').length;
     const blocked = results.filter(r => r.status === 'blocked').length;
     const skipped = results.filter(r => r.status === 'skipped').length;
     const sentUnverified = results.filter(r => r.status === 'sent_unverified').length;
 
-    writeJSON(resultPath, {
-      mode: commonArgs.options.preview ? 'preview' : (commonArgs.options.dryRun ? 'dry-run' : 'execute'),
-      results,
-      summary: {
-        total: results.length,
-        succeeded,
-        blocked,
-        skipped,
-        sentUnverified,
-        maxItems: commonArgs.options.maxItems,
-        visitedWorks: state.visitedModalIds.size,
-        repliedComments: state.repliedCommentKeys.size,
-        revisitCandidates: listPendingRevisitCandidates({ limit: 1 }).length >= 0 ? 'see_db' : 0,
-      },
-    });
-
-    console.log(`[live] 结果已保存: ${resultPath}`);
+    if (commonArgs.options.writeRunFiles) {
+      const plansDir = path.resolve('data', 'plans');
+      ensureDir(plansDir);
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const resultPath = path.join(plansDir, `live-result-${ts}.json`);
+      writeJSON(resultPath, {
+        mode: commonArgs.options.preview ? 'preview' : (commonArgs.options.dryRun ? 'dry-run' : 'execute'),
+        results,
+        summary: {
+          total: results.length,
+          succeeded,
+          blocked,
+          skipped,
+          sentUnverified,
+          maxItems: commonArgs.options.maxItems,
+          visitedWorks: state.visitedModalIds.size,
+          repliedComments: state.repliedCommentKeys.size,
+          revisitCandidates: listPendingRevisitCandidates({ limit: 1 }).length >= 0 ? 'see_db' : 0,
+        },
+      });
+      console.log(`[live] 结果已保存: ${resultPath}`);
+    }
     console.log(`[live] ${succeeded} 成功 / ${sentUnverified} 未确认 / ${blocked} 阻塞 / ${skipped} 跳过`);
     console.log(`[live] 访问作品 ${state.visitedModalIds.size} 个，回复评论 ${state.repliedCommentKeys.size} 条`);
 
