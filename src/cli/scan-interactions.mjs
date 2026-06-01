@@ -5,6 +5,7 @@ import {
   extractComments,
   getSelectedWorkTitle,
 } from '../adapters/comment-page.mjs';
+import { parseDouyinTimeText } from '../adapters/work-modal-page.mjs';
 import { commentFingerprint, commentInitialStatus, normalizeTimeText, notificationFingerprint } from '../domain/event-fingerprint.mjs';
 import { normalizeCommentEvent, buildRawPayloadJson } from '../domain/comment-event-normalization.mjs';
 import { insertEvent, getEventCounts, findUnstableEvent, promoteUnstableEvent, enrichEvent, upsertNotificationEvent } from '../db/interaction-repository.mjs';
@@ -172,6 +173,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
 
   const wantComments = (type === 'all' || type === 'comment');
   const wantLikes = (type === 'all' || type === 'like');
+  const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
 
   let totalInserted = 0;
   let totalDuplicateCount = 0;
@@ -187,6 +189,8 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   const failedEvents = [];
   const seenItemKeys = new Set();
   let consecutiveEmptyRounds = 0;
+  let consecutiveOldRelevantCount = 0;
+  let stopDueToOldRelevant = false;
 
   console.error('[scan] 开始逐批采集通知...');
 
@@ -218,9 +222,9 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       }
     }
 
-    const notifications = batchResult.data.notifications || [];
-    const noMoreData = batchResult.data.noMoreData || false;
-    let batchInserted = 0;
+      const notifications = batchResult.data.notifications || [];
+      const noMoreData = batchResult.data.noMoreData || false;
+      let batchInserted = 0;
     let batchEnriched = 0;
     let batchDuplicate = 0;
     let batchAmbiguous = 0;
@@ -233,12 +237,28 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       const itemKey = n.notificationItemKey || (n.username + '||' + n.action + '||' + (n.content || ''));
       if (seenItemKeys.has(itemKey)) continue;
       seenItemKeys.add(itemKey);
-      newInBatch++;
-      processedInBatch++;
 
       try {
         if (!wantComments && n.eventType === 'comment') continue;
         if (!wantLikes && n.eventType === 'like') continue;
+
+        const isRelevantEvent = n.eventType === 'comment' || n.eventType === 'like';
+        const parsedNotificationTime = notificationDays && isRelevantEvent ? parseDouyinTimeText(n.timeText || '') : null;
+        const isOlderThanWindow = !!(notificationDays && parsedNotificationTime && new Date(parsedNotificationTime).getTime() < Date.now() - notificationDays * 86400000);
+        if (isRelevantEvent && notificationDays) {
+          if (isOlderThanWindow) {
+            consecutiveOldRelevantCount++;
+            if (consecutiveOldRelevantCount >= 3) {
+              console.error(`[scan]   连续 ${consecutiveOldRelevantCount} 条评论/点赞通知超过 ${notificationDays} 天，停止继续滚动`);
+              stopDueToOldRelevant = true;
+            }
+            continue;
+          }
+          consecutiveOldRelevantCount = 0;
+        }
+
+        newInBatch++;
+        processedInBatch++;
 
         if (n.eventType === 'comment') {
           const normResult = normalizeCommentEvent({
@@ -391,6 +411,9 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     run.enriched = totalEnrichedCount;
 
     console.error(`[scan]   轮次 ${scrollRounds}: +${batchInserted}条 (${batchDuplicate}重复, ${batchEnriched}补全, ${batchAmbiguous}歧义, ${batchProfileResolved}主页解析, ${newInBatch}新)`);
+    if (stopDueToOldRelevant) {
+      break;
+    }
 
     if (noMoreData) {
       console.error('[scan] 面板显示"暂无更多数据"，停止采集');
