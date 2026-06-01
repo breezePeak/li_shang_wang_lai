@@ -10,13 +10,46 @@ let selectedTaskIds = new Set();
 let selectedStageId = 'collect';
 
 const STAGE_LAYOUT = [
-  { id: 'collect', left: 20, icon: 'fa-inbox', branch: false },
-  { id: 'tasks', left: 220, icon: 'fa-seedling', branch: false },
-  { id: 'review', left: 430, icon: 'fa-comment-medical', branch: false },
-  { id: 'hold', left: 520, icon: 'fa-code-branch', branch: true },
-  { id: 'execute', left: 640, icon: 'fa-bolt', branch: false },
-  { id: 'retry', left: 740, icon: 'fa-life-ring', branch: true },
-  { id: 'done', left: 860, icon: 'fa-circle-check', branch: false },
+  {
+    id: 'collect',
+    x: 100,
+    y: 120,
+    icon: 'fa-inbox',
+    label: '通知入库',
+    branch: { id: 'fallback', label: '回退', icon: 'fa-triangle-exclamation', color: 'orange' }
+  },
+  {
+    id: 'tasks',
+    x: 320,
+    y: 65,
+    icon: 'fa-seedling',
+    label: '生成回访任务',
+    branch: { id: 'hold', label: '暂缓', icon: 'fa-pause', color: 'orange' }
+  },
+  {
+    id: 'review',
+    x: 560,
+    y: 120,
+    icon: 'fa-comment-medical',
+    label: '评论审核',
+    branch: { id: 'risk', label: '风险', icon: 'fa-triangle-exclamation', color: 'orange' }
+  },
+  {
+    id: 'execute',
+    x: 800,
+    y: 100,
+    icon: 'fa-bolt',
+    label: '执行互动',
+    branch: { id: 'retry', label: '失败', icon: 'fa-circle-xmark', color: 'red' }
+  },
+  {
+    id: 'done',
+    x: 1040,
+    y: 85,
+    icon: 'fa-circle-check',
+    label: '完成归档',
+    branch: { id: 'archive', label: '归档完成', icon: 'fa-circle-check', color: 'green' }
+  }
 ];
 
 async function initApp() {
@@ -101,24 +134,56 @@ function renderHeroStats() {
 }
 
 function renderRiverTimeline() {
-  const container = document.getElementById('river-stage-strip');
+  const container = document.getElementById('river-nodes-container');
+  if (!container) return;
   const stageMap = buildStageMap();
+  const activeStageId = selectedStageId;
+
   container.innerHTML = STAGE_LAYOUT.map((stage) => {
-    const data = stageMap[stage.id];
-    const isActive = selectedStageId === stage.id ? 'is-active' : '';
+    const data = stageMap[stage.id] || { count: 0, label: stage.label };
+    
+    // 主节点激活状态：如果当前选中的是主节点本身，或者选中的是其挂载的分支，则主节点为激活态
+    const isMainActive = activeStageId === stage.id || 
+                         (stage.id === 'tasks' && activeStageId === 'hold') ||
+                         (stage.id === 'execute' && activeStageId === 'retry');
+    
+    const activeClass = isMainActive ? 'is-active' : '';
+    const selectedBadgeHtml = activeStageId === stage.id ? `<span class="selected-badge">当前节点 (已选中)</span>` : '';
+
+    // 计算分支数据
+    let branchCount = 0;
+    if (stage.branch.id === 'hold') {
+      branchCount = statsData.pendingReplies || 0;
+    } else if (stage.branch.id === 'retry') {
+      branchCount = reviewTasks.filter((task) => String(task.status || '').startsWith('failed')).length;
+    }
+
+    const isBranchActive = activeStageId === stage.branch.id;
+    const branchActiveClass = isBranchActive ? 'is-active' : '';
+
     return `
-      <div class="river-node ${isActive}" data-stage="${stage.id}" data-branch="${stage.branch ? 'true' : 'false'}" style="left:${stage.left}px">
-        <button class="river-button" onclick="selectStage('${stage.id}')">
-          <div class="river-card">
-            <div class="river-card-top">
-              <span class="river-icon"><i class="fa-solid ${stage.icon}"></i></span>
-              <span class="river-count">${data.count}</span>
-            </div>
-            <div class="river-label">${data.label}</div>
-            <div class="river-helper">${data.helper}</div>
-            <span class="river-tag">${data.tag}</span>
+      <div class="river-node-v2 ${activeClass}" style="left:${stage.x}px; top:${stage.y}px;">
+        <div class="node-meta">
+          <span class="node-label">${stage.label}</span>
+          <span class="node-count">${data.count} 条</span>
+        </div>
+        
+        <button class="node-circle-btn" onclick="selectStage('${stage.id}')" title="${stage.label}">
+          <div class="node-circle-ripple"></div>
+          <div class="node-circle-inner">
+            <i class="fa-solid ${stage.icon}"></i>
           </div>
         </button>
+
+        ${selectedBadgeHtml}
+
+        <div class="node-branch-capsule" onclick="selectStage('${stage.branch.id}'); event.stopPropagation();">
+          <div class="branch-connector"></div>
+          <div class="branch-pill ${stage.branch.color} ${branchActiveClass}">
+            <i class="fa-solid ${stage.branch.icon}"></i>
+            <span>${stage.branch.label} ${branchCount} 条</span>
+          </div>
+        </div>
       </div>
     `;
   }).join('');
@@ -620,6 +685,17 @@ function getTaskBadge(task) {
 }
 
 window.selectStage = function(stageId) {
+  if (stageId === 'fallback') {
+    showToast('当前入库通知暂无异常回退', 'success');
+    stageId = 'collect';
+  } else if (stageId === 'risk') {
+    showToast('当前评论审核无额外告警风险', 'success');
+    stageId = 'review';
+  } else if (stageId === 'archive') {
+    showToast('归档已闭环完成', 'success');
+    stageId = 'done';
+  }
+
   selectedStageId = stageId;
   renderRiverTimeline();
   renderStageDetail();

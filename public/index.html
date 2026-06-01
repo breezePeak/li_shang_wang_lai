@@ -37,7 +37,6 @@
     <section class="hero-panel">
       <div class="hero-copy">
         <span class="eyebrow">从左到右，一条河就是整个礼尚往来流程</span>
-        <h2>点击每个节点，看这一阶段正在发生什么，以及哪里需要你介入。</h2>
         <p>主河道负责推进“采集、生成、审核、执行、完成”，分支河道专门暴露风险、失败回退和暂缓提醒。</p>
       </div>
       <div class="hero-stats" id="hero-stats">
@@ -63,13 +62,38 @@
           <h3>礼尚往来时间线</h3>
         </div>
         <div class="river-legend">
-          <span><i class="fa-solid fa-circle"></i> 主河道</span>
-          <span><i class="fa-solid fa-code-branch"></i> 提醒分支</span>
+          <span><i class="fa-solid fa-circle" style="color: var(--river-b);"></i> 主河道</span>
+          <span><i class="fa-solid fa-code-branch" style="color: var(--gold);"></i> 提醒分支</span>
         </div>
       </div>
 
       <div class="river-scroll">
-        <div class="river-stage-strip" id="river-stage-strip"></div>
+        <div class="river-stage-strip" id="river-stage-strip">
+          <!-- SVG 渐变波浪河流与高逼格双层流光动效 -->
+          <svg class="river-svg" viewBox="0 0 1200 240" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="river-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#1f6d78" stop-opacity="0.85" />
+                <stop offset="25%" stop-color="#2f8f73" stop-opacity="0.85" />
+                <stop offset="50%" stop-color="#a3b899" stop-opacity="0.9" />
+                <stop offset="75%" stop-color="#d39b34" stop-opacity="0.9" />
+                <stop offset="100%" stop-color="#cc782a" stop-opacity="0.88" />
+              </linearGradient>
+            </defs>
+            <!-- 底色主干河道 -->
+            <path d="M 0,145 C 100,145 200,85 320,85 C 440,85 460,145 560,145 C 660,145 700,125 800,125 C 900,125 960,110 1040,110 L 1200,110" 
+                  fill="none" stroke="url(#river-gradient)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round" class="river-base-path" />
+            <!-- 柔和中宽流光 -->
+            <path d="M 0,145 C 100,145 200,85 320,85 C 440,85 460,145 560,145 C 660,145 700,125 800,125 C 900,125 960,110 1040,110 L 1200,110" 
+                  fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" class="river-flow-path-1" />
+            <!-- 高亮细流星流光 -->
+            <path d="M 0,145 C 100,145 200,85 320,85 C 440,85 460,145 560,145 C 660,145 700,125 800,125 C 900,125 960,110 1040,110 L 1200,110" 
+                  fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="river-flow-path-2" />
+          </svg>
+          
+          <!-- 时间线圆形主节点与挂载分支容器 -->
+          <div class="river-nodes-container" id="river-nodes-container"></div>
+        </div>
       </div>
     </section>
 

@@ -254,153 +254,329 @@ body {
 
 .river-stage-strip {
   position: relative;
-  min-width: 1180px;
+  width: 1200px;
+  height: 250px;
   margin-top: 24px;
-  padding: 28px 16px 140px;
-}
-
-.river-stage-strip::before {
-  content: '';
-  position: absolute;
-  left: 78px;
-  right: 82px;
-  top: 114px;
-  height: 30px;
-  border-radius: 999px;
-  background:
-    linear-gradient(90deg, rgba(31,109,120,0.85), rgba(47,143,115,0.85) 35%, rgba(211,155,52,0.95) 72%, rgba(204,120,42,0.88));
-  box-shadow:
-    inset 0 6px 16px rgba(255,255,255,0.28),
-    0 12px 30px rgba(31,109,120,0.18);
-}
-
-.river-stage-strip::after {
-  content: '';
-  position: absolute;
-  left: 124px;
-  right: 110px;
-  top: 123px;
-  height: 10px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(255,255,255,0.10), rgba(255,255,255,0.62), rgba(255,255,255,0.08));
-  animation: streamFlow 5.2s linear infinite;
-}
-
-@keyframes streamFlow {
-  0% { transform: translateX(-2%); opacity: 0.4; }
-  50% { opacity: 0.9; }
-  100% { transform: translateX(2%); opacity: 0.4; }
-}
-
-.river-node {
-  position: absolute;
-  top: 48px;
-  width: 180px;
-}
-
-.river-node[data-branch="true"] {
-  top: 184px;
-  width: 160px;
-}
-
-.river-node[data-branch="true"]::before {
-  content: '';
-  position: absolute;
-  top: -54px;
-  left: 54px;
-  width: 68px;
-  height: 44px;
-  border-left: 2px solid rgba(102, 117, 106, 0.35);
-  border-bottom: 2px solid rgba(102, 117, 106, 0.35);
-  border-radius: 0 0 0 20px;
-}
-
-.river-button {
-  width: 100%;
-  border: 0;
   padding: 0;
+}
+
+.river-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1200px;
+  height: 240px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 底色主干河道：立体发光和阴影 */
+.river-base-path {
+  filter: drop-shadow(0 12px 24px rgba(31, 109, 120, 0.18));
+}
+
+/* 第一层流光：宽大柔和的光晕向前漂移 */
+.river-flow-path-1 {
+  stroke-dasharray: 180, 360;
+  animation: riverFlow1 8s linear infinite;
+}
+
+/* 第二层流光：极细、极亮的流星效果，流动速度更快 */
+.river-flow-path-2 {
+  stroke-dasharray: 60, 480;
+  animation: riverFlow2 4.5s linear infinite;
+}
+
+@keyframes riverFlow1 {
+  0% { stroke-dashoffset: 960; }
+  100% { stroke-dashoffset: 0; }
+}
+
+@keyframes riverFlow2 {
+  0% { stroke-dashoffset: 960; }
+  100% { stroke-dashoffset: -960; }
+}
+
+/* 圆形节点定位包装 */
+.river-node-v2 {
+  position: absolute;
+  width: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 5;
+  transform: translateX(-50%);
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 节点上方文本标签 */
+.node-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 12px;
+  pointer-events: none;
+  transition: transform 0.3s ease;
+}
+
+.node-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+}
+
+.node-count {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.river-node-v2.is-active .node-label {
+  color: var(--river-a);
+  font-weight: 800;
+}
+
+/* 正圆形按钮 */
+.node-circle-btn {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  border: none;
+  border-radius: 999px;
   background: transparent;
   cursor: pointer;
-  text-align: left;
+  outline: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
 }
 
-.river-card {
-  padding: 18px 18px 16px;
-  min-height: 132px;
-  border-radius: 22px;
-  background: rgba(255,255,255,0.74);
-  border: 1px solid rgba(76, 99, 83, 0.14);
-  box-shadow: 0 16px 28px rgba(46, 57, 37, 0.09);
-  transition: var(--transition);
-}
-
-.river-node.is-active .river-card,
-.river-button:hover .river-card {
-  transform: translateY(-4px);
-  border-color: rgba(31, 109, 120, 0.35);
-  box-shadow: 0 22px 34px rgba(31, 109, 120, 0.16);
-}
-
-.river-node[data-branch="true"] .river-card {
-  min-height: 118px;
-  background: rgba(255, 246, 238, 0.85);
-}
-
-.river-card-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 18px;
-}
-
-.river-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
+/* 内部发光小 Icon */
+.node-circle-inner {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
   display: grid;
   place-items: center;
   color: white;
   background: linear-gradient(135deg, var(--river-a), var(--river-b));
+  box-shadow: 
+    0 8px 20px rgba(31, 109, 120, 0.35),
+    inset 0 2px 6px rgba(255, 255, 255, 0.4);
+  z-index: 3;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.river-node[data-branch="true"] .river-icon {
-  background: linear-gradient(135deg, #bb6f37, var(--alert));
+/* 完成归档节点特殊配色 */
+.river-node-v2:nth-child(5) .node-circle-inner {
+  background: linear-gradient(135deg, var(--river-b), #287a60);
+  box-shadow: 
+    0 8px 20px rgba(47, 143, 115, 0.35),
+    inset 0 2px 6px rgba(255, 255, 255, 0.4);
 }
 
-.river-count {
-  font-size: 28px;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.river-label {
+.node-circle-inner i {
   font-size: 16px;
+}
+
+/* 悬浮位移与高亮外发光 */
+.river-node-v2:hover {
+  transform: translateX(-50%) translateY(-6px);
+}
+
+.river-node-v2:hover .node-circle-inner {
+  transform: scale(1.15);
+  box-shadow: 
+    0 12px 28px rgba(31, 109, 120, 0.45),
+    0 0 0 6px rgba(47, 143, 115, 0.15);
+}
+
+/* 选中节点涟漪高亮 */
+.river-node-v2.is-active .node-circle-inner {
+  transform: scale(1.1);
+  background: linear-gradient(135deg, #185a63, var(--river-a));
+  box-shadow: 
+    0 0 0 8px rgba(47, 143, 115, 0.18),
+    0 12px 30px rgba(31, 109, 120, 0.5),
+    inset 0 2px 4px rgba(255, 255, 255, 0.3);
+}
+
+/* 多重水波涟漪圈 */
+.node-circle-ripple {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 78px;
+  height: 78px;
+  border-radius: 999px;
+  border: 1px solid rgba(47, 143, 115, 0.4);
+  background: rgba(47, 143, 115, 0.05);
+  transform: translate(-50%, -50%) scale(0.5);
+  opacity: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.river-node-v2.is-active .node-circle-ripple {
+  animation: rippleSpread 2.4s cubic-bezier(0.1, 0.8, 0.3, 1) infinite;
+}
+
+@keyframes rippleSpread {
+  0% {
+    transform: translate(-50%, -50%) scale(0.5);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.4);
+    opacity: 0;
+  }
+}
+
+/* 选中气泡标签 */
+.selected-badge {
+  position: absolute;
+  top: 198px;
+  transform: scale(0.9);
+  padding: 5px 12px;
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--river-a);
+  font-size: 11px;
   font-weight: 800;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(46, 57, 37, 0.1);
+  border: 1px solid rgba(31, 109, 120, 0.15);
+  z-index: 10;
+  pointer-events: none;
+  animation: badgePulse 2s ease-in-out infinite;
 }
 
-.river-helper {
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.55;
+@keyframes badgePulse {
+  0%, 100% { transform: scale(0.9); opacity: 0.95; }
+  50% { transform: scale(0.94); opacity: 1; box-shadow: 0 6px 16px rgba(31, 109, 120, 0.15); }
 }
 
-.river-tag {
-  margin-top: 12px;
+/* 挂载分支胶囊 */
+.node-branch-capsule {
+  position: absolute;
+  top: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  z-index: 4;
+}
+
+/* 优雅斜拉引线 */
+.branch-connector {
+  position: absolute;
+  top: -26px;
+  left: 50%;
+  width: 1px;
+  height: 26px;
+  background: linear-gradient(180deg, rgba(102, 117, 106, 0.4), rgba(102, 117, 106, 0.08));
+  transform: translateX(-50%) rotate(15deg);
+  transform-origin: top;
+}
+
+.branch-connector::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--muted);
+  transform: translateX(-50%);
+  opacity: 0.6;
+}
+
+/* 精致药丸胶囊 */
+.branch-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 6px 14px;
   border-radius: 999px;
-  padding: 5px 10px;
-  background: rgba(31,109,120,0.10);
-  color: var(--river-a);
   font-size: 11px;
   font-weight: 700;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(76, 99, 83, 0.16);
+  color: var(--muted);
+  box-shadow: 0 6px 16px rgba(46, 57, 37, 0.06);
+  white-space: nowrap;
+  transition: all 0.22s ease;
 }
 
-.river-node[data-branch="true"] .river-tag {
-  background: rgba(212, 87, 59, 0.12);
+.branch-pill.orange {
+  color: var(--gold);
+  border-color: rgba(201, 140, 45, 0.25);
+  background: rgba(255, 249, 238, 0.9);
+}
+
+.branch-pill.red {
   color: var(--alert);
+  border-color: rgba(212, 87, 59, 0.25);
+  background: rgba(255, 244, 240, 0.9);
+}
+
+.branch-pill.green {
+  color: var(--ok);
+  border-color: rgba(63, 141, 87, 0.25);
+  background: rgba(240, 250, 243, 0.9);
+}
+
+/* Hover 特效 */
+.node-branch-capsule:hover .branch-pill {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(46, 57, 37, 0.12);
+  background: #ffffff;
+}
+
+.node-branch-capsule:hover .branch-pill.orange {
+  border-color: var(--gold);
+  box-shadow: 0 8px 20px rgba(201, 140, 45, 0.15);
+}
+
+.node-branch-capsule:hover .branch-pill.red {
+  border-color: var(--alert);
+  box-shadow: 0 8px 20px rgba(212, 87, 59, 0.15);
+}
+
+.node-branch-capsule:hover .branch-pill.green {
+  border-color: var(--ok);
+  box-shadow: 0 8px 20px rgba(63, 141, 87, 0.15);
+}
+
+/* 分支选中高亮状态 */
+.branch-pill.is-active {
+  transform: translateY(-2px);
+  background: #ffffff;
+  border-width: 1.5px;
+  box-shadow: 0 8px 24px rgba(46, 57, 37, 0.15);
+}
+
+.branch-pill.orange.is-active {
+  border-color: var(--gold);
+  color: #a87119;
+  box-shadow: 0 0 0 4px rgba(201, 140, 45, 0.12), 0 8px 24px rgba(201, 140, 45, 0.15);
+}
+
+.branch-pill.red.is-active {
+  border-color: var(--alert);
+  color: #b03a22;
+  box-shadow: 0 0 0 4px rgba(212, 87, 59, 0.12), 0 8px 24px rgba(212, 87, 59, 0.15);
+}
+
+.branch-pill.green.is-active {
+  border-color: var(--ok);
+  color: #2b7041;
+  box-shadow: 0 0 0 4px rgba(63, 141, 87, 0.12), 0 8px 24px rgba(63, 141, 87, 0.15);
 }
 
 .detail-panel {
