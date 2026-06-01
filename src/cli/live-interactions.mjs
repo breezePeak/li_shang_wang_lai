@@ -1137,6 +1137,7 @@ async function main() {
     const seenNotifKeys = new Set();
     const maxScrollRounds = commonArgs.options.maxScrollRounds || 5;
     const maxNotifications = commonArgs.options.maxNotifications || 50;
+    const notificationDays = commonArgs.options.days || null;
     let processedNotifications = 0;
     let openedWorkCount = 0;
     let phase1EndedReason = '';
@@ -1168,14 +1169,14 @@ async function main() {
       }
 
       const relevantNotifs = newNotifs.filter(n => n.route?.notificationAction === 'comment_on_my_work' || n.route?.notificationAction === 'like_received');
-      const oldRelevantNotifs = commonArgs.options.days
-        ? relevantNotifs.filter(n => isTimeTextOlderThanDays(n.timeText || '', commonArgs.options.days))
+      const oldRelevantNotifs = notificationDays
+        ? relevantNotifs.filter(n => isTimeTextOlderThanDays(n.timeText || '', notificationDays))
         : [];
-      if (commonArgs.options.days) {
+      if (notificationDays) {
         newNotifs = newNotifs.filter(n => {
           const action = n.route?.notificationAction;
           if (action !== 'comment_on_my_work' && action !== 'like_received') return true;
-          return !isTimeTextOlderThanDays(n.timeText || '', commonArgs.options.days);
+          return !isTimeTextOlderThanDays(n.timeText || '', notificationDays);
         });
       }
 
@@ -1203,8 +1204,8 @@ async function main() {
       const unknownNotifs = newNotifs.filter(n => n.route?.notificationAction === 'unknown');
 
       console.log(`[live] 第 ${scrollRound + 1} 轮: 通知 ${notifications.length} 条，新增 ${newNotifs.length} 条 (评论${commentNotifs.length} 点赞${likeNotifs.length} 回复${replyNotifs.length} 未知${unknownNotifs.length})`);
-      if (commonArgs.options.days && oldRelevantNotifs.length > 0) {
-        console.log(`[live]   跳过超过 ${commonArgs.options.days} 天的评论/点赞通知 ${oldRelevantNotifs.length} 条`);
+      if (notificationDays && oldRelevantNotifs.length > 0) {
+        console.log(`[live]   跳过超过 ${notificationDays} 天的评论/点赞通知 ${oldRelevantNotifs.length} 条`);
       }
 
       for (const n of likeNotifs) {
@@ -1277,8 +1278,8 @@ async function main() {
 
       if (phase1EndedReason) break;
 
-      if (commonArgs.options.days && relevantNotifs.length > 0 && relevantNotifs.length === oldRelevantNotifs.length) {
-        console.log(`[live] 已遇到超过 ${commonArgs.options.days} 天的通知边界，停止继续滚动`);
+      if (notificationDays && relevantNotifs.length > 0 && relevantNotifs.length === oldRelevantNotifs.length) {
+        console.log(`[live] 已遇到超过 ${notificationDays} 天的通知边界，停止继续滚动`);
         phase1EndedReason = 'days-window-ended';
         break;
       }

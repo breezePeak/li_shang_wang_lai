@@ -49,29 +49,62 @@ npx playwright install chromium
 
 ## 如何安装
 
-### macOS / Linux
+### 安装到 Hermes
+
+macOS / Linux：
 
 ```bash
-mkdir -p ~/.openclaw
-git clone https://github.com/breezePeak/li_shang_wang_lai.git ~/.openclaw/li_shang_wang_lai
-cd ~/.openclaw/li_shang_wang_lai
+mkdir -p ~/.hermes/skills
+git clone https://github.com/breezePeak/li_shang_wang_lai.git ~/.hermes/skills/creator-interaction-executor
+cd ~/.hermes/skills/creator-interaction-executor
 npm install
 npx playwright install chromium
 npm run db:init
 npm run auth
 ```
 
-### Windows PowerShell
+Windows PowerShell：
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\.openclaw"
-git clone https://github.com/breezePeak/li_shang_wang_lai.git "$env:USERPROFILE\.openclaw\li_shang_wang_lai"
-cd "$env:USERPROFILE\.openclaw\li_shang_wang_lai"
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\hermes\skills"
+git clone https://github.com/breezePeak/li_shang_wang_lai.git "$env:LOCALAPPDATA\hermes\skills\creator-interaction-executor"
+cd "$env:LOCALAPPDATA\hermes\skills\creator-interaction-executor"
 npm install
 npx playwright install chromium
 npm run db:init
 npm run auth
 ```
+
+---
+
+### 安装到 OpenClaw
+
+macOS / Linux：
+
+```bash
+mkdir -p ~/.openclaw/skills
+git clone https://github.com/breezePeak/li_shang_wang_lai.git ~/.openclaw/skills/creator-interaction-executor
+cd ~/.openclaw/skills/creator-interaction-executor
+npm install
+npx playwright install chromium
+npm run db:init
+npm run auth
+```
+
+Windows PowerShell：
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.openclaw\skills"
+git clone https://github.com/breezePeak/li_shang_wang_lai.git "$env:USERPROFILE\.openclaw\skills\creator-interaction-executor"
+cd "$env:USERPROFILE\.openclaw\skills\creator-interaction-executor"
+npm install
+npx playwright install chromium
+npm run db:init
+npm run auth
+```
+
+---
+
 
 ---
 
