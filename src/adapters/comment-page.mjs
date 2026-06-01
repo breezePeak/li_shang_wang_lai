@@ -407,7 +407,7 @@ export async function openReplyBox(page, match) {
   // Determine if eventTimeText is relative BEFORE entering page.evaluate
   const timeIsRelative = eventTimeText ? isRelativeTime(eventTimeText) : false;
 
-  // MVP: block ALL dry-run/execute when eventTimeText is relative time.
+  // MVP: block execution when eventTimeText is relative time.
   // Relative time drifts (e.g. "3分钟前" → "5分钟前") making it unsafe
   // as a match anchor. Block unconditionally — do not attempt to click.
   if (timeIsRelative) {

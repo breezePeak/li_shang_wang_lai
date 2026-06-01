@@ -881,7 +881,7 @@ export async function clickLike(page, { execute = false } = {}) {
   try {
     if (!execute) {
       return blocking(
-        RESULT_CODES.ACTION_NOT_APPROVED,
+        RESULT_CODES.ACTION_NOT_READY,
         '非 execute 模式，拒绝真实点赞操作',
         { recoverable: false }
       );
@@ -1213,7 +1213,7 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
 
     if (!execute) {
       return blocking(
-        RESULT_CODES.ACTION_NOT_APPROVED,
+        RESULT_CODES.ACTION_NOT_READY,
         '非 execute 模式，拒绝真实评论操作',
         { recoverable: false }
       );

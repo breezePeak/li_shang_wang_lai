@@ -357,8 +357,8 @@ describe('CLI --json mode keepOpen enforcement', () => {
     expect(typeof parsed.ok).toBe('boolean');
   });
 
-  it('comments:execute --json with missing action-id exits cleanly', () => {
-    const result = runCli('execute-comment-reply.mjs', ['--json'], 10_000);
+  it('comments:execute-all --json with missing action-id exits cleanly', () => {
+    const result = runCli('execute-all-comment-replies.mjs', ['--json'], 10_000);
     const parsed = parseStdout(result);
     expect(parsed).not.toBeNull();
     expect(parsed.ok).toBe(false);

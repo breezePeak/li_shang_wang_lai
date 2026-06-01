@@ -67,11 +67,10 @@ export function runMigrations(dbPath = DB_PATH) {
   ).get();
 
   const actionsSql = checkActions ? (checkActions.sql || '') : '';
+  const desiredActionStatusSql = "status IN ('planned','prepared','running','succeeded','failed','blocked','skipped','sent_unverified')";
   const needsActionsMigration =
-    actionsSql.includes("execute_confirmed") ||
-    actionsSql.includes("dry_run_ok") ||
-    actionsSql.includes("'approved'") ||
-    !actionsSql.includes("sent_unverified");
+    actionsSql &&
+    !actionsSql.includes(desiredActionStatusSql);
 
   if (needsActionsMigration && actionsSql) {
     console.error('[db:init] 检测到旧版 actions 表约束，重建中...');
@@ -97,7 +96,7 @@ export function runMigrations(dbPath = DB_PATH) {
       SELECT
         id, event_id, plan_id, action_type, target_url, target_title, action_text,
         CASE
-          WHEN status IN ('approved','dry_run_ok','execute_confirmed') THEN 'prepared'
+          WHEN status NOT IN ('planned','prepared','running','succeeded','failed','blocked','skipped','sent_unverified') THEN 'prepared'
           ELSE status
         END as status,
         reason, evidence_json, screenshot_path, created_at, executed_at

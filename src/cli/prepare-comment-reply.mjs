@@ -1,6 +1,5 @@
 // 评论回复准备命令
-// 根据 eventId 和 replyText 创建一条待审批的回复动作。
-// 替代旧的手工编辑 JSON 计划文件中 replyText 和 approved 字段的方式。
+// 根据 eventId 和 replyText 创建一条 prepared 回复动作。
 //
 // 用法：
 //   npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>"
@@ -276,7 +275,7 @@ function main() {
     console.log(`  原评论: ${ev.comment_text}`);
     console.log(`  回复文本: ${args.replyText}`);
     console.log(`  决策: ${args.decision} | 风险: ${args.riskLevel}`);
-    console.log(`  状态: prepared（待审批）`);
+    console.log(`  状态: prepared（待执行）`);
   }
 }
 

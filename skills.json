@@ -39,7 +39,7 @@
       "name": "creator-interaction-executor",
       "path": "skills/creator-interaction-executor",
       "entry": "skills/creator-interaction-executor/SKILL.md",
-      "description": "Execute creator interaction workflows after explicit user confirmation, including interaction collection, comment reply preparation and execution, return-visit preparation, liking, posting approved comments, and recording results.",
+      "description": "Execute creator interaction workflows, including interaction collection, comment reply preparation and execution, return-visit preparation, liking, posting prepared comments, and recording results.",
       "dependsOn": [
         {
           "name": "creator-comment-suggestion",

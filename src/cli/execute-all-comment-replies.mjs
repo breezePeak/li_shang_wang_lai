@@ -1,6 +1,3 @@
-import { spawnSync } from 'child_process';
-import { dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
 import { runMigrations } from '../db/migrations.mjs';
 import {
   getAction,
@@ -12,9 +9,7 @@ import {
 import { updateEventStatus, getEvent } from '../db/interaction-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const EXECUTE_SCRIPT = resolve(__dirname, 'execute-comment-reply.mjs');
+import { executePreparedReply } from '../services/comment-reply-executor.mjs';
 
 function parseArgs(argv) {
   const args = {
@@ -102,26 +97,7 @@ function validatePreparedAction(actionId) {
   };
 }
 
-function executeOne(actionId) {
-  const result = spawnSync(process.execPath, [EXECUTE_SCRIPT, '--action-id', String(actionId), '--execute', '--json'], {
-    encoding: 'utf8',
-    timeout: 120_000,
-    env: process.env,
-  });
-  const stdout = (result.stdout || '').trim();
-  let parsed = null;
-  try { parsed = stdout ? JSON.parse(stdout) : null; } catch { /* keep null */ }
-
-  if (result.status !== 0 && !parsed) {
-    return { actionId, ok: false, status: 'execute_failed', error: result.stderr || result.error?.message || '执行失败' };
-  }
-  if (parsed && parsed.ok === false) {
-    return { actionId, ok: false, status: 'execute_failed', error: parsed.message || parsed.code, detail: parsed };
-  }
-  return { actionId, ok: true, status: 'succeeded', detail: parsed };
-}
-
-function main() {
+async function main() {
   runMigrations();
   const args = parseArgs(process.argv.slice(2));
   const actionIds = collectActionIds(args);
@@ -143,7 +119,10 @@ function main() {
       results.push({ ...validated, mode: 'validate-only', next: `npm run comments:execute-all -- --action-id ${actionId} --execute` });
       continue;
     }
-    results.push(executeOne(actionId));
+    const executed = await executePreparedReply(actionId, { execute: true, json: args.json });
+    results.push(executed.ok
+      ? { actionId, ok: true, status: executed.status, detail: executed }
+      : { actionId, ok: false, status: 'execute_failed', error: executed.message || executed.code, detail: executed });
   }
 
   const succeeded = results.filter(item => item.ok).length;
@@ -158,4 +137,7 @@ function main() {
   }
 }
 
-main();
+main().catch(err => {
+  printJsonError('comments:execute-all', RESULT_CODES.UNKNOWN_ERROR, err.message, { recoverable: false });
+  process.exit(1);
+});

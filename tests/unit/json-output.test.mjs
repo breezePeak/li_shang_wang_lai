@@ -48,14 +48,16 @@ describe('P0-1: pure --json stdout contract', () => {
     expect(typeof parsed.ok).toBe('boolean');
   });
 
-  it('comments:execute validate-only --json stdout must parse as single JSON', () => {
-    const result = runCli('execute-comment-reply.mjs', [
+  it('comments:execute-all validate-only --json stdout must parse as single JSON', () => {
+    const result = runCli('execute-all-comment-replies.mjs', [
       '--action-id', '999',
       '--json',
     ]);
     const parsed = parseStdout(result);
     expect(parsed).not.toBeNull();
-    expect(parsed.ok).toBe(false);
+    // May succeed or fail depending on whether the local DB already has this action id.
+    // The contract here is that stdout stays pure JSON.
+    expect(typeof parsed.ok).toBe('boolean');
   });
 
   it('execute-reciprocal-likes --execute --json must return FEATURE_DISABLED', () => {

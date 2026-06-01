@@ -55,7 +55,7 @@ async function runCommentScan(page, run) {
         continue;
       }
       // Do NOT normalize day-relative time before status check:
-      // "昨天23:44" must stay unstable so it doesn't enter prepare/dry-run.
+      // "昨天23:44" must stay unstable so it doesn't enter prepare/execute.
       // normalizeTimeText is only used for display/normalized storage, not for status.
       const status = commentInitialStatus(c.timeText);
       const fp = commentFingerprint(c, workTitle);
