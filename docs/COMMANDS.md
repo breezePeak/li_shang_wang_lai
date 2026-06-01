@@ -456,12 +456,21 @@ npm run replies:apply -- --input replies.json --commit
 ## 21. comments:prepare-replies
 
 ```bash
-npm run comments:prepare-replies -- --execute --max-items 5
+npm run comments:prepare-replies -- --max-items 5 --reply-max-length 40
 ```
 
 **源文件**：`src/cli/prepare-work-comment-replies.mjs`
 
-为作品下的评论批量准备回复。使用全部通用参数。
+从数据库读取待回复评论，结合作品内容和已采集参考评论生成回复，并写回数据库。该命令不打开浏览器，不执行真实回复。
+
+### 命令特有参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `--max-items` | int | `100` | 最多处理多少条待回复评论 |
+| `--reply-max-length` | int | `40` | 回复最大长度，最小 `10` |
+
+该命令不支持 `--execute`。
 
 ---
 
@@ -631,19 +640,42 @@ npm run return-visit:prepare -- --max-items 5
 
 **源文件**：`src/cli/execute-return-visit-prepare.mjs`
 
-准备回访任务：分析好友作品上下文，生成回访评论候选。使用全部通用参数。
+准备回访任务：从互动事件创建或更新回访任务，进入用户主页和作品页采集上下文，生成回访评论并写入数据库。该命令不会点赞，也不会发表评论。
+
+### 命令特有参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `--max-items` | int | 配置 `returnVisit.prepareMaxItems` 或 `20` | 本轮最多准备多少个回访任务 |
+| `--event-limit` | int | 配置 `returnVisit.taskEventLimit` 或 `500` | 从互动事件创建任务时读取的事件上限 |
+| `--event-status` | string | 配置 `returnVisit.eventSourceStatus` 或 `new` | 用于创建回访任务的互动事件状态 |
+| `--keep-open` | flag | `false` | 复用并保留浏览器 |
+| `--headless` | flag | `false` | 无头运行 |
+| `--json` | flag | `false` | JSON 输出 |
 
 ---
 
 ## 30. return-visit:execute
 
 ```bash
-npm run return-visit:execute -- --execute --max-items 3
+npm run return-visit:execute -- --max-items 3
 ```
 
 **源文件**：`src/cli/execute-return-visit.mjs`
 
-执行回访任务：点赞 + 评论。使用全部通用参数。
+执行回访任务：读取待执行回访任务，打开准备阶段选中的作品，检查点赞状态，点赞并发送已生成评论。该命令没有 `--execute` 参数；默认不加 `--dry-run` 即真实执行。
+
+### 命令特有参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `--max-items` | int | 配置 `returnVisit.executeMaxItems` 或 `20` | 本轮最多执行多少个回访任务 |
+| `--dry-run` | flag | `false` | 只预演，不真实点赞或评论 |
+| `--watch-policy` | string | 配置 `returnVisit.watchPolicy` 或 `seconds` | 看视频策略 |
+| `--watch-seconds` | string | 配置 `returnVisit.watchSeconds` 或 `5-8` | 看视频秒数，可传单个数字或 `min-max` |
+| `--keep-open` | flag | `false` | 复用并保留浏览器 |
+| `--headless` | flag | `false` | 无头运行 |
+| `--json` | flag | `false` | JSON 输出 |
 
 ---
 
