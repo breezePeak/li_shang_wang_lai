@@ -19,8 +19,8 @@ description: 礼尚往来 · 抖音创作者互动助手。发现评论与好友
 | "给第 N 条拟回复：xxx" | prepare comment reply，等待确认 |
 | "先预览回复位置" | dry-run 定位目标评论 |
 | "确认发送这一条" | 校验审批 + execute 单条回复 |
-| "看看好友回访候选"、"哪些朋友点赞了" | likes:plan 或 visits:discover，仅预览 |
-| "进入好友主页看看"、"发现回访目标" | visits:discover，进入主页找最新作品并检查点赞 |
+| "看看好友回访候选"、"哪些朋友点赞了" | actions:pending，仅预览 |
+| "进入好友主页看看"、"发现回访目标" | return-visit:prepare，准备回访任务 |
 | "去把互关朋友的最新作品拿出来准备回访"、"提取回访候选" | return-visit:prepare 阶段 → 扫描并分析好友最新作品以准备候选任务 |
 | "去执行好友回访"、"帮我回访一下" | return-visit:execute 阶段 → 物理隔离顶栏搜索框，安全执行点赞+评论 |
 | "自动给好友回赞"、"都回一下" | **拒绝**，提供候选预览和单条审批说明 |
@@ -32,7 +32,7 @@ description: 礼尚往来 · 抖音创作者互动助手。发现评论与好友
 - 批量自动点赞或批量回复；
 - 无人值守循环执行互动；
 - 绕过验证码、滑块、登录校验或平台风控；
-- MVP 阶段触发真实回访点赞（`likes:reciprocate --execute` 已被代码层硬阻断）；
+- MVP 阶段触发真实回访点赞（已被代码层硬阻断）；
 - 仅凭昵称相同就执行回访点赞；
 - Agent 可参考策略文件生成低风险候选回复文本，但不得自行 approve、confirm-execute 或真实发送。
 
@@ -102,29 +102,21 @@ npm run comments:prepare -- --event-id <id> --reply-text "<回复内容>" \
 # 阶段 1: 候选分流（纯数据，不进主页）
 npm run actions:plan -- --json       # 从 new 事件生成 replyCommentCandidates + visitWorkCandidates
 
-# 阶段 2 (phase3): 主页发现 + 点赞检查（浏览器进入主页/视频页）
-npm run visits:discover -- --json --max-items 5   # 进入好友主页找最新作品，检查点赞状态
+# 阶段 2: 准备回访任务（浏览器进入主页/视频页，采集上下文，生成评论）
+npm run return-visit:prepare -- --max-items 5
 
-# 阶段 3 (phase4): 待审核回访候选预览（与 visits:discover 同样进浏览器，仅输出未点赞候选 + 评论草稿）
-npm run visits:review -- --json --max-items 5    # 输出 reviewCandidates，包含 commentDrafts
-
-# 阶段 4 (phase5): 现场审核模式（交互式终端，逐条选择 + 执行）
-npm run visits:live-review -- --max-items 5                    # dry-run 模式：选择草稿仅预览
-npm run visits:live-review -- --execute --max-items 5          # execute 模式：选择草稿后立即点赞+评论
-
-# 阶段 5: 真实执行（MVP 阶段硬阻断）
-npm run likes:reciprocate -- --execute   # FEATURE_DISABLED
+# 阶段 3: 执行真实回访（点赞 + 评论）
+npm run return-visit:execute -- --execute --max-items 5
 ```
 
-> **五阶段说明：**
+> **三阶段说明：**
 > - `actions:plan`：纯数据分流，不进主页，只按 actorProfileKey 合并事件，输出 visitWorkCandidates；
-> - `visits:discover`：phase3，浏览器进入好友/互关主页，找最近非置顶作品，检查点赞状态，输出 pending_review/skipped/blocked；
-> - `visits:review`：phase4，复用 visits:discover 的浏览器流程，仅输出 pending_review 候选，每条附带 3 条评论草稿（不点赞、不评论、不落库）；
-> - `visits:live-review`：phase5，支持三种评论模式（`--comment-mode local|agent|skill`，默认 skill）；local 用本地规则生成候选，agent 预留 LLM 接口（当前 FEATURE_DISABLED），skill 给外部 Agent 使用只输出 commentContext+constraints；用户选择或传 `--selected-comment-text` 即代表人工审核通过；
+> - `return-visit:prepare`：浏览器进入好友/互关主页，找最近非置顶作品，采集上下文，生成回访评论，写入数据库；
+> - `return-visit:execute`：执行真实回访（点赞 + 评论），更新数据库状态。
 
 ### Agent 生成回访评论要求
 
-visits:live-review 在发现好友/互关用户的作品处于 not_liked 状态后，可以由 Agent 根据当前作品内容生成评论候选。Agent 生成评论的目标不是"刷存在感"，而是基于作品上下文给出自然、克制、像真人的回应。
+return-visit:prepare 在发现好友/互关用户的作品后，根据当前作品内容生成评论候选。生成评论的目标不是"刷存在感"，而是基于作品上下文给出自然、克制、像真人的回应。
 
 #### 生成输入
 
@@ -248,7 +240,7 @@ Agent 生成评论候选时，应输出结构化数据：
 
 #### 用户选择即审核
 
-在 `visits:live-review --execute` 模式下：
+在 `return-visit:execute --execute` 模式下：
 
 - Agent 展示 1/2/3 三条候选；
 - 用户输入 1、2 或 3，即表示人工审核通过当前条；
@@ -305,14 +297,6 @@ re-check like state
 
 不得把未确认评论记为 confirmed。
 
-> - `likes:reciprocate`：真实点赞继续 `FEATURE_DISABLED` 硬阻断。
-
-### 旧命令兼容
-
-```bash
-npm run likes:plan -- --json       # 旧版浏览器回访计划（不推荐）
-npm run visits:plan -- --json       # 旧版统一回访计划（不推荐）
-```
 
 ## 评论回复完整流程
 
@@ -366,59 +350,19 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
     - visitWorkCandidates（好友回访候选，按 actorProfileKey 合并）
     - skipped（不进入候选的原因）
 
-阶段 2: 主页发现 (visits:discover, phase3)
-  用户说 "进入主页看看"
+阶段 2: 准备回访 (return-visit:prepare)
+  用户说 "准备回访"、"提取回访候选"
     ↓
-  npm run visits:discover -- --json --max-items 5
+  npm run return-visit:prepare -- --max-items 5
     ↓
-  对每个 visitWorkCandidate（仅 friend/mutual）：
-    → page.goto(actorProfileUrl)
-    → findLatestNonPinnedVideo
-    → navigateToVideo
-    → checkLikeState
-    ↓
-  输出 visitDiscoveries：
-    - pending_review: 未点赞 → plannedActions=["like_work","comment_work"], executeAllowed=false
-    - skipped: 已点赞 → reason="already_liked_skip_comment", plannedActions=[]
-    - blocked: 无法确认 → reason 说明原因 (no_actor_profile_url / LIKE_STATE_UNKNOWN / ...)
+  进入好友主页 → 找最近非置顶作品 → 采集上下文 → 生成回访评论 → 写入数据库
 
-阶段 3: 待审核候选 (visits:review, phase4)
-  用户说 "看看哪些需要回复"、"生成回访审核列表"
+阶段 3: 执行回访 (return-visit:execute)
+  用户说 "执行回访"、"帮我回访一下"
     ↓
-  npm run visits:review -- --json --max-items 5
+  npm run return-visit:execute -- --execute --max-items 5
     ↓
-  复用 visits:discover 的浏览器流程（进入主页→找作品→检查点赞）
-    ↓
-  仅输出 pending_review 候选，每条附带 3 条评论草稿
-    ↓
-  输出 reviewCandidates（selectedCommentDraft=null, executeAllowed=false）
-
-阶段 4: 现场审核 (visits:live-review, phase5)
-  用户说 "逐条审核回访候选"、"现场确认回访"
-    ↓
-  三种评论模式：--comment-mode local|agent|skill（默认 skill）
-    ↓
-  local:  npm run visits:live-review -- --comment-mode local --execute --max-items 5
-  agent:  npm run visits:live-review -- --comment-mode agent --max-items 5  (当前 FEATURE_DISABLED)
-  skill:  npm run visits:live-review -- --comment-mode skill --json --max-items 1
-    ↓
-  local 模式：提取上下文 → generateVisitCommentCandidates → 展示 1/2/3 → 用户选择 → 执行
-  agent 模式：预留 LLM 接口，当前 FEATURE_DISABLED
-  skill 模式：提取上下文 → 输出 needsAgentComment + commentContext + constraints → 外部 Agent 生成评论
-  skill 执行：npm run visits:live-review -- --selected-comment-text "xxx" --execute --max-items 1
-    ↓
-  选择或传入 --selected-comment-text 即代表人工审核通过当前条，不需要 YES
-  skill + selected-comment-text 时必须 --max-items 1，一条评论只对应一个作品
-  执行前当前页 re-check like state
-    ↓
-  输出 reviewCandidates（含 generatedCommentCandidates/needsAgentComment/commentContext/constraints/selectedCommentText 等）
-
-阶段 5: 旧版真实执行保留 (likes:reciprocate, MVP 硬阻断)
-  用户说 "给这个候选点赞"
-    ↓
-  npm run likes:reciprocate -- --execute ...
-    ↓
-  FEATURE_DISABLED（代码层硬阻断）
+  从数据库读取待执行任务 → 点赞 + 评论 → 更新状态
 ```
 
 ## 阻断场景处理
@@ -445,13 +389,7 @@ npm run comments:execute -- --action-id <id> --execute --max-items 1 --json
 ## 当前版本限制
 
 - 评论回复流程：`prepare → approve → dry-run → confirm-execute → execute`
-- 好友回访五阶段：
-  - `actions:plan` — 候选分流，不进主页
-  - `visits:discover` — phase3，进主页发现作品并检查点赞
-  - `visits:review` — phase4，生成待审核回访候选（含评论草稿，不点赞、不评论、不落库）
-  - `visits:live-review` — phase5，交互式审核，根据作品上下文生成评论候选（Agent=medium, 固定模板=low fallback），选择 1/2/3 即审核通过；high/ignore 阻断
-  - `likes:reciprocate` — 真实点赞代码层硬阻断
-- 新版回访两阶段流程 (return-visit):
+- 回访两阶段流程 (return-visit):
   - `return-visit:prepare` — 执行准备阶段。进入好友主页扫描最近非置顶作品并提取上下文，生成 AI 评论内容，并将合法任务标记为 `pending_execute` 落库。
   - `return-visit:execute` — 执行回访阶段。从库中加载真正的合法候选，通过打标精确定位点赞按钮，自动在物理及词汇层级排除顶栏全局搜索框，无缝完成视频点赞和评论发送。
 

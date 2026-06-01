@@ -290,153 +290,7 @@ npm run interactions:reply -- --execute --max-items 5
 
 ---
 
-## 14. likes:plan
-
-```bash
-npm run likes:plan -- --mode auto --out likes-plan.json
-```
-
-**源文件**：`src/cli/plan-likes.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--mode` | string | — | 计划模式 |
-| `--out` | string | — | 输出路径 |
-
-生成点赞回访计划。
-
----
-
-## 15. likes:reciprocate
-
-```bash
-npm run likes:reciprocate -- --plan likes-plan.json --dry-run
-```
-
-**源文件**：`src/cli/execute-reciprocal-likes.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--plan` | string | 必填 | 计划文件路径 |
-| `--relation` | string | — | 按关系筛选 |
-
-执行点赞回访。当前真实点赞功能为 `FEATURE_DISABLED`。
-
----
-
-## 16. visits:plan
-
-```bash
-npm run visits:plan -- --source notifications
-```
-
-**源文件**：`src/cli/plan-visits.mjs`
-
-### 命令特有参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `--source` | string | — | 数据来源 |
-
-生成作品回访计划。
-
----
-
-## 17. visits:discover
-
-```bash
-npm run visits:discover -- --max-items 5 --keep-open
-npm run visits:discover -- --max-items 1 --safe-observe
-npm run visits:discover -- --json --max-items 3
-```
-
-**源文件**：`src/cli/discover-visits.mjs`
-
-逐个访问好友/互关用户主页，找最新非置顶作品，进入视频页检查点赞状态。
-
-### 页面切换节奏
-
-```
-进入用户主页
-→ waitForProfileSettled（等待主页稳定）
-→ waitForHumanObservation（停留供人工观察）
-→ 确认主页视频列表存在
-→ findLatestNonPinnedVideo（找候选作品）
-→ waitForHumanObservation（停留供人工确认候选）
-→ navigateToVideo（进入视频页）
-→ waitForVideoSettled（等待视频页稳定）
-→ waitForHumanObservation（停留供人工观察）
-→ waitForTimeout(1500)（额外缓冲）
-→ checkLikeState（检查点赞状态）
-```
-
-如果 `waitForProfileSettled` 或 `waitForVideoSettled` 失败，该候选标记为 `blocked`，不会继续执行。
-
-### keepOpen 默认行为
-
-- 非 `--json` 模式：默认 `keepOpen=true`，方便人工检查
-- `--json` 模式：自动关闭浏览器
-
----
-
-## 18. visits:review
-
-```bash
-npm run visits:review -- --json --max-items 5
-```
-
-**源文件**：`src/cli/review-visits.mjs`
-
-汇总展示已发现的作品回访候选。使用全部通用参数。
-
----
-
-## 19. visits:live-review
-
-```bash
-npm run visits:live-review -- --comment-mode skill --json --max-items 1
-npm run visits:live-review -- --comment-mode local --max-items 5
-npm run visits:live-review -- --comment-mode skill --execute --max-items 1 \
-  --selected-comment-text "这个主题挺温柔的～" \
-  --reply-mode agent_generated_review_required \
-  --risk-level medium \
-  --manual-review-method user_selected_agent_comment
-npm run visits:live-review -- --safe-observe --max-items 1
-```
-
-**源文件**：`src/cli/live-review-visits.mjs`
-
-访问好友主页 → 进入作品页 → 检查点赞 → 生成评论候选或输出上下文给 Agent。
-
-### 三种 comment-mode
-
-| 模式 | 用途 | 评论来源 | 状态 |
-|---|---|---|---|
-| `skill` | 给 Hermes / OpenClaw 使用 | 外部 Agent 根据 `SKILL.md` 生成 | 推荐默认 |
-| `local` | 本地调试 | 本地规则生成器 | 可用 |
-| `agent` | 项目自己调用大模型 | 内置 LLM provider | 预留（`FEATURE_DISABLED`） |
-
-### skill 模式流程
-
-1. 不传 `--selected-comment-text`：只输出 `commentContext` + `constraints`，Agent 生成评论
-2. 传 `--selected-comment-text`：执行 Agent 选中的评论（必须 `--max-items 1`）
-
-### 页面切换节奏
-
-与 `visits:discover` 完全一致，使用相同的 `waitForProfileSettled` / `waitForVideoSettled` / `waitForHumanObservation` 流程。
-
-### keepOpen 默认行为
-
-- 非 `--json` 模式：默认 `keepOpen=true`
-- `--json` 模式：自动关闭浏览器
-
----
-
-## 20. return-visit:prepare
+## 14. return-visit:prepare
 
 ```bash
 npm run return-visit:prepare -- --max-items 5
@@ -459,7 +313,7 @@ npm run return-visit:prepare -- --max-items 5
 
 ---
 
-## 21. return-visit:execute
+## 15. return-visit:execute
 
 ```bash
 npm run return-visit:execute -- --max-items 3
@@ -483,7 +337,7 @@ npm run return-visit:execute -- --max-items 3
 
 ---
 
-## 22. notify:inspect
+## 16. notify:inspect
 
 ```bash
 npm run notify:inspect
@@ -495,7 +349,7 @@ npm run notify:inspect
 
 ---
 
-## 23. interactions:inspect
+## 17. interactions:inspect
 
 ```bash
 npm run interactions:inspect
@@ -507,7 +361,7 @@ npm run interactions:inspect
 
 ---
 
-## 24. history
+## 18. history
 
 ```bash
 npm run history
@@ -519,7 +373,7 @@ npm run history
 
 ---
 
-## 25. dev:inspect-page
+## 19. dev:inspect-page
 
 ```bash
 npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
@@ -540,7 +394,7 @@ npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
 
 ---
 
-## 26. debug:like-dom
+## 20. debug:like-dom
 
 ```bash
 npm run debug:like-dom
@@ -552,7 +406,7 @@ npm run debug:like-dom
 
 ---
 
-## 31. debug:like-state
+## 21. debug:like-state
 
 ```bash
 npm run debug:like-state
