@@ -61,6 +61,32 @@ function randomInRange(min, max) {
   return Math.floor(min + Math.random() * (max - min + 1));
 }
 
+export function getReturnVisitTaskExecutionIssue(task) {
+  const hasComment = task?.generatedComment && String(task.generatedComment).trim();
+  const hasWorkUrl = task?.targetWork?.workUrl && String(task.targetWork.workUrl).trim();
+
+  const isTargetStatus = [
+    RETURN_VISIT_STATUS.PENDING_EXECUTE,
+    RETURN_VISIT_STATUS.EXECUTING,
+    RETURN_VISIT_STATUS.FAILED_LIKE,
+    RETURN_VISIT_STATUS.FAILED_COMMENT,
+  ].includes(task?.status);
+
+  if (!isTargetStatus) {
+    return 'non_executable_status';
+  }
+  if (!hasComment) {
+    return 'no_generated_comment';
+  }
+  if (!hasWorkUrl) {
+    return 'no_work_url';
+  }
+  if (task?.commentStatus === 'posted') {
+    return 'comment_already_posted';
+  }
+  return null;
+}
+
 async function main() {
   runMigrations();
 
@@ -110,18 +136,9 @@ async function main() {
   let failed = 0;
 
   for (const task of allTasks) {
-    const hasComment = task.generatedComment && String(task.generatedComment).trim();
-    const hasWorkUrl = task.targetWork?.workUrl && String(task.targetWork.workUrl).trim();
-
-    const isTargetStatus = [
-      RETURN_VISIT_STATUS.PENDING_EXECUTE,
-      RETURN_VISIT_STATUS.EXECUTING,
-      RETURN_VISIT_STATUS.FAILED_LIKE,
-      RETURN_VISIT_STATUS.FAILED_COMMENT
-    ].includes(task.status);
-
-    if (!isTargetStatus || !hasComment || !hasWorkUrl || task.commentStatus === 'posted') {
-      if (!hasComment) {
+    const issue = getReturnVisitTaskExecutionIssue(task);
+    if (issue) {
+      if (issue === 'no_generated_comment') {
         log(args.json, `[return-visit:execute] task ${task.taskId} skipped due to empty generatedComment`);
         updateReturnVisitTask(task.taskId, {
           status: RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT,
@@ -129,7 +146,7 @@ async function main() {
         });
         taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT, reason: 'no_generated_comment' });
         failed++;
-      } else if (!hasWorkUrl) {
+      } else if (issue === 'no_work_url') {
         log(args.json, `[return-visit:execute] task ${task.taskId} skipped due to empty workUrl`);
         updateReturnVisitTask(task.taskId, {
           status: RETURN_VISIT_STATUS.FAILED_COLLECT,
@@ -138,7 +155,7 @@ async function main() {
         taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.FAILED_COLLECT, reason: 'no_work_url' });
         failed++;
       } else {
-        log(args.json, `[return-visit:execute] task ${task.taskId} filtered out (status: ${task.status}, commentStatus: ${task.commentStatus})`);
+        log(args.json, `[return-visit:execute] task ${task.taskId} filtered out (${issue}) (status: ${task.status}, commentStatus: ${task.commentStatus})`);
       }
       continue;
     }

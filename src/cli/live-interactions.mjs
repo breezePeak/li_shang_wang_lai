@@ -21,19 +21,29 @@ import {
 } from '../adapters/work-modal-page.mjs';
 import { clickNotificationWorkThumbnail } from '../adapters/work-context-page.mjs';
 import { checkWorkOwner, getSelfProfile } from '../adapters/work-context-page.mjs';
-import { clickLike, postVideoComment } from '../adapters/video-page.mjs';
 import { generateReplyText } from '../domain/reply-template.mjs';
 import { classifyNotificationAction } from '../domain/notification-action-router.mjs';
 import { analyzeReturnVisitContext, generateReturnVisitComment } from '../services/return-visit-comment-generator.mjs';
+import { loadConfig } from '../config/user-config.mjs';
 import { upsertNotificationEvent } from '../db/interaction-repository.mjs';
 import { upsertWorkContext, findWorkByModalId, findWorkByWorkId, findWorkByThumbnailKey } from '../db/work-repository.mjs';
 import { upsertWorkComment, listPendingCommentsGroupedByWork, listPreparedComments, markCommentReplyPrepared, markCommentReplied, markCommentSentUnverified, markCommentBlocked, markCommentSkipped, findCommentByActorAndText, listReplyTrackedCommentKeysForWork } from '../db/work-comment-repository.mjs';
-import { upsertRevisitCandidate, listPendingRevisitCandidates, markRevisitDone, markRevisitSkipped, markRevisitBlocked } from '../db/revisit-repository.mjs';
 import { getDb } from '../db/database.mjs';
 import { runMigrations } from '../db/migrations.mjs';
 import { writeJSON, ensureDir } from '../utils/filesystem.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
+import {
+  RETURN_VISIT_STATUS,
+  createOrUpdateReturnVisitTasksFromEvents,
+  listReturnVisitPrepareTasks,
+  listReturnVisitExecuteTasks,
+  updateReturnVisitTask,
+  markReturnVisitFailure,
+  markReturnVisitDone,
+} from '../services/return-visit-task-service.mjs';
+import { collectCandidateWorkFromProfile } from '../services/return-visit-work-collector.mjs';
+import { executeReturnVisitTask } from '../services/return-visit-executor.mjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -59,24 +69,6 @@ function updateEventWorkInfo(db, eventId, workId, workUrl, workTitle, rawPayload
   params.push(new Date().toISOString());
   params.push(eventId);
   db.prepare(`UPDATE interaction_events SET ${fields.join(', ')} WHERE id = ?`).run(...params);
-}
-
-function addRevisitCandidateDB(notification, reason) {
-  const relation = notification.relation || 'unknown';
-  if (relation !== 'friend' && relation !== 'mutual') {
-    console.log(`[live]   跳过回访候选: ${notification.username || ''} relation=${relation}`);
-    return { action: 'skipped', reason: 'non_friend_relation' };
-  }
-
-  const result = upsertRevisitCandidate({
-    actorName: notification.username || '',
-    actorProfileUrl: notification.actorProfileUrl || '',
-    actorProfileKey: notification.actorProfileKey || '',
-    eventId: notification.eventId || null,
-    reason,
-    rawText: notification.content || '',
-  });
-  return result;
 }
 
 function normalizeNotificationWorkLookup(workId) {
@@ -713,334 +705,207 @@ async function executePreparedReplies(page, db, run, options) {
   return results;
 }
 
-async function processRevisitCandidates(page, revisitList, db, run, options) {
+async function processReturnVisitTasks(page, run, options) {
+  const config = loadConfig().returnVisit || {};
+  const maxItems = options.maxRevisits || options.maxItems || config.executeMaxItems || 1;
+  const maxRetryCount = Number(config.maxRetryCount ?? 2);
+  const maxWorksToCheck = Number(config.maxWorksToCheck ?? 3);
+  const pageLoadRetryCount = Number(config.pageLoadRetryCount ?? 1);
+  const maxConsecutiveFailures = Number(config.maxConsecutiveFailures ?? 3);
+  const watchPolicy = config.watchPolicy || 'seconds';
+  const watchSeconds = Array.isArray(config.watchSeconds) ? config.watchSeconds : [5, 8];
+
+  const sourceSummary = createOrUpdateReturnVisitTasksFromEvents({
+    limit: config.taskEventLimit || 500,
+    status: config.eventSourceStatus || 'new',
+  });
+  console.log(`[live] 回访任务已同步: inserted=${sourceSummary.inserted} enriched=${sourceSummary.enriched} skipped=${sourceSummary.skipped}`);
+
+  const prepareTasks = listReturnVisitPrepareTasks({ limit: maxItems, maxRetryCount });
   const revisitResults = [];
-  const profileSettleMs = Math.max(options.profileSettleMs || 0, 12000);
-  const betweenRevisitMs = Math.max(options.revisitIntervalMs || 0, 8000);
-  const writeEvidenceFiles = !!options.writeEvidenceFiles;
+  let consecutiveFailures = 0;
 
-  async function findFirstProfileWork() {
-    const attempts = 4;
-    for (let attempt = 1; attempt <= attempts; attempt++) {
-      const firstWork = await page.evaluate(() => {
-        const links = document.querySelectorAll('a[href*="/video/"], a[href*="/note/"]');
-        const candidates = [];
-        for (const link of links) {
-          const href = link.getAttribute('href') || '';
-          const text = (link.innerText || link.textContent || '').trim();
-          const imgAlt = Array.from(link.querySelectorAll('img')).map(img => img.getAttribute('alt') || '').filter(Boolean).join(' ');
-          const rect = link.getBoundingClientRect();
-          if (rect.width > 50 && rect.height > 50 && rect.bottom > 0 && rect.top < window.innerHeight) {
-            candidates.push({
-              href: href.startsWith('http') ? href : `https://www.douyin.com${href}`,
-              text: text.slice(0, 200),
-              imgAlt: imgAlt.slice(0, 200),
-              x: Math.round(rect.x + rect.width / 2),
-              y: Math.round(rect.y + rect.height / 2),
-              top: Math.round(rect.top),
-              left: Math.round(rect.left),
-            });
-          }
-        }
-        candidates.sort((a, b) => a.top - b.top || a.left - b.left);
-        return candidates[0] || null;
-      });
-
-      if (firstWork) return firstWork;
-
-      console.log(`[live]   作品未出现，等待主页内容加载 (${attempt}/${attempts})...`);
-      await page.waitForTimeout(2500 + Math.floor(Math.random() * 1200));
-      await page.evaluate(() => window.scrollBy(0, Math.floor(260 + Math.random() * 180))).catch(() => {});
-      await page.waitForTimeout(1500 + Math.floor(Math.random() * 1000));
+  for (const task of prepareTasks) {
+    if (consecutiveFailures >= maxConsecutiveFailures) {
+      console.log(`[live] 回访准备连续失败 ${consecutiveFailures} 个任务，暂停本轮`);
+      break;
     }
-    return null;
-  }
 
-  function parseCandidateComments(candidate) {
-    try {
-      const parsed = JSON.parse(candidate.comments_json || '[]');
-      return Array.isArray(parsed) ? parsed.filter(Boolean).map(String).slice(0, 8) : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function safeEvidenceName(text) {
-    return String(text || 'unknown')
-      .replace(/[\\/:*?"<>|\s]+/g, '_')
-      .replace(/_+/g, '_')
-      .slice(0, 60) || 'unknown';
-  }
-
-  async function openProfileAndFindWork(profileUrl, phaseLabel) {
-    console.log(`[live]   ${phaseLabel}打开主页: ${profileUrl}`);
-    await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    console.log(`[live]   等待主页作品加载 ${Math.round(profileSettleMs / 1000)}s...`);
-    await page.waitForTimeout(profileSettleMs);
-    return await findFirstProfileWork();
-  }
-
-  async function extractRevisitProfileContext(firstWork = null) {
-    return await page.evaluate((work) => {
-      const bodyText = document.body?.innerText || '';
-      const title = document.title || '';
-      const nickname =
-        document.querySelector('[data-e2e="user-info"]')?.innerText ||
-        document.querySelector('[class*="nickname"]')?.innerText ||
-        '';
-      const desc =
-        document.querySelector('[class*="signature"]')?.innerText ||
-        document.querySelector('[class*="desc"]')?.innerText ||
-        '';
-      const visibleWorks = [];
-      const links = document.querySelectorAll('a[href*="/video/"], a[href*="/note/"]');
-      for (const link of links) {
-        const rect = link.getBoundingClientRect();
-        if (rect.width < 50 || rect.height < 50 || rect.bottom <= 0 || rect.top >= window.innerHeight) continue;
-        const href = link.getAttribute('href') || '';
-        const text = (link.innerText || link.textContent || '').trim();
-        const imgAlt = Array.from(link.querySelectorAll('img')).map(img => img.getAttribute('alt') || '').filter(Boolean).join(' ');
-        visibleWorks.push({
-          href: href.startsWith('http') ? href : `https://www.douyin.com${href}`,
-          text: text.slice(0, 160),
-          imgAlt: imgAlt.slice(0, 160),
-        });
-        if (visibleWorks.length >= 6) break;
-      }
-      return {
-        profileTitle: title.slice(0, 160),
-        profileText: bodyText.slice(0, 1200),
-        nickname: nickname.trim().slice(0, 120),
-        signature: desc.trim().slice(0, 240),
-        firstWorkText: work?.text || '',
-        firstWorkImgAlt: work?.imgAlt || '',
-        visibleWorks,
-      };
-    }, firstWork);
-  }
-
-  async function extractRevisitWorkContext() {
-    return await page.evaluate(() => {
-      const metaDescription = document.querySelector('meta[name="description"]')?.getAttribute('content') || '';
-      const ogTitle = document.querySelector('meta[property="og:title"]')?.getAttribute('content') || '';
-      const workTitle =
-        document.querySelector('div.title[data-e2e="video-desc"]')?.innerText ||
-        document.querySelector('[data-e2e="video-desc"]')?.innerText ||
-        document.querySelector('[class*="video-desc"]')?.innerText ||
-        document.querySelector('[class*="desc-info"]')?.innerText ||
-        document.querySelector('[class*="aweme-desc"]')?.innerText ||
-        document.querySelector('[class*="title"]')?.innerText ||
-        document.querySelector('h1')?.innerText ||
-        ogTitle ||
-        document.title ||
-        '';
-      const workText = [
-        workTitle,
-        metaDescription,
-        document.body?.innerText || '',
-      ].filter(Boolean).join('\n').slice(0, 1800);
-      const referenceComments = [];
-      const commentItems = document.querySelectorAll('[data-e2e="comment-item"], .comment-item-info-wrap');
-      for (const item of commentItems) {
-        const text = (item.innerText || '').trim();
-        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-        const cleaned = [];
-        for (const line of lines) {
-          if (line === '回复' || line === '赞' || line === '分享' || line === '作者' || line === '朋友' || line === '互相关注') continue;
-          if (/^\d+$/.test(line)) continue;
-          if (/^\d+[秒分时天周月年]前/.test(line) || /^\d+月\d+日/.test(line)) continue;
-          if (line.includes('·') && line.length < 30) continue;
-          if (line.length > 1 && line.length < 120) cleaned.push(line);
-        }
-        const commentText = cleaned.slice(1, 3).join(' ') || cleaned[0] || '';
-        if (commentText && commentText.length < 180 && !referenceComments.includes(commentText)) referenceComments.push(commentText);
-        if (referenceComments.length >= 8) break;
-      }
-      return {
-        workTitle: workTitle.trim().slice(0, 160),
-        workText,
-        referenceComments,
-      };
-    });
-  }
-
-  for (let i = 0; i < revisitList.length; i++) {
-    const candidate = revisitList[i];
-    console.log(`[live] 回访 ${i + 1}/${revisitList.length} actor=${candidate.actor_name} key=${candidate.revisit_key}`);
-
-    if (options.dryRun) {
-      console.log(`[live]   (dry-run) 将回访 ${candidate.actor_name}`);
-      revisitResults.push({ actorName: candidate.actor_name, status: 'skipped', reason: 'dry-run' });
+    const profileUrl = task.userProfileUrl || (task.userId ? `https://www.douyin.com/user/${task.userId}` : null);
+    if (!profileUrl) {
+      markReturnVisitFailure(task, { status: RETURN_VISIT_STATUS.FAILED_COLLECT, error: 'no_profile_url' });
+      revisitResults.push({ actorName: task.userName, status: 'blocked', reason: 'no_profile_url', phase: 'revisit_prepare' });
+      consecutiveFailures++;
       continue;
     }
 
-    try {
-      const profileUrl = candidate.actor_profile_url || (candidate.actor_profile_key ? `https://www.douyin.com/user/${candidate.actor_profile_key}` : null);
-      if (!profileUrl) {
-        console.log(`[live]   跳过：无主页 URL`);
-        markRevisitSkipped(candidate.id, 'no_profile_url');
-        revisitResults.push({ actorName: candidate.actor_name, status: 'skipped', reason: 'no_profile_url' });
-        continue;
+    updateReturnVisitTask(task.taskId, {
+      status: RETURN_VISIT_STATUS.COLLECTING_CONTENT,
+      userProfileUrl: profileUrl,
+      lastError: null,
+    });
+
+    const collected = await collectCandidateWorkFromProfile(page, profileUrl, {
+      maxWorksToCheck,
+      pageLoadRetryCount,
+      maxReferenceComments: 5,
+      validateWork: (work) => {
+        const analysis = analyzeReturnVisitContext({
+          workTitle: work.workTitle,
+          workText: work.workText,
+          contentSummary: work.contentSummary,
+          referenceComments: work.referenceComments || [],
+        });
+        if (!analysis.workTitle && analysis.referenceComments.length === 0) {
+          return { ok: false, reason: 'revisit_context_missing_work_and_comments' };
+        }
+        if (analysis.sceneSignals.length === 0) {
+          return { ok: false, reason: 'revisit_context_no_scene_signal' };
+        }
+        return { ok: true };
+      },
+    });
+
+    if (!collected.ok) {
+      if (String(collected.status || '').startsWith('skipped_')) {
+        updateReturnVisitTask(task.taskId, {
+          status: collected.status,
+          lastError: collected.reason || collected.status,
+        });
+        revisitResults.push({ actorName: task.userName, status: 'skipped', reason: collected.reason || collected.status, phase: 'revisit_prepare' });
+        consecutiveFailures = 0;
+      } else {
+        markReturnVisitFailure(task, {
+          status: RETURN_VISIT_STATUS.FAILED_COLLECT,
+          error: collected.reason || 'collect_failed',
+        });
+        revisitResults.push({ actorName: task.userName, status: 'blocked', reason: collected.reason || 'collect_failed', phase: 'revisit_prepare' });
+        consecutiveFailures++;
       }
+      continue;
+    }
 
-      const firstWork = await openProfileAndFindWork(profileUrl, '只读分析：');
+    const selectedWork = collected.selectedWork;
+    const generated = generateReturnVisitComment({
+      workTitle: selectedWork.workTitle,
+      workText: selectedWork.workText,
+      contentSummary: selectedWork.contentSummary,
+      referenceComments: selectedWork.referenceComments || [],
+    });
 
-      if (!firstWork) {
-        console.log(`[live]   未找到作品，跳过`);
-        markRevisitSkipped(candidate.id, 'no_work_found');
-        revisitResults.push({ actorName: candidate.actor_name, status: 'skipped', reason: 'no_work_found' });
-        continue;
+    if (!generated.ok || !generated.comment) {
+      const reason = generated.reason || 'generate_comment_failed';
+      if (reason === 'content_too_short') {
+        updateReturnVisitTask(task.taskId, {
+          status: RETURN_VISIT_STATUS.SKIPPED_NO_SUITABLE_WORK,
+          lastError: reason,
+        });
+        revisitResults.push({ actorName: task.userName, status: 'skipped', reason, phase: 'revisit_prepare' });
+        consecutiveFailures = 0;
+      } else {
+        markReturnVisitFailure(task, {
+          status: RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT,
+          error: reason,
+        });
+        revisitResults.push({ actorName: task.userName, status: 'blocked', reason, phase: 'revisit_prepare' });
+        consecutiveFailures++;
       }
+      continue;
+    }
 
-      const profileContext = await extractRevisitProfileContext(firstWork);
-      const sourceComments = parseCandidateComments(candidate);
+    updateReturnVisitTask(task.taskId, {
+      status: RETURN_VISIT_STATUS.PENDING_EXECUTE,
+      targetWork: {
+        workId: selectedWork.workId,
+        workUrl: selectedWork.workUrl,
+        workTitle: selectedWork.workTitle,
+        workText: selectedWork.workText,
+        contentSummary: selectedWork.contentSummary,
+        publishTime: selectedWork.publishTime,
+      },
+      referenceComments: selectedWork.referenceComments || [],
+      likeStatus: selectedWork.likeState === 'already_liked' ? 'already_liked' : 'pending',
+      commentStatus: 'generated',
+      generatedComment: generated.comment,
+      collectedAt: new Date().toISOString(),
+      generatedAt: new Date().toISOString(),
+      lastError: null,
+    });
+    revisitResults.push({ actorName: task.userName, status: 'prepared', reason: selectedWork.workUrl, phase: 'revisit_prepare' });
+    consecutiveFailures = 0;
+  }
 
-      console.log(`[live]   只读分析：打开最近作品采集作品信息和评论...`);
-      await page.mouse.click(firstWork.x, firstWork.y);
-      await page.waitForTimeout(Math.min(Math.max(options.videoSettleMs || 0, 3000), 5000));
-      const modalResult = await waitForWorkModal(page, { timeoutMs: 15000, closeAutoPlay: true });
-      if (!modalResult.ok) {
-        console.log(`[live]   作品评论区未就绪: ${modalResult.message}`);
-        markRevisitBlocked(candidate.id, modalResult.message || 'work_modal_not_ready');
-        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: modalResult.message || 'work_modal_not_ready' });
-        continue;
-      }
+  const executeTasks = listReturnVisitExecuteTasks({ limit: maxItems, maxRetryCount });
+  consecutiveFailures = 0;
 
-      const readWorkContext = await extractRevisitWorkContext();
-      const modalContextResult = await extractWorkModalContext(page).catch(() => null);
-      const modalWorkContext = modalContextResult?.ok ? modalContextResult.data : null;
-      const workContext = {
-        ...readWorkContext,
-        workTitle: modalWorkContext?.workTitle || readWorkContext.workTitle || firstWork.text || firstWork.imgAlt || '',
-        contentSummary: [
-          modalWorkContext?.workTitle || '',
-          modalWorkContext?.publishedAtText || '',
-          profileContext.profileTitle,
-          profileContext.nickname,
-          profileContext.signature,
-          profileContext.firstWorkText,
-          profileContext.firstWorkImgAlt,
-          profileContext.visibleWorks.map(w => `${w.text} ${w.imgAlt}`.trim()).filter(Boolean).join(' '),
-        ].filter(Boolean).join('\n').slice(0, 1200),
-        referenceComments: [
-          ...(readWorkContext.referenceComments || []),
-        ].filter(Boolean).slice(0, 12),
-      };
+  for (let i = 0; i < executeTasks.length; i++) {
+    const task = executeTasks[i];
+    if (consecutiveFailures >= maxConsecutiveFailures) {
+      console.log(`[live] 回访执行连续失败 ${consecutiveFailures} 个任务，暂停本轮`);
+      break;
+    }
 
-      const analysis = analyzeReturnVisitContext(workContext);
-      const contextEvidence = {
-        actorName: candidate.actor_name,
-        profileUrl,
-        sourceActorComments: sourceComments,
-        profileContext,
-        firstWork,
-        modalWorkContext,
-        workContext,
-        analysis: {
-          contentType: analysis.contentType,
-          commentFocus: analysis.commentFocus,
-          contentDeficient: analysis.contentDeficient,
-          sceneSignals: analysis.sceneSignals,
+    updateReturnVisitTask(task.taskId, {
+      status: RETURN_VISIT_STATUS.EXECUTING,
+      lastError: null,
+    });
+
+    const result = await executeReturnVisitTask(page, task, {
+      execute: !options.dryRun,
+      pageLoadRetryCount,
+      maxWorksToCheck,
+      watchPolicy,
+      watchSeconds,
+    });
+
+    if (result.resolvedWork) {
+      updateReturnVisitTask(task.taskId, {
+        targetWork: {
+          workId: result.resolvedWork.workId,
+          workUrl: result.resolvedWork.workUrl,
+          workTitle: result.resolvedWork.workTitle,
+          workText: result.resolvedWork.workText,
+          contentSummary: result.resolvedWork.contentSummary,
+          publishTime: result.resolvedWork.publishTime,
         },
-      };
-      const evidencePath = writeEvidenceFiles
-        ? path.join(run.outputDir, `revisit-analysis-${i + 1}-${safeEvidenceName(candidate.actor_name)}.json`)
-        : null;
-      if (evidencePath) {
-        writeJSON(evidencePath, contextEvidence);
-        console.log(`[live]   回访分析证据已保存: ${evidencePath}`);
-      }
-      console.log(`[live]   回访上下文: title="${(workContext.workTitle || '').slice(0, 60)}" comments=${workContext.referenceComments.length} signals=${analysis.sceneSignals.map(s => s.key).join(',') || 'none'}`);
+        referenceComments: result.resolvedWork.referenceComments || [],
+      });
+    }
 
-      if (!workContext.workTitle && workContext.referenceComments.length === 0) {
-        const reason = 'revisit_context_missing_work_and_comments';
-        console.log(`[live]   回访上下文不足，拒绝执行评论: ${reason}`);
-        markRevisitBlocked(candidate.id, reason);
-        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason });
-        continue;
-      }
-
-      if (analysis.sceneSignals.length === 0) {
-        const reason = 'revisit_context_no_scene_signal';
-        console.log(`[live]   回访上下文没有具体场景信号，拒绝执行评论: ${reason}`);
-        markRevisitBlocked(candidate.id, reason);
-        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason });
-        continue;
-      }
-
-      const generated = generateReturnVisitComment(workContext);
-      if (!generated.ok || !generated.comment) {
-        const reason = generated.reason || 'generate_comment_failed';
-        console.log(`[live]   生成回访评论失败: ${reason}`);
-        markRevisitBlocked(candidate.id, reason);
-        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason });
-        continue;
-      }
-      contextEvidence.generated = generated;
-      if (evidencePath) {
-        writeJSON(evidencePath, contextEvidence);
-      }
-
-      console.log(`[live]   已生成回访评论 (${generated.reason || 'generated'}): "${generated.comment}"`);
-
-      const actionWork = await openProfileAndFindWork(profileUrl, '执行动作：');
-      if (!actionWork) {
-        console.log(`[live]   执行动作前未找到作品，跳过`);
-        markRevisitSkipped(candidate.id, 'no_work_found_before_action');
-        revisitResults.push({ actorName: candidate.actor_name, status: 'skipped', reason: 'no_work_found_before_action' });
-        continue;
-      }
-
-      console.log(`[live]   执行动作：打开最近作品...`);
-      await page.mouse.click(actionWork.x, actionWork.y);
-      await page.waitForTimeout(Math.min(Math.max(options.videoSettleMs || 0, 3000), 5000));
-      const actionModalResult = await waitForWorkModal(page, { timeoutMs: 15000, closeAutoPlay: true });
-      if (!actionModalResult.ok) {
-        console.log(`[live]   执行动作时作品评论区未就绪: ${actionModalResult.message}`);
-        markRevisitBlocked(candidate.id, actionModalResult.message || 'work_modal_not_ready_before_action');
-        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: actionModalResult.message || 'work_modal_not_ready_before_action' });
-        continue;
-      }
-
-      const likeResult = await clickLike(page, { execute: true });
-      const likeOk = likeResult.ok || likeResult.code === RESULT_CODES.ALREADY_LIKED;
-      const likeMethod = likeResult.ok ? 'click_like' : 'already_liked';
-      if (!likeOk) {
-        console.log(`[live]   点赞失败: ${likeResult.message}`);
-        markRevisitBlocked(candidate.id, likeResult.message || 'like_failed');
-        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: likeResult.message || 'like_failed' });
-        continue;
-      }
-
-      console.log(`[live]   点赞完成 (${likeMethod})`);
-      await page.waitForTimeout(2500 + Math.floor(Math.random() * 1500));
-
-      console.log(`[live]   发送回访评论: "${generated.comment}"`);
-      const commentResult = await postVideoComment(page, generated.comment, { execute: true });
-      if (!commentResult.ok) {
-        console.log(`[live]   回访评论失败: ${commentResult.message}`);
-        markRevisitBlocked(candidate.id, commentResult.message || 'comment_failed');
-        revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: commentResult.message || 'comment_failed' });
-        continue;
-      }
-
-      const commentReason = commentResult.data?.unconfirmed ? 'comment_sent_unconfirmed' : 'comment_posted';
-      console.log(`[live]   回访完成: ${likeMethod} + ${commentReason}`);
-      markRevisitDone(candidate.id);
-      revisitResults.push({ actorName: candidate.actor_name, status: 'succeeded', reason: `${likeMethod}+${commentReason}` });
+    if (result.ok && result.status === RETURN_VISIT_STATUS.DONE) {
+      markReturnVisitDone(task, {
+        likeStatus: result.likeStatus,
+        commentStatus: result.commentStatus,
+      });
+      revisitResults.push({ actorName: task.userName, status: 'succeeded', reason: `${result.likeStatus}+${result.commentStatus}`, phase: 'revisit_execute' });
       run.succeeded++;
-
-      await page.waitForTimeout(2000);
-    } catch (err) {
-      console.log(`[live]   回访异常: ${err.message}`);
-      markRevisitBlocked(candidate.id, err.message);
-      revisitResults.push({ actorName: candidate.actor_name, status: 'blocked', reason: err.message });
-    } finally {
-      if (i < revisitList.length - 1) {
-        const delay = betweenRevisitMs + Math.floor(Math.random() * 4000);
-        console.log(`[live]   回访间隔等待 ${Math.round(delay / 1000)}s，避免连续切换过快`);
-        await page.waitForTimeout(delay);
-      }
+      consecutiveFailures = 0;
+    } else if (result.ok && result.dryRun) {
+      updateReturnVisitTask(task.taskId, {
+        status: RETURN_VISIT_STATUS.PENDING_EXECUTE,
+        likeStatus: result.likeStatus,
+        commentStatus: result.commentStatus,
+      });
+      revisitResults.push({ actorName: task.userName, status: 'skipped', reason: 'dry-run', phase: 'revisit_execute' });
+      consecutiveFailures = 0;
+    } else if (!result.ok && String(result.status || '').startsWith('skipped_')) {
+      updateReturnVisitTask(task.taskId, {
+        status: result.status,
+        likeStatus: result.likeStatus || task.likeStatus,
+        commentStatus: result.commentStatus || task.commentStatus,
+        lastError: result.error || result.status,
+      });
+      revisitResults.push({ actorName: task.userName, status: 'skipped', reason: result.error || result.status, phase: 'revisit_execute' });
+      consecutiveFailures = 0;
+    } else {
+      markReturnVisitFailure(task, {
+        status: result.status || RETURN_VISIT_STATUS.FAILED,
+        error: result.error || 'execute_failed',
+        likeStatus: result.likeStatus || task.likeStatus,
+        commentStatus: result.commentStatus || task.commentStatus,
+      });
+      revisitResults.push({ actorName: task.userName, status: 'blocked', reason: result.error || result.status || 'execute_failed', phase: 'revisit_execute' });
+      consecutiveFailures++;
     }
   }
 
@@ -1209,15 +1074,10 @@ async function main() {
       }
 
       for (const n of likeNotifs) {
-        if (!commonArgs.options.noRevisit) {
-          const revisitResult = addRevisitCandidateDB(n, 'like_received');
-          if (revisitResult.action === 'skipped') {
-            console.log(`[live] 点赞通知：actor=${n.username} -> 不加入回访候选 (${revisitResult.reason})`);
-          } else {
-            console.log(`[live] 点赞通知：actor=${n.username} -> 加入回访候选，稍后统一回访`);
-          }
+        if (commonArgs.options.noRevisit) {
+          console.log(`[live] noRevisit=true，点赞通知仅入库，不进入回访链路`);
         } else {
-          console.log(`[live] noRevisit=true，本轮不收集回访候选`);
+          console.log(`[live] 点赞通知：actor=${n.username} -> 已入 interaction_events，稍后走 return_visit_tasks 链路`);
         }
       }
 
@@ -1234,15 +1094,6 @@ async function main() {
       }
 
       for (const n of commentNotifs) {
-        if (!commonArgs.options.noRevisit) {
-          const revisitResult = addRevisitCandidateDB(n, 'comment_on_my_work');
-          if (revisitResult.action === 'skipped') {
-            console.log(`[live] 评论人不加入回访候选: actor=${n.username} (${revisitResult.reason})`);
-          } else {
-            console.log(`[live] 评论人加入回访候选: actor=${n.username}`);
-          }
-        }
-
         const commentKey = `${(n.username || '')}::${(n.content || '').slice(0, 60)}`;
         if (state.repliedCommentKeys.has(commentKey)) {
           console.log(`[live]   跳过已回复通知: ${n.username} "${(n.content || '').slice(0, 30)}"`);
@@ -1326,17 +1177,13 @@ async function main() {
     const replyResults = await executePreparedReplies(page, db, run, commonArgs.options);
     results.push(...replyResults);
 
-    const revisitLimit = commonArgs.options.maxRevisits || commonArgs.options.maxItems || 1;
-    const pendingRevisits = commonArgs.options.noRevisit ? [] : listPendingRevisitCandidates({ limit: revisitLimit });
-    if (pendingRevisits.length > 0) {
-      console.log(`[live] 第四阶段：统一回访开始 (${pendingRevisits.length} 人)`);
-      const revisitResults = await processRevisitCandidates(page, pendingRevisits, db, run, commonArgs.options);
-      results.push(...revisitResults.map(r => ({ ...r, phase: 'revisit' })));
-      console.log(`[live] 统一回访完成`);
-    } else if (commonArgs.options.noRevisit) {
+    if (commonArgs.options.noRevisit) {
       console.log(`[live] --no-revisit：跳过统一回访阶段`);
     } else {
-      console.log(`[live] 无回访候选，跳过第四阶段`);
+      console.log(`[live] 第四阶段：统一回访开始 (return_visit_tasks)`);      
+      const revisitResults = await processReturnVisitTasks(page, run, commonArgs.options);
+      results.push(...revisitResults.map(r => ({ ...r, phase: r.phase || 'revisit' })));
+      console.log(`[live] 统一回访完成`);
     }
 
   } catch (err) {
@@ -1366,7 +1213,7 @@ async function main() {
           maxItems: commonArgs.options.maxItems,
           visitedWorks: state.visitedModalIds.size,
           repliedComments: state.repliedCommentKeys.size,
-          revisitCandidates: listPendingRevisitCandidates({ limit: 1 }).length >= 0 ? 'see_db' : 0,
+          revisitCandidates: 'return_visit_tasks',
         },
       });
       console.log(`[live] 结果已保存: ${resultPath}`);
