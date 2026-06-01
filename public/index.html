@@ -14,63 +14,45 @@
   <div class="page-orb orb-b"></div>
 
   <div class="app-shell">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark"><i class="fa-solid fa-water"></i></div>
-        <div>
-          <h1>礼尚往来</h1>
-          <p>River Timeline Cockpit</p>
+    <section class="river-board" onclick="closeDetailCabin();">
+      <!-- 融入式顶栏：左侧品牌，右侧悬浮毛玻璃数据卡与刷新 -->
+      <div class="river-header-full" onclick="event.stopPropagation();">
+        <div class="river-brand">
+          <div class="river-brand-mark"><i class="fa-solid fa-water"></i></div>
+          <div class="river-brand-text">
+            <h1>礼尚往来</h1>
+            <p>RIVER TIMELINE COCKPIT</p>
+          </div>
         </div>
-      </div>
-      <div class="topbar-meta">
-        <div class="meta-chip">
-          <span class="meta-dot"></span>
-          <span>SQLite WAL</span>
-        </div>
-        <button class="refresh-btn" id="btn-refresh">
-          <i class="fa-solid fa-rotate-right"></i>
-          <span>刷新</span>
-        </button>
-      </div>
-    </header>
 
-    <section class="hero-panel">
-      <div class="hero-copy">
-        <span class="eyebrow">从左到右，一条河就是整个礼尚往来流程</span>
-        <p>主河道负责推进“采集、生成、审核、执行、完成”，分支河道专门暴露风险、失败回退和暂缓提醒。</p>
-      </div>
-      <div class="hero-stats" id="hero-stats">
-        <div class="hero-stat-card">
-          <span>入库通知</span>
-          <strong id="hero-collected-total">0</strong>
-        </div>
-        <div class="hero-stat-card">
-          <span>回访任务</span>
-          <strong id="hero-total-tasks">0</strong>
-        </div>
-        <div class="hero-stat-card">
-          <span>已完成</span>
-          <strong id="hero-completed-tasks">0</strong>
-        </div>
-      </div>
-    </section>
-
-    <section class="river-board">
-      <div class="river-header">
-        <div>
-          <span class="section-kicker">流程河流</span>
-          <h3>礼尚往来时间线</h3>
-        </div>
-        <div class="river-legend">
-          <span><i class="fa-solid fa-circle" style="color: var(--river-b);"></i> 主河道</span>
-          <span><i class="fa-solid fa-code-branch" style="color: var(--gold);"></i> 提醒分支</span>
+        <div class="river-meta-container">
+          <div class="meta-frosted-chip">
+            <span class="chip-dot"></span>
+            <span>SQLite WAL</span>
+          </div>
+          <div class="meta-frosted-chip">
+            <span class="chip-label">入库通知</span>
+            <strong class="chip-value" id="hero-collected-total">0</strong>
+          </div>
+          <div class="meta-frosted-chip">
+            <span class="chip-label">回访任务</span>
+            <strong class="chip-value" id="hero-total-tasks">0</strong>
+          </div>
+          <div class="meta-frosted-chip">
+            <span class="chip-label">已完成</span>
+            <strong class="chip-value" id="hero-completed-tasks">0</strong>
+          </div>
+          <button class="frosted-refresh-btn" id="btn-refresh">
+            <i class="fa-solid fa-rotate-right"></i>
+            <span>刷新</span>
+          </button>
         </div>
       </div>
 
-      <div class="river-scroll">
+      <div class="river-scroll" onclick="event.stopPropagation();">
         <div class="river-stage-strip" id="river-stage-strip">
-          <!-- SVG 渐变波浪河流与高逼格双层流光动效 -->
-          <svg class="river-svg" viewBox="0 0 1200 240" preserveAspectRatio="none">
+          <!-- SVG 渐变波浪河流（拓宽至 1400x320，起伏大，水流更加波澜壮阔） -->
+          <svg class="river-svg" viewBox="0 0 1400 320" preserveAspectRatio="none">
             <defs>
               <linearGradient id="river-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
                 <stop offset="0%" stop-color="#1f6d78" stop-opacity="0.85" />
@@ -81,13 +63,13 @@
               </linearGradient>
             </defs>
             <!-- 底色主干河道 -->
-            <path d="M 0,145 C 100,145 200,85 320,85 C 440,85 460,145 560,145 C 660,145 700,125 800,125 C 900,125 960,110 1040,110 L 1200,110" 
+            <path d="M 0,190 C 150,190 280,70 450,70 C 620,70 650,210 750,210 C 850,210 950,160 1050,160 C 1150,160 1200,120 1300,120 L 1400,120" 
                   fill="none" stroke="url(#river-gradient)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round" class="river-base-path" />
             <!-- 柔和中宽流光 -->
-            <path d="M 0,145 C 100,145 200,85 320,85 C 440,85 460,145 560,145 C 660,145 700,125 800,125 C 900,125 960,110 1040,110 L 1200,110" 
+            <path d="M 0,190 C 150,190 280,70 450,70 C 620,70 650,210 750,210 C 850,210 950,160 1050,160 C 1150,160 1200,120 1300,120 L 1400,120" 
                   fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" class="river-flow-path-1" />
             <!-- 高亮细流星流光 -->
-            <path d="M 0,145 C 100,145 200,85 320,85 C 440,85 460,145 560,145 C 660,145 700,125 800,125 C 900,125 960,110 1040,110 L 1200,110" 
+            <path d="M 0,190 C 150,190 280,70 450,70 C 620,70 650,210 750,210 C 850,210 950,160 1050,160 C 1150,160 1200,120 1300,120 L 1400,120" 
                   fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="river-flow-path-2" />
           </svg>
           
@@ -97,26 +79,42 @@
       </div>
     </section>
 
-    <section class="detail-panel">
-      <div class="detail-summary">
+    <!-- 空间三维磨砂悬浮详情舱 -->
+    <div class="floating-detail-cabin" id="detail-cabin" onclick="event.stopPropagation();">
+      <!-- 指向节点的发光三角形箭头 -->
+      <div class="cabin-arrow"></div>
+      
+      <!-- 关闭按钮 -->
+      <button class="cabin-close-btn" onclick="closeDetailCabin();">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+
+      <!-- 第一栏：概要与指标 -->
+      <div class="cabin-column cabin-summary">
         <div class="detail-heading">
-          <span class="section-kicker" id="detail-kicker">阶段详情</span>
-          <h3 id="detail-title">加载中</h3>
-          <p id="detail-description">正在读取这一阶段的任务上下文。</p>
+          <span class="detail-kicker" id="detail-kicker">STAGE</span>
+          <h3 id="detail-title">阶段加载中...</h3>
+          <p id="detail-description" style="display:none;"></p>
         </div>
-        <div class="detail-metrics" id="detail-metrics"></div>
+        <div class="detail-metrics" id="detail-metrics">
+          <!-- JS 动态填充 metrics -->
+        </div>
       </div>
 
-      <div class="detail-branches">
+      <!-- 第二栏：告警分支 -->
+      <div class="cabin-column cabin-branches-wrap">
         <div class="detail-branches-head">
-          <h4>提醒与分支</h4>
+          <h4>涉及分支</h4>
           <span id="detail-branch-count">0</span>
         </div>
-        <div class="branch-list" id="detail-branches"></div>
+        <div class="detail-branches" id="detail-branches">
+          <!-- JS 动态填充 branches -->
+        </div>
       </div>
 
-      <div class="detail-workspace">
-        <div class="workspace-toolbar">
+      <!-- 第三栏：处理工作区 -->
+      <div class="cabin-column cabin-workspace">
+        <div class="workspace-toolbar" style="display: none !important;">
           <div class="workspace-status">
             <h4 id="workspace-title">当前阶段任务</h4>
             <p id="workspace-subtitle">按所选流程节点自动切换内容。</p>
@@ -150,6 +148,7 @@
 
         <div class="workspace-body" id="workspace-body"></div>
       </div>
+    </div>
     </section>
   </div>
 

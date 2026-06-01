@@ -12,40 +12,40 @@ let selectedStageId = 'collect';
 const STAGE_LAYOUT = [
   {
     id: 'collect',
-    x: 100,
-    y: 120,
+    left: '10%',
+    y: 163,
     icon: 'fa-inbox',
     label: '通知入库',
     branch: { id: 'fallback', label: '回退', icon: 'fa-triangle-exclamation', color: 'orange' }
   },
   {
     id: 'tasks',
-    x: 320,
-    y: 65,
+    left: '32%',
+    y: 43,
     icon: 'fa-seedling',
     label: '生成回访任务',
     branch: { id: 'hold', label: '暂缓', icon: 'fa-pause', color: 'orange' }
   },
   {
     id: 'review',
-    x: 560,
-    y: 120,
+    left: '54%',
+    y: 183,
     icon: 'fa-comment-medical',
     label: '评论审核',
     branch: { id: 'risk', label: '风险', icon: 'fa-triangle-exclamation', color: 'orange' }
   },
   {
     id: 'execute',
-    x: 800,
-    y: 100,
+    left: '75%',
+    y: 133,
     icon: 'fa-bolt',
     label: '执行互动',
     branch: { id: 'retry', label: '失败', icon: 'fa-circle-xmark', color: 'red' }
   },
   {
     id: 'done',
-    x: 1040,
-    y: 85,
+    left: '92%',
+    y: 93,
     icon: 'fa-circle-check',
     label: '完成归档',
     branch: { id: 'archive', label: '归档完成', icon: 'fa-circle-check', color: 'green' }
@@ -142,7 +142,6 @@ function renderRiverTimeline() {
   container.innerHTML = STAGE_LAYOUT.map((stage) => {
     const data = stageMap[stage.id] || { count: 0, label: stage.label };
     
-    // 主节点激活状态：如果当前选中的是主节点本身，或者选中的是其挂载的分支，则主节点为激活态
     const isMainActive = activeStageId === stage.id || 
                          (stage.id === 'tasks' && activeStageId === 'hold') ||
                          (stage.id === 'execute' && activeStageId === 'retry');
@@ -150,7 +149,6 @@ function renderRiverTimeline() {
     const activeClass = isMainActive ? 'is-active' : '';
     const selectedBadgeHtml = activeStageId === stage.id ? `<span class="selected-badge">当前节点 (已选中)</span>` : '';
 
-    // 计算分支数据
     let branchCount = 0;
     if (stage.branch.id === 'hold') {
       branchCount = statsData.pendingReplies || 0;
@@ -162,7 +160,7 @@ function renderRiverTimeline() {
     const branchActiveClass = isBranchActive ? 'is-active' : '';
 
     return `
-      <div class="river-node-v2 ${activeClass}" style="left:${stage.x}px; top:${stage.y}px;">
+      <div class="river-node-v2 ${activeClass}" style="left:${stage.left}; top:${stage.y}px;">
         <div class="node-meta">
           <span class="node-label">${stage.label}</span>
           <span class="node-count">${data.count} 条</span>
@@ -684,21 +682,62 @@ function getTaskBadge(task) {
   return { badgeClass: 'badge-pending', badgeText: '处理中', dotClass: 'pending' };
 }
 
-window.selectStage = function(stageId) {
-  if (stageId === 'fallback') {
-    showToast('当前入库通知暂无异常回退', 'success');
-    stageId = 'collect';
-  } else if (stageId === 'risk') {
-    showToast('当前评论审核无额外告警风险', 'success');
-    stageId = 'review';
-  } else if (stageId === 'archive') {
-    showToast('归档已闭环完成', 'success');
-    stageId = 'done';
+window.closeDetailCabin = function() {
+  const cabin = document.getElementById('detail-cabin');
+  if (cabin) {
+    cabin.classList.remove('active');
   }
+  selectedStageId = '';
+  renderRiverTimeline();
+};
 
+window.selectStage = function(stageId) {
   selectedStageId = stageId;
   renderRiverTimeline();
   renderStageDetail();
+
+  // 动态处理空间详情舱的 top/left 定位与箭头方向
+  const cabin = document.getElementById('detail-cabin');
+  if (cabin) {
+    let layoutNode = STAGE_LAYOUT.find(n => n.id === stageId);
+    if (!layoutNode) {
+      if (stageId === 'hold') layoutNode = STAGE_LAYOUT.find(n => n.id === 'tasks');
+      else if (stageId === 'retry') layoutNode = STAGE_LAYOUT.find(n => n.id === 'execute');
+      else if (stageId === 'fallback') layoutNode = STAGE_LAYOUT.find(n => n.id === 'collect');
+      else if (stageId === 'risk') layoutNode = STAGE_LAYOUT.find(n => n.id === 'review');
+      else if (stageId === 'archive') layoutNode = STAGE_LAYOUT.find(n => n.id === 'done');
+    }
+
+    if (layoutNode) {
+      const yVal = layoutNode.y + 27; // 圆心 Y 坐标
+      let topPos = 0;
+
+      cabin.classList.remove('arrow-on-top', 'arrow-on-bottom');
+
+      // 若水位高 (yVal < 150)，详情舱悬浮在下方，三角形箭头在舱体顶部，指向上方圆形节点
+      if (yVal < 150) {
+        topPos = yVal + 40; 
+        cabin.classList.add('arrow-on-top');
+      } else {
+        // 若水位低 (yVal >= 150)，详情舱悬浮在上方，三角形箭头在舱体底部，指向下方圆形节点
+        topPos = yVal - 302; 
+        cabin.classList.add('arrow-on-bottom');
+      }
+
+      cabin.style.left = layoutNode.left;
+      cabin.style.top = `${topPos}px`;
+      cabin.classList.add('active'); // 弹性淡入
+    }
+  }
+
+  // 对没有额外展示界面的分支，进行优雅的气泡轻提示
+  if (stageId === 'fallback') {
+    showToast('当前入库通知暂无异常回退', 'success');
+  } else if (stageId === 'risk') {
+    showToast('当前评论审核无额外告警风险', 'success');
+  } else if (stageId === 'archive') {
+    showToast('归档已闭环完成', 'success');
+  }
 };
 
 window.toggleSelect = function(id) {
