@@ -842,7 +842,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
           const line = lines[k];
           if (line === '回复' || line === '赞' || line === '分享' || line === '回复中' || line === '...') continue;
           if (line === '互相关注' || line === '朋友' || line === '关注' || line === '作者' || line === '作者赞过') continue;
-          if (/^\d+$/.test(line) || (/^[刚昨前天周月年]/.test(line) && line.length < 10)) continue;
+          if (/^\d{1,2}$/.test(line) || (/^[刚昨前天周月年]/.test(line) && line.length < 10)) continue;
           if (/^\d+[秒分时天周月年]前/.test(line) || /^\d{1,2}:\d{2}/.test(line) || /^\d+月\d+日/.test(line)) continue;
           if (line.includes('·') && line.length < 30) continue;
           if (!commentText && line.length > 0) {
@@ -856,7 +856,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
             const line = lines[k];
             if (line === '回复' || line === '赞' || line === '分享' || line === '回复中' || line === '...' || line === '作者') continue;
             if (line === '互相关注' || line === '朋友' || line === '关注' || line === '作者赞过') continue;
-            if (/^\d+$/.test(line) || (/^[刚昨前天周月年]/.test(line) && line.length < 10)) continue;
+            if (/^\d{1,2}$/.test(line) || (/^[刚昨前天周月年]/.test(line) && line.length < 10)) continue;
             if (/^\d+[秒分时天周月年]前/.test(line) || /^\d{1,2}:\d{2}/.test(line)) continue;
             if (line.includes('·') && line.length < 30) continue;
             if (line.length > 2 && line.length < 300) {
@@ -893,10 +893,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
         commentKey = `${actorName}::${commentText.slice(0, 60)}`;
 
         const rect = items[i].getBoundingClientRect();
-        // 调试: 打印 raw text 的前10行
-        const rawLines = text.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 10);
         comments.push({
-          _debugLines: rawLines,
           commentIndex: i,
           actorName,
           commentText: commentText.slice(0, 300),
@@ -916,19 +913,8 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
 
     let result = await collect();
     allComments.push(...result.comments);
-    // 打印首条评论的原始 innerText 用于调试
-    const rawSample = await page.evaluate(() => {
-      const item = document.querySelector('[data-e2e="comment-item"]');
-      if (!item) return '(no comment item found)';
-      return (item.innerText || '').substring(0, 400);
-    });
-    console.error(`[work-modal] 首条评论原始 innerText:\n${rawSample}`);
     console.error(`[work-modal] 首轮采集 ${result.comments.length} 条评论:`);
-    result.comments.forEach(c => {
-      const lines = c._debugLines ? c._debugLines.join(' | ') : '(none)';
-      console.error(`  [${c.commentKey}] actor="${c.actorName}" isSelf=${c.isSelfComment} hasReply=${c.hasMyReply} text="${c.commentText.slice(0, 40)}"`);
-      console.error(`    lines: ${lines}`);
-    });
+    result.comments.forEach(c => console.error(`  [${c.commentKey}] actor="${c.actorName}" isSelf=${c.isSelfComment} hasReply=${c.hasMyReply} text="${c.commentText.slice(0, 40)}"`));
 
     if (hasConsecutiveOldAtTail()) {
       console.error(`[work-modal] 连续 ${oldCommentStopCount} 条评论超过 ${maxAgeDays} 天，停止该作品评论采集`);
