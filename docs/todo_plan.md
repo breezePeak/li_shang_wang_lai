@@ -54,7 +54,78 @@
    读取 JSON -> 按作品打开评论 -> 填写回复 -> 发送 -> 逐条确认
    ├─ 确认成功: 每条评论状态码 EXECUTE_CONFIRMED，reply_status=succeeded
    ├─ 发送未确认: 每条评论状态码 EXECUTE_SENT_UNVERIFIED，reply_status=sent_unverified
-   └─ 定位/发送失败: 每条评论状态码 EXECUTE_BLOCKED，reply_status=blocked
+    └─ 定位/发送失败: 每条评论状态码 EXECUTE_BLOCKED，reply_status=blocked
+```
+
+## 通知面板滚动采集内部流程
+
+下图是 `interactions:scan` 主流程中"步骤 1"通知扫描阶段的内部控制流，含滚动循环、停止条件和通知分类处理。
+
+```text
+导航到通知主页
+ ↓
+打开通知面板 (铃铛 hover/click)
+ ↓
+等待面板稳定 (DOM 就绪)
+ ↓
+鼠标移入面板 (保持悬浮态)
+ ↓
+┌── 滚动采集循环 (while true) ────────────────────────────────────┐
+│                                                                   │
+│  extractVisibleNotifications()                                    │
+│  ├─ 失败（首轮）→ 阻断返回                                        │
+│  └─ 成功 → 获取可见通知列表 + noMoreData 标记                       │
+│                                                                   │
+│  遍历每条通知:                                                     │
+│  ├─ 本次扫描内重复 (seenItemKeys)                 → skip           │
+│  ├─ 数据库已存在 (dedupeContext.notificationKeys) → skip           │
+│  ├─ --type 过滤 (comment/like 不匹配)             → skip           │
+│  ├─ --days N 天数窗口                           → 天数检测          │
+│  │  ├─ 超过 N 天 → 累计连续过期计数                                │
+│  │  │  └─ 连续 ≥ 3 条 → stopDueToOldRelevant → break              │
+│  │  └─ 在窗口内 → 重置连续计数为 0                                  │
+│  ├─ --max-count M 条数限制                      → 条数检测          │
+│  │  └─ seenItemKeys ≥ M → stopDueToOldRelevant → break            │
+│  │                                                                 │
+│  └─ 按通知类型分发:                                                 │
+│     ├─ comment_on_my_work（评论我的作品）                           │
+│     │  ├─ 作品级去重 → 已采集              → skip                  │
+│     │  └─ 未采集:                                                  │
+│     │     点击缩略图 → 等待作品弹窗                                 │
+│     │     │                                                        │
+│     │     └─ 作品评论采集 (collectCommentsFromNotificationWork)     │
+│     │        ├─ extractWorkModalContext → 作品上下文                │
+│     │        ├─ upsert work_contexts                               │
+│     │        ├─ findUnrepliedCommentsInModal (作品内滚动采集)       │
+│     │        │  └─ 连续 3 条过期 → 停止作品内滚动                   │
+│     │        ├─ upsert work_comments (评论级去重)                   │
+│     │        └─ 标记作品已采集                                     │
+│     │                                                              │
+│     │     关闭作品弹窗 → 恢复通知面板                               │
+│     │     ├─ 轻量恢复: Escape → waitForNotificationPanelStable      │
+│     │     │  ├─ 面板幸存（原位恢复）→ 继续                          │
+│     │     │  └─ 面板丢失 → 降级完整恢复 (page.goto + 重新打开面板)   │
+│     │     └─ 恢复失败 → stopDueToOldRelevant → break               │
+│     │                                                              │
+│     ├─ like（赞我的作品）                                           │
+│     │  └─ 写入 interaction_events                                  │
+│     │                                                              │
+│     ├─ reply_to_my_comment（回复我的评论）→ skip（暂不处理）         │
+│     └─ unknown（其他）                  → skip                     │
+│                                                                   │
+│  ── 一批处理完毕 ──                                                │
+│  stopDueToOldRelevant?                          → break            │
+│  noMoreData（面板显示"暂无更多数据"）?            → break            │
+│  连续 2 轮无新通知 (consecutiveEmptyRounds ≥ 2)? → break            │
+│  本轮全部重复 (allDuplicate)?                    → break            │
+│                                                                   │
+│  scrollPanelDown(600px)  (wheel 滚动)                              │
+│  └─ 滚动失败? → break                                              │
+│                                                                   │
+└───────────────────────────────────────────────────────────────────┘
+ ↓
+生成待回复评论 JSON (generateReplyJson)
+生成待回访 JSON      (generateVisitJson)
 ```
 
 ## 状态码约定
