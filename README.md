@@ -103,11 +103,14 @@ npm run auth
 |---|---|
 | 登录认证 | `npm run auth` |
 | 初始化数据库 | `npm run db:init` |
-| 扫描互动 | `npm run interactions:scan -- --type all --days 7` |
+| 生成执行计划 | `npm run interactions:run -- --input "看看谁给我评论了，回复一下" --days 7 --max-count 100` |
+| 只看互动 | `npm run interactions:scan -- --type all --days 7 --max-count 100 --display-only` |
+| 扫描并生成待回评 | `npm run interactions:scan -- --type comment --days 7 --max-count 100 --generate-reply-json` |
+| 扫描并生成待回访 | `npm run interactions:scan -- --type all --days 7 --max-count 100 --generate-visit-json` |
 | 填写评论回复 | 编辑 `data/pending-replies/pending-comments-xxx.json` 的 `reply_text` |
 | 批量准备评论回复 | `npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json` |
 | 批量执行评论回复 | `npm run comments:execute-all -- --items-file data/pending-replies/pending-comments-xxx.json --execute` |
-| 准备回访 | `npm run return-visit:prepare -- --days 7 --max-items 5` |
+| 准备回访 | `npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json --days 7 --max-items 5` |
 | 执行回访 | `npm run return-visit:execute -- --execute` |
 | 运行默认测试 | `npm test` |
 

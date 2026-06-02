@@ -48,6 +48,7 @@ export const RETURN_VISIT_EXECUTE_RETRY_STATUS = [
 const SOURCE_PRIORITY = {
   other: 1,
   follow: 2,
+  reply: 3,
   comment: 3,
   like: 3,
 };
@@ -81,6 +82,7 @@ function normalizeEventSourceType(eventType) {
   const v = String(eventType || '').toLowerCase();
   if (v === 'like') return 'like';
   if (v === 'comment') return 'comment';
+  if (v === 'reply') return 'reply';
   if (v === 'follow') return 'follow';
   return 'other';
 }
@@ -289,6 +291,113 @@ export function createOrUpdateReturnVisitTasksFromEvents(options = {}) {
 
   return {
     totalEvents: events.length,
+    inserted,
+    enriched,
+    skipped,
+  };
+}
+
+export function createOrUpdateReturnVisitTasksFromItems(items = []) {
+  const db = getDb();
+  const now = new Date().toISOString();
+  let inserted = 0;
+  let enriched = 0;
+  let skipped = 0;
+
+  const selectStmt = db.prepare('SELECT * FROM return_visit_tasks WHERE identity_key = ?');
+  const insertStmt = db.prepare(`
+    INSERT INTO return_visit_tasks (
+      task_id, identity_key, user_id, user_name, user_profile_url,
+      source_type, source_types_json, source_event_ids_json,
+      action_type, status, like_status, comment_status,
+      created_at, updated_at
+    ) VALUES (
+      ?, ?, ?, ?, ?,
+      ?, ?, ?,
+      'like_and_comment', ?, 'pending', 'pending',
+      ?, ?
+    )
+  `);
+
+  for (const item of items || []) {
+    const relation = String(item.relation || '').trim().toLowerCase();
+    if (relation && relation !== 'friend' && relation !== 'mutual') {
+      skipped++;
+      continue;
+    }
+
+    const userId = String(item.actor_profile_key || item.user_id || '').trim() || null;
+    const userProfileUrl = normalizeDouyinUrl(item.actor_profile_url || item.user_profile_url || '') || null;
+    const userName = String(item.actor_name || item.user_name || '').trim();
+    const identityKey = buildIdentityKey({ userId, userProfileUrl, userName });
+    if (!identityKey) {
+      skipped++;
+      continue;
+    }
+
+    const sourceType = normalizeEventSourceType(item.source_type || item.event_type);
+    const sourceEventId = item.source_event_id || item.event_id || null;
+    const existing = selectStmt.get(identityKey);
+
+    if (!existing) {
+      const taskId = buildTaskId(identityKey);
+      insertStmt.run(
+        taskId,
+        identityKey,
+        userId,
+        userName || '(unknown)',
+        userProfileUrl,
+        sourceType,
+        JSON.stringify([sourceType]),
+        JSON.stringify(sourceEventId ? [sourceEventId] : []),
+        RETURN_VISIT_STATUS.PENDING_VISIT,
+        now,
+        now
+      );
+      inserted++;
+      continue;
+    }
+
+    const mergedSourceTypes = toUniqueArray([
+      ...parseJsonArray(existing.source_types_json),
+      sourceType,
+    ]);
+    const mergedSourceEventIds = toUniqueArray([
+      ...parseJsonArray(existing.source_event_ids_json),
+      ...(sourceEventId ? [sourceEventId] : []),
+    ]);
+    const nextSourceType = mergeSourceType(existing.source_type || 'other', sourceType);
+    const updateCols = [
+      'source_type = ?',
+      'source_types_json = ?',
+      'source_event_ids_json = ?',
+      'updated_at = ?',
+    ];
+    const params = [
+      nextSourceType,
+      JSON.stringify(mergedSourceTypes),
+      JSON.stringify(mergedSourceEventIds),
+      now,
+    ];
+    if (userId && !existing.user_id) {
+      updateCols.push('user_id = ?');
+      params.push(userId);
+    }
+    if (userProfileUrl && !existing.user_profile_url) {
+      updateCols.push('user_profile_url = ?');
+      params.push(userProfileUrl);
+    }
+    if (userName && (!existing.user_name || existing.user_name === '(unknown)')) {
+      updateCols.push('user_name = ?');
+      params.push(userName);
+    }
+    params.push(existing.id);
+    db.prepare(`UPDATE return_visit_tasks SET ${updateCols.join(', ')} WHERE id = ?`).run(...params);
+    enriched++;
+  }
+
+  return {
+    totalItems: items.length,
     inserted,
     enriched,
     skipped,

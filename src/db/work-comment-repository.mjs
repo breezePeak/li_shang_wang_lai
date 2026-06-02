@@ -52,10 +52,17 @@ export function upsertWorkComment(comment) {
 
 export function listPendingCommentsGroupedByWork(options = {}) {
   const db = getDb();
-  const { limit = 100 } = options;
-  const rows = db.prepare(
-    "SELECT * FROM work_comments WHERE reply_status = 'pending' ORDER BY first_seen_at ASC LIMIT ?"
-  ).all(limit);
+  const { limit = 100, days = null } = options;
+  const params = [];
+  let sql = "SELECT * FROM work_comments WHERE reply_status = 'pending'";
+  if (Number(days) > 0) {
+    const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
+    sql += ' AND last_seen_at >= ?';
+    params.push(since);
+  }
+  sql += ' ORDER BY first_seen_at ASC LIMIT ?';
+  params.push(limit);
+  const rows = db.prepare(sql).all(...params);
 
   const groups = new Map();
   for (const row of rows) {

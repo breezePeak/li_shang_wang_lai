@@ -361,8 +361,8 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
   };
 }
 
-function writePendingReplyJson() {
-  const groups = listPendingCommentsGroupedByWork({ limit: 500 });
+function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
+  const groups = listPendingCommentsGroupedByWork({ limit: maxCount, days });
   const works = [];
   let totalComments = 0;
 
@@ -397,6 +397,7 @@ function writePendingReplyJson() {
   writeJSON(filePath, {
     generatedAt: new Date().toISOString(),
     source: 'interactions:scan',
+    task_type: 'comment_reply',
     workflow_status_code: 'SCAN_JSON_READY',
     status_codes: {
       scan: 'SCAN_JSON_READY',
@@ -409,7 +410,63 @@ function writePendingReplyJson() {
   return { filePath, totalComments, workCount: works.length };
 }
 
-async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNotificationDom = false) {
+function getVisitSourceType(event) {
+  if (event.notificationAction === 'reply_to_my_comment') return 'reply';
+  if (event.notificationAction === 'comment_on_my_work' || event.eventType === 'comment') return 'comment';
+  if (event.notificationAction === 'like_received' || event.eventType === 'like') return 'like';
+  if (event.notificationAction === 'follow_received') return 'follow';
+  return 'other';
+}
+
+function writePendingVisitJson(events, { days = null, maxCount = 100, collectTypes = ['like', 'comment', 'reply', 'follow'] } = {}) {
+  const allowed = new Set((collectTypes || []).map(type => String(type || '').trim()).filter(Boolean));
+  const users = [];
+  const seen = new Set();
+
+  for (const event of events || []) {
+    const sourceType = getVisitSourceType(event);
+    if (allowed.size > 0 && !allowed.has(sourceType)) continue;
+    const identityKey = event.actorProfileKey || event.actorProfileUrl || event.actorName || '';
+    if (!identityKey || seen.has(identityKey)) continue;
+    seen.add(identityKey);
+    users.push({
+      source_type: sourceType,
+      source_event_id: event.eventId || null,
+      actor_name: event.actorName || '',
+      actor_profile_key: event.actorProfileKey || null,
+      actor_profile_url: event.actorProfileUrl || null,
+      relation: event.relation || 'unknown',
+      target_work_id: event.targetWorkId || null,
+      target_work_url: event.targetWorkUrl || null,
+      event_time_text: event.eventTimeText || null,
+      visit_status: 'pending',
+      collect_status_code: 'COLLECT_PENDING_VISIT',
+    });
+    if (users.length >= maxCount) break;
+  }
+
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const filePath = resolve('data', 'pending-visits', `pending-visits-${ts}.json`);
+  writeJSON(filePath, {
+    generatedAt: new Date().toISOString(),
+    source: 'interactions:scan',
+    task_type: 'return_visit',
+    workflow_status_code: 'SCAN_VISIT_JSON_READY',
+    status_codes: {
+      scan: 'SCAN_VISIT_JSON_READY',
+      prepare: 'VISIT_PREPARE_WAIT',
+      execute: 'VISIT_EXECUTE_WAIT',
+    },
+    days,
+    maxCount,
+    collectTypes,
+    totalUsers: users.length,
+    users,
+  });
+  return { filePath, totalUsers: users.length };
+}
+
+async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNotificationDom = false, scanPlan = {}) {
   console.error('[scan] === 通知面板扫描（增量逐批采集） ===');
 
   const {
@@ -477,6 +534,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   const wantComments = (type === 'all' || type === 'comment');
   const wantLikes = (type === 'all' || type === 'like');
   const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
+  const maxCount = Number(scanPlan.maxCount || run.options?.maxItems || 0) > 0 ? Number(scanPlan.maxCount || run.options.maxItems) : null;
   const dedupeContext = buildDedupeContext(notificationDays);
   console.error(
     `[scan] 去重上下文: notifications=${dedupeContext.notificationKeys.size} ` +
@@ -547,6 +605,11 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
 
     for (const [itemIndex, n] of notifications.entries()) {
       const notificationIndex = run.scanned + itemIndex + 1;
+      if (maxCount && seenItemKeys.size >= maxCount) {
+        logNotificationSkip(notificationIndex, n, `达到最大采集条数 maxCount=${maxCount}`);
+        stopDueToOldRelevant = true;
+        break;
+      }
       const itemKey = n.notificationItemKey || (n.username + '||' + n.action + '||' + (n.content || ''));
       if (seenItemKeys.has(itemKey)) {
         logNotificationSkip(notificationIndex, n, '本次扫描内重复通知', itemKey);
@@ -695,11 +758,14 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
           allEvents.push({
             eventId: result.eventId, eventType: n.eventType,
             actorName: n.username, actorProfileUrl: n.actorProfileUrl || null,
+            actorProfileKey: n.actorProfileKey || null,
             relation: n.relation, profileResolutionStatus,
             dbAction: 'inserted', dedupConfidence: confidence,
+            notificationAction: route.notificationAction,
             platformEventId: n.platformEventId || null,
             targetWorkId: n.workId || null,
             targetWorkUrl: n.workUrl || null,
+            eventTimeText: n.timeText || null,
           });
         } else if (result.action === 'enriched') {
           batchEnriched++;
@@ -711,11 +777,14 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
           allEvents.push({
             eventId: result.eventId, eventType: n.eventType,
             actorName: n.username, actorProfileUrl: n.actorProfileUrl || null,
+            actorProfileKey: n.actorProfileKey || null,
             relation: n.relation, profileResolutionStatus,
             dbAction: 'enriched', dedupConfidence: confidence,
+            notificationAction: route.notificationAction,
             platformEventId: n.platformEventId || null,
             targetWorkId: n.workId || null,
             targetWorkUrl: n.workUrl || null,
+            eventTimeText: n.timeText || null,
           });
         } else if (result.action === 'duplicate') {
           batchDuplicate++;
@@ -835,8 +904,23 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     await closeNotificationPanel(page);
   }
 
-  const pendingReplyFile = writePendingReplyJson();
-  console.error(`[scan] 待回复评论 JSON: ${pendingReplyFile.filePath} (${pendingReplyFile.totalComments} 条, ${pendingReplyFile.workCount} 个作品)`);
+  const pendingReplyFile = scanPlan.generateReplyJson
+    ? writePendingReplyJson({ days: notificationDays, maxCount: maxCount || 500 })
+    : null;
+  if (pendingReplyFile) {
+    console.error(`[scan] 待回复评论 JSON: ${pendingReplyFile.filePath} (${pendingReplyFile.totalComments} 条, ${pendingReplyFile.workCount} 个作品)`);
+  } else {
+    console.error('[scan] 本次计划不生成待回复评论 JSON');
+  }
+
+  const pendingVisitFile = scanPlan.generateVisitJson
+    ? writePendingVisitJson(allEvents, { days: notificationDays, maxCount: maxCount || 100, collectTypes: scanPlan.collectTypes })
+    : null;
+  if (pendingVisitFile) {
+    console.error(`[scan] 待回访 JSON: ${pendingVisitFile.filePath} (${pendingVisitFile.totalUsers} 个用户)`);
+  } else {
+    console.error('[scan] 本次计划不生成待回访 JSON');
+  }
 
   console.error(`[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalAmbiguousCount} 歧义 | ${totalProfileResolved} 主页已解析 | ${totalProfileUnresolved} 主页未解析 | work_comments ${totalWorkCommentInserted} 新增/${totalWorkCommentEnriched} 补全/${totalWorkCommentDuplicate} 重复 | ${parseFailedCount} 条解析失败 | ${scrollRounds} 轮滚动`);
   return success({
@@ -850,6 +934,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     workCommentsEnriched: totalWorkCommentEnriched,
     workCommentsDuplicate: totalWorkCommentDuplicate,
     pendingReplyFile,
+    pendingVisitFile,
     events: allEvents,
     ambiguousEvents,
     failedEvents,
@@ -865,6 +950,21 @@ async function main() {
   const pauseIdx = remaining.indexOf('--pause-after-open');
   const pauseAfterOpen = pauseIdx >= 0 ? parseInt(remaining[pauseIdx + 1], 10) || 0 : 0;
   const debugNotificationDom = remaining.includes('--debug-notification-dom');
+  const maxCountIdx = remaining.indexOf('--max-count');
+  const maxCount = maxCountIdx >= 0 ? Math.max(1, parseInt(remaining[maxCountIdx + 1], 10) || 1) : null;
+  const collectTypesIdx = remaining.indexOf('--collect-types');
+  const collectTypes = collectTypesIdx >= 0 && remaining[collectTypesIdx + 1]
+    ? remaining[collectTypesIdx + 1].split(',').map(type => type.trim()).filter(Boolean)
+    : ['like', 'comment', 'reply', 'follow'];
+  const displayOnly = remaining.includes('--display-only');
+  const explicitReplyJson = remaining.includes('--generate-reply-json');
+  const explicitVisitJson = remaining.includes('--generate-visit-json');
+  const scanPlan = {
+    maxCount,
+    collectTypes,
+    generateReplyJson: displayOnly ? false : (explicitReplyJson || (!explicitVisitJson && !displayOnly)),
+    generateVisitJson: displayOnly ? false : explicitVisitJson,
+  };
   const validTypes = ['all', 'comment', 'like'];
   if (!validTypes.includes(type)) {
     if (options.json) {
@@ -895,7 +995,7 @@ async function main() {
     // All new interaction collection flows through the notification center.
     // runCommentScan() is preserved only for reply execution positioning,
     // NOT for new event collection.
-    const notifResult = await runPhaseWithRecovery(page, run, 'notification', () => runNotificationScan(page, run, type, pauseAfterOpen, debugNotificationDom), options);
+    const notifResult = await runPhaseWithRecovery(page, run, 'notification', () => runNotificationScan(page, run, type, pauseAfterOpen, debugNotificationDom, scanPlan), options);
     if (!notifResult.ok) {
       if (options.json) {
         printJsonError('interactions:scan', notifResult.code || RESULT_CODES.BLOCKED,
@@ -920,6 +1020,8 @@ async function main() {
         failedEvents: notifData.failedEvents || [],
         ambiguousEvents: notifData.ambiguousEvents || [],
         counts,
+        pendingReplyFile: notifData.pendingReplyFile || null,
+        pendingVisitFile: notifData.pendingVisitFile || null,
       }, {
         totalScanned: run.scanned,
         inserted: notifData.inserted || 0,
@@ -931,6 +1033,7 @@ async function main() {
         profileUnresolved: notifData.profileUnresolved || 0,
         scrollRounds: notifData.scrollRounds || 0,
         source: 'notification',
+        plan: scanPlan,
       });
     }
 

@@ -6,12 +6,15 @@ import { RESULT_CODES } from '../domain/result-codes.mjs';
 import {
   RETURN_VISIT_STATUS,
   createOrUpdateReturnVisitTasksFromEvents,
+  createOrUpdateReturnVisitTasksFromItems,
   listReturnVisitPrepareTasks,
   updateReturnVisitTask,
   markReturnVisitFailure,
 } from '../services/return-visit-task-service.mjs';
 import { collectCandidateWorkFromProfile } from '../services/return-visit-work-collector.mjs';
 import { analyzeReturnVisitContext, generateReturnVisitComment } from '../services/return-visit-comment-generator.mjs';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
 function parseArgs(argv) {
   const args = {
@@ -22,6 +25,7 @@ function parseArgs(argv) {
     eventLimit: null,
     eventStatus: null,
     days: null,
+    itemsFile: '',
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -32,6 +36,7 @@ function parseArgs(argv) {
     else if (arg === '--max-items' && i + 1 < argv.length) args.maxItems = Math.max(1, parseInt(argv[++i], 10) || 1);
     else if (arg === '--event-limit' && i + 1 < argv.length) args.eventLimit = Math.max(1, parseInt(argv[++i], 10) || 1);
     else if (arg === '--event-status' && i + 1 < argv.length) args.eventStatus = String(argv[++i] || '').trim() || null;
+    else if (arg === '--items-file' && i + 1 < argv.length) args.itemsFile = String(argv[++i] || '').trim();
     else if (arg === '--days' && i + 1 < argv.length) {
       const n = parseInt(argv[++i], 10);
       args.days = Number.isFinite(n) && n > 0 ? n : null;
@@ -39,6 +44,14 @@ function parseArgs(argv) {
   }
 
   return args;
+}
+
+function loadVisitItems(itemsFile) {
+  const parsed = JSON.parse(readFileSync(resolve(itemsFile), 'utf8'));
+  if (Array.isArray(parsed?.users)) return parsed.users;
+  if (Array.isArray(parsed?.items)) return parsed.items;
+  if (Array.isArray(parsed)) return parsed;
+  throw new Error('--items-file 必须是 interactions:scan 生成的 users 数组、items 数组或用户数组');
 }
 
 function log(useJson, ...args) {
@@ -62,11 +75,25 @@ async function main() {
   const pageLoadRetryCount = Number(returnVisitConfig.pageLoadRetryCount ?? 1);
   const maxConsecutiveFailures = Number(returnVisitConfig.maxConsecutiveFailures ?? 3);
 
-  const sourceSummary = createOrUpdateReturnVisitTasksFromEvents({
-    limit: eventLimit,
-    status: eventStatus,
-    days: sourceDays,
-  });
+  let sourceSummary;
+  try {
+    if (args.itemsFile) {
+      const items = loadVisitItems(args.itemsFile);
+      sourceSummary = createOrUpdateReturnVisitTasksFromItems(items);
+    } else {
+      sourceSummary = createOrUpdateReturnVisitTasksFromEvents({
+        limit: eventLimit,
+        status: eventStatus,
+        days: sourceDays,
+      });
+    }
+  } catch (err) {
+    if (args.json) {
+      printJsonError('return-visit:prepare', RESULT_CODES.INVALID_ARGUMENTS, err.message, { recoverable: false });
+      return;
+    }
+    throw err;
+  }
 
   const tasks = listReturnVisitPrepareTasks({
     limit: maxItems,
@@ -74,7 +101,7 @@ async function main() {
     days: sourceDays,
   });
 
-  log(args.json, `[return-visit:prepare] sourced events: ${sourceSummary.totalEvents}, inserted=${sourceSummary.inserted}, enriched=${sourceSummary.enriched}, skipped=${sourceSummary.skipped}${sourceDays ? `, days=${sourceDays}` : ''}`);
+  log(args.json, `[return-visit:prepare] sourced ${args.itemsFile ? 'json users' : 'events'}: ${sourceSummary.totalEvents ?? sourceSummary.totalItems}, inserted=${sourceSummary.inserted}, enriched=${sourceSummary.enriched}, skipped=${sourceSummary.skipped}${sourceDays ? `, days=${sourceDays}` : ''}`);
   log(args.json, `[return-visit:prepare] loaded pending tasks: ${tasks.length}`);
 
   if (tasks.length === 0) {
