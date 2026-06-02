@@ -157,6 +157,9 @@ async function main() {
       pageLoadRetryCount,
       maxReferenceComments: 5,
       validateWork: (work) => {
+        if (work.likeState === 'already_liked') {
+          return { ok: false, reason: 'revisit_work_already_liked' };
+        }
         const analysis = analyzeReturnVisitContext({
           workTitle: work.workTitle,
           workText: work.workText,
