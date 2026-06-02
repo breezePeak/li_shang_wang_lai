@@ -34,7 +34,7 @@ npm run interactions:scan -- --type all --days 7 --max-count 100 --display-only
 npm run interactions:scan -- --type comment --days 7 --max-count 100 --generate-reply-json
 npm run interactions:scan -- --type all --days 7 --max-count 100 --generate-visit-json
 npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json
-npm run comments:execute-all -- --items-file data/pending-replies/pending-comments-xxx.json --execute
+npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json --execute
 npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json
 npm run return-visit:execute -- --execute
 npm test

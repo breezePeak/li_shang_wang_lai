@@ -6,7 +6,7 @@
 
 | 分类 | 命令 |
 |---|---|
-| 主流程 | `auth`、`db:init`、`interactions:scan`、`comments:prepare`、`comments:execute-all`、`return-visit:prepare`、`return-visit:execute` |
+| 主流程 | `auth`、`db:init`、`interactions:scan`、`comments:prepare`、`comments:execute`、`return-visit:prepare`、`return-visit:execute` |
 | 只读/辅助入口 | `actions:pending`、`actions:plan`、`likes:plan`、`comments:classify`、`history` |
 | 兼容入口 | `likes:reciprocate` |
 | 调试/开发入口 | `notify:inspect`、`interactions:inspect`、`debug:like-dom`、`debug:like-state`、`dev:inspect-page`、`server`、`icon:profile` |
@@ -15,7 +15,7 @@
 
 ## 安全默认值
 
-- 评论回复：`comments:execute-all` 不带 `--execute` 时只做数据门禁校验，不真实发送。
+- 评论回复：`comments:execute` 不带 `--execute` 时只做数据门禁校验，不真实发送。
 - 回访：`return-visit:execute` 不带 `--execute` 时为 dry-run，不真实点赞或评论。
 - 旧回赞：`likes:reciprocate --execute` 固定返回 `FEATURE_DISABLED`，不真实点赞。
 - 所有真实动作必须经过登录态、页面稳定、状态判断、重复判断和失败阻断。
@@ -28,7 +28,7 @@
 npm run interactions:scan -- --type comment --days 7 --max-count 100 --generate-reply-json
 # 填写 data/pending-replies/pending-comments-xxx.json 中每条要回复评论的 reply_text
 npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json
-npm run comments:execute-all -- --items-file data/pending-replies/pending-comments-xxx.json --execute
+npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json --execute
 ```
 
 回访：
@@ -160,27 +160,29 @@ JSON 中评论项示例：
 }
 ```
 
-## 6. comments:execute-all
+## 6. comments:execute
 
 ```bash
-npm run comments:execute-all -- --items-file data/pending-replies/pending-comments-xxx.json
-npm run comments:execute-all -- --items-file data/pending-replies/pending-comments-xxx.json --execute
+npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
+npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json --execute
 ```
 
-源文件：`src/cli/execute-all-comment-replies.mjs`
+源文件：`src/cli/execute-comment-replies.mjs`
 
-读取同一个待回复评论 JSON，逐条打开作品评论区、定位原评论、填写并发送回复。每条发送后必须确认成功，再更新 `work_comments.reply_status` 和 JSON 状态码。不带 `--execute` 时只做门禁校验；带 `--execute` 才真实发送回复。
+读取同一个待回复评论 JSON，逐条打开作品评论区、定位原评论、填写并发送回复。每条发送后必须确认成功，再更新 `work_comments.reply_status` 和 `interaction_events.status`，并回写 JSON 状态码。不带 `--execute` 时只做门禁校验；带 `--execute` 才真实发送回复。
+
+reply_text 为空的评论会打印日志跳过，不阻塞执行。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--items-file` | 必填 | `interactions:scan` 生成且已 prepare 的 JSON |
+| `--items-file` | 必填 | `interactions:scan` 生成并已填写 reply_text 的 JSON |
 | `--max-items` | `20` | 本轮最多处理条数 |
 | `--execute` | `false` | 真实发送回复 |
 | `--json` | `false` | JSON 输出 |
 
 安全规则：
 
-- 只处理 `work_comments.reply_status = prepared` 的评论。
+- 只处理 `reply_text` 非空的评论。
 - 执行前检查原评论、回复文本和作品 URL。
 - 发送失败、页面定位失败或状态不确定会进入 `blocked` 或 `sent_unverified`。
 

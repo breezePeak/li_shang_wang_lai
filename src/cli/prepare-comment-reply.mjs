@@ -6,10 +6,10 @@
 //
 // 输入要求：
 //   JSON 中每条 comments[] 必须包含 work_comments.id，并填写 reply_text。
-//   本命令只更新 work_comments.reply_text / reply_status，并回写 JSON 状态码。
+//   本命令只更新 work_comments.reply_text，不改变 reply_status。回写 JSON 状态码。
 
 import { runMigrations } from '../db/migrations.mjs';
-import { getWorkComment, markCommentReplyPrepared } from '../db/work-comment-repository.mjs';
+import { getWorkComment, saveReplyText } from '../db/work-comment-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 import { isAllowedTemplate, validateNaturalReply } from '../domain/reply-templates.mjs';
@@ -209,28 +209,14 @@ function prepareWorkCommentOne(item) {
     return failResult(item, RESULT_CODES.DUPLICATE_ACTION, `评论 #${item.commentId} 已回复或已发送，不能重复准备`);
   }
 
-  const reason = JSON.stringify({
-    decision: item.decision,
-    riskLevel: item.riskLevel,
-    relevance: item.relevance,
-    commentCategory: item.commentCategory,
-    replyMode: item.replyMode,
-    decisionReason: item.decisionReason || '',
-    preparedAt: new Date().toISOString(),
-    source: 'comments:prepare-json',
-  });
-  markCommentReplyPrepared(item.commentId, item.replyText.trim(), reason);
+  const reason = JSON.stringify({ preparedAt: new Date().toISOString(), source: 'comments:prepare-json' });
+  saveReplyText(item.commentId, item.replyText.trim());
 
   return {
     itemIndex: item.itemIndex,
     ok: true,
     commentId: item.commentId,
-    workId: comment.work_id,
-    modalId: comment.modal_id,
-    actorName: comment.actor_name,
-    commentText: comment.comment_text,
-    replyText: item.replyText.trim(),
-    status: 'prepared',
+    status: 'reply_text_written',
   };
 }
 
@@ -248,8 +234,6 @@ function updatePrepareJsonFile(itemsFile, parsed, results) {
     comment.prepare_status_code = result.ok ? 'PREPARE_READY' : 'PREPARE_FAILED';
     comment.prepare_error = result.ok ? '' : (result.message || result.error || result.code || 'prepare_failed');
     if (result.ok) {
-      comment.reply_status = 'prepared';
-      comment.reply_text = result.replyText || comment.reply_text || '';
       comment.execute_status_code = 'EXECUTE_WAIT_CONFIRM';
     }
   });
@@ -294,7 +278,7 @@ function main() {
       }
     }
     if (commentIds.length > 0) {
-      console.log(`  下一步: npm run comments:execute-all -- --items-file ${args.itemsFile} --execute`);
+      console.log(`  下一步: npm run comments:execute -- --items-file ${args.itemsFile} --execute`);
     }
   }
 }

@@ -42,7 +42,7 @@ describe('cli-output', () => {
 
   it('printJsonError with data field', () => {
     const logs = captureStdout(() => {
-      printJsonError('comments:execute-all', 'BLOCKED', '定位失败', { data: { eventId: 1 }, evidence: '/tmp/ev' });
+      printJsonError('comments:execute', 'BLOCKED', '定位失败', { data: { eventId: 1 }, evidence: '/tmp/ev' });
     });
 
     const parsed = JSON.parse(logs[0]);

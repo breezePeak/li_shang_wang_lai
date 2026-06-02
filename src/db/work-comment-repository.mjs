@@ -54,7 +54,7 @@ export function listPendingCommentsGroupedByWork(options = {}) {
   const db = getDb();
   const { limit = 100, days = null } = options;
   const params = [];
-  let sql = "SELECT * FROM work_comments WHERE reply_status = 'pending'";
+  let sql = "SELECT * FROM work_comments WHERE reply_status = 'pending' AND (reply_text IS NULL OR reply_text = '')";
   if (Number(days) > 0) {
     const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
     sql += ' AND last_seen_at >= ?';
@@ -91,11 +91,11 @@ export function listPreparedComments(options = {}) {
   ).all(limit);
 }
 
-export function markCommentReplyPrepared(commentId, replyText, reason) {
+export function saveReplyText(commentId, replyText) {
   const db = getDb();
   db.prepare(
-    "UPDATE work_comments SET reply_status = 'prepared', reply_text = ?, reply_reason = ?, last_seen_at = ? WHERE id = ?"
-  ).run(replyText, reason || null, new Date().toISOString(), commentId);
+    "UPDATE work_comments SET reply_text = ?, last_seen_at = ? WHERE id = ?"
+  ).run(replyText, new Date().toISOString(), commentId);
 }
 
 export function getWorkComment(commentId) {
@@ -106,9 +106,19 @@ export function getWorkComment(commentId) {
 export function markCommentReplied(commentId) {
   const db = getDb();
   const now = new Date().toISOString();
+  const row = db.prepare('SELECT * FROM work_comments WHERE id = ?').get(commentId);
+  if (!row) return false;
+
   db.prepare(
     "UPDATE work_comments SET reply_status = 'succeeded', replied_at = ?, last_seen_at = ? WHERE id = ?"
   ).run(now, now, commentId);
+
+  if (row.source_event_id) {
+    db.prepare(
+      "UPDATE interaction_events SET status = 'replied', updated_at = ? WHERE id = ?"
+    ).run(now, row.source_event_id);
+  }
+  return true;
 }
 
 export function markCommentSentUnverified(commentId, reason) {
@@ -157,7 +167,7 @@ export function listReplyTrackedCommentKeysForWork({ workId, modalId } = {}) {
     SELECT actor_name, comment_text, comment_key
     FROM work_comments
     WHERE (${clauses.join(' OR ')})
-      AND reply_status IN ('prepared','succeeded','sent_unverified')
+      AND reply_status IN ('succeeded','sent_unverified')
   `).all(...params).map(row => row.comment_key || `${row.actor_name || ''}::${String(row.comment_text || '').slice(0, 60)}`);
 }
 

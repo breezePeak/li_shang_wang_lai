@@ -82,7 +82,7 @@ export async function executePreparedReply(actionId, { execute = false, keepOpen
     };
   }
 
-  const run = createRunContext('comment-execute-all', {
+  const run = createRunContext('comment-execute', {
     debug: true,
     dryRun: false,
     execute: true,
@@ -148,7 +148,7 @@ export async function executePreparedReply(actionId, { execute = false, keepOpen
       return { ok: false, actionId: action.actionId, code: sendResult.code, message: sendResult.message, recoverable: true };
     }
 
-    await updateActionStatus(action.actionId, 'succeeded', null, JSON.stringify({ executedBy: 'comments:execute-all' }));
+    await updateActionStatus(action.actionId, 'succeeded', null, JSON.stringify({ executedBy: 'comments:execute' }));
     await updateEventStatus(action.eventId, 'succeeded');
     return {
       ok: true,

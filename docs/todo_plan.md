@@ -40,7 +40,7 @@
 
 3. comments:prepare --items-file <JSON> → PREPARE_JSON_UPDATED
 
-4. comments:execute-all --items-file <JSON> --execute
+4. comments:execute --items-file <JSON> --execute
    → EXECUTE_JSON_DONE / EXECUTE_JSON_PARTIAL
 ```
 
@@ -219,7 +219,7 @@ profile_resolution_status  status  scanned_at
 
 ---
 
-## 二、评论回复模块（`comments:prepare` / `comments:execute-all`）
+## 二、评论回复模块（`comments:prepare` / `comments:execute`）
 
 ### 2.1 评论回复内部流程
 
@@ -236,22 +236,23 @@ comments:prepare（准备阶段）
  │  ├─ 回复文本过长 / 命中模板黑名单                          → BLOCKED
  │  └─ 通过 → 查找 work_comments
  │     ├─ 不存在 → PREPARE_FAILED
- │     └─ 存在 → markCommentReplyPrepared
- │        reply_status = prepared
+ │     └─ 存在 → saveReplyText（只写 reply_text，不改 reply_status）
  └─ 回写 JSON 状态码
     ├─ 全部成功 → workflow_status_code: PREPARE_JSON_UPDATED
     └─ 部分失败 → 逐条记录 prepare_status_code
  ↓
-comments:execute-all（执行阶段）
+comments:execute（执行阶段）
  ├─ dry-run（不带 --execute）
- │  └─ 逐条校验（id / reply_status=prepared /
- │     workUrl / reply_text）→ 输出校验报告
+ │  └─ 逐条校验（id / workUrl / reply_text）→ 输出校验报告
+ │     ├─ reply_text 为空 → 日志跳过（skipped_empty_reply）
+ │     └─ 已回复 → 跳过重复执行
  │
  └─ --execute 真实执行
     启动浏览器
     ↓
-    遍历每条已 prepare 的评论（上限 --max-items 条）:
-    ├─ 校验失败 → blocked
+    遍历每条待回复评论（上限 --max-items 条）:
+    ├─ reply_text 为空 → 日志跳过
+    ├─ 已回复 (succeeded/sent_unverified) → 跳过
     │
     ├─ page.goto(workUrl) → 等待作品弹窗
     │  └─ 弹窗未出现 → markCommentBlocked
@@ -268,6 +269,7 @@ comments:execute-all（执行阶段）
     ├─ verifyReplyInWorkModal → 确认回复
     │  ├─ 确认成功 → markCommentReplied
     │  │  reply_status = succeeded
+    │  │  同时更新 interaction_events.status = replied
     │  └─ 已发送未确认 → markCommentSentUnverified
     │     reply_status = sent_unverified
     │
@@ -282,11 +284,11 @@ comments:execute-all（执行阶段）
 |---|---|---|
 | `PREPARE_WAIT_REPLY_TEXT` | JSON / 评论字段 | 等待填写 `reply_text` |
 | `PREPARE_JSON_UPDATED` | JSON `workflow_status_code` | 准备完成，JSON 已回写 |
-| `PREPARE_READY` | `works[].comments[].prepare_status_code` | 已写入 `reply_text`，`reply_status=prepared` |
+| `PREPARE_READY` | `works[].comments[].prepare_status_code` | 已写入 `reply_text`，等待执行 |
 | `PREPARE_FAILED` | `works[].comments[].prepare_status_code` | 准备失败，查看 `prepare_error` |
 | `EXECUTE_JSON_DONE` | JSON `workflow_status_code` | 全部执行成功 |
 | `EXECUTE_JSON_PARTIAL` | JSON `workflow_status_code` | 有失败或未确认 |
-| `EXECUTE_CONFIRMED` | `works[].comments[].execute_status_code` | 已确认回复成功 |
+| `EXECUTE_CONFIRMED` | `works[].comments[].execute_status_code` | 已确认回复成功，同时更新 interaction_events.status=replied |
 | `EXECUTE_SENT_UNVERIFIED` | `works[].comments[].execute_status_code` | 已发送但未确认 |
 | `EXECUTE_BLOCKED` | `works[].comments[].execute_status_code` | 定位/输入/发送失败 |
 
@@ -403,7 +405,7 @@ pending_visit → collecting_content → content_collected
 
 ```text
 采集模块 (interactions:scan)     — 通知面板唯一入口
-回评模块 (comments:prepare/execute-all) — 只消费待回评 JSON
+回评模块 (comments:prepare/execute) — 只消费待回评 JSON
 回访模块 (return-visit:prepare/execute) — 只消费待回访 JSON
 
 actions:pending 不属于主流程；第一步已拿到按作品分组的评论 JSON。
@@ -417,7 +419,7 @@ return-visit:prepare 不属于评论回复默认流程。
 只看互动:   interactions:scan --display-only
 评论回复:   interactions:scan --generate-reply-json
            → comments:prepare --items-file <JSON>
-           → comments:execute-all --items-file <JSON> --execute
+           → comments:execute --items-file <JSON> --execute
 明确回访:   interactions:scan --generate-visit-json
            → return-visit:prepare --items-file <JSON>
            → return-visit:execute --execute

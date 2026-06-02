@@ -61,9 +61,8 @@ describe('P0-1: pure --json stdout contract', () => {
     expect(parsed.data.results).toHaveLength(2);
   });
 
-  it('comments:execute-all validate-only --json stdout must parse as single JSON', () => {
-    const result = runCli('execute-all-comment-replies.mjs', [
-      '--action-id', '999',
+  it('comments:execute validate-only --json stdout must parse as single JSON', () => {
+    const result = runCli('execute-comment-replies.mjs', [
       '--json',
     ]);
     const parsed = parseStdout(result);

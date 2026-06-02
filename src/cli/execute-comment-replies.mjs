@@ -114,6 +114,9 @@ function updateExecuteJsonFile(itemsFile, parsed, results) {
       comment.reply_status = 'blocked';
       comment.execute_status_code = 'EXECUTE_BLOCKED';
       comment.execute_error = result.error || '';
+    } else if (result.status === 'skipped_empty_reply') {
+      comment.execute_status_code = 'EXECUTE_SKIPPED_EMPTY';
+      comment.execute_error = 'reply_text 为空，跳过执行';
     } else {
       comment.execute_status_code = result.ok ? 'EXECUTE_VALIDATED' : 'EXECUTE_FAILED';
       comment.execute_error = result.ok ? '' : (result.error || 'execute_failed');
@@ -136,12 +139,15 @@ function validateWorkCommentItem(item) {
   if (!row) {
     return { itemIndex: item.itemIndex, commentId: item.commentId, ok: false, error: `找不到 work_comments.id=${item.commentId}` };
   }
+
   const replyText = String(item.replyText || row.reply_text || '').trim();
   if (!replyText) {
-    return { itemIndex: item.itemIndex, commentId: item.commentId, ok: false, error: 'reply_text 为空；请先填写回复内容并执行 comments:prepare' };
+    console.error(`[comments:execute] commentId=${item.commentId} reply_text 为空，跳过执行`);
+    return { itemIndex: item.itemIndex, commentId: item.commentId, ok: false, status: 'skipped_empty_reply' };
   }
-  if (row.reply_status !== 'prepared') {
-    return { itemIndex: item.itemIndex, commentId: item.commentId, ok: false, status: row.reply_status, error: `状态 ${row.reply_status} 不可执行；请先运行 comments:prepare -- --items-file <json>` };
+
+  if (row.reply_status === 'succeeded' || row.reply_status === 'sent_unverified') {
+    return { itemIndex: item.itemIndex, commentId: item.commentId, ok: false, status: row.reply_status, error: `评论已回复（状态: ${row.reply_status}），跳过重复执行` };
   }
 
   const workUrl = item.workUrl || row.work_url || '';
@@ -169,7 +175,7 @@ async function executeWorkCommentItems(items, args) {
     return items.map(item => {
       const validated = validateWorkCommentItem(item);
       return validated.ok
-        ? { ...validated, mode: 'validate-only', next: `npm run comments:execute-all -- --items-file ${args.itemsFile} --execute` }
+        ? { ...validated, mode: 'validate-only', next: `npm run comments:execute -- --items-file ${args.itemsFile} --execute` }
         : validated;
     });
   }
@@ -284,9 +290,9 @@ async function main() {
 
   if (!args.itemsFile) {
     printJsonError(
-      'comments:execute-all',
+      'comments:execute',
       RESULT_CODES.INVALID_ARGUMENTS,
-      'comments:execute-all 只支持 --items-file <第一步JSON>',
+      'comments:execute 只支持 --items-file <第一步JSON>',
       { recoverable: false }
     );
     return;
@@ -296,25 +302,29 @@ async function main() {
   try {
     loaded = loadWorkCommentItemsFromFile(args.itemsFile, args.maxItems);
   } catch (err) {
-    printJsonError('comments:execute-all', RESULT_CODES.INVALID_ARGUMENTS, err.message, { recoverable: false });
+    printJsonError('comments:execute', RESULT_CODES.INVALID_ARGUMENTS, err.message, { recoverable: false });
     return;
   }
 
   const results = await executeWorkCommentItems(loaded.items, args);
   updateExecuteJsonFile(args.itemsFile, loaded.parsed, results);
   const succeeded = results.filter(item => item.ok).length;
-  const failed = results.length - succeeded;
+  const skipped = results.filter(item => item.status === 'skipped_empty_reply').length;
+  const failed = results.length - succeeded - skipped;
+
+  const skippedLog = skipped > 0 ? `，跳过 ${skipped}（reply_text 为空）` : '';
   if (args.json) {
-    printJsonResult('comments:execute-all', { results }, { succeeded, failed, execute: args.execute, mode: 'work_comment_json' });
+    printJsonResult('comments:execute', { results }, { succeeded, failed, skipped, execute: args.execute, mode: 'work_comment_json' });
   } else {
-    console.log(`[comments:execute-all] mode=work_comment_json 成功 ${succeeded} 条，失败 ${failed} 条，真实执行=${args.execute}`);
+    console.log(`[comments:execute] mode=work_comment_json 成功 ${succeeded} 条，失败 ${failed + skipped} 条${skippedLog}，真实执行=${args.execute}`);
     for (const item of results) {
-      console.log(`  [comment#${item.commentId || '-'}] ${item.ok ? item.status : `failed ${item.error}`}`);
+      const statusTag = item.status === 'skipped_empty_reply' ? ' [empty-reply]' : '';
+      console.log(`  [comment#${item.commentId || '-'}] ${item.ok ? item.status : `failed ${item.error}`}${statusTag}`);
     }
   }
 }
 
 main().catch(err => {
-  printJsonError('comments:execute-all', RESULT_CODES.UNKNOWN_ERROR, err.message, { recoverable: false });
+  printJsonError('comments:execute', RESULT_CODES.UNKNOWN_ERROR, err.message, { recoverable: false });
   process.exit(1);
 });

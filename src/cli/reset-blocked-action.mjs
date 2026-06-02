@@ -39,7 +39,7 @@ function main() {
     actionId: args.actionId,
     eventId: action.eventId,
     status: 'prepared',
-    next: `npm run comments:execute-all -- --action-id ${args.actionId} --execute`,
+    next: `npm run comments:execute -- --items-file <待回复JSON> --execute`,
   }, { reset: 1 });
 }
 
