@@ -170,6 +170,30 @@ export function hasCommentsForWork({ workId, modalId } = {}) {
   return !!row;
 }
 
+export function findCollectedCommentForWork({ workId, modalId, actorName, commentText } = {}) {
+  const db = getDb();
+  const workClauses = [];
+  const params = [];
+  if (workId) {
+    workClauses.push('work_id = ?');
+    params.push(workId);
+  }
+  if (modalId) {
+    workClauses.push('modal_id = ?');
+    params.push(modalId);
+  }
+  if (workClauses.length === 0 || !actorName || !commentText) return null;
+
+  return db.prepare(`
+    SELECT id, work_id, modal_id, actor_name, comment_text, comment_key, reply_status
+    FROM work_comments
+    WHERE (${workClauses.join(' OR ')})
+      AND actor_name = ?
+      AND comment_text = ?
+    LIMIT 1
+  `).get(...params, actorName, commentText);
+}
+
 export function listCommentsForDedupe(options = {}) {
   const db = getDb();
   const { days = null, limit = 5000 } = options;

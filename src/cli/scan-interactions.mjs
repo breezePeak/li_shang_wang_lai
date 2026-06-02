@@ -10,8 +10,8 @@ import { commentFingerprint, commentInitialStatus, normalizeTimeText, notificati
 import { normalizeCommentEvent, buildRawPayloadJson } from '../domain/comment-event-normalization.mjs';
 import { classifyNotificationAction } from '../domain/notification-action-router.mjs';
 import { insertEvent, getEventCounts, findUnstableEvent, promoteUnstableEvent, enrichEvent, upsertNotificationEvent, listEventsForDedupe } from '../db/interaction-repository.mjs';
-import { upsertWorkContext, listWorksForDedupe } from '../db/work-repository.mjs';
-import { upsertWorkComment, listPendingCommentsGroupedByWork, listReplyTrackedCommentKeysForWork, listCommentsForDedupe } from '../db/work-comment-repository.mjs';
+import { upsertWorkContext, listWorksForDedupe, findWorkByThumbnailKey, findWorkByWorkId } from '../db/work-repository.mjs';
+import { upsertWorkComment, listPendingCommentsGroupedByWork, listReplyTrackedCommentKeysForWork, listCommentsForDedupe, findCollectedCommentForWork } from '../db/work-comment-repository.mjs';
 import logger from '../utils/logger.mjs';
 import { runMigrations } from '../db/migrations.mjs';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
@@ -188,6 +188,7 @@ function buildDedupeContext(days) {
   const notificationKeys = new Set();
   const workKeys = new Set();
   const commentKeys = new Set();
+  const commentWorkHints = new Map();
 
   for (const row of listEventsForDedupe({ days })) {
     if (row.platform_event_id) notificationKeys.add(row.platform_event_id);
@@ -214,16 +215,66 @@ function buildDedupeContext(days) {
     if (row.work_id) workKeys.add(`work_id:${row.work_id}`);
     if (row.modal_id) workKeys.add(`modal_id:${row.modal_id}`);
     if (row.comment_key) commentKeys.add(`${row.work_id || row.modal_id || '__unknown__'}:${row.comment_key}`);
+    if (row.actor_name && row.comment_text && (row.work_id || row.modal_id)) {
+      commentWorkHints.set(
+        `${String(row.actor_name).trim()}||${String(row.comment_text).trim()}`,
+        { workId: row.work_id || null, modalId: row.modal_id || null, source: 'comment_hint' }
+      );
+    }
   }
 
-  return { notificationKeys, workKeys, commentKeys };
+  return { notificationKeys, workKeys, commentKeys, commentWorkHints };
 }
 
-function isWorkAlreadyCollected(dedupeContext, n) {
-  for (const key of getWorkDedupeKeys(n)) {
-    if (dedupeContext.workKeys.has(key)) return { found: true, key };
+function resolveKnownWorkFromNotification(dedupeContext, n) {
+  if (n.workId) {
+    const exact = findWorkByWorkId(n.workId);
+    if (exact) return { work: exact, matchedBy: `work_id:${n.workId}` };
+    const numeric = n.workId.replace(/^(video|note|modal)-/, '');
+    if (numeric && numeric !== n.workId) {
+      const normalized = findWorkByWorkId(numeric);
+      if (normalized) return { work: normalized, matchedBy: `work_id:${numeric}` };
+    }
   }
-  return { found: false, key: getWorkDedupeKeys(n)[0] || '' };
+  if (n.thumbnailKey) {
+    const byThumb = findWorkByThumbnailKey(n.thumbnailKey);
+    if (byThumb) return { work: byThumb, matchedBy: `thumbnail_key:${n.thumbnailKey}` };
+  }
+  const actorName = String(n.username || '').trim();
+  const commentText = String(n.content || '').trim();
+  const hinted = dedupeContext.commentWorkHints?.get(`${actorName}||${commentText}`);
+  if (hinted) {
+    return {
+      work: { work_id: hinted.workId || null, modal_id: hinted.modalId || null },
+      matchedBy: `comment_hint:${actorName}:${commentText.slice(0, 20)}`,
+    };
+  }
+  return null;
+}
+
+function checkCollectedCommentForNotification(dedupeContext, n) {
+  const knownWork = resolveKnownWorkFromNotification(dedupeContext, n);
+  if (!knownWork) {
+    return { shouldSkip: false, reason: 'work_unresolved', detail: getWorkDedupeKeys(n)[0] || '' };
+  }
+
+  const actorName = String(n.username || '').trim();
+  const commentText = String(n.content || '').trim();
+  if (!actorName || !commentText) {
+    return { shouldSkip: false, reason: 'missing_actor_or_comment', detail: knownWork.matchedBy };
+  }
+
+  const existing = findCollectedCommentForWork({
+    workId: knownWork.work.work_id || null,
+    modalId: knownWork.work.modal_id || null,
+    actorName,
+    commentText,
+  });
+  if (existing) {
+    return { shouldSkip: true, reason: 'same_actor_same_comment', detail: `${knownWork.matchedBy} comment_id=${existing.id}` };
+  }
+
+  return { shouldSkip: false, reason: 'same_work_new_comment', detail: knownWork.matchedBy };
 }
 
 function addWorkKeys(dedupeContext, identity) {
@@ -238,6 +289,31 @@ function addWorkKeys(dedupeContext, identity) {
   if (identity.modalId) dedupeContext.workKeys.add(`modal_id:${identity.modalId}`);
   if (identity.workUrl) dedupeContext.workKeys.add(`work_url:${identity.workUrl}`);
   if (identity.thumbnailKey) dedupeContext.workKeys.add(`thumbnail_key:${identity.thumbnailKey}`);
+}
+
+function addCommentWorkHint(dedupeContext, identity, comment) {
+  const actorName = String(comment?.actorName || '').trim();
+  const commentText = String(comment?.commentText || '').trim();
+  const workId = identity?.workId || null;
+  const modalId = identity?.modalId || null;
+  if (!actorName || !commentText || (!workId && !modalId)) return;
+  dedupeContext.commentWorkHints.set(`${actorName}||${commentText}`, {
+    workId,
+    modalId,
+    source: 'runtime_collect',
+  });
+}
+
+function logWorkCollectionDecision(notificationIndex, n, decision) {
+  const actor = compactLogValue(n.username, 40);
+  const comment = compactLogValue(n.content, 40);
+  if (decision.shouldSkip) {
+    console.error(`[scan]   - 跳过作品评论 index=${notificationIndex} actor=${actor} comment=${comment} reason=${decision.reason} ${decision.detail}`);
+    return;
+  }
+  if (decision.reason === 'same_work_new_comment') {
+    console.error(`[scan]   > 同作品新评论 index=${notificationIndex} actor=${actor} comment=${comment} ${decision.detail}`);
+  }
 }
 
 async function restoreNotificationPanel(page, panelTools, panelBox) {
@@ -329,10 +405,12 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
   let enriched = 0;
 
   for (const c of comments) {
+    addCommentWorkHint(dedupeContext, identity, c);
     const commentKey = buildCommentKey({ workId: identity.workId, modalId: identity.modalId, comment: c });
     const dedupeKey = `${identity.workId || identity.modalId || '__unknown__'}:${commentKey}`;
     if (dedupeContext.commentKeys.has(dedupeKey)) {
       duplicate++;
+      console.error(`[scan]   - 评论重复 actor=${compactLogValue(c.actorName, 30)} comment=${compactLogValue(c.commentText, 40)} reason=in_memory_comment_key`);
       continue;
     }
 
@@ -359,7 +437,10 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
     dedupeContext.commentKeys.add(dedupeKey);
     if (result.action === 'inserted') inserted++;
     else if (result.action === 'enriched') enriched++;
-    else duplicate++;
+    else {
+      duplicate++;
+      console.error(`[scan]   - 评论重复 actor=${compactLogValue(c.actorName, 30)} comment=${compactLogValue(c.commentText, 40)} reason=db_upsert_duplicate`);
+    }
   }
 
   return {
@@ -822,11 +903,12 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
         }
 
         if (route.notificationAction === 'comment_on_my_work') {
-          const workCheck = isWorkAlreadyCollected(dedupeContext, n);
-          if (workCheck.found) {
-            logNotificationSkip(notificationIndex, n, '该作品评论已采集过', workCheck.key);
+          const workCheck = checkCollectedCommentForNotification(dedupeContext, n);
+          if (workCheck.shouldSkip) {
+            logWorkCollectionDecision(notificationIndex, n, workCheck);
             continue;
           }
+          logWorkCollectionDecision(notificationIndex, n, workCheck);
 
           const clicked = await clickNotificationThumbnail(page, n);
           if (!clicked) {
