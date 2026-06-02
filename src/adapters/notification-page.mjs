@@ -812,7 +812,13 @@ export async function clickNotificationThumbnail(page, eventCtx) {
   const ctx = eventCtx || {};
   const shortName = (ctx.username || '').slice(0, 20);
 
-  const result = await page.evaluate(({ name, action, timeText, notificationItemKey, workUrl, workId, thumbnailKey }) => {
+  const result = await page.evaluate(({ name, action, timeText, notificationItemKey, workUrl, workId, thumbnailKey, content, rawText, actorProfileKey }) => {
+    const ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '回复了你的评论'];
+
+    function normalizeText(value) {
+      return String(value || '').replace(/\s+/g, '');
+    }
+
     function parseRelationLine(line) {
       if (!line) return null;
       if (line === '朋友') return 'friend';
@@ -864,6 +870,62 @@ export async function clickNotificationThumbnail(page, eventCtx) {
       return null;
     }
 
+    function findNotificationItemElements(panel) {
+      const panelRect = panel.getBoundingClientRect();
+      const selectorItems = panel.querySelectorAll('li, [class*="item"], [class*="row"], [class*="entry"]');
+      const direct = [];
+      for (const el of selectorItems) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 30 || rect.height < 5) continue;
+        const text = (el.innerText || '').trim();
+        if (!text) continue;
+        for (const pat of ACTION_PATTERNS) {
+          if (text.includes(pat)) { direct.push(el); break; }
+        }
+      }
+      if (direct.length > 0) return direct;
+
+      const singleAction = [];
+      for (const el of panel.querySelectorAll('*')) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 30 || rect.height < 20) continue;
+        if (rect.height > panelRect.height * 0.4) continue;
+        if (rect.top < panelRect.top - 5 || rect.bottom > panelRect.bottom + 50) continue;
+        const text = (el.innerText || '').trim();
+        if (text.length < 5) continue;
+        let actionCount = 0;
+        for (const pat of ACTION_PATTERNS) {
+          let idx = text.indexOf(pat);
+          let safety = 0;
+          while (idx !== -1 && safety < 10) { actionCount++; idx = text.indexOf(pat, idx + 1); safety++; }
+        }
+        if (actionCount === 1) {
+          const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+          if (lines.length >= 2) singleAction.push({ el, lines, rect });
+        }
+      }
+      if (singleAction.length === 0) return [];
+
+      const groups = [];
+      for (const candidate of singleAction) {
+        let addedToGroup = false;
+        for (const group of groups) {
+          const memberRect = group[0].rect;
+          const candRect = candidate.rect;
+          const overlapTop = Math.max(memberRect.top, candRect.top);
+          const overlapBottom = Math.min(memberRect.bottom, candRect.bottom);
+          const overlapHeight = overlapBottom - overlapTop;
+          if (overlapHeight > Math.min(memberRect.height, candRect.height) * 0.5) {
+            group.push(candidate);
+            addedToGroup = true;
+            break;
+          }
+        }
+        if (!addedToGroup) groups.push([candidate]);
+      }
+      return groups.map(group => { group.sort((a, b) => b.lines.length - a.lines.length); return group[0].el; });
+    }
+
     function getItemData(itemEl) {
       const text = (itemEl.innerText || '').trim();
       const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
@@ -890,6 +952,7 @@ export async function clickNotificationThumbnail(page, eventCtx) {
         const rect = img.getBoundingClientRect();
         if (!src || rect.width < 20 || rect.height < 20) continue;
         if (src.includes('aweme-avatar')) continue;
+        if ((img.closest('a[href*="/user/"]'))) continue;
         thumbnailSrc = src;
         break;
       }
@@ -898,27 +961,59 @@ export async function clickNotificationThumbnail(page, eventCtx) {
 
     function scoreItem(itemEl) {
       const text = (itemEl.innerText || '').trim();
-      if (!text || (name && !text.includes(name))) return -1;
+      if (!text) return -1;
+      const normalizedText = normalizeText(text);
+      const normalizedRawText = normalizeText(rawText);
+      const normalizedContent = normalizeText(content);
       let score = 0;
       if (name && text.includes(name)) score += 3;
       if (action && text.includes(action)) score += 3;
       if (timeText && text.includes(timeText)) score += 1;
+      if (normalizedContent && normalizedText.includes(normalizedContent)) score += 5;
+      if (normalizedRawText && normalizedText.includes(normalizedRawText.slice(0, 80))) score += 4;
+      if (actorProfileKey && itemEl.querySelector(`a[href*="${actorProfileKey}"]`)) score += 5;
+      if (thumbnailKey) {
+        for (const img of itemEl.querySelectorAll('img')) {
+          const src = img.getAttribute('src') || '';
+          if (src && normalizeText(src).includes(normalizeText(thumbnailKey).slice(0, 120))) {
+            score += 5;
+            break;
+          }
+        }
+      }
+      if (workId && text.includes(workId.replace(/^(video|note|modal)-/, ''))) score += 3;
       if (notificationItemKey) {
         const key = generateItemKey(getItemData(itemEl));
         if (key === notificationItemKey) score += 8;
       }
+      if (name && !text.includes(name) && !actorProfileKey && !normalizedContent) return -1;
       return score;
+    }
+
+    function isLikelyAvatarImage(img) {
+      const src = img.getAttribute('src') || '';
+      const rect = img.getBoundingClientRect();
+      if (!src || rect.width < 20 || rect.height < 20) return true;
+      if (src.includes('aweme-avatar')) return true;
+      if (img.closest('a[href*="/user/"]')) return true;
+      if ((img.getAttribute('alt') || '').includes('头像')) return true;
+      return false;
     }
 
     const panel = findNotificationPanel();
     if (!panel) return { clicked: false, reason: 'panel-not-found' };
 
-    const items = Array.from(panel.querySelectorAll('li, [class*="item"], [class*="row"], [class*="entry"], a[href*="/video/"], a[href*="/note/"]'))
+    const candidateItems = findNotificationItemElements(panel);
+    const items = (candidateItems.length > 0 ? candidateItems : Array.from(panel.querySelectorAll('li, [class*="item"], [class*="row"], [class*="entry"], a[href*="/video/"], a[href*="/note/"]')))
       .map(el => {
         let item = el;
         for (let i = 0; i < 5 && item && item !== panel; i++) {
           const text = (item.innerText || '').trim();
-          if (text.includes(name || '') && (!action || text.includes(action))) break;
+          const normalizedText = normalizeText(text);
+          const hasIdentity = (name && text.includes(name)) ||
+            (actorProfileKey && item.querySelector(`a[href*="${actorProfileKey}"]`)) ||
+            (content && normalizedText.includes(normalizeText(content)));
+          if (hasIdentity && (!action || text.includes(action))) break;
           item = item.parentElement;
         }
         return item || el;
@@ -940,11 +1035,11 @@ export async function clickNotificationThumbnail(page, eventCtx) {
       }
 
       const imgs = Array.from(el.querySelectorAll('img'));
-      for (const img of imgs) {
+      const thumbnailImages = imgs
+        .filter(img => !isLikelyAvatarImage(img))
+        .sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right);
+      for (const img of thumbnailImages) {
         const src = img.getAttribute('src') || '';
-        const rect = img.getBoundingClientRect();
-        if (!src || rect.width < 20 || rect.height < 20) continue;
-        if (src.includes('aweme-avatar')) continue;
         const target = img.closest('a,[role="button"],button') || img;
         target.click();
         return { clicked: true, method: 'thumbnail-image', text: (el.innerText || '').trim().slice(0, 80), src: src.slice(0, 120) };
@@ -960,6 +1055,9 @@ export async function clickNotificationThumbnail(page, eventCtx) {
     workUrl: ctx.workUrl || '',
     workId: ctx.workId || '',
     thumbnailKey: ctx.thumbnailKey || '',
+    content: ctx.content || '',
+    rawText: ctx.rawText || '',
+    actorProfileKey: ctx.actorProfileKey || '',
   });
 
   if (result.clicked) {

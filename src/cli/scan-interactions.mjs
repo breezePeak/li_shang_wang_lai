@@ -629,11 +629,6 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
         const route = classifyNotificationAction(n.rawText || n.action || '');
         const notificationDedupeKey = getNotificationDedupeKey(n);
 
-        if (dedupeContext.notificationKeys.has(notificationDedupeKey)) {
-          logNotificationSkip(notificationIndex, n, '数据库中已存在通知记录', notificationDedupeKey);
-          continue;
-        }
-
         if (!wantComments && n.eventType === 'comment') {
           logNotificationSkip(notificationIndex, n, '--type 过滤评论通知', notificationDedupeKey);
           continue;
@@ -641,6 +636,14 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
         if (!wantLikes && n.eventType === 'like') {
           logNotificationSkip(notificationIndex, n, '--type 过滤点赞通知', notificationDedupeKey);
           continue;
+        }
+
+        if (dedupeContext.notificationKeys.has(notificationDedupeKey)) {
+          if (route.notificationAction !== 'comment_on_my_work') {
+            logNotificationSkip(notificationIndex, n, '数据库中已存在通知记录', notificationDedupeKey);
+            continue;
+          }
+          console.error(`[scan]   = ${n.username} [${n.relation}] 通知已存在，检查是否需要补采作品评论`);
         }
 
         const isRelevantEvent = n.eventType === 'comment' || n.eventType === 'like';
