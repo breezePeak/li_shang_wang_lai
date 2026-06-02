@@ -8,7 +8,10 @@ import {
 import { parseDouyinTimeText } from '../adapters/work-modal-page.mjs';
 import { commentFingerprint, commentInitialStatus, normalizeTimeText, notificationFingerprint } from '../domain/event-fingerprint.mjs';
 import { normalizeCommentEvent, buildRawPayloadJson } from '../domain/comment-event-normalization.mjs';
-import { insertEvent, getEventCounts, findUnstableEvent, promoteUnstableEvent, enrichEvent, upsertNotificationEvent } from '../db/interaction-repository.mjs';
+import { classifyNotificationAction } from '../domain/notification-action-router.mjs';
+import { insertEvent, getEventCounts, findUnstableEvent, promoteUnstableEvent, enrichEvent, upsertNotificationEvent, listEventsForDedupe } from '../db/interaction-repository.mjs';
+import { upsertWorkContext, listWorksForDedupe } from '../db/work-repository.mjs';
+import { upsertWorkComment, listPendingCommentsGroupedByWork, listReplyTrackedCommentKeysForWork, listCommentsForDedupe } from '../db/work-comment-repository.mjs';
 import logger from '../utils/logger.mjs';
 import { runMigrations } from '../db/migrations.mjs';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
@@ -16,6 +19,8 @@ import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { promptRecoveryAction } from '../browser/interactive-control.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
+import { writeJSON } from '../utils/filesystem.mjs';
+import { createHash } from 'crypto';
 import { resolve } from 'path';
 
 async function runCommentScan(page, run) {
@@ -116,6 +121,284 @@ async function runCommentScan(page, run) {
   return success({ commentCount: newCount, duplicateCount, parseFailedCount, step: 'comment-scan' });
 }
 
+function stableHash(value) {
+  return createHash('sha256').update(String(value || '')).digest('hex').slice(0, 16);
+}
+
+function compactLogValue(value, max = 120) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function buildNotificationFallbackKey(n) {
+  const actor = n.actorProfileKey || n.actorProfileUrl || n.username || '';
+  const work = n.workId || n.workUrl || n.thumbnailKey || '';
+  return [
+    n.eventType || 'unknown',
+    actor,
+    work,
+    n.eventType === 'comment' ? (n.content || '') : '',
+    n.timeText || '',
+  ].map(v => String(v || '').trim()).join('||');
+}
+
+function getNotificationDedupeKey(n) {
+  return n.platformEventId ||
+    n.notificationItemKey ||
+    buildNotificationFallbackKey(n);
+}
+
+function getWorkDedupeKeys(n) {
+  const keys = [];
+  if (n.workId) keys.push(`work_id:${n.workId}`);
+  if (n.workUrl) keys.push(`work_url:${n.workUrl}`);
+  if (n.thumbnailKey) keys.push(`thumbnail_key:${n.thumbnailKey}`);
+  return keys;
+}
+
+function getWorkIdentity(n, modalContext = {}) {
+  return {
+    workId: modalContext.workId || n.workId || null,
+    modalId: modalContext.modalId || null,
+    workUrl: modalContext.workUrl || n.workUrl || null,
+    thumbnailKey: modalContext.thumbnailKey || n.thumbnailKey || null,
+  };
+}
+
+function logNotificationSkip(index, n, reason, dedupeKey = '') {
+  console.error(
+    `[通知跳过] index=${index} eventType=${n.eventType || 'unknown'} actorProfileKey=${compactLogValue(n.actorProfileKey)} ` +
+    `actorName=${compactLogValue(n.username)} targetWorkId=${compactLogValue(n.workId)} thumbnailKey=${compactLogValue(n.thumbnailKey)} ` +
+    `eventTimeText=${compactLogValue(n.timeText)} dedupeKey=${compactLogValue(dedupeKey)} reason=${reason} rawText=${compactLogValue(n.rawText, 200)}`
+  );
+}
+
+function buildCommentKey({ workId, modalId, comment }) {
+  if (comment.commentKey) return comment.commentKey;
+  const actor = comment.actorProfileKey || comment.actorProfileUrl || comment.actorName || '';
+  const raw = [
+    workId || modalId || '',
+    actor,
+    comment.commentText || '',
+    comment.eventTimeText || '',
+  ].map(v => String(v || '').trim()).join('||');
+  return stableHash(raw);
+}
+
+function buildDedupeContext(days) {
+  const notificationKeys = new Set();
+  const workKeys = new Set();
+  const commentKeys = new Set();
+
+  for (const row of listEventsForDedupe({ days })) {
+    if (row.platform_event_id) notificationKeys.add(row.platform_event_id);
+    if (row.notification_item_key) notificationKeys.add(row.notification_item_key);
+    if (row.fingerprint) notificationKeys.add(row.fingerprint);
+    const fallback = [
+      row.event_type || 'unknown',
+      row.actor_profile_key || row.actor_profile_url || row.actor_name || '',
+      row.target_work_id || row.target_work_url || '',
+      row.comment_text || '',
+      row.event_time_text || '',
+    ].map(v => String(v || '').trim()).join('||');
+    notificationKeys.add(fallback);
+  }
+
+  for (const row of listWorksForDedupe({ days })) {
+    if (row.work_id) workKeys.add(`work_id:${row.work_id}`);
+    if (row.modal_id) workKeys.add(`modal_id:${row.modal_id}`);
+    if (row.work_url) workKeys.add(`work_url:${row.work_url}`);
+    if (row.thumbnail_key) workKeys.add(`thumbnail_key:${row.thumbnail_key}`);
+  }
+
+  for (const row of listCommentsForDedupe({ days })) {
+    if (row.work_id) workKeys.add(`work_id:${row.work_id}`);
+    if (row.modal_id) workKeys.add(`modal_id:${row.modal_id}`);
+    if (row.comment_key) commentKeys.add(`${row.work_id || row.modal_id || '__unknown__'}:${row.comment_key}`);
+  }
+
+  return { notificationKeys, workKeys, commentKeys };
+}
+
+function isWorkAlreadyCollected(dedupeContext, n) {
+  for (const key of getWorkDedupeKeys(n)) {
+    if (dedupeContext.workKeys.has(key)) return { found: true, key };
+  }
+  return { found: false, key: getWorkDedupeKeys(n)[0] || '' };
+}
+
+function addWorkKeys(dedupeContext, identity) {
+  if (identity.workId) dedupeContext.workKeys.add(`work_id:${identity.workId}`);
+  if (identity.modalId) dedupeContext.workKeys.add(`modal_id:${identity.modalId}`);
+  if (identity.workUrl) dedupeContext.workKeys.add(`work_url:${identity.workUrl}`);
+  if (identity.thumbnailKey) dedupeContext.workKeys.add(`thumbnail_key:${identity.thumbnailKey}`);
+}
+
+async function restoreNotificationPanel(page, panelTools, panelBox) {
+  try {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(800);
+  } catch {}
+
+  try {
+    await panelTools.ensureNotificationPageReady(page);
+    const opened = await panelTools.openNotificationPanel(page);
+    if (!opened) return null;
+    const state = await panelTools.waitForNotificationPanelStable(page);
+    if (!state.stable || state.empty) return null;
+    await panelTools.moveMouseIntoPanel(page, state.panelBox || panelBox);
+    return state.panelBox || panelBox;
+  } catch (err) {
+    console.error(`[scan] 通知面板恢复失败: ${err.message}`);
+    return null;
+  }
+}
+
+async function collectCommentsFromNotificationWork(page, n, { sourceEventId, notificationDays, dedupeContext }) {
+  const {
+    waitForWorkModal,
+    extractWorkModalContext,
+    findUnrepliedCommentsInModal,
+  } = await import('../adapters/work-modal-page.mjs');
+
+  const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
+  if (!modalReady.ok) {
+    return { ok: false, reason: modalReady.message || modalReady.code || 'work-modal-not-ready' };
+  }
+
+  const contextResult = await extractWorkModalContext(page);
+  const context = contextResult.ok ? (contextResult.data || {}) : {};
+  const identity = getWorkIdentity(n, context);
+  if (!identity.workId && identity.modalId) identity.workId = identity.modalId;
+
+  const workResult = upsertWorkContext({
+    workId: identity.workId,
+    modalId: identity.modalId,
+    workUrl: identity.workUrl,
+    workTitle: context.workTitle || n.workTitle || null,
+    workType: context.workType || null,
+    thumbnailKey: n.thumbnailKey || null,
+    thumbnailSrc: context.thumbnailSrc || n.thumbnailSrc || null,
+    authorName: context.authorName || null,
+    authorProfileUrl: context.authorProfileUrl || null,
+    authorProfileKey: context.authorProfileKey || null,
+    publishedAt: context.publishedAtText || null,
+    rawContextJson: JSON.stringify({
+      source: 'notification-comment',
+      notificationItemKey: n.notificationItemKey || null,
+      rawText: n.rawText || null,
+      modalContext: context,
+    }),
+  });
+
+  addWorkKeys(dedupeContext, identity);
+
+  const alreadyRepliedKeys = new Set(listReplyTrackedCommentKeysForWork({
+    workId: identity.workId,
+    modalId: identity.modalId,
+  }));
+
+  const commentsResult = await findUnrepliedCommentsInModal(page, {
+    maxScrolls: 50,
+    alreadyRepliedKeys,
+    selfNickname: '',
+    maxAgeDays: notificationDays,
+    oldCommentStopCount: 3,
+  });
+  if (!commentsResult.ok) {
+    return { ok: false, reason: commentsResult.message || commentsResult.code || 'comment-collect-failed', workResult };
+  }
+
+  const comments = commentsResult.data?.unreplied || [];
+  let inserted = 0;
+  let duplicate = 0;
+  let enriched = 0;
+
+  for (const c of comments) {
+    const commentKey = buildCommentKey({ workId: identity.workId, modalId: identity.modalId, comment: c });
+    const dedupeKey = `${identity.workId || identity.modalId || '__unknown__'}:${commentKey}`;
+    if (dedupeContext.commentKeys.has(dedupeKey)) {
+      duplicate++;
+      continue;
+    }
+
+    const result = upsertWorkComment({
+      workId: identity.workId,
+      workUrl: identity.workUrl,
+      modalId: identity.modalId,
+      actorName: c.actorName || null,
+      actorProfileUrl: c.actorProfileUrl || null,
+      actorProfileKey: c.actorProfileKey || null,
+      commentText: c.commentText || '',
+      eventTimeText: c.eventTimeText || null,
+      commentKey,
+      sourceEventId,
+      sourceNotificationKey: n.notificationItemKey || null,
+      rawCommentJson: JSON.stringify({
+        source: 'notification-work-modal',
+        notificationItemKey: n.notificationItemKey || null,
+        rawNotificationText: n.rawText || null,
+        comment: c,
+      }),
+    });
+
+    dedupeContext.commentKeys.add(dedupeKey);
+    if (result.action === 'inserted') inserted++;
+    else if (result.action === 'enriched') enriched++;
+    else duplicate++;
+  }
+
+  return {
+    ok: true,
+    workResult,
+    total: commentsResult.data?.total || 0,
+    inWindow: commentsResult.data?.comments?.length || 0,
+    pending: comments.length,
+    inserted,
+    enriched,
+    duplicate,
+    workId: identity.workId,
+    modalId: identity.modalId,
+  };
+}
+
+function writePendingReplyJson() {
+  const groups = listPendingCommentsGroupedByWork({ limit: 500 });
+  const works = [];
+  let totalComments = 0;
+
+  for (const [workKey, rows] of groups.entries()) {
+    totalComments += rows.length;
+    works.push({
+      workKey,
+      comments: rows.map(row => ({
+        id: row.id,
+        work_id: row.work_id,
+        work_url: row.work_url,
+        modal_id: row.modal_id,
+        actor_name: row.actor_name,
+        actor_profile_url: row.actor_profile_url,
+        actor_profile_key: row.actor_profile_key,
+        comment_text: row.comment_text,
+        event_time_text: row.event_time_text,
+        comment_key: row.comment_key,
+        source_event_id: row.source_event_id,
+        source_notification_key: row.source_notification_key,
+        reply_status: row.reply_status,
+      })),
+    });
+  }
+
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const filePath = resolve('data', 'pending-replies', `pending-comments-${ts}.json`);
+  writeJSON(filePath, {
+    generatedAt: new Date().toISOString(),
+    source: 'interactions:scan',
+    totalComments,
+    works,
+  });
+  return { filePath, totalComments, workCount: works.length };
+}
+
 async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNotificationDom = false) {
   console.error('[scan] === 通知面板扫描（增量逐批采集） ===');
 
@@ -123,7 +406,15 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     ensureNotificationPageReady, openNotificationPanel, closeNotificationPanel,
     extractVisibleNotifications, scrollPanelDown,
     waitForNotificationPanelStable, moveMouseIntoPanel,
+    clickNotificationThumbnail,
   } = await import('../adapters/notification-page.mjs');
+
+  const panelTools = {
+    ensureNotificationPageReady,
+    openNotificationPanel,
+    waitForNotificationPanelStable,
+    moveMouseIntoPanel,
+  };
 
   try {
     await ensureNotificationPageReady(page);
@@ -144,7 +435,9 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     );
   }
 
-  const { stable, empty, panelBox } = await waitForNotificationPanelStable(page);
+  const panelState = await waitForNotificationPanelStable(page);
+  const { stable, empty } = panelState;
+  let panelBox = panelState.panelBox;
   if (!stable || empty) {
     if (!stable) {
       return blocking(
@@ -174,11 +467,20 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   const wantComments = (type === 'all' || type === 'comment');
   const wantLikes = (type === 'all' || type === 'like');
   const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
+  const dedupeContext = buildDedupeContext(notificationDays);
+  console.error(
+    `[scan] 去重上下文: notifications=${dedupeContext.notificationKeys.size} ` +
+    `works=${dedupeContext.workKeys.size} comments=${dedupeContext.commentKeys.size}` +
+    (notificationDays ? ` days=${notificationDays}` : '')
+  );
 
   let totalInserted = 0;
   let totalDuplicateCount = 0;
   let totalAmbiguousCount = 0;
   let totalEnrichedCount = 0;
+  let totalWorkCommentInserted = 0;
+  let totalWorkCommentDuplicate = 0;
+  let totalWorkCommentEnriched = 0;
   let totalProfileResolved = 0;
   let totalProfileUnresolved = 0;
   let parseFailedCount = 0;
@@ -233,14 +535,32 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     let newInBatch = 0;
     let processedInBatch = 0;
 
-    for (const n of notifications) {
+    for (const [itemIndex, n] of notifications.entries()) {
+      const notificationIndex = run.scanned + itemIndex + 1;
       const itemKey = n.notificationItemKey || (n.username + '||' + n.action + '||' + (n.content || ''));
-      if (seenItemKeys.has(itemKey)) continue;
+      if (seenItemKeys.has(itemKey)) {
+        logNotificationSkip(notificationIndex, n, '本次扫描内重复通知', itemKey);
+        continue;
+      }
       seenItemKeys.add(itemKey);
 
       try {
-        if (!wantComments && n.eventType === 'comment') continue;
-        if (!wantLikes && n.eventType === 'like') continue;
+        const route = classifyNotificationAction(n.rawText || n.action || '');
+        const notificationDedupeKey = getNotificationDedupeKey(n);
+
+        if (dedupeContext.notificationKeys.has(notificationDedupeKey)) {
+          logNotificationSkip(notificationIndex, n, '数据库中已存在通知记录', notificationDedupeKey);
+          continue;
+        }
+
+        if (!wantComments && n.eventType === 'comment') {
+          logNotificationSkip(notificationIndex, n, '--type 过滤评论通知', notificationDedupeKey);
+          continue;
+        }
+        if (!wantLikes && n.eventType === 'like') {
+          logNotificationSkip(notificationIndex, n, '--type 过滤点赞通知', notificationDedupeKey);
+          continue;
+        }
 
         const isRelevantEvent = n.eventType === 'comment' || n.eventType === 'like';
         const parsedNotificationTime = notificationDays && isRelevantEvent ? parseDouyinTimeText(n.timeText || '') : null;
@@ -253,6 +573,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
               stopDueToOldRelevant = true;
               break;
             }
+            logNotificationSkip(notificationIndex, n, `超过 ${notificationDays} 天时间窗口`, notificationDedupeKey);
             continue;
           }
           consecutiveOldRelevantCount = 0;
@@ -275,6 +596,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
           });
           if (!normResult.valid) {
             batchDuplicate++;
+            logNotificationSkip(notificationIndex, n, `评论通知规范化失败: ${(normResult.warnings || []).join(',') || 'invalid'}`, notificationDedupeKey);
             continue;
           }
         }
@@ -354,6 +676,10 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
 
         if (result.action === 'inserted') {
           batchInserted++;
+          dedupeContext.notificationKeys.add(notificationDedupeKey);
+          if (n.platformEventId) dedupeContext.notificationKeys.add(n.platformEventId);
+          if (n.notificationItemKey) dedupeContext.notificationKeys.add(n.notificationItemKey);
+          if (fp) dedupeContext.notificationKeys.add(fp);
           const tag = n.actorProfileUrl ? '' : ' [no-profile]';
           console.error(`[scan]   + ${n.username} [${n.relation}] ${n.action} ${n.timeText}${tag}`);
           allEvents.push({
@@ -367,6 +693,10 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
           });
         } else if (result.action === 'enriched') {
           batchEnriched++;
+          dedupeContext.notificationKeys.add(notificationDedupeKey);
+          if (n.platformEventId) dedupeContext.notificationKeys.add(n.platformEventId);
+          if (n.notificationItemKey) dedupeContext.notificationKeys.add(n.notificationItemKey);
+          if (fp) dedupeContext.notificationKeys.add(fp);
           console.error(`[scan]   ~ ${n.username} [${n.relation}] enriched`);
           allEvents.push({
             eventId: result.eventId, eventType: n.eventType,
@@ -379,6 +709,8 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
           });
         } else if (result.action === 'duplicate') {
           batchDuplicate++;
+          dedupeContext.notificationKeys.add(notificationDedupeKey);
+          logNotificationSkip(notificationIndex, n, '数据库 upsert 判定重复', notificationDedupeKey);
         } else if (result.action === 'ambiguous') {
           batchAmbiguous++;
           console.error(`[scan]   ? ${n.username} [${n.relation}] ambiguous match`);
@@ -391,8 +723,53 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
             error: result.error || 'ambiguous',
           });
         }
+
+        if (route.notificationAction === 'comment_on_my_work') {
+          const workCheck = isWorkAlreadyCollected(dedupeContext, n);
+          if (workCheck.found) {
+            logNotificationSkip(notificationIndex, n, '该作品评论已采集过', workCheck.key);
+            continue;
+          }
+
+          const clicked = await clickNotificationThumbnail(page, n);
+          if (!clicked) {
+            logNotificationSkip(notificationIndex, n, '未能点击作品缩略图，跳过作品评论采集', notificationDedupeKey);
+            continue;
+          }
+
+          const collectResult = await collectCommentsFromNotificationWork(page, n, {
+            sourceEventId: result.eventId || null,
+            notificationDays,
+            dedupeContext,
+          });
+          if (!collectResult.ok) {
+            logNotificationSkip(notificationIndex, n, `作品评论采集失败: ${collectResult.reason}`, notificationDedupeKey);
+          } else {
+            totalWorkCommentInserted += collectResult.inserted;
+            totalWorkCommentDuplicate += collectResult.duplicate;
+            totalWorkCommentEnriched += collectResult.enriched;
+            console.error(
+              `[scan]   评论采集 workId=${collectResult.workId || ''} modalId=${collectResult.modalId || ''}: ` +
+              `${collectResult.inserted} 新增, ${collectResult.enriched} 补全, ${collectResult.duplicate} 重复, ` +
+              `pending=${collectResult.pending}, total=${collectResult.total}`
+            );
+          }
+
+          const restoredPanelBox = await restoreNotificationPanel(page, panelTools, panelBox);
+          if (!restoredPanelBox) {
+            console.error('[scan] 作品评论采集后无法恢复通知面板，停止后续滚动');
+            stopDueToOldRelevant = true;
+            break;
+          }
+          panelBox = restoredPanelBox;
+        } else if (route.notificationAction === 'reply_to_my_comment') {
+          logNotificationSkip(notificationIndex, n, '回复我的通知暂不进入后续处理', notificationDedupeKey);
+        } else if (route.notificationAction === 'unknown') {
+          logNotificationSkip(notificationIndex, n, '无法识别通知类型，暂不进入后续处理', notificationDedupeKey);
+        }
       } catch (err) {
         parseFailedCount++;
+        logNotificationSkip(notificationIndex, n, `单条通知处理异常: ${err.message || 'parse error'}`);
         failedEvents.push({
           actorName: n.username || 'unknown',
           eventType: n.eventType || 'unknown',
@@ -411,7 +788,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     run.scanned += notifications.length;
     run.enriched = totalEnrichedCount;
 
-    console.error(`[scan]   轮次 ${scrollRounds}: +${batchInserted}条 (${batchDuplicate}重复, ${batchEnriched}补全, ${batchAmbiguous}歧义, ${batchProfileResolved}主页解析, ${newInBatch}新)`);
+    console.error(`[scan]   轮次 ${scrollRounds}: +${batchInserted}条 (${batchDuplicate}重复, ${batchEnriched}补全, ${batchAmbiguous}歧义, ${batchProfileResolved}主页解析, ${newInBatch}新, 评论入库+${totalWorkCommentInserted})`);
     if (stopDueToOldRelevant) {
       break;
     }
@@ -448,7 +825,10 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     await closeNotificationPanel(page);
   }
 
-  console.error(`[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalAmbiguousCount} 歧义 | ${totalProfileResolved} 主页已解析 | ${totalProfileUnresolved} 主页未解析 | ${parseFailedCount} 条解析失败 | ${scrollRounds} 轮滚动`);
+  const pendingReplyFile = writePendingReplyJson();
+  console.error(`[scan] 待回复评论 JSON: ${pendingReplyFile.filePath} (${pendingReplyFile.totalComments} 条, ${pendingReplyFile.workCount} 个作品)`);
+
+  console.error(`[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalAmbiguousCount} 歧义 | ${totalProfileResolved} 主页已解析 | ${totalProfileUnresolved} 主页未解析 | work_comments ${totalWorkCommentInserted} 新增/${totalWorkCommentEnriched} 补全/${totalWorkCommentDuplicate} 重复 | ${parseFailedCount} 条解析失败 | ${scrollRounds} 轮滚动`);
   return success({
     inserted: totalInserted,
     duplicateCount: totalDuplicateCount, enriched: totalEnrichedCount,
@@ -456,6 +836,10 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     profileResolved: totalProfileResolved, profileUnresolved: totalProfileUnresolved,
     parseFailed: parseFailedCount,
     scrollRounds,
+    workCommentsInserted: totalWorkCommentInserted,
+    workCommentsEnriched: totalWorkCommentEnriched,
+    workCommentsDuplicate: totalWorkCommentDuplicate,
+    pendingReplyFile,
     events: allEvents,
     ambiguousEvents,
     failedEvents,

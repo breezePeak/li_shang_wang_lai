@@ -808,6 +808,170 @@ export async function clickCommentLink(page, username) {
   return false;
 }
 
+export async function clickNotificationThumbnail(page, eventCtx) {
+  const ctx = eventCtx || {};
+  const shortName = (ctx.username || '').slice(0, 20);
+
+  const result = await page.evaluate(({ name, action, timeText, notificationItemKey, workUrl, workId, thumbnailKey }) => {
+    function parseRelationLine(line) {
+      if (!line) return null;
+      if (line === '朋友') return 'friend';
+      if (line === '互相关注') return 'mutual';
+      if (line.includes('在线')) return 'friend';
+      return null;
+    }
+
+    function generateItemKey(d) {
+      const workKey =
+        d.workId ||
+        d.workUrl ||
+        d.thumbnailKey ||
+        d.thumbnailSrc ||
+        '';
+
+      const raw = [
+        d.username,
+        d.relation,
+        d.action,
+        workKey,
+        (d.content || '').slice(0, 200),
+        d.actorProfileKey || d.actorProfileUrl,
+      ]
+        .map(s => (s || '').trim())
+        .join('||');
+      let hash = 0;
+      for (let i = 0; i < raw.length; i++) {
+        hash = ((hash << 5) - hash) + raw.charCodeAt(i);
+        hash |= 0;
+      }
+      return Math.abs(hash).toString(36);
+    }
+
+    function findNotificationPanel() {
+      for (const el of document.querySelectorAll('*')) {
+        const t = (el.innerText || '').trim();
+        if (t.startsWith('互动消息') || t.startsWith('全部消息')) {
+          const r = el.getBoundingClientRect();
+          if (r.width < 100 || r.height < 30) continue;
+          let c = el.parentElement;
+          for (let i = 0; i < 6 && c && c !== document.body; i++) {
+            const cr = c.getBoundingClientRect();
+            if (cr.width > 250 && cr.height > 300) return c;
+            c = c.parentElement;
+          }
+        }
+      }
+      return null;
+    }
+
+    function getItemData(itemEl) {
+      const text = (itemEl.innerText || '').trim();
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      const username = lines[0] || '';
+      let relation = 'unknown';
+      let idx = 1;
+      const parsedRelation = parseRelationLine(lines[idx] || '');
+      if (parsedRelation) {
+        relation = parsedRelation;
+        idx++;
+      }
+      let content = '';
+      let actionLine = action || '';
+      for (let k = idx; k < lines.length; k++) {
+        if (actionLine && lines[k].includes(actionLine)) {
+          if (k > idx) content = lines.slice(idx, k).join(' ');
+          break;
+        }
+      }
+      let thumbnailSrc = '';
+      const imgs = itemEl.querySelectorAll('img');
+      for (const img of imgs) {
+        const src = img.getAttribute('src') || '';
+        const rect = img.getBoundingClientRect();
+        if (!src || rect.width < 20 || rect.height < 20) continue;
+        if (src.includes('aweme-avatar')) continue;
+        thumbnailSrc = src;
+        break;
+      }
+      return { username, relation, action: actionLine, content, workId, workUrl, thumbnailKey, thumbnailSrc };
+    }
+
+    function scoreItem(itemEl) {
+      const text = (itemEl.innerText || '').trim();
+      if (!text || (name && !text.includes(name))) return -1;
+      let score = 0;
+      if (name && text.includes(name)) score += 3;
+      if (action && text.includes(action)) score += 3;
+      if (timeText && text.includes(timeText)) score += 1;
+      if (notificationItemKey) {
+        const key = generateItemKey(getItemData(itemEl));
+        if (key === notificationItemKey) score += 8;
+      }
+      return score;
+    }
+
+    const panel = findNotificationPanel();
+    if (!panel) return { clicked: false, reason: 'panel-not-found' };
+
+    const items = Array.from(panel.querySelectorAll('li, [class*="item"], [class*="row"], [class*="entry"], a[href*="/video/"], a[href*="/note/"]'))
+      .map(el => {
+        let item = el;
+        for (let i = 0; i < 5 && item && item !== panel; i++) {
+          const text = (item.innerText || '').trim();
+          if (text.includes(name || '') && (!action || text.includes(action))) break;
+          item = item.parentElement;
+        }
+        return item || el;
+      })
+      .filter((el, index, arr) => el && arr.indexOf(el) === index);
+
+    const ranked = items
+      .map(el => ({ el, score: scoreItem(el) }))
+      .filter(x => x.score >= 3)
+      .sort((a, b) => b.score - a.score);
+
+    for (const { el } of ranked) {
+      const links = Array.from(el.querySelectorAll('a[href*="/video/"], a[href*="/note/"], a[href*="modal_id="]'));
+      for (const link of links) {
+        const href = link.getAttribute('href') || '';
+        if (workUrl && !href.includes(workUrl.split('?')[0].replace('https://www.douyin.com', ''))) continue;
+        link.click();
+        return { clicked: true, method: 'work-link', text: (el.innerText || '').trim().slice(0, 80), href };
+      }
+
+      const imgs = Array.from(el.querySelectorAll('img'));
+      for (const img of imgs) {
+        const src = img.getAttribute('src') || '';
+        const rect = img.getBoundingClientRect();
+        if (!src || rect.width < 20 || rect.height < 20) continue;
+        if (src.includes('aweme-avatar')) continue;
+        const target = img.closest('a,[role="button"],button') || img;
+        target.click();
+        return { clicked: true, method: 'thumbnail-image', text: (el.innerText || '').trim().slice(0, 80), src: src.slice(0, 120) };
+      }
+    }
+
+    return { clicked: false, reason: ranked.length === 0 ? 'item-not-found' : 'thumbnail-not-found' };
+  }, {
+    name: shortName,
+    action: ctx.action || '',
+    timeText: ctx.timeText || '',
+    notificationItemKey: ctx.notificationItemKey || '',
+    workUrl: ctx.workUrl || '',
+    workId: ctx.workId || '',
+    thumbnailKey: ctx.thumbnailKey || '',
+  });
+
+  if (result.clicked) {
+    console.error(`[notify-page] 点击 ${shortName || '(unknown)'} 的作品缩略图 (${result.method})`);
+    await page.waitForTimeout(3000);
+    return true;
+  }
+
+  console.error(`[notify-page] 未找到 ${shortName || '(unknown)'} 的作品缩略图 (reason: ${result.reason})`);
+  return false;
+}
+
 export async function debugDumpNotificationItems(page, debugDir) {
   const { ensureDir, writeJSON } = await import('../utils/filesystem.mjs');
   const { writeFileSync } = await import('fs');

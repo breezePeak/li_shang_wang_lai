@@ -148,3 +148,40 @@ export function listReplyTrackedCommentKeysForWork({ workId, modalId } = {}) {
       AND reply_status IN ('prepared','succeeded','sent_unverified')
   `).all(...params).map(row => row.comment_key || `${row.actor_name || ''}::${String(row.comment_text || '').slice(0, 60)}`);
 }
+
+export function hasCommentsForWork({ workId, modalId } = {}) {
+  const db = getDb();
+  const params = [];
+  const clauses = [];
+  if (workId) {
+    clauses.push('work_id = ?');
+    params.push(workId);
+  }
+  if (modalId) {
+    clauses.push('modal_id = ?');
+    params.push(modalId);
+  }
+  if (clauses.length === 0) return false;
+  const row = db.prepare(`SELECT id FROM work_comments WHERE ${clauses.join(' OR ')} LIMIT 1`).get(...params);
+  return !!row;
+}
+
+export function listCommentsForDedupe(options = {}) {
+  const db = getDb();
+  const { days = null, limit = 5000 } = options;
+  const params = [];
+  let sql = `
+    SELECT id, work_id, modal_id, actor_name, actor_profile_key, actor_profile_url,
+      comment_text, event_time_text, comment_key, reply_status, first_seen_at, last_seen_at
+    FROM work_comments
+    WHERE 1=1
+  `;
+  if (Number(days) > 0) {
+    const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
+    sql += ' AND last_seen_at >= ?';
+    params.push(since);
+  }
+  sql += ' ORDER BY last_seen_at DESC LIMIT ?';
+  params.push(limit);
+  return db.prepare(sql).all(...params);
+}
