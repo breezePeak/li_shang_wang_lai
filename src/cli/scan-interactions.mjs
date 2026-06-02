@@ -542,7 +542,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   const wantComments = (type === 'all' || type === 'comment');
   const wantLikes = (type === 'all' || type === 'like');
   const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
-  const maxCount = Number(scanPlan.maxCount || run.options?.maxItems || 0) > 0 ? Number(scanPlan.maxCount || run.options.maxItems) : null;
+  const maxCount = Number(scanPlan.maxCount || 0) > 0 ? Number(scanPlan.maxCount) : null;
   const dedupeContext = buildDedupeContext(notificationDays);
   console.error(
     `[scan] 去重上下文: notifications=${dedupeContext.notificationKeys.size} ` +
