@@ -22,20 +22,19 @@
 
 ## 主流程
 
-评论回复：
+评论回复（默认 7 天 / 100 条）：
 
 ```bash
-npm run interactions:scan -- --type comment --days 7 --max-count 100 --generate-reply-json
+npm run interactions:scan -- --type comment --generate-reply-json
 # Agent 根据评论内容、作品上下文和安全规则，生成并填写 reply_text
 npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json
 npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
 ```
 
-回访：
+回访（默认 7 天 / 100 条）：
 
 ```bash
-npm run interactions:scan -- --type all --days 7
-npm run interactions:scan -- --type all --days 7 --max-count 100 --generate-visit-json
+npm run interactions:scan -- --generate-visit-json
 npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json
 npm run return-visit:execute -- --execute
 ```
@@ -69,9 +68,9 @@ npm run db:init
 ## 3. interactions:scan
 
 ```bash
-npm run interactions:scan -- --type all --days 7 --max-count 100 --display-only
-npm run interactions:scan -- --type comment --days 7 --max-count 100 --generate-reply-json
-npm run interactions:scan -- --type like --days 7 --max-count 100 --generate-visit-json
+npm run interactions:scan -- --display-only
+npm run interactions:scan -- --type comment --generate-reply-json
+npm run interactions:scan -- --generate-visit-json
 ```
 
 源文件：`src/cli/scan-interactions.mjs`
@@ -83,8 +82,8 @@ npm run interactions:scan -- --type like --days 7 --max-count 100 --generate-vis
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `--type` | `all` | `all` / `comment` / `like` |
-| `--days` | `null` | 限定最近 N 天通知 |
-| `--max-count` | `--max-items` 或不限 | 最大采集通知条数 |
+| `--days` | `7` | 限定最近 N 天通知，传 `0` 取消限制 |
+| `--max-count` | `100` | 最大采集通知条数 |
 | `--display-only` | `false` | 只采集和展示互动数据，不生成待回评 / 待回访 JSON |
 | `--generate-reply-json` | 兼容默认 | 生成 `data/pending-replies/pending-comments-xxx.json` |
 | `--generate-visit-json` | `false` | 生成 `data/pending-visits/pending-visits-xxx.json` |

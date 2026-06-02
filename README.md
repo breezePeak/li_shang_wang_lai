@@ -104,9 +104,9 @@ npm run auth
 | 登录认证 | `npm run auth` |
 | 初始化数据库 | `npm run db:init` |
 | 清空表数据 | `npm run db:reset` |
-| 只看互动 | `npm run interactions:scan -- --type all --days 7 --max-count 100 --display-only` |
-| 扫描并生成待回评 | `npm run interactions:scan -- --type comment --days 7 --max-count 100 --generate-reply-json` |
-| 扫描并生成待回访 | `npm run interactions:scan -- --type all --days 7 --max-count 100 --generate-visit-json` |
+| 只看互动 | `npm run interactions:scan -- --display-only` |
+| 扫描并生成待回评 | `npm run interactions:scan -- --type comment --generate-reply-json` |
+| 扫描并生成待回访 | `npm run interactions:scan -- --generate-visit-json` |
 | 填写评论回复 | Agent 生成并填写 `data/pending-replies/pending-comments-xxx.json` 的 `reply_text` |
 | 批量准备评论回复 | `npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json` |
 | 批量执行评论回复 | `npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json` |
