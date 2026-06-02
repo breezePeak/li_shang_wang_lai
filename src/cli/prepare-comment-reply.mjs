@@ -34,12 +34,14 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const WORK_CONTEXT_PATH = resolve(__dirname, '../../prompts/work-context.json');
+const USER_WORK_CONTEXT_PATH = resolve(__dirname, '../../config/works.json');
+const DEFAULT_WORK_CONTEXT_PATH = resolve(__dirname, '../../prompts/work-context.json');
 
 function loadWorkContext() {
-  if (!existsSync(WORK_CONTEXT_PATH)) return null;
+  const contextPath = existsSync(USER_WORK_CONTEXT_PATH) ? USER_WORK_CONTEXT_PATH : DEFAULT_WORK_CONTEXT_PATH;
+  if (!existsSync(contextPath)) return null;
   try {
-    return JSON.parse(readFileSync(WORK_CONTEXT_PATH, 'utf-8'));
+    return JSON.parse(readFileSync(contextPath, 'utf-8'));
   } catch { return null; }
 }
 
@@ -234,11 +236,11 @@ function prepareOne(item, events, workCtx) {
       return failResult(item, RESULT_CODES.BLOCKED, 'decision=reply 且 relevance=relevant 时，必须提供 workContextId。缺少作品上下文时，请设置 decision=manual_review。');
     }
     if (!workCtx || !Array.isArray(workCtx.works)) {
-      return failResult(item, RESULT_CODES.BLOCKED, 'work-context.json 缺失或格式错误，无法校验作品上下文');
+      return failResult(item, RESULT_CODES.BLOCKED, '作品上下文配置缺失或格式错误，无法校验作品上下文。请检查 config/works.json 或 prompts/work-context.json。');
     }
     const matchedWork = workCtx.works.find(w => w.id === item.workContextId);
     if (!matchedWork) {
-      return failResult(item, RESULT_CODES.BLOCKED, `workContextId "${item.workContextId}" 在 work-context.json 中未找到`);
+      return failResult(item, RESULT_CODES.BLOCKED, `workContextId "${item.workContextId}" 在作品上下文配置中未找到`);
     }
     const eventTitle = (ev.my_work_title || '').trim();
     const workTitle = (matchedWork.title || '').trim();
@@ -246,7 +248,7 @@ function prepareOne(item, events, workCtx) {
       return failResult(item, RESULT_CODES.BLOCKED, `事件 #${item.eventId} 缺少作品标题，无法校验作品上下文匹配。请改为 decision=manual_review。`);
     }
     if (!workTitle) {
-      return failResult(item, RESULT_CODES.BLOCKED, `work-context "${item.workContextId}" 缺少 title 字段，无法校验匹配。`);
+      return failResult(item, RESULT_CODES.BLOCKED, `作品上下文 "${item.workContextId}" 缺少 title 字段，无法校验匹配。`);
     }
     const eventTitleLower = eventTitle.toLowerCase();
     const workTitleLower = workTitle.toLowerCase();

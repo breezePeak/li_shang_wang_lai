@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-礼尚往来 — 抖音创作者互动助手 OpenClaw Skill 执行引擎。Node.js + Playwright + SQLite。
+礼尚往来 — 抖音创作者互动助手 Hermes / OpenClaw Skill 执行引擎。Node.js + Playwright + SQLite。
 
 ## 常用命令
 

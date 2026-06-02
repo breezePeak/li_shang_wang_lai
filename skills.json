@@ -6,7 +6,7 @@
     {
       "name": "li-shang-wang-lai",
       "path": ".",
-      "entry": "skill.md",
+      "entry": "SKILL.md",
       "description": "Main Hermes / OpenClaw routing entry for the 礼尚往来 creator interaction assistant. It identifies user intent and routes to README.md, docs/COMMANDS.md, or the specialized skills without duplicating their full instructions.",
       "outputs": [
         "routing decision",

@@ -22,5 +22,5 @@
     }
   ],
   "testing": true,
-  "note": "测试阶段配置，正式使用前需要根据真实作品更新 works 列表"
+  "note": "测试/默认上下文，仅供本地测试和兜底校验。正式使用请复制 config/works.example.json 为 config/works.json 并填写自己的作品上下文；不要提交真实账号隐私、Cookie、Token 或验证码。"
 }

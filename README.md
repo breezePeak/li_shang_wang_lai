@@ -1,26 +1,38 @@
 # 礼尚往来 · li_shang_wang_lai
 
-基于 Node.js、Playwright 和 SQLite 的抖音创作者互动助手。
+基于 Node.js、Playwright 和 SQLite 的抖音创作者互动助手，支持 Hermes / OpenClaw Skill 加载。
 
 项目用于辅助创作者扫描互动、准备评论回复、准备回访任务，并在显式执行模式下完成评论回复或回访点赞 + 评论。默认状态是安全的：没有 `--execute` 时不会执行真实点赞、评论或回复。
 
 ## 文档边界
 
 - `README.md`：项目介绍、安装方式、环境要求、首次初始化、常用入口命令。
-- `skill.md`：Hermes / OpenClaw 主入口调度，不写完整流程细节。
+- `SKILL.md`：Hermes / OpenClaw 主入口调度，不写完整流程细节。
 - `docs/COMMANDS.md`：命令参考手册，和 `package.json` scripts、实际 CLI 参数保持一致。
 - `skills/creator-interaction-executor/SKILL.md`：互动执行流程。
 - `skills/creator-comment-suggestion/SKILL.md`：只生成一条评论回复建议，不执行命令。
+
+根目录只保留 `SKILL.md`。不要同时创建 `skill.md` 和 `SKILL.md`，macOS 默认 APFS 大小写不敏感，两个文件名容易互相覆盖。
 
 ## 环境要求
 
 | 环境 | 要求 |
 |---|---|
-| Node.js | 24+ |
+| Node.js | 20+ |
 | npm | 随 Node.js 安装 |
 | 浏览器 | Playwright Chromium |
 | 数据库 | SQLite |
 | 账号 | 抖音创作者账号，需完成浏览器登录 |
+
+## Skill 入口
+
+Hermes / OpenClaw 安装后应能识别三个 Skill：
+
+- `li-shang-wang-lai`：根入口，负责路由。
+- `creator-interaction-executor`：互动采集、评论回复、回访执行流程。
+- `creator-comment-suggestion`：只生成一条评论回复建议。
+
+主入口不维护完整流程细节。互动执行请看 `skills/creator-interaction-executor/SKILL.md`，评论回复建议请看 `skills/creator-comment-suggestion/SKILL.md`。
 
 ## 安装到 Hermes
 
@@ -28,8 +40,8 @@ macOS / Linux：
 
 ```bash
 mkdir -p ~/.hermes/skills
-git clone https://github.com/breezePeak/li_shang_wang_lai.git ~/.hermes/skills/creator-interaction-executor
-cd ~/.hermes/skills/creator-interaction-executor
+git clone https://github.com/breezePeak/li_shang_wang_lai.git ~/.hermes/skills/li-shang-wang-lai
+cd ~/.hermes/skills/li-shang-wang-lai
 npm install
 npx playwright install chromium
 npm run db:init
@@ -40,8 +52,8 @@ Windows PowerShell：
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\hermes\skills"
-git clone https://github.com/breezePeak/li_shang_wang_lai.git "$env:LOCALAPPDATA\hermes\skills\creator-interaction-executor"
-cd "$env:LOCALAPPDATA\hermes\skills\creator-interaction-executor"
+git clone https://github.com/breezePeak/li_shang_wang_lai.git "$env:LOCALAPPDATA\hermes\skills\li-shang-wang-lai"
+cd "$env:LOCALAPPDATA\hermes\skills\li-shang-wang-lai"
 npm install
 npx playwright install chromium
 npm run db:init
@@ -54,8 +66,8 @@ macOS / Linux：
 
 ```bash
 mkdir -p ~/.openclaw/skills
-git clone https://github.com/breezePeak/li_shang_wang_lai.git ~/.openclaw/skills/creator-interaction-executor
-cd ~/.openclaw/skills/creator-interaction-executor
+git clone https://github.com/breezePeak/li_shang_wang_lai.git ~/.openclaw/skills/li-shang-wang-lai
+cd ~/.openclaw/skills/li-shang-wang-lai
 npm install
 npx playwright install chromium
 npm run db:init
@@ -66,8 +78,8 @@ Windows PowerShell：
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.openclaw\skills"
-git clone https://github.com/breezePeak/li_shang_wang_lai.git "$env:USERPROFILE\.openclaw\skills\creator-interaction-executor"
-cd "$env:USERPROFILE\.openclaw\skills\creator-interaction-executor"
+git clone https://github.com/breezePeak/li_shang_wang_lai.git "$env:USERPROFILE\.openclaw\skills\li-shang-wang-lai"
+cd "$env:USERPROFILE\.openclaw\skills\li-shang-wang-lai"
 npm install
 npx playwright install chromium
 npm run db:init
@@ -85,6 +97,18 @@ npm run auth
 
 `npm run auth` 会打开浏览器检测抖音登录态。检测到已登录后自动关闭浏览器并返回认证成功；60 秒未检测到登录态时提示扫码登录；最多等待 5 分钟。
 
+## 作品上下文配置
+
+评论回复准备命令在使用 `--work-context-id` 时会校验作品上下文。正式使用前建议复制示例配置：
+
+```bash
+cp config/works.example.json config/works.json
+```
+
+然后在 `config/works.json` 中填写自己的作品列表、标题片段和内容摘要。`config/works.json` 已被 `.gitignore` 忽略，不要提交真实账号隐私、Cookie、Token、验证码或其他敏感信息。
+
+如果没有 `config/works.json`，代码会回退读取 `prompts/work-context.json`。该文件仅作为测试/默认上下文，不应当被当成正式配置。
+
 ## 常用入口命令
 
 | 功能 | 命令 |
@@ -98,6 +122,7 @@ npm run auth
 | 准备回访 | `npm run return-visit:prepare` |
 | 执行回访 | `npm run return-visit:execute -- --execute` |
 | 恢复 blocked 评论动作 | `npm run actions:reset-blocked -- --action-id <action_id>` |
+| 运行默认测试 | `npm test` |
 
 完整命令参数见 `docs/COMMANDS.md`。
 
