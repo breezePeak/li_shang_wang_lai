@@ -13,7 +13,7 @@ import {
 } from '../services/return-visit-task-service.mjs';
 import { collectCandidateWorkFromProfile } from '../services/return-visit-work-collector.mjs';
 import { analyzeReturnVisitContext, generateReturnVisitComment } from '../services/return-visit-comment-generator.mjs';
-import { readFileSync } from 'fs';
+import { readFileSync, unlinkSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
 function parseArgs(argv) {
@@ -304,6 +304,17 @@ async function main() {
 
   if (browser && !args.keepOpen) {
     await browser.close();
+  }
+
+  // 消费后删除中间 JSON
+  if (args.itemsFile) {
+    try {
+      const absPath = resolve(args.itemsFile);
+      if (existsSync(absPath)) {
+        unlinkSync(absPath);
+        log(args.json, `[return-visit:prepare] 已删除中间 JSON: ${args.itemsFile}`);
+      }
+    } catch {}
   }
 }
 

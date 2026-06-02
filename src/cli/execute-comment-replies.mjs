@@ -23,7 +23,7 @@ import {
   sendReplyInWorkModal,
   verifyReplyInWorkModal,
 } from '../adapters/work-modal-page.mjs';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
 function parseArgs(argv) {
@@ -328,6 +328,15 @@ async function main() {
 
   const results = await executeWorkCommentItems(loaded.items, args);
   updateExecuteJsonFile(args.itemsFile, loaded.parsed, results);
+
+  // 消费后删除中间 JSON
+  try {
+    const absPath = resolve(args.itemsFile);
+    if (existsSync(absPath)) {
+      unlinkSync(absPath);
+      console.log(`[comments:execute] 已删除中间 JSON: ${args.itemsFile}`);
+    }
+  } catch {}
 
   const succeeded = results.filter(item => item.ok && item.status === 'succeeded').length;
   const skipped = results.filter(isSkippedResult).length;
