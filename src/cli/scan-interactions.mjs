@@ -403,7 +403,7 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
   const commentsResult = await findUnrepliedCommentsInModal(page, {
     maxScrolls: 50,
     alreadyRepliedKeys,
-    selfNickname: '',
+    selfNickname: context.authorName || '',
     maxAgeDays: notificationDays,
     oldCommentStopCount: 3,
   });

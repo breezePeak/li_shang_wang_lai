@@ -842,6 +842,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
           const line = lines[k];
           if (line === '回复' || line === '赞' || line === '分享' || line === '回复中' || line === '...') continue;
           if (line === '互相关注' || line === '朋友' || line === '关注' || line === '作者' || line === '作者赞过') continue;
+          if (line.includes('该评论被折叠')) continue;
           if (/^\d{1,2}$/.test(line) || (/^[刚昨前天周月年]/.test(line) && line.length < 10)) continue;
           if (/^\d+[秒分时天周月年]前/.test(line) || /^\d{1,2}:\d{2}/.test(line) || /^\d+月\d+日/.test(line)) continue;
           if (line.includes('·') && line.length < 30) continue;
@@ -856,6 +857,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
             const line = lines[k];
             if (line === '回复' || line === '赞' || line === '分享' || line === '回复中' || line === '...' || line === '作者') continue;
             if (line === '互相关注' || line === '朋友' || line === '关注' || line === '作者赞过') continue;
+            if (line.includes('该评论被折叠')) continue;
             if (/^\d{1,2}$/.test(line) || (/^[刚昨前天周月年]/.test(line) && line.length < 10)) continue;
             if (/^\d+[秒分时天周月年]前/.test(line) || /^\d{1,2}:\d{2}/.test(line)) continue;
             if (line.includes('·') && line.length < 30) continue;
@@ -891,6 +893,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
         }
 
         commentKey = `${actorName}::${commentText.slice(0, 60)}`;
+        if (!commentText || commentText.includes('该评论被折叠')) continue;
 
         const rect = items[i].getBoundingClientRect();
         comments.push({
