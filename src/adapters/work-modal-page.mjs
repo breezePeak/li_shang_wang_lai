@@ -514,7 +514,6 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
     }
 
     await page.waitForSelector('.comment-mainContent', { state: 'visible', timeout: 10000 });
-    await page.evaluate(MATCH_COMMENT_INNER);
     return success({ modalVisible: true });
   } catch (err) {
     const removed = await detectVideoRemoved(page).catch(() => '');
@@ -545,26 +544,6 @@ export async function detectVideoRemoved(page) {
   });
 }
 
-const MATCH_COMMENT_INNER = `
-  function matchComment(items, actorName, commentText, eventTimeText) {
-    for (let i = 0; i < items.length; i++) {
-      const text = (items[i].innerText || '').trim();
-      if (!text.includes(commentText)) continue;
-      if (actorName && !text.includes(actorName)) continue;
-      if (eventTimeText && !text.includes(eventTimeText)) continue;
-      const rect = items[i].getBoundingClientRect();
-      return { ok: true, commentIndex: i, previewText: text.slice(0, 200), x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) };
-    }
-    for (let i = 0; i < items.length; i++) {
-      const text = (items[i].innerText || '').trim();
-      if (!text.includes(commentText)) continue;
-      const rect = items[i].getBoundingClientRect();
-      return { ok: true, commentIndex: i, previewText: text.slice(0, 200), x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height), fallback: true };
-    }
-    return null;
-  }
-`;
-
 export async function findCommentInWorkModal(page, item, { maxScrolls = 10 } = {}) {
   const actorName = (item?.actorName || '').trim();
   const commentText = (item?.commentText || '').trim();
@@ -577,27 +556,113 @@ export async function findCommentInWorkModal(page, item, { maxScrolls = 10 } = {
   try {
     console.error(`[work-modal] 查找评论 actor="${actorName}" comment="${commentText.slice(0, 40)}" time="${eventTimeText}"`);
 
-    const found = await page.evaluate(({ actorName, commentText, eventTimeText, matchCommentSource }) => {
-      const matchComment = (0, eval)(`(${matchCommentSource})`);
+    const found = await page.evaluate(({ actorName, commentText, eventTimeText }) => {
+      function normalizeTimeHint(value) {
+        return String(value || '').split('·')[0].trim();
+      }
+
+      function collectCommentItems(commentArea) {
+        const items = commentArea.querySelectorAll('[data-e2e="comment-item"]');
+        const comments = [];
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          const text = (item.innerText || '').trim();
+          const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+          if (lines.length < 1) continue;
+
+          let parsedActorName = '';
+          let parsedCommentText = '';
+          let parsedEventTimeText = '';
+
+          const nameLine = lines[0];
+          if (nameLine.length > 0 && nameLine.length < 50) parsedActorName = nameLine;
+
+          for (const line of lines) {
+            if (/^刚刚$/.test(line) || /^昨天/.test(line) || /^前天/.test(line) || /^\d+[秒分时天周月年]前/.test(line) || /^\d+月\d+日/.test(line) || /^\d{4}-\d{2}-\d{2}/.test(line)) {
+              parsedEventTimeText = line;
+              break;
+            }
+          }
+
+          for (let k = 1; k < lines.length; k++) {
+            const line = lines[k];
+            if (line === '回复' || line === '赞' || line === '分享' || line === '回复中' || line === '...') continue;
+            if (line === '互相关注' || line === '朋友' || line === '关注' || line === '作者' || line === '作者赞过') continue;
+            if (/^\d+$/.test(line) || (/^[刚昨前天周月年]/.test(line) && line.length < 10)) continue;
+            if (/^\d+[秒分时天周月年]前/.test(line) || /^\d{1,2}:\d{2}/.test(line) || /^\d+月\d+日/.test(line)) continue;
+            if (line.includes('·') && line.length < 30) continue;
+            if (!parsedCommentText && line.length > 0) {
+              parsedCommentText = line;
+              break;
+            }
+          }
+
+          if (!parsedCommentText) {
+            for (let k = lines.length - 1; k >= 1; k--) {
+              const line = lines[k];
+              if (line === '回复' || line === '赞' || line === '分享' || line === '回复中' || line === '...' || line === '作者') continue;
+              if (line === '互相关注' || line === '朋友' || line === '关注' || line === '作者赞过') continue;
+              if (/^\d+$/.test(line) || (/^[刚昨前天周月年]/.test(line) && line.length < 10)) continue;
+              if (/^\d+[秒分时天周月年]前/.test(line) || /^\d{1,2}:\d{2}/.test(line)) continue;
+              if (line.includes('·') && line.length < 30) continue;
+              if (line.length > 2 && line.length < 300) {
+                parsedCommentText = line;
+                break;
+              }
+            }
+          }
+
+          const rect = item.getBoundingClientRect();
+          comments.push({
+            commentIndex: i,
+            actorName: parsedActorName,
+            commentText: parsedCommentText.slice(0, 300),
+            eventTimeText: parsedEventTimeText,
+            previewText: text.slice(0, 200),
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+            w: Math.round(rect.width),
+            h: Math.round(rect.height),
+          });
+        }
+        return comments;
+      }
+
+      function matchComment(comments, actorName, commentText, eventTimeText) {
+        const normalizedTime = normalizeTimeHint(eventTimeText);
+        for (const comment of comments) {
+          if (!comment.commentText || !comment.commentText.includes(commentText)) continue;
+          if (actorName && comment.actorName !== actorName) continue;
+          if (normalizedTime && normalizeTimeHint(comment.eventTimeText) && normalizeTimeHint(comment.eventTimeText) !== normalizedTime) continue;
+          return { ok: true, ...comment };
+        }
+        for (const comment of comments) {
+          if (!comment.commentText || !comment.commentText.includes(commentText)) continue;
+          return { ok: true, fallback: true, ...comment };
+        }
+        return null;
+      }
+
       const commentArea = document.querySelector('.comment-mainContent');
       if (!commentArea) return { ok: false, reason: 'comment-mainContent not found' };
 
-      const items = commentArea.querySelectorAll('.comment-item-info-wrap');
-      const match = matchComment(items, actorName, commentText, eventTimeText);
+      const comments = collectCommentItems(commentArea);
+      const match = matchComment(comments, actorName, commentText, eventTimeText);
       if (match) return match;
 
       const canScroll = commentArea.scrollHeight > commentArea.clientHeight + 10;
-      return { ok: false, reason: 'no matching comment', totalItems: items.length, canScroll };
-    }, {
-      actorName,
-      commentText,
-      eventTimeText,
-      matchCommentSource: MATCH_COMMENT_INNER.trim().replace(/^function matchComment/, 'function'),
-    });
+      return { ok: false, reason: 'no matching comment', totalItems: comments.length, canScroll, samples: comments.slice(0, 5) };
+    }, { actorName, commentText, eventTimeText });
 
     if (found.ok) {
       console.error(`[work-modal] 找到评论 index=${found.commentIndex} preview="${String(found.previewText || '').slice(0, 60)}"`);
       return success(found);
+    }
+
+    if (Array.isArray(found.samples) && found.samples.length > 0) {
+      for (const sample of found.samples.slice(0, 3)) {
+        console.error(`[work-modal] 样本评论 index=${sample.commentIndex} actor="${sample.actorName}" comment="${String(sample.commentText || '').slice(0, 40)}" time="${sample.eventTimeText || ''}"`);
+      }
     }
 
     if (!found.canScroll) {
@@ -620,20 +685,78 @@ export async function findCommentInWorkModal(page, item, { maxScrolls = 10 } = {
 
       await page.waitForTimeout(1500 + Math.floor(Math.random() * 2500));
 
-      const foundAfterScroll = await page.evaluate(({ actorName, commentText, eventTimeText, matchCommentSource }) => {
-        const matchComment = (0, eval)(`(${matchCommentSource})`);
+      const foundAfterScroll = await page.evaluate(({ actorName, commentText, eventTimeText }) => {
+        function normalizeTimeHint(value) {
+          return String(value || '').split('·')[0].trim();
+        }
+        function collectCommentItems(commentArea) {
+          const items = commentArea.querySelectorAll('[data-e2e="comment-item"]');
+          const comments = [];
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const text = (item.innerText || '').trim();
+            const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+            if (lines.length < 1) continue;
+            let parsedActorName = '';
+            let parsedCommentText = '';
+            let parsedEventTimeText = '';
+            const nameLine = lines[0];
+            if (nameLine.length > 0 && nameLine.length < 50) parsedActorName = nameLine;
+            for (const line of lines) {
+              if (/^刚刚$/.test(line) || /^昨天/.test(line) || /^前天/.test(line) || /^\d+[秒分时天周月年]前/.test(line) || /^\d+月\d+日/.test(line) || /^\d{4}-\d{2}-\d{2}/.test(line)) {
+                parsedEventTimeText = line;
+                break;
+              }
+            }
+            for (let k = 1; k < lines.length; k++) {
+              const line = lines[k];
+              if (line === '回复' || line === '赞' || line === '分享' || line === '回复中' || line === '...') continue;
+              if (line === '互相关注' || line === '朋友' || line === '关注' || line === '作者' || line === '作者赞过') continue;
+              if (/^\d+$/.test(line) || (/^[刚昨前天周月年]/.test(line) && line.length < 10)) continue;
+              if (/^\d+[秒分时天周月年]前/.test(line) || /^\d{1,2}:\d{2}/.test(line) || /^\d+月\d+日/.test(line)) continue;
+              if (line.includes('·') && line.length < 30) continue;
+              if (!parsedCommentText && line.length > 0) {
+                parsedCommentText = line;
+                break;
+              }
+            }
+            if (!parsedCommentText) continue;
+            const rect = item.getBoundingClientRect();
+            comments.push({
+              commentIndex: i,
+              actorName: parsedActorName,
+              commentText: parsedCommentText.slice(0, 300),
+              eventTimeText: parsedEventTimeText,
+              previewText: text.slice(0, 200),
+              x: Math.round(rect.x),
+              y: Math.round(rect.y),
+              w: Math.round(rect.width),
+              h: Math.round(rect.height),
+            });
+          }
+          return comments;
+        }
+        function matchComment(comments, actorName, commentText, eventTimeText) {
+          const normalizedTime = normalizeTimeHint(eventTimeText);
+          for (const comment of comments) {
+            if (!comment.commentText || !comment.commentText.includes(commentText)) continue;
+            if (actorName && comment.actorName !== actorName) continue;
+            if (normalizedTime && normalizeTimeHint(comment.eventTimeText) && normalizeTimeHint(comment.eventTimeText) !== normalizedTime) continue;
+            return { ok: true, ...comment };
+          }
+          for (const comment of comments) {
+            if (!comment.commentText || !comment.commentText.includes(commentText)) continue;
+            return { ok: true, fallback: true, ...comment };
+          }
+          return null;
+        }
         const commentArea = document.querySelector('.comment-mainContent');
         if (!commentArea) return { ok: false, reason: 'comment-mainContent not found' };
-        const items = commentArea.querySelectorAll('.comment-item-info-wrap');
-        const match = matchComment(items, actorName, commentText, eventTimeText);
+        const comments = collectCommentItems(commentArea);
+        const match = matchComment(comments, actorName, commentText, eventTimeText);
         if (match) { match.scrolled = true; return match; }
-        return { ok: false, reason: 'no matching comment', totalItems: items.length };
-      }, {
-        actorName,
-        commentText,
-        eventTimeText,
-        matchCommentSource: MATCH_COMMENT_INNER.trim().replace(/^function matchComment/, 'function'),
-      });
+        return { ok: false, reason: 'no matching comment', totalItems: comments.length, samples: comments.slice(0, 5) };
+      }, { actorName, commentText, eventTimeText });
 
       if (foundAfterScroll.ok) {
         console.error(`[work-modal] 滚动 ${s + 1} 次后找到评论`);
