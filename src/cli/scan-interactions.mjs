@@ -240,13 +240,21 @@ async function restoreNotificationPanel(page, panelTools, panelBox) {
   } catch {}
 
   try {
+    // 轻量恢复：作品弹窗关闭后，通知面板应该还在原位（无需 page.goto 重载页面）
+    const state = await panelTools.waitForNotificationPanelStable(page);
+    if (state.stable && !state.empty && state.panelBox) {
+      await panelTools.moveMouseIntoPanel(page, state.panelBox);
+      return state.panelBox;
+    }
+    // 降级：面板丢失，做完整恢复（重新导航 + 打开面板）
+    console.error('[scan] 通知面板轻量恢复失败，降级为完整恢复');
     await panelTools.ensureNotificationPageReady(page);
     const opened = await panelTools.openNotificationPanel(page);
     if (!opened) return null;
-    const state = await panelTools.waitForNotificationPanelStable(page);
-    if (!state.stable || state.empty) return null;
-    await panelTools.moveMouseIntoPanel(page, state.panelBox || panelBox);
-    return state.panelBox || panelBox;
+    const fallbackState = await panelTools.waitForNotificationPanelStable(page);
+    if (!fallbackState.stable || fallbackState.empty) return null;
+    await panelTools.moveMouseIntoPanel(page, fallbackState.panelBox || panelBox);
+    return fallbackState.panelBox || panelBox;
   } catch (err) {
     console.error(`[scan] 通知面板恢复失败: ${err.message}`);
     return null;
