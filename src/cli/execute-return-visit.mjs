@@ -22,7 +22,6 @@ function parseArgs(argv) {
     headless: false,
     dryRun: true,
     execute: false,
-    maxItems: null,
     watchPolicy: null,
     watchSeconds: null,
   };
@@ -34,7 +33,6 @@ function parseArgs(argv) {
     else if (arg === '--headless') args.headless = true;
     else if (arg === '--dry-run') { args.dryRun = true; args.execute = false; }
     else if (arg === '--execute') { args.execute = true; args.dryRun = false; }
-    else if (arg === '--max-items' && i + 1 < argv.length) args.maxItems = Math.max(1, parseInt(argv[++i], 10) || 1);
     else if (arg === '--watch-policy' && i + 1 < argv.length) args.watchPolicy = argv[++i];
     else if (arg === '--watch-seconds' && i + 1 < argv.length) args.watchSeconds = argv[++i];
   }
@@ -97,7 +95,6 @@ async function main() {
   const returnVisitConfig = config.returnVisit || {};
 
   const executeMode = args.execute;
-  const maxItems = args.maxItems || returnVisitConfig.executeMaxItems || 20;
   const maxRetryCount = Number(returnVisitConfig.maxRetryCount ?? 2);
   const maxWorksToCheck = Number(returnVisitConfig.maxWorksToCheck ?? 3);
   const pageLoadRetryCount = Number(returnVisitConfig.pageLoadRetryCount ?? 1);
@@ -127,7 +124,6 @@ async function main() {
   }
 
   const allTasks = listReturnVisitExecuteTasks({
-    limit: maxItems,
     maxRetryCount,
   });
 

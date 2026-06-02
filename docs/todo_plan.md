@@ -717,19 +717,16 @@ interaction_events.scanned_at >= 当前时间 - --days
 
 但不是只能读取 `new`。
 
-可以通过参数覆盖状态、来源事件数、时间窗口和本轮处理条数：
+可以通过参数覆盖状态：
 
 ```bash
-npm run return-visit:prepare -- --event-status new --event-limit 200 --days 7 --max-items 5
+npm run return-visit:prepare -- --event-status new
 ```
 
 或通过配置覆盖：
 
 ```text
 returnVisit.eventSourceStatus
-returnVisit.taskEventLimit
-returnVisit.sourceDays
-returnVisit.prepareMaxItems
 ```
 
 只处理关系为：
@@ -762,7 +759,6 @@ identity_key
 ```text
 return-visit:prepare 创建或更新回访任务后，不会更新源 interaction_events 的 status。
 重复运行时靠 return_visit_tasks.identity_key 合并任务。
-待回访用户必须从数据库查询，且来源事件与实际处理任务都必须同时受条数和过去几天的条件约束。
 ```
 
 ---
@@ -887,6 +883,5 @@ skills/creator-interaction-executor/SKILL.md
 8. 回访任务由 `return-visit:prepare` 创建或更新。
 9. `comments:prepare` 不更新 `interaction_events.status`。
 10. `return-visit:prepare` 默认只读取 `new`，但可通过 `--event-status` 或配置覆盖。
-11. 明确回访时，`return-visit:prepare` 必须受 `--days` / `returnVisit.sourceDays` 和 `--max-items` / `returnVisit.prepareMaxItems` 约束。
 12. 不要把 `newInBatch` 理解为新入库数量。
 13. 不要把 `seenItemKeys` 写成每轮去重，它是本次扫描级别去重。

@@ -163,7 +163,7 @@ function getTaskRowByTaskId(taskId) {
   return db.prepare('SELECT * FROM return_visit_tasks WHERE task_id = ?').get(taskId);
 }
 
-function getSourceEvents({ limit = 500, status = 'new', days = null } = {}) {
+function getSourceEvents({ status = 'new' } = {}) {
   const db = getDb();
   const params = [];
   let sql = "SELECT * FROM interaction_events WHERE event_type IN ('like','comment')";
@@ -171,26 +171,18 @@ function getSourceEvents({ limit = 500, status = 'new', days = null } = {}) {
     sql += ' AND status = ?';
     params.push(status);
   }
-  if (Number(days) > 0) {
-    const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
-    sql += ' AND scanned_at >= ?';
-    params.push(since);
-  }
-  sql += ' ORDER BY created_at DESC LIMIT ?';
-  params.push(limit);
+  sql += ' ORDER BY created_at DESC';
   return db.prepare(sql).all(...params);
 }
 
 export function createOrUpdateReturnVisitTasksFromEvents(options = {}) {
   const {
-    limit = 500,
     status = 'new',
-    days = null,
   } = options;
 
   const db = getDb();
   const now = new Date().toISOString();
-  const events = getSourceEvents({ limit, status, days });
+  const events = getSourceEvents({ status });
   let inserted = 0;
   let enriched = 0;
   let skipped = 0;
@@ -404,23 +396,17 @@ export function createOrUpdateReturnVisitTasksFromItems(items = []) {
   };
 }
 
-function listTasksByStatuses(statuses, { limit = 20, maxRetryCount = 2, days = null } = {}) {
+function listTasksByStatuses(statuses, { maxRetryCount = 2 } = {}) {
   if (!Array.isArray(statuses) || statuses.length === 0) return [];
   const db = getDb();
   const placeholders = statuses.map(() => '?').join(',');
   const params = [...statuses, maxRetryCount];
-  let sql = `
+  const sql = `
     SELECT * FROM return_visit_tasks
     WHERE status IN (${placeholders})
       AND retry_count <= ?
+    ORDER BY updated_at ASC
   `;
-  if (Number(days) > 0) {
-    const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
-    sql += ' AND updated_at >= ?';
-    params.push(since);
-  }
-  sql += ' ORDER BY updated_at ASC LIMIT ?';
-  params.push(limit);
   const rows = db.prepare(sql).all(...params);
   return rows.map(mapRowToTask);
 }

@@ -21,10 +21,7 @@ function parseArgs(argv) {
     json: false,
     keepOpen: false,
     headless: false,
-    maxItems: null,
-    eventLimit: null,
     eventStatus: null,
-    days: null,
     itemsFile: '',
   };
 
@@ -33,14 +30,8 @@ function parseArgs(argv) {
     if (arg === '--json') args.json = true;
     else if (arg === '--keep-open') args.keepOpen = true;
     else if (arg === '--headless') args.headless = true;
-    else if (arg === '--max-items' && i + 1 < argv.length) args.maxItems = Math.max(1, parseInt(argv[++i], 10) || 1);
-    else if (arg === '--event-limit' && i + 1 < argv.length) args.eventLimit = Math.max(1, parseInt(argv[++i], 10) || 1);
     else if (arg === '--event-status' && i + 1 < argv.length) args.eventStatus = String(argv[++i] || '').trim() || null;
     else if (arg === '--items-file' && i + 1 < argv.length) args.itemsFile = String(argv[++i] || '').trim();
-    else if (arg === '--days' && i + 1 < argv.length) {
-      const n = parseInt(argv[++i], 10);
-      args.days = Number.isFinite(n) && n > 0 ? n : null;
-    }
   }
 
   return args;
@@ -66,10 +57,7 @@ async function main() {
   const config = loadConfig();
   const returnVisitConfig = config.returnVisit || {};
 
-  const maxItems = args.maxItems || returnVisitConfig.prepareMaxItems || 20;
-  const eventLimit = args.eventLimit || returnVisitConfig.taskEventLimit || 500;
   const eventStatus = args.eventStatus || returnVisitConfig.eventSourceStatus || 'new';
-  const sourceDays = args.days || Number(returnVisitConfig.sourceDays) || 7;
   const maxRetryCount = Number(returnVisitConfig.maxRetryCount ?? 2);
   const maxWorksToCheck = Number(returnVisitConfig.maxWorksToCheck ?? 3);
   const pageLoadRetryCount = Number(returnVisitConfig.pageLoadRetryCount ?? 1);
@@ -82,9 +70,7 @@ async function main() {
       sourceSummary = createOrUpdateReturnVisitTasksFromItems(items);
     } else {
       sourceSummary = createOrUpdateReturnVisitTasksFromEvents({
-        limit: eventLimit,
         status: eventStatus,
-        days: sourceDays,
       });
     }
   } catch (err) {
@@ -96,12 +82,10 @@ async function main() {
   }
 
   const tasks = listReturnVisitPrepareTasks({
-    limit: maxItems,
     maxRetryCount,
-    days: sourceDays,
   });
 
-  log(args.json, `[return-visit:prepare] sourced ${args.itemsFile ? 'json users' : 'events'}: ${sourceSummary.totalEvents ?? sourceSummary.totalItems}, inserted=${sourceSummary.inserted}, enriched=${sourceSummary.enriched}, skipped=${sourceSummary.skipped}${sourceDays ? `, days=${sourceDays}` : ''}`);
+  log(args.json, `[return-visit:prepare] sourced ${args.itemsFile ? 'json users' : 'events'}: ${sourceSummary.totalEvents ?? sourceSummary.totalItems}, inserted=${sourceSummary.inserted}, enriched=${sourceSummary.enriched}, skipped=${sourceSummary.skipped}`);
   log(args.json, `[return-visit:prepare] loaded pending tasks: ${tasks.length}`);
 
   if (tasks.length === 0) {

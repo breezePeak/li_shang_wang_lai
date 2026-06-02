@@ -23,10 +23,6 @@ export const DEFAULTS = {
   returnVisit: {
     enabled: true,
     eventSourceStatus: 'new',
-    sourceDays: 7,
-    taskEventLimit: 500,
-    prepareMaxItems: 20,
-    executeMaxItems: 20,
     maxWorksToCheck: 3,
     maxRetryCount: 2,
     maxConsecutiveFailures: 3,

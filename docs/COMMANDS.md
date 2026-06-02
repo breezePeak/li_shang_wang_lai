@@ -187,20 +187,17 @@ npm run comments:execute-all -- --items-file data/pending-replies/pending-commen
 ## 7. return-visit:prepare
 
 ```bash
-npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json --days 7 --max-items 5 --json
+npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json --json
 ```
 
 源文件：`src/cli/execute-return-visit-prepare.mjs`
 
-优先消费 `interactions:scan -- --generate-visit-json` 生成的待回访 JSON，创建或更新待回访用户任务，再从符合时间窗口的回访任务中取本轮处理对象，进入用户主页和作品页采集上下文，生成回访评论并写入数据库。该命令不会点赞，也不会发表评论。
+优先消费 `interactions:scan -- --generate-visit-json` 生成的待回访 JSON，创建或更新待回访用户任务，再读取所有待回访任务，进入用户主页和作品页采集上下文，生成回访评论并写入数据库。该命令不会点赞，也不会发表评论。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--max-items` | 配置 `returnVisit.prepareMaxItems` 或 `20` | 本轮最多准备任务数 |
 | `--items-file` | `''` | 待回访 JSON 文件路径，推荐主流程使用 |
-| `--event-limit` | 配置 `returnVisit.taskEventLimit` 或 `500` | 从互动事件读取的上限 |
 | `--event-status` | 配置 `returnVisit.eventSourceStatus` 或 `new` | 用于创建任务的事件状态 |
-| `--days` | 配置 `returnVisit.sourceDays` 或 `7` | 只从过去 N 天扫描到的互动事件中获取待回访用户 |
 | `--keep-open` | `false` | 复用并保留浏览器 |
 | `--headless` | `false` | 无头运行 |
 | `--json` | `false` | JSON 输出 |
@@ -210,7 +207,6 @@ npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-
 ```bash
 npm run return-visit:execute
 npm run return-visit:execute -- --execute
-npm run return-visit:execute -- --max-items 3 --execute
 ```
 
 源文件：`src/cli/execute-return-visit.mjs`
@@ -219,7 +215,6 @@ npm run return-visit:execute -- --max-items 3 --execute
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--max-items` | 配置 `returnVisit.executeMaxItems` 或 `20` | 本轮最多执行任务数 |
 | `--execute` | `false` | 真实点赞并评论 |
 | `--dry-run` | `true` | 只预演，不真实点赞或评论 |
 | `--watch-policy` | 配置 `returnVisit.watchPolicy` 或 `seconds` | 看视频策略 |
