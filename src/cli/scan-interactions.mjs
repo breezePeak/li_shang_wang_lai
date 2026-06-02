@@ -771,13 +771,14 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
         const isOlderThanWindow = !!(notificationDays && parsedNotificationTime && new Date(parsedNotificationTime).getTime() < Date.now() - notificationDays * 86400000);
         if (isRelevantEvent && notificationDays) {
           if (isOlderThanWindow) {
+            const parsedStr = parsedNotificationTime ? new Date(parsedNotificationTime).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '(解析失败)';
             consecutiveOldRelevantCount++;
             if (consecutiveOldRelevantCount >= 3) {
               console.error(`[scan]   连续 ${consecutiveOldRelevantCount} 条评论/点赞通知超过 ${notificationDays} 天，停止继续滚动`);
               stopDueToOldRelevant = true;
               break;
             }
-            logNotificationSkip(notificationIndex, n, `超过 ${notificationDays} 天时间窗口`, notificationDedupeKey);
+            logNotificationSkip(notificationIndex, n, `超过 ${notificationDays} 天时间窗口 (解析时间: ${parsedStr})`, notificationDedupeKey);
             continue;
           }
           consecutiveOldRelevantCount = 0;
