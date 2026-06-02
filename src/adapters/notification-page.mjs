@@ -139,6 +139,10 @@ async function hasNotificationPanel(page) {
   }).catch(() => false);
 }
 
+export async function isNotificationPanelVisible(page) {
+  return await hasNotificationPanel(page);
+}
+
 export function parseRelationLine(line) {
   if (!line) return null;
   if (line === '朋友') return 'friend';

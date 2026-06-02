@@ -330,23 +330,24 @@ async function restoreNotificationPanel(page, panelTools, panelBox) {
   } catch {}
 
   try {
-    // 轻量恢复：作品弹窗关闭后，通知面板应该还在原位（无需 page.goto 重载页面）
-    const state = await panelTools.waitForNotificationPanelStable(page);
-    if (state.networkBad) throw new Error(state.reason || '网络不好');
-    if (state.stable && !state.empty && state.panelBox) {
-      await panelTools.moveMouseIntoPanel(page, state.panelBox);
-      return state.panelBox;
+    const panelStillVisible = await panelTools.isNotificationPanelVisible(page);
+    if (panelStillVisible) {
+      const state = await panelTools.waitForNotificationPanelStable(page, { timeoutMs: 2000 });
+      if (state.stable && !state.empty && state.panelBox) {
+        await panelTools.moveMouseIntoPanel(page, state.panelBox);
+        return state.panelBox;
+      }
+      console.error('[scan] 通知面板可见但未稳定，重新打开通知面板');
+    } else {
+      console.error('[scan] 通知面板已关闭，重新打开通知面板');
     }
-    // 降级：面板丢失，做完整恢复（重新导航 + 打开面板）
-    console.error('[scan] 通知面板轻量恢复失败，降级为完整恢复');
-    await panelTools.ensureNotificationPageReady(page);
+
     const opened = await panelTools.openNotificationPanel(page);
     if (!opened) return null;
-    const fallbackState = await panelTools.waitForNotificationPanelStable(page);
-    if (fallbackState.networkBad) throw new Error(fallbackState.reason || '网络不好');
-    if (!fallbackState.stable || fallbackState.empty) return null;
-    await panelTools.moveMouseIntoPanel(page, fallbackState.panelBox || panelBox);
-    return fallbackState.panelBox || panelBox;
+    const reopenedState = await panelTools.waitForNotificationPanelStable(page);
+    if (!reopenedState.stable || reopenedState.empty) return null;
+    await panelTools.moveMouseIntoPanel(page, reopenedState.panelBox || panelBox);
+    return reopenedState.panelBox || panelBox;
   } catch (err) {
     console.error(`[scan] 通知面板恢复失败: ${err.message}`);
     return null;
@@ -571,7 +572,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   const {
     ensureNotificationPageReady, openNotificationPanel, closeNotificationPanel,
     extractVisibleNotifications, scrollPanelDown,
-    waitForNotificationPanelStable, moveMouseIntoPanel,
+    waitForNotificationPanelStable, moveMouseIntoPanel, isNotificationPanelVisible,
     clickNotificationThumbnail,
   } = await import('../adapters/notification-page.mjs');
 
@@ -580,6 +581,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     openNotificationPanel,
     waitForNotificationPanelStable,
     moveMouseIntoPanel,
+    isNotificationPanelVisible,
   };
 
   try {
