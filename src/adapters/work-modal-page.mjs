@@ -456,7 +456,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
       }
     }
 
-    const commentVisible = await page.evaluate(() => {
+    const isCommentAreaVisible = async () => await page.evaluate(() => {
       const commentArea = document.querySelector('.comment-mainContent');
       if (commentArea) {
         const rect = commentArea.getBoundingClientRect();
@@ -465,35 +465,55 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
       return false;
     });
 
-    if (!commentVisible) {
-      console.error('[work-modal] 评论区未展开，点击评论按钮...');
-      const clicked = await page.evaluate(() => {
-        const commentIcon = document.querySelector('[data-e2e="feed-comment-icon"]');
-        if (!commentIcon) return false;
-        const rect = commentIcon.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
-          commentIcon.click();
-          return true;
-        }
-        return false;
-      });
-      if (clicked) {
-        await page.waitForTimeout(2000);
-      } else {
-        console.error('[work-modal] 未找到评论按钮，尝试点击评论区容器...');
-        const containerClicked = await page.evaluate(() => {
-          const containers = document.querySelectorAll('[data-e2e="feed-comment-icon"], [class*="comment-icon"], [class*="comment-btn"]');
-          for (const el of containers) {
+    async function clickCommentOpenControl() {
+      return await page.evaluate(() => {
+        const selectors = [
+          '[data-e2e="feed-comment-icon"]',
+          '[data-e2e="video-comment"]',
+          '[data-e2e="comment-icon"]',
+          '[aria-label*="评论"]',
+          '[title*="评论"]',
+          '[class*="comment-icon"]',
+          '[class*="comment-btn"]',
+        ];
+        for (const selector of selectors) {
+          for (const el of document.querySelectorAll(selector)) {
             const rect = el.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) { el.click(); return true; }
+            if (rect.width > 0 && rect.height > 0) {
+              el.click();
+              return { clicked: true, selector };
+            }
           }
-          return false;
-        });
-        if (containerClicked) await page.waitForTimeout(2000);
+        }
+        return { clicked: false };
+      });
+    }
+
+    if (!(await isCommentAreaVisible())) {
+      console.error('[work-modal] 评论区未展开，点击评论按钮...');
+      let opened = false;
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        const clicked = await clickCommentOpenControl();
+        if (!clicked.clicked) {
+          console.error(`[work-modal] 未找到评论按钮 (attempt=${attempt})`);
+        } else {
+          console.error(`[work-modal] 已点击评论按钮 ${clicked.selector} (attempt=${attempt})`);
+        }
+
+        const deadline = Date.now() + (attempt < 3 ? 2500 : 5000);
+        while (Date.now() < deadline) {
+          if (await isCommentAreaVisible()) {
+            opened = true;
+            break;
+          }
+          await page.waitForTimeout(500);
+        }
+        if (opened) break;
+        await page.waitForTimeout(700 * attempt);
       }
     }
 
-    await page.waitForSelector('.comment-mainContent', { state: 'visible', timeout: 5000 });
+    await page.waitForSelector('.comment-mainContent', { state: 'visible', timeout: 10000 });
     await page.evaluate(MATCH_COMMENT_INNER);
     return success({ modalVisible: true });
   } catch (err) {

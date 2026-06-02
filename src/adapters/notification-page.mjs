@@ -77,11 +77,16 @@ export async function openNotificationPanel(page) {
     const bell = page.locator('svg.LtuRRess').first();
     try {
       await bell.waitFor({ state: 'attached', timeout: 5000 });
-      await bell.hover({ timeout: 3000 });
-      const found = await waitForPanelContent(page);
-      if (found) {
-        console.error('[notify-page] ✅ hover 铃铛触发了通知面板');
-        return true;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await bell.hover({ timeout: 3000 });
+        const found = await waitForPanelContent(page, { maxWait: attempt === 1 ? 8000 : 12000 });
+        if (found) {
+          console.error(`[notify-page] ✅ hover 铃铛触发了通知面板 (attempt=${attempt})`);
+          return true;
+        }
+        console.error(`[notify-page] hover 铃铛后通知面板未出现，重试 ${attempt}/3`);
+        await page.mouse.move(0, 0).catch(() => {});
+        await page.waitForTimeout(800 * attempt);
       }
     } catch {
       console.error('[notify-page] hover 铃铛失败');
@@ -89,11 +94,15 @@ export async function openNotificationPanel(page) {
 
     try {
       const bellBtn = page.locator('div[data-e2e]:has(svg.LtuRRess)').first();
-      await bellBtn.click({ timeout: 5000 });
-      const found = await waitForPanelContent(page);
-      if (found) {
-        console.error('[notify-page] ✅ click data-e2e 容器触发了通知面板');
-        return true;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await bellBtn.click({ timeout: 5000 });
+        const found = await waitForPanelContent(page, { maxWait: attempt === 1 ? 6000 : 10000 });
+        if (found) {
+          console.error(`[notify-page] ✅ click data-e2e 容器触发了通知面板 (attempt=${attempt})`);
+          return true;
+        }
+        console.error(`[notify-page] click 容器后通知面板未出现，重试 ${attempt}/3`);
+        await page.waitForTimeout(800 * attempt);
       }
     } catch {
       console.error('[notify-page] click 容器失败');

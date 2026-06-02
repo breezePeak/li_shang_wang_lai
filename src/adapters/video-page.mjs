@@ -1062,6 +1062,27 @@ export async function extractVideoCommentContext(page) {
 
 async function ensureCommentPanelOpen(page) {
   try {
+    const isOpen = async () => await page.evaluate(() => {
+      const selectors = [
+        '.comment-mainContent',
+        '[class*="comment-main"]',
+        '[class*="comment-list"]',
+        '[class*="comment-container"]',
+        '[contenteditable="true"][data-placeholder*="评"]',
+        '[contenteditable="true"][placeholder*="评"]',
+        'textarea[placeholder*="评"]',
+      ];
+      for (const selector of selectors) {
+        for (const el of document.querySelectorAll(selector)) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 30 && rect.height > 20) return true;
+        }
+      }
+      return false;
+    }).catch(() => false);
+
+    if (await isOpen()) return true;
+
     const commentBtns = [
       page.locator('.t5VMknM2 .MinpposV > .AOWKbsTg').nth(1), // action bar 第二个
       page.locator('[data-e2e="video-comment"]'),
@@ -1070,13 +1091,20 @@ async function ensureCommentPanelOpen(page) {
       page.locator('[title*="评论"]'),
       page.locator('svg').filter({ has: page.locator('path[d*="comment"]') }).locator('..')
     ];
-    for (const btn of commentBtns) {
-      if (await btn.count() > 0 && await btn.first().isVisible()) {
-        await btn.first().click();
-        console.error('[video-page] 已点击评论按钮，尝试打开评论面板');
-        await page.waitForTimeout(1500);
-        return true;
+
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      for (const btn of commentBtns) {
+        if (await btn.count() > 0 && await btn.first().isVisible()) {
+          await btn.first().click();
+          console.error(`[video-page] 已点击评论按钮，尝试打开评论面板 (attempt=${attempt})`);
+          const deadline = Date.now() + (attempt < 3 ? 2500 : 5000);
+          while (Date.now() < deadline) {
+            if (await isOpen()) return true;
+            await page.waitForTimeout(500);
+          }
+        }
       }
+      await page.waitForTimeout(700 * attempt);
     }
   } catch (err) {
     console.error(`[video-page] 展开评论面板异常: ${err.message}`);
