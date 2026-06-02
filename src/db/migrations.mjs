@@ -37,7 +37,7 @@ export function runMigrations(dbPath = DB_PATH) {
       target_work_url TEXT,
       dedup_confidence TEXT,
       profile_resolution_status TEXT,
-      status TEXT NOT NULL DEFAULT 'new',
+      status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','replied','succeeded','blocked','planned')),
       scanned_at TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

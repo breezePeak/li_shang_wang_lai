@@ -316,7 +316,7 @@ async function main() {
   if (args.json) {
     printJsonResult('comments:execute', { results }, { succeeded, failed, skipped, execute: args.execute, mode: 'work_comment_json' });
   } else {
-    console.log(`[comments:execute] mode=work_comment_json 成功 ${succeeded} 条，失败 ${failed + skipped} 条${skippedLog}，真实执行=${args.execute}`);
+    console.log(`[comments:execute] mode=work_comment_json 成功 ${succeeded} 条，失败 ${failed} 条${skippedLog}，真实执行=${args.execute}`);
     for (const item of results) {
       const statusTag = item.status === 'skipped_empty_reply' ? ' [empty-reply]' : '';
       console.log(`  [comment#${item.commentId || '-'}] ${item.ok ? item.status : `failed ${item.error}`}${statusTag}`);

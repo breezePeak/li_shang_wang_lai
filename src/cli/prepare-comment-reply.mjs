@@ -209,7 +209,6 @@ function prepareWorkCommentOne(item) {
     return failResult(item, RESULT_CODES.DUPLICATE_ACTION, `评论 #${item.commentId} 已回复或已发送，不能重复准备`);
   }
 
-  const reason = JSON.stringify({ preparedAt: new Date().toISOString(), source: 'comments:prepare-json' });
   saveReplyText(item.commentId, item.replyText.trim());
 
   return {
