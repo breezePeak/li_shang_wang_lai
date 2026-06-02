@@ -36,6 +36,7 @@
     "notify:inspect": "node ./src/cli/inspect-notifications.mjs",
     "debug:like-dom": "node ./scripts/debug-like-dom.mjs",
     "debug:like-state": "node ./scripts/debug-like-state.mjs",
+    "debug:open": "node ./src/cli/open-page.mjs",
     "icon:profile": "node ./.sisyphus/icon-profile.mjs",
     "dev:inspect-page": "node ./src/cli/dev-inspect-page.mjs",
     "history": "node ./src/cli/show-history.mjs",
