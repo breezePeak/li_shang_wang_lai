@@ -561,7 +561,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   let totalProfileUnresolved = 0;
   let parseFailedCount = 0;
   let scrollRounds = 0;
-  const maxScrolls = 20;
+
   const allEvents = [];
   const ambiguousEvents = [];
   const failedEvents = [];
@@ -574,7 +574,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
 
   let debugDumpDone = false;
 
-  while (scrollRounds < maxScrolls) {
+  while (true) {
     const batchResult = await extractVisibleNotifications(page);
     if (!batchResult || !batchResult.ok) {
       if (scrollRounds === 0) {
