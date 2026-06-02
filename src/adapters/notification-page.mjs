@@ -187,11 +187,6 @@ export async function openNotificationPanel(page) {
     let attempt = 0;
     while (Date.now() < deadline) {
       attempt++;
-      if (await hasNotificationPanel(page)) {
-        console.error(`[notify-page] ✅ 通知面板已可见 (attempt=${attempt})`);
-        return true;
-      }
-
       const bell = page.locator('svg.LtuRRess').first();
       try {
         if (await bell.count()) {
