@@ -13,6 +13,117 @@ import { normalizeDouyinUrl as _norm } from '../utils/douyin-url.mjs';
 export const normalizeDouyinUrl = _norm;
 
 const SELF_URL = 'https://www.douyin.com/user/self';
+const REQUEST_TRACKER = Symbol.for('lishangwanglai.notificationRequestTracker');
+const NETWORK_WAIT_TIMEOUT_MS = 30000;
+const NETWORK_IDLE_MS = 1200;
+
+function shouldTrackRequest(request) {
+  const url = request.url ? request.url() : '';
+  if (!url || url.startsWith('data:') || url.startsWith('blob:')) return false;
+  const type = request.resourceType ? request.resourceType() : '';
+  return !['image', 'media', 'font'].includes(type);
+}
+
+function ensureRequestTracker(page) {
+  if (page[REQUEST_TRACKER]) return page[REQUEST_TRACKER];
+
+  const tracker = {
+    inflight: new Map(),
+    lastActivityAt: Date.now(),
+  };
+
+  const onRequest = (request) => {
+    if (!shouldTrackRequest(request)) return;
+    tracker.inflight.set(request, { url: request.url(), type: request.resourceType?.() || 'unknown', startedAt: Date.now() });
+    tracker.lastActivityAt = Date.now();
+  };
+  const onDone = (request) => {
+    if (!tracker.inflight.has(request)) return;
+    tracker.inflight.delete(request);
+    tracker.lastActivityAt = Date.now();
+  };
+
+  page.on('request', onRequest);
+  page.on('requestfinished', onDone);
+  page.on('requestfailed', onDone);
+
+  tracker.dispose = () => {
+    page.off('request', onRequest);
+    page.off('requestfinished', onDone);
+    page.off('requestfailed', onDone);
+  };
+
+  page[REQUEST_TRACKER] = tracker;
+  return tracker;
+}
+
+function getRequestTrackerSnapshot(page) {
+  const tracker = ensureRequestTracker(page);
+  const now = Date.now();
+  return {
+    inflightCount: tracker.inflight.size,
+    idleForMs: now - tracker.lastActivityAt,
+    pendingRequests: Array.from(tracker.inflight.values()).slice(0, 5).map(item => ({
+      type: item.type,
+      ageMs: now - item.startedAt,
+      url: item.url.slice(0, 160),
+    })),
+  };
+}
+
+async function waitForNetworkSettledOrTimeout(page, {
+  timeoutMs = NETWORK_WAIT_TIMEOUT_MS,
+  idleMs = NETWORK_IDLE_MS,
+  label = '页面',
+} = {}) {
+  ensureRequestTracker(page);
+  const startedAt = Date.now();
+  let lastInflightCount = -1;
+  while (Date.now() - startedAt < timeoutMs) {
+    const snapshot = getRequestTrackerSnapshot(page);
+    if (snapshot.inflightCount !== lastInflightCount) {
+      console.error(`[notify-page] ${label}请求中=${snapshot.inflightCount}`);
+      lastInflightCount = snapshot.inflightCount;
+    }
+    if (snapshot.inflightCount === 0 && snapshot.idleForMs >= idleMs) {
+      return { ok: true, snapshot };
+    }
+    await page.waitForTimeout(300);
+  }
+
+  const snapshot = getRequestTrackerSnapshot(page);
+  const pending = snapshot.pendingRequests
+    .map(item => `${item.type}:${item.ageMs}ms:${item.url}`)
+    .join(' | ');
+  throw new Error(`网络不好，${label}等待超过30s${pending ? ` pending=${pending}` : ''}`);
+}
+
+async function hasNotificationBell(page) {
+  return await page.evaluate(() => {
+    return !!document.querySelector('svg.LtuRRess') ||
+      !!document.querySelector('[data-e2e*="notify"]') ||
+      !!document.querySelector('[data-e2e*="message"]');
+  }).catch(() => false);
+}
+
+async function hasNotificationPanel(page) {
+  return await page.evaluate(() => {
+    for (const el of document.querySelectorAll('*')) {
+      const t = (el.innerText || '').trim();
+      if (t.startsWith('互动消息') || t.startsWith('全部消息')) {
+        const r = el.getBoundingClientRect();
+        if (r.width < 100 || r.height < 30) continue;
+        let c = el.parentElement;
+        for (let i = 0; i < 6 && c && c !== document.body; i++) {
+          const cr = c.getBoundingClientRect();
+          if (cr.width > 250 && cr.height > 300) return true;
+          c = c.parentElement;
+        }
+      }
+    }
+    return false;
+  }).catch(() => false);
+}
 
 export function parseRelationLine(line) {
   if (!line) return null;
@@ -50,24 +161,21 @@ export function generateNotificationItemKey(d) {
 }
 
 export async function ensureNotificationPageReady(page) {
+  ensureRequestTracker(page);
   await page.goto(SELF_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
   console.error('[notify-page] 等待页面加载...');
-  const maxWait = 15000;
-  const pollInterval = 1000;
   const start = Date.now();
-  while (Date.now() - start < maxWait) {
-    const found = await page.evaluate(() => {
-      return !!document.querySelector('svg.LtuRRess') ||
-        !!document.querySelector('[data-e2e*="notify"]') ||
-        !!document.querySelector('[data-e2e*="message"]');
-    }).catch(() => false);
+  while (Date.now() - start < NETWORK_WAIT_TIMEOUT_MS) {
+    await waitForNetworkSettledOrTimeout(page, { timeoutMs: Math.max(1000, NETWORK_WAIT_TIMEOUT_MS - (Date.now() - start)), label: '通知页' });
+    const found = await hasNotificationBell(page);
     if (found) {
       console.error(`[notify-page] 页面就绪 (${((Date.now() - start) / 1000).toFixed(1)}s)`);
       return;
     }
-    await page.waitForTimeout(pollInterval);
+    console.error('[notify-page] 页面请求已停，但通知铃铛未出现，准备重试检查...');
+    await page.waitForTimeout(500);
   }
-  console.error('[notify-page] 页面就绪（超时降级）');
+  throw new Error('网络不好，通知页等待超过30s且通知铃铛未出现');
 }
 
 export async function openNotificationPanel(page) {
@@ -137,6 +245,7 @@ export async function openNotificationPanel(page) {
     console.error('[notify-page] 所有策略均未触发通知面板');
     return false;
   } catch (err) {
+    if ((err.message || '').includes('网络不好')) throw err;
     console.error('[notify-page] 异常:', err.message);
     return false;
   }
@@ -145,37 +254,31 @@ export async function openNotificationPanel(page) {
 async function waitForPanelContent(page, { maxWait = 15000 } = {}) {
   const deadline = Date.now() + maxWait;
   while (Date.now() < deadline) {
-    const result = await page.evaluate(() => {
-      for (const el of document.querySelectorAll('*')) {
-        const t = (el.innerText || '').trim();
-        if (t.startsWith('互动消息') || t.startsWith('全部消息')) {
-          const r = el.getBoundingClientRect();
-          if (r.width < 100 || r.height < 30) continue;
-          let c = el.parentElement;
-          for (let i = 0; i < 6 && c && c !== document.body; i++) {
-            const cr = c.getBoundingClientRect();
-            if (cr.width > 250 && cr.height > 300) return { found: true };
-            c = c.parentElement;
-          }
-        }
-      }
-      return { found: false };
-    });
-    if (result.found) return true;
+    if (await hasNotificationPanel(page)) return true;
+    const snapshot = getRequestTrackerSnapshot(page);
+    if (snapshot.inflightCount === 0 && snapshot.idleForMs >= NETWORK_IDLE_MS) return false;
     await page.waitForTimeout(500);
+  }
+  const snapshot = getRequestTrackerSnapshot(page);
+  if (snapshot.inflightCount > 0) {
+    const pending = snapshot.pendingRequests
+      .map(item => `${item.type}:${item.ageMs}ms:${item.url}`)
+      .join(' | ');
+    throw new Error(`网络不好，通知面板等待超过${Math.round(maxWait / 1000)}s${pending ? ` pending=${pending}` : ''}`);
   }
   return false;
 }
 
 export async function waitForNotificationPanelStable(page) {
   console.error('[notify-page] 等待通知面板稳定...');
-  const maxWait = 8000;
+  const maxWait = NETWORK_WAIT_TIMEOUT_MS;
   const deadline = Date.now() + maxWait;
   let prevInfo = '';
-  let prevCount = -1;
   let stableRounds = 0;
+  let settled = false;
 
   while (Date.now() < deadline) {
+    const snapshot = getRequestTrackerSnapshot(page);
     const info = await page.evaluate(() => {
       const panel = (function findNotificationPanel() {
         for (const el of document.querySelectorAll('*')) {
@@ -205,6 +308,9 @@ export async function waitForNotificationPanelStable(page) {
     });
 
     if (!info.found) {
+      if (snapshot.inflightCount === 0 && snapshot.idleForMs >= NETWORK_IDLE_MS) {
+        return { stable: false, empty: false, panelBox: null, reason: 'panel-missing-after-network-idle' };
+      }
       await page.waitForTimeout(500);
       continue;
     }
@@ -212,8 +318,9 @@ export async function waitForNotificationPanelStable(page) {
     const currentInfo = `${info.textLen}:${info.visibleCount}`;
     if (currentInfo === prevInfo) {
       stableRounds++;
-      if (stableRounds >= 2) {
+      if (stableRounds >= 2 && snapshot.inflightCount === 0 && snapshot.idleForMs >= NETWORK_IDLE_MS) {
         console.error('[notify-page] 通知面板已稳定');
+        settled = true;
         break;
       }
     } else {
@@ -248,6 +355,43 @@ export async function waitForNotificationPanelStable(page) {
     const hasAction = actionPatterns.some(p => text.includes(p));
     return { panelFound: true, empty: hasEmpty && !hasAction };
   });
+
+  if (!settled) {
+    const snapshot = getRequestTrackerSnapshot(page);
+    const pending = snapshot.pendingRequests
+      .map(item => `${item.type}:${item.ageMs}ms:${item.url}`)
+      .join(' | ');
+    return {
+      stable: false,
+      empty: false,
+      panelBox,
+      networkBad: snapshot.inflightCount > 0,
+      reason: snapshot.inflightCount > 0
+        ? `网络不好，通知面板等待超过30s${pending ? ` pending=${pending}` : ''}`
+        : '通知面板请求已停，但内容未稳定',
+    };
+  }
+
+  if (!panelBox) {
+    const snapshot = getRequestTrackerSnapshot(page);
+    if (snapshot.inflightCount === 0 && snapshot.idleForMs >= NETWORK_IDLE_MS) {
+      return { stable: false, empty: false, panelBox: null, reason: 'panel-missing-after-network-idle' };
+    }
+  }
+
+  if (!panelBox) {
+    const snapshot = getRequestTrackerSnapshot(page);
+    const pending = snapshot.pendingRequests
+      .map(item => `${item.type}:${item.ageMs}ms:${item.url}`)
+      .join(' | ');
+    return {
+      stable: false,
+      empty: false,
+      panelBox: null,
+      networkBad: true,
+      reason: `网络不好，通知面板等待超过30s${pending ? ` pending=${pending}` : ''}`,
+    };
+  }
 
   return { stable: true, empty: emptyState.empty, panelBox };
 }

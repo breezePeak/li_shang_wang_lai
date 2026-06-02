@@ -325,6 +325,7 @@ async function restoreNotificationPanel(page, panelTools, panelBox) {
   try {
     // 轻量恢复：作品弹窗关闭后，通知面板应该还在原位（无需 page.goto 重载页面）
     const state = await panelTools.waitForNotificationPanelStable(page);
+    if (state.networkBad) throw new Error(state.reason || '网络不好');
     if (state.stable && !state.empty && state.panelBox) {
       await panelTools.moveMouseIntoPanel(page, state.panelBox);
       return state.panelBox;
@@ -335,6 +336,7 @@ async function restoreNotificationPanel(page, panelTools, panelBox) {
     const opened = await panelTools.openNotificationPanel(page);
     if (!opened) return null;
     const fallbackState = await panelTools.waitForNotificationPanelStable(page);
+    if (fallbackState.networkBad) throw new Error(fallbackState.reason || '网络不好');
     if (!fallbackState.stable || fallbackState.empty) return null;
     await panelTools.moveMouseIntoPanel(page, fallbackState.panelBox || panelBox);
     return fallbackState.panelBox || panelBox;
@@ -572,6 +574,13 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   try {
     await ensureNotificationPageReady(page);
   } catch (err) {
+    if ((err.message || '').includes('网络不好')) {
+      return blocking(
+        RESULT_CODES.BLOCKED,
+        err.message,
+        { recoverable: true, data: { step: 'notify-navigate' } }
+      );
+    }
     return blocking(
       RESULT_CODES.NAVIGATION_TIMEOUT,
       `通知页面导航超时: ${err.message}`,
@@ -579,7 +588,19 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     );
   }
 
-  const opened = await openNotificationPanel(page);
+  let opened = false;
+  try {
+    opened = await openNotificationPanel(page);
+  } catch (err) {
+    if ((err.message || '').includes('网络不好')) {
+      return blocking(
+        RESULT_CODES.BLOCKED,
+        err.message,
+        { recoverable: true, data: { step: 'notify-open-panel' } }
+      );
+    }
+    throw err;
+  }
   if (!opened) {
     return blocking(
       RESULT_CODES.NOTIFICATION_PANEL_NOT_FOUND,
@@ -589,6 +610,13 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   }
 
   const panelState = await waitForNotificationPanelStable(page);
+  if (panelState.networkBad) {
+    return blocking(
+      RESULT_CODES.BLOCKED,
+      panelState.reason || '网络不好',
+      { recoverable: true, data: { step: 'notify-panel-unstable' } }
+    );
+  }
   const { stable, empty } = panelState;
   let panelBox = panelState.panelBox;
   if (!stable || empty) {
