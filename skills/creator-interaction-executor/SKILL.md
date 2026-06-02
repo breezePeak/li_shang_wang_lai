@@ -126,30 +126,10 @@ npm run interactions:scan -- --type all --days 7 --max-count 100 --generate-visi
 2. 准备回访任务：
 
 ```bash
-npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json --days 7 --max-items 5
+npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json
 ```
 
 该命令消费采集阶段生成的待回访 JSON，创建或更新回访任务，进入用户主页，采集作品内容和参考评论，生成回访评论。它不会点赞，也不会发表评论。
-
-回访准备必须同时受边界约束：
-
-```text
---days N       只读取过去 N 天扫描到的互动用户，并只处理该窗口内更新的回访任务
---event-limit  从数据库读取的来源事件上限
---max-items    本轮实际准备的待回访用户上限
-```
-
-3. 先 dry-run 检查：
-
-```bash
-npm run return-visit:execute
-```
-
-4. 真实执行点赞 + 评论：
-
-```bash
-npm run return-visit:execute -- --execute
-```
 
 ## ID 规则
 
@@ -163,5 +143,5 @@ npm run return-visit:execute -- --execute
 - 不发送空评论、广告、引流、互关、互赞、辱骂或骚扰内容。
 - 不在命令失败后继续执行后续真实动作。
 - 评论回复必须先由 `comments:prepare -- --items-file <json>` 更新为 `prepared`。
-- 回访必须先经过带边界约束的 `return-visit:prepare`，不得跳过上下文采集直接执行。
+- 回访必须先经过 `return-visit:prepare`，不得跳过上下文采集直接执行。
 - 页面未稳定、登录失效、点赞状态未知、重复执行风险或发送结果未确认时必须阻断。

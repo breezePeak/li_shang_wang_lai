@@ -36,11 +36,11 @@ npm run comments:execute-all -- --items-file data/pending-replies/pending-commen
 ```bash
 npm run interactions:scan -- --type all --days 7
 npm run interactions:scan -- --type all --days 7 --max-count 100 --generate-visit-json
-npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json --days 7 --max-items 5
+npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json
 npm run return-visit:execute -- --execute
 ```
 
-评论回复结束后只有在用户明确要求回访时，才进入回访流程。回访准备必须从数据库读取待回访用户，并同时受 `--days` 时间窗口、`--event-limit` 来源事件数和 `--max-items` 本轮处理数约束。
+评论回复结束后只有在用户明确要求回访时，才进入回访流程。回访准备从数据库读取待回访用户，完全按提供的回访 JSON 处理。
 
 ## 1. auth
 
