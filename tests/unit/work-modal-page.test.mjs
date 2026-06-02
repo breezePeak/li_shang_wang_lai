@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { extractModalIdFromUrl, parseDouyinTimeText } from '../../src/adapters/work-modal-page.mjs';
 import { checkWorkOwner } from '../../src/adapters/work-context-page.mjs';
 
@@ -74,6 +74,21 @@ describe('parseDouyinTimeText', () => {
   it('支持 刚刚', () => {
     const iso = parseDouyinTimeText('刚刚');
     expect(iso).toBeTruthy();
+  });
+
+  it('支持 星期日，并按最近一次该周几回推', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-02T12:00:00+08:00'));
+    try {
+      const iso = parseDouyinTimeText('星期日');
+      expect(iso).toBeTruthy();
+      const date = new Date(iso);
+      expect(date.getFullYear()).toBe(2026);
+      expect(date.getMonth() + 1).toBe(5);
+      expect(date.getDate()).toBe(31);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

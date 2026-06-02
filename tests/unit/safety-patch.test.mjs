@@ -56,6 +56,9 @@ describe('isRelativeTime — relative time detection', () => {
   it('should detect "前天 10:30" as relative time (day-relative)', () => {
     expect(isRelativeTime('前天 10:30')).toBe(true);
   });
+  it('should detect "星期日" as relative time (weekday-relative)', () => {
+    expect(isRelativeTime('星期日')).toBe(true);
+  });
   it('should NOT consider "05-29 12:00" as relative time', () => {
     expect(isRelativeTime('05-29 12:00')).toBe(false);
   });
@@ -75,6 +78,10 @@ describe('isRelativeTime — relative time detection', () => {
   it('normalizeTimeText should convert "前天 10:30" to absolute date', () => {
     const result = normalizeTimeText('前天 10:30');
     expect(result).toMatch(/^\d{4}-\d{2}-\d{2} 10:30$/);
+  });
+  it('normalizeTimeText should convert "星期日" to absolute date', () => {
+    const result = normalizeTimeText('星期日');
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
   it('normalizeTimeText should pass through stable times unchanged', () => {
     expect(normalizeTimeText('05-29 12:00')).toBe('05-29 12:00');

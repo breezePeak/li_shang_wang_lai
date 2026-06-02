@@ -152,6 +152,15 @@ export function parseDouyinTimeText(text) {
   if (!text) return null;
   const now = new Date();
   const trimmed = String(text || '').trim();
+  const weekdayMatch = trimmed.match(/^(?:星期|周)([一二三四五六日天])$/);
+  if (weekdayMatch) {
+    const weekdayMap = { '日': 0, '天': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6 };
+    const targetDay = weekdayMap[weekdayMatch[1]];
+    const currentDay = now.getDay();
+    let diffDays = (currentDay - targetDay + 7) % 7;
+    if (diffDays === 0) diffDays = 7;
+    return new Date(now.getTime() - diffDays * 86400000).toISOString();
+  }
   const dayWithClock = trimmed.match(/^(昨天|前天)\s*(\d{1,2}):(\d{2})$/);
   if (dayWithClock) {
     const days = dayWithClock[1] === '昨天' ? 1 : 2;

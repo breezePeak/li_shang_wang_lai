@@ -4,10 +4,11 @@ import crypto from 'crypto';
 // "昨天HH:mm" / "前天HH:mm" also drift (absolute date shifts daily).
 const RELATIVE_TIME_RE = /^(刚刚|\d+秒前|\d+分钟前|\d+小时前|\d+天前)$/;
 const DAY_RELATIVE_RE = /^(昨天|前天)\s*\d{1,2}:\d{2}$/;
+const WEEKDAY_RELATIVE_RE = /^(?:星期|周)[一二三四五六日天]$/;
 
 function isRelativeTime(text) {
   const t = (text || '').trim();
-  return RELATIVE_TIME_RE.test(t) || DAY_RELATIVE_RE.test(t);
+  return RELATIVE_TIME_RE.test(t) || DAY_RELATIVE_RE.test(t) || WEEKDAY_RELATIVE_RE.test(t);
 }
 
 /**
@@ -17,8 +18,19 @@ function isRelativeTime(text) {
  */
 export function normalizeTimeText(timeText) {
   const t = (timeText || '').trim();
-  if (!DAY_RELATIVE_RE.test(t)) return t;
+  if (!DAY_RELATIVE_RE.test(t) && !WEEKDAY_RELATIVE_RE.test(t)) return t;
   const now = new Date();
+  if (WEEKDAY_RELATIVE_RE.test(t)) {
+    const weekdayMatch = t.match(/^(?:星期|周)([一二三四五六日天])$/);
+    const weekdayMap = { '日': 0, '天': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6 };
+    const targetDay = weekdayMap[weekdayMatch[1]];
+    const currentDay = now.getDay();
+    let diffDays = (currentDay - targetDay + 7) % 7;
+    if (diffDays === 0) diffDays = 7;
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diffDays);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
   const match = t.match(/^(昨天|前天)/);
   if (!match) return t;
   const days = match[1] === '昨天' ? 1 : 2;
