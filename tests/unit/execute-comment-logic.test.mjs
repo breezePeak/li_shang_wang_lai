@@ -50,9 +50,11 @@ function setup() {
     );
     CREATE TABLE IF NOT EXISTS interaction_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      platform TEXT NOT NULL DEFAULT 'douyin',
       event_type TEXT NOT NULL,
       actor_name TEXT NOT NULL,
       comment_text TEXT,
+      raw_payload_json TEXT,
       fingerprint TEXT NOT NULL UNIQUE,
       status TEXT NOT NULL DEFAULT 'new',
       scanned_at TEXT NOT NULL,
@@ -107,6 +109,17 @@ function makeJsonFile(comments) {
   return filePath;
 }
 
+function makeWorkArrayJsonFile(comments) {
+  const filePath = join(testDir, 'test-pending-array.json');
+  const json = [{
+    workKey: 'work1',
+    work_url: 'https://douyin.com/video/1',
+    comments,
+  }];
+  writeFileSync(filePath, JSON.stringify(json));
+  return filePath;
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -148,6 +161,17 @@ describe('comments:execute refactored logic', () => {
     // Including the empty reply and the already-succeeded one
     const emptyReplies = allComments.filter(c => !c.reply_text);
     expect(emptyReplies.length).toBe(1);
+  });
+
+  it('supports top-level work array JSON format', async () => {
+    const json = makeWorkArrayJsonFile([
+      { id: 2, reply_text: '', work_url: 'https://douyin.com/video/2', actor_name: 'user2', comment_text: 'test2' },
+    ]);
+    const fs = await import('fs');
+    const parsed = JSON.parse(fs.readFileSync(json, 'utf8'));
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(Array.isArray(parsed[0].comments)).toBe(true);
+    expect(parsed[0].comments[0].comment_text).toBe('test2');
   });
 
   // 3. EXECUTE_SKIPPED_EMPTY for empty reply_text

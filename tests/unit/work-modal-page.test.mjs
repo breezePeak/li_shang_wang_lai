@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractModalIdFromUrl } from '../../src/adapters/work-modal-page.mjs';
+import { extractModalIdFromUrl, parseDouyinTimeText } from '../../src/adapters/work-modal-page.mjs';
 import { checkWorkOwner } from '../../src/adapters/work-context-page.mjs';
 
 describe('extractModalIdFromUrl', () => {
@@ -49,6 +49,26 @@ describe('replyText 前缀匹配逻辑', () => {
     expect(prefix.length).toBeLessThan(5);
     const shouldUsePrefix = prefix.length >= 5;
     expect(shouldUsePrefix).toBe(false);
+  });
+});
+
+describe('parseDouyinTimeText', () => {
+  it('支持 昨天00:11', () => {
+    const iso = parseDouyinTimeText('昨天00:11');
+    expect(iso).toBeTruthy();
+    const date = new Date(iso);
+    expect(date.getHours()).toBe(0);
+    expect(date.getMinutes()).toBe(11);
+  });
+
+  it('支持 1小时前', () => {
+    const iso = parseDouyinTimeText('1小时前');
+    expect(iso).toBeTruthy();
+  });
+
+  it('支持 刚刚', () => {
+    const iso = parseDouyinTimeText('刚刚');
+    expect(iso).toBeTruthy();
   });
 });
 

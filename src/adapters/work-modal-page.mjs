@@ -151,12 +151,22 @@ async function clickReplySendControl(page) {
 export function parseDouyinTimeText(text) {
   if (!text) return null;
   const now = new Date();
+  const trimmed = String(text || '').trim();
+  const dayWithClock = trimmed.match(/^(昨天|前天)\s*(\d{1,2}):(\d{2})$/);
+  if (dayWithClock) {
+    const days = dayWithClock[1] === '昨天' ? 1 : 2;
+    const dt = new Date(now.getTime() - days * 86400000);
+    dt.setHours(parseInt(dayWithClock[2], 10), parseInt(dayWithClock[3], 10), 0, 0);
+    return dt.toISOString();
+  }
   const m = text.match(/(\d+)天前/);
   if (m) return new Date(now.getTime() - parseInt(m[1]) * 86400000).toISOString();
   const h = text.match(/(\d+)小时前/);
   if (h) return new Date(now.getTime() - parseInt(h[1]) * 3600000).toISOString();
   const min = text.match(/(\d+)分钟前/);
   if (min) return new Date(now.getTime() - parseInt(min[1]) * 60000).toISOString();
+  const sec = text.match(/(\d+)秒前/);
+  if (sec) return new Date(now.getTime() - parseInt(sec[1]) * 1000).toISOString();
   if (text.startsWith('刚刚')) return now.toISOString();
   if (text.startsWith('昨天')) return new Date(now.getTime() - 86400000).toISOString();
   if (text.startsWith('前天')) return new Date(now.getTime() - 2 * 86400000).toISOString();

@@ -18,7 +18,7 @@ import { createRunContext, saveRunSummary, resolveBrowserClose } from '../browse
 import { captureEvidence } from '../browser/failure-evidence.mjs';
 import {
   waitForWorkModal,
-  findCommentInWorkModal,
+  findUnrepliedCommentsInModal,
   openReplyBoxByIndex,
   sendReplyInWorkModal,
   verifyReplyInWorkModal,
@@ -45,6 +45,14 @@ function loadWorkCommentItemsFromFile(itemsFile) {
   const parsed = JSON.parse(raw);
   const items = [];
 
+  if (Array.isArray(parsed) && parsed.every(item => item && typeof item === 'object' && Array.isArray(item.comments))) {
+    for (const work of parsed) {
+      const comments = Array.isArray(work.comments) ? work.comments : [];
+      for (const comment of comments) {
+        items.push({ ...comment, workKey: work.workKey || work.work_key || '' });
+      }
+    }
+  } else
   if (Array.isArray(parsed?.works)) {
     for (const work of parsed.works) {
       const comments = Array.isArray(work.comments) ? work.comments : [];
@@ -57,7 +65,7 @@ function loadWorkCommentItemsFromFile(itemsFile) {
   } else if (Array.isArray(parsed)) {
     items.push(...parsed);
   } else {
-    throw new Error('--items-file 必须是 interactions:scan 生成的 works[].comments[]、comments 数组或评论数组');
+    throw new Error('--items-file 必须是 interactions:scan 生成的作品数组、works[].comments[]、comments 数组或评论数组');
   }
 
   return {
@@ -77,6 +85,13 @@ function loadWorkCommentItemsFromFile(itemsFile) {
 }
 
 function visitJsonComments(parsed, visitor) {
+  if (Array.isArray(parsed) && parsed.every(item => item && typeof item === 'object' && Array.isArray(item.comments))) {
+    for (const work of parsed) {
+      const comments = Array.isArray(work.comments) ? work.comments : [];
+      for (const comment of comments) visitor(comment, work);
+    }
+    return;
+  }
   if (Array.isArray(parsed?.works)) {
     for (const work of parsed.works) {
       const comments = Array.isArray(work.comments) ? work.comments : [];
@@ -91,6 +106,43 @@ function visitJsonComments(parsed, visitor) {
   if (Array.isArray(parsed)) {
     for (const comment of parsed) visitor(comment, null);
   }
+}
+
+function groupExecutableItemsByWork(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = item.workUrl || item.workId || item.modalId || `comment:${item.commentId}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  return [...groups.values()];
+}
+
+function normalizeTimeHint(value) {
+  return String(value || '').split('·')[0].trim();
+}
+
+function findMatchingCommentIndex(scannedComments, target, usedIndexes = new Set()) {
+  const targetTime = normalizeTimeHint(target.eventTimeText);
+  const exact = scannedComments.find(comment =>
+    !usedIndexes.has(comment.commentIndex) &&
+    comment.actorName === target.actorName &&
+    comment.commentText === target.commentText &&
+    (!targetTime || !normalizeTimeHint(comment.eventTimeText) || normalizeTimeHint(comment.eventTimeText) === targetTime)
+  );
+  if (exact) return exact;
+
+  const sameActorAndText = scannedComments.find(comment =>
+    !usedIndexes.has(comment.commentIndex) &&
+    comment.actorName === target.actorName &&
+    comment.commentText === target.commentText
+  );
+  if (sameActorAndText) return sameActorAndText;
+
+  return scannedComments.find(comment =>
+    !usedIndexes.has(comment.commentIndex) &&
+    comment.commentText === target.commentText
+  ) || null;
 }
 
 function updateExecuteJsonFile(itemsFile, parsed, results) {
@@ -234,67 +286,92 @@ async function executeWorkCommentItems(items, args) {
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
 
-    for (const validated of executable) {
+    const workGroups = groupExecutableItemsByWork(executable);
+    for (const group of workGroups) {
+      const currentWork = group[0];
       try {
-        console.log(`[comments:execute] 打开作品 commentId=${validated.commentId} actor="${validated.actorName}" comment="${validated.commentText.slice(0, 40)}"`);
-        await page.goto(validated.workUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        console.log(`[comments:execute] 打开作品 work="${currentWork.workId || currentWork.modalId || currentWork.workUrl}" comments=${group.length}`);
+        await page.goto(currentWork.workUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await page.waitForTimeout(1500);
 
         const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
         if (!modalReady.ok) {
-          markCommentBlocked(validated.commentId, modalReady.message || modalReady.code || 'work_modal_not_ready');
-          results.push({ ...validated, ok: false, status: 'blocked', error: modalReady.message || modalReady.code });
+          for (const validated of group) {
+            markCommentBlocked(validated.commentId, modalReady.message || modalReady.code || 'work_modal_not_ready');
+            results.push({ ...validated, ok: false, status: 'blocked', error: modalReady.message || modalReady.code });
+          }
           continue;
         }
 
-        const found = await findCommentInWorkModal(page, {
-          actorName: validated.actorName,
-          commentText: validated.commentText,
-          eventTimeText: validated.eventTimeText,
-        }, { maxScrolls: 30 });
-        if (!found.ok) {
-          console.log(`[comments:execute] 未找到评论 commentId=${validated.commentId} reason=${found.message || found.code}`);
-          markCommentBlocked(validated.commentId, found.message || found.code || 'comment_not_found');
-          results.push({ ...validated, ok: false, status: 'blocked', error: found.message || found.code });
-          continue;
-        }
-        console.log(`[comments:execute] 已定位评论 commentId=${validated.commentId} index=${found.data?.commentIndex}`);
-
-        const opened = await openReplyBoxByIndex(page, found.data.commentIndex);
-        if (!opened.ok) {
-          markCommentBlocked(validated.commentId, opened.message || opened.code || 'reply_box_not_opened');
-          results.push({ ...validated, ok: false, status: 'blocked', error: opened.message || opened.code });
+        const scanned = await findUnrepliedCommentsInModal(page, {
+          maxScrolls: 30,
+          alreadyRepliedKeys: new Set(),
+          selfNickname: '',
+          maxAgeDays: null,
+          oldCommentStopCount: 0,
+        });
+        if (!scanned.ok) {
+          for (const validated of group) {
+            markCommentBlocked(validated.commentId, scanned.message || scanned.code || 'comment_scan_failed');
+            results.push({ ...validated, ok: false, status: 'blocked', error: scanned.message || scanned.code });
+          }
           continue;
         }
 
-        const sent = await sendReplyInWorkModal(page, validated.replyText);
-        if (!sent.ok) {
-          markCommentBlocked(validated.commentId, sent.message || sent.code || 'send_failed');
-          results.push({ ...validated, ok: false, status: 'blocked', error: sent.message || sent.code });
-          continue;
-        }
+        const scannedComments = scanned.data?.comments || [];
+        const usedIndexes = new Set();
 
-        const verified = await verifyReplyInWorkModal(page, {
-          commentText: validated.commentText,
-          actorName: validated.actorName,
-        }, validated.replyText, { timeoutMs: 7000 });
-        if (!verified.ok) {
-          markCommentSentUnverified(validated.commentId, verified.message || verified.code || 'send_unverified');
-          results.push({ ...validated, ok: false, status: 'sent_unverified', error: verified.message || verified.code });
-          continue;
-        }
+        for (const validated of group) {
+          console.log(`[comments:execute] 匹配评论 commentId=${validated.commentId} actor="${validated.actorName}" comment="${validated.commentText.slice(0, 40)}"`);
+          const matched = findMatchingCommentIndex(scannedComments, validated, usedIndexes);
+          if (!matched) {
+            console.log(`[comments:execute] 未找到评论 commentId=${validated.commentId} reason=no_matching_comment_in_scanned_work`);
+            markCommentBlocked(validated.commentId, 'no_matching_comment_in_scanned_work');
+            results.push({ ...validated, ok: false, status: 'blocked', error: 'no_matching_comment_in_scanned_work' });
+            continue;
+          }
+          usedIndexes.add(matched.commentIndex);
+          console.log(`[comments:execute] 已定位评论 commentId=${validated.commentId} index=${matched.commentIndex}`);
 
-        markCommentReplied(validated.commentId);
-        saveReplyText(validated.commentId, validated.replyText);
-        results.push({ ...validated, ok: true, status: 'succeeded', mode: 'execute' });
+          const opened = await openReplyBoxByIndex(page, matched.commentIndex);
+          if (!opened.ok) {
+            markCommentBlocked(validated.commentId, opened.message || opened.code || 'reply_box_not_opened');
+            results.push({ ...validated, ok: false, status: 'blocked', error: opened.message || opened.code });
+            continue;
+          }
+
+          const sent = await sendReplyInWorkModal(page, validated.replyText);
+          if (!sent.ok) {
+            markCommentBlocked(validated.commentId, sent.message || sent.code || 'send_failed');
+            results.push({ ...validated, ok: false, status: 'blocked', error: sent.message || sent.code });
+            continue;
+          }
+
+          const verified = await verifyReplyInWorkModal(page, {
+            commentText: validated.commentText,
+            actorName: validated.actorName,
+          }, validated.replyText, { timeoutMs: 7000 });
+          if (!verified.ok) {
+            markCommentSentUnverified(validated.commentId, verified.message || verified.code || 'send_unverified');
+            results.push({ ...validated, ok: false, status: 'sent_unverified', error: verified.message || verified.code });
+            continue;
+          }
+
+          markCommentReplied(validated.commentId);
+          saveReplyText(validated.commentId, validated.replyText);
+          results.push({ ...validated, ok: true, status: 'succeeded', mode: 'execute' });
+        }
       } catch (err) {
         run.hadBlocked = true;
-        markCommentBlocked(validated.commentId, err.message);
+        for (const validated of group) {
+          markCommentBlocked(validated.commentId, err.message);
+          results.push({ ...validated, ok: false, status: 'blocked', error: err.message });
+        }
         if (page) {
           try {
             const { evidenceDir } = await captureEvidence(page, {
               outputDir: run.outputDir,
-              step: `work-comment-${validated.commentId}`,
+              step: `work-comment-group-${currentWork.commentId || 'unknown'}`,
               code: RESULT_CODES.UNKNOWN_ERROR,
               message: err.message,
               recoverable: true,
@@ -302,7 +379,6 @@ async function executeWorkCommentItems(items, args) {
             run.evidenceDirectories.push(evidenceDir);
           } catch {}
         }
-        results.push({ ...validated, ok: false, status: 'blocked', error: err.message });
       }
     }
   } finally {

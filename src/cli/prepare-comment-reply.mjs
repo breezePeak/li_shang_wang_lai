@@ -76,6 +76,16 @@ function normalizeWorkCommentItem(item, index, basePolicy, workKey = '') {
 }
 
 function extractItemsFromParsedJson(parsed, basePolicy) {
+  if (Array.isArray(parsed) && parsed.every(item => item && typeof item === 'object' && Array.isArray(item.comments))) {
+    const items = [];
+    for (const work of parsed) {
+      const comments = Array.isArray(work.comments) ? work.comments : [];
+      for (const comment of comments) {
+        items.push(normalizeWorkCommentItem(comment, items.length, basePolicy, work.workKey || work.work_key || ''));
+      }
+    }
+    return items;
+  }
   if (Array.isArray(parsed?.works)) {
     const items = [];
     for (const work of parsed.works) {
@@ -92,10 +102,17 @@ function extractItemsFromParsedJson(parsed, basePolicy) {
   if (Array.isArray(parsed)) {
     return parsed.map((item, index) => normalizeWorkCommentItem(item, index, basePolicy));
   }
-  throw new Error('--items-file 必须是 interactions:scan 生成的 works[].comments[]、comments 数组或评论数组');
+  throw new Error('--items-file 必须是 interactions:scan 生成的作品数组、works[].comments[]、comments 数组或评论数组');
 }
 
 function visitJsonComments(parsed, visitor) {
+  if (Array.isArray(parsed) && parsed.every(item => item && typeof item === 'object' && Array.isArray(item.comments))) {
+    for (const work of parsed) {
+      const comments = Array.isArray(work.comments) ? work.comments : [];
+      for (const comment of comments) visitor(comment, work);
+    }
+    return;
+  }
   if (Array.isArray(parsed?.works)) {
     for (const work of parsed.works) {
       const comments = Array.isArray(work.comments) ? work.comments : [];

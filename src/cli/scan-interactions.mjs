@@ -490,19 +490,7 @@ function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const filePath = resolve('data', 'pending-replies', `pending-comments-${ts}.json`);
-  writeJSON(filePath, {
-    generatedAt: new Date().toISOString(),
-    source: 'interactions:scan',
-    task_type: 'comment_reply',
-    workflow_status_code: 'SCAN_JSON_READY',
-    status_codes: {
-      scan: 'SCAN_JSON_READY',
-      prepare: 'PREPARE_WAIT_REPLY_TEXT',
-      execute: 'EXECUTE_WAIT_PREPARE',
-    },
-    totalComments,
-    works,
-  });
+  writeJSON(filePath, works);
   return { filePath, totalComments, workCount: works.length };
 }
 
