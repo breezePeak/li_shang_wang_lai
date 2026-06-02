@@ -384,6 +384,10 @@ function writePendingReplyJson() {
         source_event_id: row.source_event_id,
         source_notification_key: row.source_notification_key,
         reply_status: row.reply_status,
+        reply_text: row.reply_text || '',
+        collect_status_code: 'COLLECT_PENDING_REPLY',
+        prepare_status_code: row.reply_status === 'prepared' ? 'PREPARE_READY' : 'PREPARE_WAIT_REPLY_TEXT',
+        execute_status_code: row.reply_status === 'succeeded' ? 'EXECUTE_CONFIRMED' : 'EXECUTE_WAIT_PREPARE',
       })),
     });
   }
@@ -393,6 +397,12 @@ function writePendingReplyJson() {
   writeJSON(filePath, {
     generatedAt: new Date().toISOString(),
     source: 'interactions:scan',
+    workflow_status_code: 'SCAN_JSON_READY',
+    status_codes: {
+      scan: 'SCAN_JSON_READY',
+      prepare: 'PREPARE_WAIT_REPLY_TEXT',
+      execute: 'EXECUTE_WAIT_PREPARE',
+    },
     totalComments,
     works,
   });

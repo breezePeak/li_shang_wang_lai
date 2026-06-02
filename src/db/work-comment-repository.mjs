@@ -91,6 +91,11 @@ export function markCommentReplyPrepared(commentId, replyText, reason) {
   ).run(replyText, reason || null, new Date().toISOString(), commentId);
 }
 
+export function getWorkComment(commentId) {
+  const db = getDb();
+  return db.prepare('SELECT * FROM work_comments WHERE id = ?').get(commentId);
+}
+
 export function markCommentReplied(commentId) {
   const db = getDb();
   const now = new Date().toISOString();
