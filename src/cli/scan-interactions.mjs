@@ -304,6 +304,13 @@ function addCommentWorkHint(dedupeContext, identity, comment) {
   });
 }
 
+function getRuntimeWorkSeenKeys(work = {}) {
+  const keys = [];
+  if (work.work_id || work.workId) keys.push(`work_id:${work.work_id || work.workId}`);
+  if (work.modal_id || work.modalId) keys.push(`modal_id:${work.modal_id || work.modalId}`);
+  return keys.filter(Boolean);
+}
+
 function logWorkCollectionDecision(notificationIndex, n, decision) {
   const actor = compactLogValue(n.username, 40);
   const comment = compactLogValue(n.content, 40);
@@ -403,13 +410,17 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
     return { ok: false, reason: commentsResult.message || commentsResult.code || 'comment-collect-failed', workResult };
   }
 
+  const visibleComments = commentsResult.data?.comments || [];
   const comments = commentsResult.data?.unreplied || [];
   let inserted = 0;
   let duplicate = 0;
   let enriched = 0;
 
-  for (const c of comments) {
+  for (const c of visibleComments) {
     addCommentWorkHint(dedupeContext, identity, c);
+  }
+
+  for (const c of comments) {
     const commentKey = buildCommentKey({ workId: identity.workId, modalId: identity.modalId, comment: c });
     const dedupeKey = `${identity.workId || identity.modalId || '__unknown__'}:${commentKey}`;
     if (dedupeContext.commentKeys.has(dedupeKey)) {
@@ -672,6 +683,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   const ambiguousEvents = [];
   const failedEvents = [];
   const seenItemKeys = new Set();
+  const runtimeCollectedWorkKeys = new Set();
   let consecutiveEmptyRounds = 0;
   let consecutiveOldRelevantCount = 0;
   let stopDueToOldRelevant = false;
@@ -922,6 +934,14 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
 
         if (route.notificationAction === 'comment_on_my_work') {
           const workCheck = checkCollectedCommentForNotification(dedupeContext, n);
+          const knownWork = resolveKnownWorkFromNotification(dedupeContext, n);
+          const runtimeWorkHit = knownWork
+            ? getRuntimeWorkSeenKeys(knownWork.work).find(key => runtimeCollectedWorkKeys.has(key))
+            : null;
+          if (runtimeWorkHit) {
+            logNotificationSkip(notificationIndex, n, `同轮已采集过该作品 ${runtimeWorkHit}`, notificationDedupeKey);
+            continue;
+          }
           if (workCheck.shouldSkip) {
             logWorkCollectionDecision(notificationIndex, n, workCheck);
             continue;
@@ -942,6 +962,9 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
           if (!collectResult.ok) {
             logNotificationSkip(notificationIndex, n, `作品评论采集失败: ${collectResult.reason}`, notificationDedupeKey);
           } else {
+            for (const key of getRuntimeWorkSeenKeys({ workId: collectResult.workId, modalId: collectResult.modalId })) {
+              runtimeCollectedWorkKeys.add(key);
+            }
             totalWorkCommentInserted += collectResult.inserted;
             totalWorkCommentDuplicate += collectResult.duplicate;
             totalWorkCommentEnriched += collectResult.enriched;

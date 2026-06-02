@@ -276,7 +276,7 @@ async function waitForPanelContent(page, { maxWait = 15000 } = {}) {
 
 export async function waitForNotificationPanelStable(page) {
   console.error('[notify-page] 等待通知面板稳定...');
-  const maxWait = NETWORK_WAIT_TIMEOUT_MS;
+  const maxWait = 8000;
   const deadline = Date.now() + maxWait;
   let prevInfo = '';
   let stableRounds = 0;
@@ -328,7 +328,7 @@ export async function waitForNotificationPanelStable(page) {
     const currentInfo = `${info.textLen}:${info.visibleCount}`;
     if (currentInfo === prevInfo) {
       stableRounds++;
-      if (stableRounds >= 2) {
+      if (stableRounds >= 1) {
         console.error('[notify-page] 通知面板已稳定');
         settled = true;
         break;
@@ -377,8 +377,8 @@ export async function waitForNotificationPanelStable(page) {
       panelBox,
       networkBad: !panelSeen && snapshot.inflightCount > 0,
       reason: !panelSeen && snapshot.inflightCount > 0
-        ? `网络不好，通知面板等待超过${formatTimeoutSeconds(NETWORK_WAIT_TIMEOUT_MS)}s${pending ? ` pending=${pending}` : ''}`
-        : (panelSeen ? '通知面板内容长时间未稳定' : '通知面板请求已停，但内容未稳定'),
+        ? `网络不好，通知面板等待超过${formatTimeoutSeconds(maxWait)}s${pending ? ` pending=${pending}` : ''}`
+        : (panelSeen ? '通知面板内容长时间未稳定' : '通知面板请求已停，但面板未出现'),
     };
   }
 

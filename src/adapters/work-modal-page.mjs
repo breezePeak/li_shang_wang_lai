@@ -993,14 +993,18 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
     const inWindowComments = cutoffMs
       ? allComments.filter(c => !isOlderThanWindow(c))
       : allComments;
-    const unreplied = inWindowComments.filter(c => !c.isSelfComment && !c.hasMyReply && !c.alreadyReplied && c.commentText.length > 0);
+    const pageUnreplied = inWindowComments.filter(c => !c.isSelfComment && !c.hasMyReply && c.commentText.length > 0);
+    const trackedAsReplied = pageUnreplied.filter(c => c.alreadyReplied);
 
-    console.error(`[work-modal] 评论扫描: 总 ${allComments.length} 条，时间窗口内 ${inWindowComments.length} 条，我未回复 ${unreplied.length} 条`);
+    console.error(
+      `[work-modal] 评论扫描: 总 ${allComments.length} 条，时间窗口内 ${inWindowComments.length} 条，页面未回复 ${pageUnreplied.length} 条，库中已标记 ${trackedAsReplied.length} 条`
+    );
 
     return success({
       total: allComments.length,
       comments: inWindowComments,
-      unreplied,
+      unreplied: pageUnreplied,
+      trackedAsReplied,
       allKeys: allComments.map(c => c.commentKey),
     });
   } catch (err) {
