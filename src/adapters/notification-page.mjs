@@ -177,86 +177,76 @@ export function generateNotificationItemKey(d) {
 export async function ensureNotificationPageReady(page) {
   ensureRequestTracker(page);
   await page.goto(SELF_URL, { waitUntil: 'domcontentloaded', timeout: NETWORK_WAIT_TIMEOUT_MS });
-  console.error('[notify-page] 等待页面加载...');
-  const result = await waitForPageSignalOrNetworkState(page, {
-    timeoutMs: NETWORK_WAIT_TIMEOUT_MS,
-    label: '通知页',
-    signalLabel: '通知铃铛',
-    checkSignal: () => hasNotificationBell(page),
-  });
-  if (result.ready) {
-    console.error('[notify-page] 页面就绪');
-    return;
-  }
-  throw new Error('通知页请求已停，但通知铃铛未出现');
+  console.error('[notify-page] 页面已进入主页，开始尝试打开通知面板...');
 }
 
 export async function openNotificationPanel(page) {
   try {
     console.error('[notify-page] 定位通知铃铛...');
-
-    const bell = page.locator('svg.LtuRRess').first();
-    try {
-      await bell.waitFor({ state: 'attached', timeout: 5000 });
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        await bell.hover({ timeout: 3000 });
-        const found = await waitForPanelContent(page, { maxWait: NETWORK_WAIT_TIMEOUT_MS });
-        if (found) {
-          console.error(`[notify-page] ✅ hover 铃铛触发了通知面板 (attempt=${attempt})`);
-          return true;
-        }
-        console.error(`[notify-page] hover 铃铛后通知面板未出现，重试 ${attempt}/3`);
-        await page.mouse.move(0, 0).catch(() => {});
-        await page.waitForTimeout(800 * attempt);
-      }
-    } catch {
-      console.error('[notify-page] hover 铃铛失败');
-    }
-
-    try {
-      const bellBtn = page.locator('div[data-e2e]:has(svg.LtuRRess)').first();
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        await bellBtn.click({ timeout: 5000 });
-        const found = await waitForPanelContent(page, { maxWait: NETWORK_WAIT_TIMEOUT_MS });
-        if (found) {
-          console.error(`[notify-page] ✅ click data-e2e 容器触发了通知面板 (attempt=${attempt})`);
-          return true;
-        }
-        console.error(`[notify-page] click 容器后通知面板未出现，重试 ${attempt}/3`);
-        await page.waitForTimeout(800 * attempt);
-      }
-    } catch {
-      console.error('[notify-page] click 容器失败');
-    }
-
-    console.error('[notify-page] 降级扫描顶部图标...');
-    const candidates = await page.evaluate(() => {
-      const all = document.querySelectorAll('[data-e2e], [class*="icon"], [class*="btn"], header *, nav *');
-      const icons = [];
-      const seen = new Set();
-      for (const el of all) {
-        const rect = el.getBoundingClientRect();
-        if (rect.y > 120 || rect.x < 200 || rect.width < 10 || rect.height < 10) continue;
-        const key = `${rect.x.toFixed(0)},${rect.y.toFixed(0)}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        icons.push({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
-      }
-      return icons;
-    });
-
-    for (let i = 0; i < candidates.length; i++) {
-      const c = candidates[i];
-      await page.mouse.move(c.x, c.y, { steps: 3 });
-      const found = await waitForPanelContent(page, { maxWait: NETWORK_WAIT_TIMEOUT_MS });
-      if (found) {
-        console.error(`[notify-page] ✅ hover #${i + 1} 触发: (${c.x.toFixed(0)}, ${c.y.toFixed(0)})`);
+    const deadline = Date.now() + NETWORK_WAIT_TIMEOUT_MS;
+    let attempt = 0;
+    while (Date.now() < deadline) {
+      attempt++;
+      if (await hasNotificationPanel(page)) {
+        console.error(`[notify-page] ✅ 通知面板已可见 (attempt=${attempt})`);
         return true;
       }
+
+      const bell = page.locator('svg.LtuRRess').first();
+      try {
+        if (await bell.count()) {
+          await bell.hover({ timeout: 1500 });
+          if (await waitForPanelContent(page, { maxWait: 1500 })) {
+            console.error(`[notify-page] ✅ hover 铃铛触发了通知面板 (attempt=${attempt})`);
+            return true;
+          }
+        }
+      } catch {}
+
+      try {
+        const bellBtn = page.locator('div[data-e2e]:has(svg.LtuRRess)').first();
+        if (await bellBtn.count()) {
+          await bellBtn.click({ timeout: 1500 });
+          if (await waitForPanelContent(page, { maxWait: 1500 })) {
+            console.error(`[notify-page] ✅ click data-e2e 容器触发了通知面板 (attempt=${attempt})`);
+            return true;
+          }
+        }
+      } catch {}
+
+      try {
+        const candidates = await page.evaluate(() => {
+          const all = document.querySelectorAll('[data-e2e], [class*="icon"], [class*="btn"], header *, nav *');
+          const icons = [];
+          const seen = new Set();
+          for (const el of all) {
+            const rect = el.getBoundingClientRect();
+            if (rect.y > 120 || rect.x < 200 || rect.width < 10 || rect.height < 10) continue;
+            const key = `${rect.x.toFixed(0)},${rect.y.toFixed(0)}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            icons.push({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
+          }
+          return icons.slice(0, 8);
+        });
+
+        for (const c of candidates) {
+          await page.mouse.move(c.x, c.y, { steps: 2 });
+          if (await waitForPanelContent(page, { maxWait: 600 })) {
+            console.error(`[notify-page] ✅ hover 顶部图标触发了通知面板 (attempt=${attempt})`);
+            return true;
+          }
+        }
+      } catch {}
+
+      if (attempt % 5 === 0) {
+        const foundBell = await hasNotificationBell(page);
+        console.error(`[notify-page] 尝试打开通知面板 attempt=${attempt} bell=${foundBell ? 'yes' : 'no'}`);
+      }
+      await page.waitForTimeout(500);
     }
 
-    console.error('[notify-page] 所有策略均未触发通知面板');
-    return false;
+    throw new Error(`网络不好，通知面板等待超过${formatTimeoutSeconds(NETWORK_WAIT_TIMEOUT_MS)}s`);
   } catch (err) {
     if ((err.message || '').includes('网络不好')) throw err;
     console.error('[notify-page] 异常:', err.message);
