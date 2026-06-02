@@ -75,31 +75,41 @@ function getRequestTrackerSnapshot(page) {
   };
 }
 
-async function waitForNetworkSettledOrTimeout(page, {
+async function waitForPageSignalOrNetworkState(page, {
   timeoutMs = NETWORK_WAIT_TIMEOUT_MS,
   idleMs = NETWORK_IDLE_MS,
   label = '页面',
+  signalLabel = '目标信号',
+  checkSignal = null,
 } = {}) {
   ensureRequestTracker(page);
   const startedAt = Date.now();
   let lastInflightCount = -1;
   while (Date.now() - startedAt < timeoutMs) {
+    if (checkSignal && await checkSignal()) {
+      return { ok: true, ready: true };
+    }
+
     const snapshot = getRequestTrackerSnapshot(page);
     if (snapshot.inflightCount !== lastInflightCount) {
       console.error(`[notify-page] ${label}请求中=${snapshot.inflightCount}`);
       lastInflightCount = snapshot.inflightCount;
     }
     if (snapshot.inflightCount === 0 && snapshot.idleForMs >= idleMs) {
-      return { ok: true, snapshot };
+      return { ok: true, ready: false, idle: true, snapshot };
     }
     await page.waitForTimeout(300);
+  }
+
+  if (checkSignal && await checkSignal()) {
+    return { ok: true, ready: true };
   }
 
   const snapshot = getRequestTrackerSnapshot(page);
   const pending = snapshot.pendingRequests
     .map(item => `${item.type}:${item.ageMs}ms:${item.url}`)
     .join(' | ');
-  throw new Error(`网络不好，${label}等待超过${formatTimeoutSeconds(timeoutMs)}s${pending ? ` pending=${pending}` : ''}`);
+  throw new Error(`网络不好，${label}等待${signalLabel}超过${formatTimeoutSeconds(timeoutMs)}s${pending ? ` pending=${pending}` : ''}`);
 }
 
 async function hasNotificationBell(page) {
@@ -168,18 +178,17 @@ export async function ensureNotificationPageReady(page) {
   ensureRequestTracker(page);
   await page.goto(SELF_URL, { waitUntil: 'domcontentloaded', timeout: NETWORK_WAIT_TIMEOUT_MS });
   console.error('[notify-page] 等待页面加载...');
-  const start = Date.now();
-  while (Date.now() - start < NETWORK_WAIT_TIMEOUT_MS) {
-    await waitForNetworkSettledOrTimeout(page, { timeoutMs: Math.max(1000, NETWORK_WAIT_TIMEOUT_MS - (Date.now() - start)), label: '通知页' });
-    const found = await hasNotificationBell(page);
-    if (found) {
-      console.error(`[notify-page] 页面就绪 (${((Date.now() - start) / 1000).toFixed(1)}s)`);
-      return;
-    }
-    console.error('[notify-page] 页面请求已停，但通知铃铛未出现，准备重试检查...');
-    await page.waitForTimeout(500);
+  const result = await waitForPageSignalOrNetworkState(page, {
+    timeoutMs: NETWORK_WAIT_TIMEOUT_MS,
+    label: '通知页',
+    signalLabel: '通知铃铛',
+    checkSignal: () => hasNotificationBell(page),
+  });
+  if (result.ready) {
+    console.error('[notify-page] 页面就绪');
+    return;
   }
-  throw new Error(`网络不好，通知页等待超过${formatTimeoutSeconds(NETWORK_WAIT_TIMEOUT_MS)}s且通知铃铛未出现`);
+  throw new Error('通知页请求已停，但通知铃铛未出现');
 }
 
 export async function openNotificationPanel(page) {
@@ -256,21 +265,13 @@ export async function openNotificationPanel(page) {
 }
 
 async function waitForPanelContent(page, { maxWait = 15000 } = {}) {
-  const deadline = Date.now() + maxWait;
-  while (Date.now() < deadline) {
-    if (await hasNotificationPanel(page)) return true;
-    const snapshot = getRequestTrackerSnapshot(page);
-    if (snapshot.inflightCount === 0 && snapshot.idleForMs >= NETWORK_IDLE_MS) return false;
-    await page.waitForTimeout(500);
-  }
-  const snapshot = getRequestTrackerSnapshot(page);
-  if (snapshot.inflightCount > 0) {
-    const pending = snapshot.pendingRequests
-      .map(item => `${item.type}:${item.ageMs}ms:${item.url}`)
-      .join(' | ');
-    throw new Error(`网络不好，通知面板等待超过${Math.round(maxWait / 1000)}s${pending ? ` pending=${pending}` : ''}`);
-  }
-  return false;
+  const result = await waitForPageSignalOrNetworkState(page, {
+    timeoutMs: maxWait,
+    label: '通知面板',
+    signalLabel: '通知面板出现',
+    checkSignal: () => hasNotificationPanel(page),
+  });
+  return !!result.ready;
 }
 
 export async function waitForNotificationPanelStable(page) {
