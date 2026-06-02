@@ -427,7 +427,7 @@ export async function extractVisibleNotifications(page) {
   const result = await page.evaluate(() => {
     // --- Constants must be inline inside evaluate() ---
     const ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '回复了你的评论'];
-    const TIME_PATTERN = /^(\d{2}:\d{2}|\d+[秒分时天周月年]前|\d{2}-\d{2}|\d+月\d+日|昨天\s?\d{2}:\d{2}|(?:星期|周)[一二三四五六日天])$/;
+    const TIME_PATTERN = /^(\d{1,2}:\d{2}|\d+[秒分时天周月年]前|\d{2}-\d{2}|\d+月\d+日|昨天\s?\d{1,2}:\d{2}|(?:星期|周)[一二三四五六日天])$/;
     const SKIP_SET = new Set(['互动消息', '全部消息', '点击加载更多', '加载更多', '没有更多了', '暂无消息', '推荐了你的视频']);
 
     function parseRelationLine(line) {
