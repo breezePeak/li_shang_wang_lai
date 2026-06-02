@@ -15,7 +15,6 @@ interactions-output/*
 
 # Local config (user-specific settings)
 config/local.json
-config/works.json
 
 # Environment variables
 .env

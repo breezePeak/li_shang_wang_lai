@@ -29,21 +29,11 @@ import { getEvents, updateEventStatus } from '../db/interaction-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 import { isAllowedTemplate, validateNaturalReply } from '../domain/reply-templates.mjs';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const USER_WORK_CONTEXT_PATH = resolve(__dirname, '../../config/works.json');
-const DEFAULT_WORK_CONTEXT_PATH = resolve(__dirname, '../../prompts/work-context.json');
-
-function loadWorkContext() {
-  const contextPath = existsSync(USER_WORK_CONTEXT_PATH) ? USER_WORK_CONTEXT_PATH : DEFAULT_WORK_CONTEXT_PATH;
-  if (!existsSync(contextPath)) return null;
-  try {
-    return JSON.parse(readFileSync(contextPath, 'utf-8'));
-  } catch { return null; }
-}
 
 function parseArgs(argv) {
   const args = {
@@ -144,7 +134,7 @@ function failResult(item, code, message, extra = {}) {
   };
 }
 
-function prepareOne(item, events, workCtx) {
+function prepareOne(item, events) {
   // Validation
   const missing = [];
   if (!item.eventId) missing.push('eventId');
@@ -230,33 +220,6 @@ function prepareOne(item, events, workCtx) {
     }
   }
 
-  // Work-context validation: --work-context-id must match a known work
-  if (item.decision === 'reply' && item.relevance === 'relevant') {
-    if (!item.workContextId) {
-      return failResult(item, RESULT_CODES.BLOCKED, 'decision=reply 且 relevance=relevant 时，必须提供 workContextId。缺少作品上下文时，请设置 decision=manual_review。');
-    }
-    if (!workCtx || !Array.isArray(workCtx.works)) {
-      return failResult(item, RESULT_CODES.BLOCKED, '作品上下文配置缺失或格式错误，无法校验作品上下文。请检查 config/works.json 或 prompts/work-context.json。');
-    }
-    const matchedWork = workCtx.works.find(w => w.id === item.workContextId);
-    if (!matchedWork) {
-      return failResult(item, RESULT_CODES.BLOCKED, `workContextId "${item.workContextId}" 在作品上下文配置中未找到`);
-    }
-    const eventTitle = (ev.my_work_title || '').trim();
-    const workTitle = (matchedWork.title || '').trim();
-    if (!eventTitle) {
-      return failResult(item, RESULT_CODES.BLOCKED, `事件 #${item.eventId} 缺少作品标题，无法校验作品上下文匹配。请改为 decision=manual_review。`);
-    }
-    if (!workTitle) {
-      return failResult(item, RESULT_CODES.BLOCKED, `作品上下文 "${item.workContextId}" 缺少 title 字段，无法校验匹配。`);
-    }
-    const eventTitleLower = eventTitle.toLowerCase();
-    const workTitleLower = workTitle.toLowerCase();
-    if (!eventTitleLower.includes(workTitleLower) && !workTitleLower.includes(eventTitleLower)) {
-      return failResult(item, RESULT_CODES.BLOCKED, `作品标题不匹配: event="${ev.my_work_title}" vs work-context="${matchedWork.title}"。请确认 workContextId 或改为 decision=manual_review。`);
-    }
-  }
-
   // Check duplicate — already succeeded
   if (hasSucceededAction(item.eventId, 'reply_comment')) {
     return failResult(item, RESULT_CODES.DUPLICATE_ACTION, '该评论已有成功回复记录，不能重复创建');
@@ -266,8 +229,6 @@ function prepareOne(item, events, workCtx) {
   if (hasActiveAction(item.eventId, 'reply_comment')) {
     return failResult(item, RESULT_CODES.DUPLICATE_ACTION, '该评论已有待执行回复动作（prepared），不能重复创建。请先执行或重置已有动作。');
   }
-
-  const matchedWork = workCtx?.works?.find(w => w.id === item.workContextId) || null;
 
   // Create action with audit trail in evidence_json
   const auditInfo = {
@@ -279,8 +240,6 @@ function prepareOne(item, events, workCtx) {
     autoExecuteAllowed: false,
     decisionReason: item.decisionReason || '',
     workContextId: item.workContextId || '',
-    workContextTitle: matchedWork ? matchedWork.title : '',
-    workContextSummary: matchedWork ? matchedWork.summary : '',
     policyVersion: '0.1.0',
     preparedAt: new Date().toISOString(),
   };
@@ -330,8 +289,7 @@ function main() {
   }
 
   const events = getEvents({ limit: 500 });
-  const workCtx = loadWorkContext();
-  const results = items.map(item => item.ok === false ? item : prepareOne(item, events, workCtx));
+  const results = items.map(item => item.ok === false ? item : prepareOne(item, events));
   const prepared = results.filter(item => item.ok).length;
   const failed = results.length - prepared;
   const actionIds = results.filter(item => item.ok).map(item => item.actionId);

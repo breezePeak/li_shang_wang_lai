@@ -59,7 +59,7 @@ npm run actions:pending
 
 3. 为每条评论生成一条回复建议。
 
-回复文本必须通过 `skills/creator-comment-suggestion/SKILL.md` 生成。不要读取 `prompts/` 里的旧策略文件来生成评论；`--work-context-id` 的作品上下文校验优先读取 `config/works.json`，不存在时才回退到测试/默认上下文 `prompts/work-context.json`。
+回复文本必须通过 `skills/creator-comment-suggestion/SKILL.md` 生成。不要读取 `prompts/` 里的旧策略文件来生成评论。
 
 4. 批量创建 prepared action：
 

@@ -617,10 +617,10 @@ describe('fingerprint — promote with platform ID', () => {
 });
 
 // ============================================================
-// 10. Work-context validation + audit timeline
+// 10. Prepare audit timeline
 // ============================================================
-describe('work-context validation + audit', () => {
-  it('prepare with --work-context-id matching existing work should have clean JSON', () => {
+describe('prepare audit timeline', () => {
+  it('prepare keeps optional --work-context-id as audit metadata without external file validation', () => {
     const result = runCli('prepare-comment-reply.mjs', [
       '--event-id', '1', '--reply-text', 'test',
       '--decision', 'reply', '--risk-level', 'low',
@@ -631,34 +631,6 @@ describe('work-context validation + audit', () => {
     const parsed = parseStdout(result);
     expect(parsed).not.toBeNull();
     expect(typeof parsed.ok).toBe('boolean');
-  });
-
-  it('prepare with --work-context-id missing from work-context.json blocks', () => {
-    const result = runCli('prepare-comment-reply.mjs', [
-      '--event-id', '1', '--reply-text', 'test',
-      '--decision', 'reply', '--risk-level', 'low',
-      '--relevance', 'relevant',
-      '--work-context-id', 'nonexistent-work',
-      '--json',
-    ], 10_000);
-    const parsed = parseStdout(result);
-    expect(parsed).not.toBeNull();
-    expect(parsed.ok).toBe(false);
-  });
-
-  it('prepare blocks when event work title is empty (even with valid work-context-id)', () => {
-    // Use event 999 which doesn't exist → my_work_title would be undefined/null
-    // But even if it existed with empty title, the block would fire
-    const result = runCli('prepare-comment-reply.mjs', [
-      '--event-id', '999', '--reply-text', 'test',
-      '--decision', 'reply', '--risk-level', 'low',
-      '--relevance', 'relevant',
-      '--work-context-id', 'opus4.8',
-      '--json',
-    ], 10_000);
-    const parsed = parseStdout(result);
-    expect(parsed).not.toBeNull();
-    expect(parsed.ok).toBe(false);
   });
 
   it('succeeded evidence_json preserves full audit chain (policy + timeline + runtime)', async () => {

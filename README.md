@@ -97,18 +97,6 @@ npm run auth
 
 `npm run auth` 会打开浏览器检测抖音登录态。检测到已登录后自动关闭浏览器并返回认证成功；60 秒未检测到登录态时提示扫码登录；最多等待 5 分钟。
 
-## 作品上下文配置
-
-评论回复准备命令在使用 `--work-context-id` 时会校验作品上下文。正式使用前建议复制示例配置：
-
-```bash
-cp config/works.example.json config/works.json
-```
-
-然后在 `config/works.json` 中填写自己的作品列表、标题片段和内容摘要。`config/works.json` 已被 `.gitignore` 忽略，不要提交真实账号隐私、Cookie、Token、验证码或其他敏感信息。
-
-如果没有 `config/works.json`，代码会回退读取 `prompts/work-context.json`。该文件仅作为测试/默认上下文，不应当被当成正式配置。
-
 ## 常用入口命令
 
 | 功能 | 命令 |
