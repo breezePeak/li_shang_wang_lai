@@ -575,7 +575,10 @@ export async function findCommentInWorkModal(page, item, { maxScrolls = 10 } = {
   }
 
   try {
-    const found = await page.evaluate(({ actorName, commentText, eventTimeText }) => {
+    console.error(`[work-modal] 查找评论 actor="${actorName}" comment="${commentText.slice(0, 40)}" time="${eventTimeText}"`);
+
+    const found = await page.evaluate(({ actorName, commentText, eventTimeText, matchCommentSource }) => {
+      const matchComment = (0, eval)(`(${matchCommentSource})`);
       const commentArea = document.querySelector('.comment-mainContent');
       if (!commentArea) return { ok: false, reason: 'comment-mainContent not found' };
 
@@ -585,9 +588,15 @@ export async function findCommentInWorkModal(page, item, { maxScrolls = 10 } = {
 
       const canScroll = commentArea.scrollHeight > commentArea.clientHeight + 10;
       return { ok: false, reason: 'no matching comment', totalItems: items.length, canScroll };
-    }, { actorName, commentText, eventTimeText });
+    }, {
+      actorName,
+      commentText,
+      eventTimeText,
+      matchCommentSource: MATCH_COMMENT_INNER.trim().replace(/^function matchComment/, 'function'),
+    });
 
     if (found.ok) {
+      console.error(`[work-modal] 找到评论 index=${found.commentIndex} preview="${String(found.previewText || '').slice(0, 60)}"`);
       return success(found);
     }
 
@@ -611,14 +620,20 @@ export async function findCommentInWorkModal(page, item, { maxScrolls = 10 } = {
 
       await page.waitForTimeout(1500 + Math.floor(Math.random() * 2500));
 
-      const foundAfterScroll = await page.evaluate(({ actorName, commentText, eventTimeText }) => {
+      const foundAfterScroll = await page.evaluate(({ actorName, commentText, eventTimeText, matchCommentSource }) => {
+        const matchComment = (0, eval)(`(${matchCommentSource})`);
         const commentArea = document.querySelector('.comment-mainContent');
         if (!commentArea) return { ok: false, reason: 'comment-mainContent not found' };
         const items = commentArea.querySelectorAll('.comment-item-info-wrap');
         const match = matchComment(items, actorName, commentText, eventTimeText);
         if (match) { match.scrolled = true; return match; }
         return { ok: false, reason: 'no matching comment', totalItems: items.length };
-      }, { actorName, commentText, eventTimeText });
+      }, {
+        actorName,
+        commentText,
+        eventTimeText,
+        matchCommentSource: MATCH_COMMENT_INNER.trim().replace(/^function matchComment/, 'function'),
+      });
 
       if (foundAfterScroll.ok) {
         console.error(`[work-modal] 滚动 ${s + 1} 次后找到评论`);

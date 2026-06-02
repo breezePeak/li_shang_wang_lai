@@ -131,6 +131,28 @@ export function findCommentByActorAndText(actorName, commentTextPrefix) {
   ).get(actorName, `${commentTextPrefix}%`);
 }
 
+export function findCommentByWorkActorAndText({ workId, modalId, actorName, commentText } = {}) {
+  const db = getDb();
+  const clauses = [];
+  const params = [];
+  if (workId) {
+    clauses.push('work_id = ?');
+    params.push(workId);
+  }
+  if (modalId) {
+    clauses.push('modal_id = ?');
+    params.push(modalId);
+  }
+  if (clauses.length === 0 || !actorName || !commentText) return null;
+  return db.prepare(`
+    SELECT * FROM work_comments
+    WHERE (${clauses.join(' OR ')})
+      AND actor_name = ?
+      AND comment_text = ?
+    LIMIT 1
+  `).get(...params, actorName, commentText);
+}
+
 export function listReplyTrackedCommentKeysForWork({ workId, modalId } = {}) {
   const db = getDb();
   const params = [];

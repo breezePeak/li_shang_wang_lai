@@ -10,7 +10,7 @@
 //   命令默认真实执行回复，不再需要 --execute。
 
 import { runMigrations } from '../db/migrations.mjs';
-import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentSentUnverified } from '../db/work-comment-repository.mjs';
+import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentSentUnverified, findCommentByWorkActorAndText } from '../db/work-comment-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 import { createBrowserContext } from '../browser/browser-context.mjs';
@@ -152,7 +152,18 @@ function validateWorkCommentItem(item) {
   if (!item.commentId) {
     return { itemIndex: item.itemIndex, ok: false, error: '缺少 work_comments.id；请使用 interactions:scan 生成的 JSON' };
   }
-  const row = getWorkComment(item.commentId);
+  let row = getWorkComment(item.commentId);
+  if (!row) {
+    row = findCommentByWorkActorAndText({
+      workId: item.workId || '',
+      modalId: item.modalId || '',
+      actorName: item.actorName || '',
+      commentText: item.commentText || '',
+    });
+    if (row) {
+      console.error(`[comments:execute] commentId=${item.commentId} 已失效，回退命中当前记录 id=${row.id}`);
+    }
+  }
   if (!row) {
     return { itemIndex: item.itemIndex, commentId: item.commentId, ok: false, error: `找不到 work_comments.id=${item.commentId}` };
   }
@@ -209,19 +220,23 @@ async function executeWorkCommentItems(items, args) {
   const results = [];
 
   try {
+    const prepared = items.map(validateWorkCommentItem);
+    const executable = prepared.filter(item => item.ok);
+    for (const item of prepared) {
+      if (!item.ok) results.push(item);
+    }
+    if (executable.length === 0) {
+      return results;
+    }
+
     const ctx = await createBrowserContext({ headless: false, enableReuse: false });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
 
-    for (const item of items) {
-      const validated = validateWorkCommentItem(item);
-      if (!validated.ok) {
-        results.push(validated);
-        continue;
-      }
-
+    for (const validated of executable) {
       try {
+        console.log(`[comments:execute] 打开作品 commentId=${validated.commentId} actor="${validated.actorName}" comment="${validated.commentText.slice(0, 40)}"`);
         await page.goto(validated.workUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await page.waitForTimeout(1500);
 
@@ -238,10 +253,12 @@ async function executeWorkCommentItems(items, args) {
           eventTimeText: validated.eventTimeText,
         }, { maxScrolls: 30 });
         if (!found.ok) {
+          console.log(`[comments:execute] 未找到评论 commentId=${validated.commentId} reason=${found.message || found.code}`);
           markCommentBlocked(validated.commentId, found.message || found.code || 'comment_not_found');
           results.push({ ...validated, ok: false, status: 'blocked', error: found.message || found.code });
           continue;
         }
+        console.log(`[comments:execute] 已定位评论 commentId=${validated.commentId} index=${found.data?.commentIndex}`);
 
         const opened = await openReplyBoxByIndex(page, found.data.commentIndex);
         if (!opened.ok) {
@@ -328,14 +345,18 @@ async function main() {
   const results = await executeWorkCommentItems(loaded.items, args);
   updateExecuteJsonFile(args.itemsFile, loaded.parsed, results);
 
-  // 消费后删除中间 JSON
-  try {
-    const absPath = resolve(args.itemsFile);
-    if (existsSync(absPath)) {
-      unlinkSync(absPath);
-      console.log(`[comments:execute] 已删除中间 JSON: ${args.itemsFile}`);
-    }
-  } catch {}
+  const allSucceeded = results.length > 0 && results.every(item => item.ok && item.status === 'succeeded');
+  if (allSucceeded) {
+    try {
+      const absPath = resolve(args.itemsFile);
+      if (existsSync(absPath)) {
+        unlinkSync(absPath);
+        console.log(`[comments:execute] 已删除中间 JSON: ${args.itemsFile}`);
+      }
+    } catch {}
+  } else {
+    console.log(`[comments:execute] 保留中间 JSON（未全部成功）: ${args.itemsFile}`);
+  }
 
   const succeeded = results.filter(item => item.ok && item.status === 'succeeded').length;
   const skipped = results.filter(isSkippedResult).length;
