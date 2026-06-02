@@ -379,21 +379,6 @@ work_id/modal_id + actor_profile_key/actor_profile_url/actor_name + comment_text
 
 ---
 
-## 评论页采集停止规则
-
-进入作品详情页后，如果配置 `--days N`：
-
-```text
-每条评论解析 eventTimeText
-未过期：expiredCount = 0
-已过期：expiredCount += 1
-expiredCount >= 3：停止当前作品评论采集并打印日志
-```
-
-不能因为发现 1 条过期评论就停止当前作品采集。
-
----
-
 ## 临时 JSON 输出
 
 通知采集和入库完成后，待回复评论从当前已有查询读取：
@@ -415,31 +400,6 @@ work_id || modal_id || '__unknown__'
 ```
 
 临时 JSON 字段优先沿用 `work_comments` 现有字段；不要重新设计 `needReply`、`commentId`、`workId` 等新字段。若评论回复准备流程已有固定 JSON 格式，以该流程实际要求为准，只做字段映射，不扩表。
-
----
-
-## 执行顺序
-
-实际启动顺序：
-
-```text
-初始化数据库迁移
-启动浏览器
-打开抖音个人主页 /user/self
-打开通知面板
-等待通知面板稳定
-逐批解析通知
-滚动继续采集
-写入 interaction_events
-输出扫描结果
-```
-
-说明：
-
-```text
-新互动采集只走通知中心。
-runCommentScan() 保留在代码中，但不是当前新事件采集入口。
-```
 
 ---
 
@@ -498,26 +458,6 @@ notificationItemKey
 ```text
 eventType = comment | like
 ```
-
----
-
-## 参数过滤
-
-```text
---type all      采集评论和点赞
---type comment  只采集评论
---type like     只采集点赞
-```
-
-`--days N` 只在时间能被 `parseDouyinTimeText()` 解析时生效。
-
-说明：
-
-```text
-如果 timeText 解析不出来，该通知不会因为 --days 被过滤。
-```
-
-当连续 3 条可解析的相关通知都超过时间窗口时，停止继续滚动。
 
 ---
 
@@ -662,42 +602,6 @@ scanned_at
 
 ---
 
-## 滚动停止条件
-
-通知面板最多滚动：
-
-```text
-20 轮
-```
-
-停止条件：
-
-```text
-面板显示暂无更多数据
-连续 2 轮没有本次扫描内的新通知
-通知面板无法继续滚动
-连续 3 条可解析的相关通知超过 --days 时间窗口
-首轮通知解析失败
-后续轮通知解析失败
-```
-
-异常处理规则：
-
-```text
-首轮 extractVisibleNotifications() 失败：阻断退出。
-后续轮 extractVisibleNotifications() 失败：停止继续滚动，返回已采集结果。
-单条通知处理异常：累计 parseFailed 和 failedEvents，不会立刻停止整个扫描。
-```
-
-说明：
-
-```text
-代码里有 allDuplicate 判断，但它不等价于“DB upsert 全部 duplicate”。
-不要写成本轮全部数据库重复就一定停止。
-```
-
----
-
 ## JSON 输出
 
 `--json` 输出分为 data 和 summary。
@@ -735,186 +639,163 @@ summary 里是 ambiguous，不是 ambiguousCount。
 
 ---
 
-## 评论回复流程
+## 评论回复内部流程
 
-采集阶段会生成按作品聚合的待回复评论 JSON。该 JSON 来自 `work_comments`，每条评论包含 `id`、`comment_text`、`reply_text`、`reply_status` 等字段。
-
-第二步直接使用第一步生成并已填写 `reply_text` 的 JSON 更新数据库：
-
-```bash
-npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json
-```
-
-创建结果：
+下图是 `comments:prepare` → `comments:execute-all` 的内部控制流。
 
 ```text
-work_comments.reply_status = prepared
-work_comments.reply_text = JSON 中填写的 reply_text
+JSON (含 reply_text)
+ ↓
+comments:prepare（准备阶段）
+ ├─ 加载 JSON，提取评论项
+ ├─ 逐条校验：
+ │  ├─ 缺少 work_comments.id              → PREPARE_FAILED
+ │  ├─ reply_text 为空                     → EMPTY_REPLY_TEXT
+ │  ├─ 策略字段无效 (decision/riskLevel/
+ │  │   relevance/replyMode/commentCategory) → BLOCKED
+ │  ├─ 回复文本过长 / 命中模板黑名单          → BLOCKED
+ │  └─ 通过 → 查找 work_comments
+ │     ├─ 不存在 → PREPARE_FAILED
+ │     └─ 存在 → markCommentReplyPrepared
+ │        reply_status = prepared
+ │        reply_text = reply_text
+ └─ 回写 JSON 状态码
+    ├─ 全部成功 → workflow_status_code: PREPARE_JSON_UPDATED
+    └─ 部分失败 → 逐条记录 prepare_status_code
+ ↓
+comments:execute-all（执行阶段）
+ ├─ dry-run（不带 --execute）
+ │  └─ 逐条校验（id / reply_status=prepared /
+ │     workUrl / reply_text）→ 输出校验报告
+ │
+ └─ --execute 真实执行
+    启动浏览器
+    ↓
+    遍历每条已 prepare 的评论（上限 --max-items 条）:
+    ├─ 校验失败 (missing id / not prepared /
+    │   empty reply / no workUrl) → blocked
+    │
+    ├─ page.goto(workUrl) → 等待作品弹窗
+    │  └─ 弹窗未出现 → markCommentBlocked
+    │
+    ├─ findCommentInWorkModal (作品内滚动
+    │  最多 30 轮查找目标评论)
+    │  └─ 找不到 → markCommentBlocked
+    │
+    ├─ openReplyBoxByIndex → 打开回复框
+    │  └─ 失败 → markCommentBlocked
+    │
+    ├─ 模拟打字 → sendReplyInWorkModal → 发送
+    │  └─ 失败 → markCommentBlocked
+    │
+    ├─ verifyReplyInWorkModal → 确认回复
+    │  ├─ 确认成功 → markCommentReplied
+    │  │  reply_status = succeeded
+    │  └─ 已发送未确认 → markCommentSentUnverified
+    │     reply_status = sent_unverified
+    │
+    └─ 回写 JSON 状态码
+       ├─ 全部成功 → EXECUTE_JSON_DONE
+       └─ 部分失败 → EXECUTE_JSON_PARTIAL
 ```
 
-第三步直接使用同一个 JSON 执行回复：
+## 回访任务内部流程
 
-```bash
-npm run comments:execute-all -- --items-file data/pending-replies/pending-comments-xxx.json --execute
-```
+下图是 `return-visit:prepare` → `return-visit:execute` 的完整控制流。
 
-每条回复执行后必须确认回复成功，再更新数据库：
+### 准备阶段 (return-visit:prepare)
 
 ```text
-确认成功：work_comments.reply_status = succeeded
-发送后未确认：work_comments.reply_status = sent_unverified
-定位或发送失败：work_comments.reply_status = blocked
+加载数据源
+├─ --items-file → createOrUpdateReturnVisitTasksFromItems
+│  JSON 中每个用户: identity_key 去重 → insert/enrich
+└─ 无文件 → createOrUpdateReturnVisitTasksFromEvents
+   从 interaction_events (status=new)
+   筛选 friend/mutual → identity_key 去重 → insert/enrich
+   ↓
+listReturnVisitPrepareTasks (状态: pending_visit 等)
+   ↓
+启动浏览器
+   ↓
+遍历待准备任务 (连续失败 ≥ maxConsecutiveFailures 则停止):
+├─ 无 profileUrl → FAILED_COLLECT
+│
+├─ 打开用户主页
+│  ├─ 私密账号 → SKIPPED_PRIVATE
+│  └─ listProfileWorkUrls (滚动采集视频/笔记链接)
+│
+├─ 遍历候选作品 (最多 maxWorksToCheck 个):
+│  ├─ navigateToVideo → 检查点赞状态
+│  ├─ getVideoTitle → 提取作品标题
+│  ├─ extractVideoCommentContext → 提取参考评论
+│  ├─ analyzeReturnVisitContext → 场景信号分析
+│  │  └─ 无场景信号 / 无作品标题且无评论 → 跳过
+│  └─ 选择最佳作品
+│
+├─ 无合适作品 → SKIPPED_NO_SUITABLE_WORK
+│
+├─ generateReturnVisitComment → 生成回访评论
+│  └─ 失败 → FAILED_GENERATE_COMMENT
+│
+└─ 成功 → 更新任务:
+   status: collecting_content → content_collected
+          → comment_generated → pending_execute
+   写入 targetWork + referenceComments + generatedComment
 ```
 
----
-
-## 回访任务流程
-
-只有当用户明确说需要回访时，评论回复结束后才进入本流程。不要把回访准备写成评论回复主流程的默认后置步骤。
-
-回访任务由下面命令创建或更新：
-
-```bash
-npm run return-visit:prepare -- --days 7 --max-items 5
-```
-
-默认读取来源：
+### 执行阶段 (return-visit:execute)
 
 ```text
-interaction_events.event_type IN ('like', 'comment')
-interaction_events.status = new
-interaction_events.scanned_at >= 当前时间 - --days
+listReturnVisitExecuteTasks (status: pending_execute 等)
+   ↓
+过滤脏任务:
+├─ 无 generatedComment → FAILED_GENERATE_COMMENT
+├─ 无 targetWork.workUrl → FAILED_COLLECT
+└─ 通过 → 加入执行队列
+   ↓
+启动浏览器
+   ↓
+遍历可执行任务 (连续失败 ≥ max / 每 N 个休息 M ms):
+├─ 状态 → executing
+│
+├─ executeReturnVisitTask:
+│  ├─ resolveWorkForExecution:
+│  │  ├─ knownWorkUrl → collectWorkFromUrl
+│  │  └─ 失败 → 降级: collectCandidateWorkFromProfile
+│  │     ├─ 私密 → skipped_private
+│  │     └─ 无合适作品 → skipped_no_suitable_work
+│  │
+│  ├─ navigateToVideo(workUrl)
+│  │
+│  ├─ checkLikeState → 点赞状态检测
+│  │  ├─ already_liked → 跳过点赞
+│  │  └─ neutral → clickLike → confirmLikeSucceeded
+│  │
+│  ├─ waitRandom(likeToCommentMs) → 随机等待
+│  ├─ handleVideoWatch → 观看视频
+│  │
+│  ├─ postVideoComment → 发送回访评论
+│  │
+│  └─ dry-run 模式: 只检查不执行
+│
+└─ 结果处理:
+   ├─ done → markReturnVisitDone
+   │  likeStatus=liked/already_liked
+   │  commentStatus=posted
+   ├─ dry-run → 回退 PENDING_EXECUTE
+   ├─ skipped_* → 记录跳过原因
+   └─ 失败 → markReturnVisitFailure (累计连续失败)
 ```
 
-但不是只能读取 `new`。
-
-可以通过参数覆盖状态：
-
-```bash
-npm run return-visit:prepare -- --event-status new
-```
-
-或通过配置覆盖：
+## 模块约束
 
 ```text
-returnVisit.eventSourceStatus
-```
-
-只处理关系为：
-
-```text
-friend
-mutual
-```
-
-符合条件后写入：
-
-```text
-return_visit_tasks
-```
-
-新任务初始状态：
-
-```text
-pending_visit
-```
-
-任务唯一合并依据：
-
-```text
-identity_key
-```
-
-说明：
-
-```text
-return-visit:prepare 创建或更新回访任务后，不会更新源 interaction_events 的 status。
-重复运行时靠 return_visit_tasks.identity_key 合并任务。
-```
-
----
-
-## return-visit:prepare 后续状态推进
-
-`return-visit:prepare` 不只是建任务。
-
-它还会继续执行：
-
-```text
-进入用户主页
-采集候选作品
-采集作品内容和参考评论
-生成回访评论
-更新回访任务
-```
-
-成功后任务进入：
-
-```text
-return_visit_tasks.status = pending_execute
-comment_status = generated
-```
-
-该命令不会真实点赞，也不会发表评论。
-
----
-
-## 推荐主流程
-
-推荐顺序按用户意图分支，不存在唯一固定主流程。
-
-只看互动：
-
-```text
-1. interactions:scan --display-only
-   采集 comment / like，写入 interaction_events / work_comments
-   输出互动展示数据
-   不生成待回评 JSON
-   不生成待回访 JSON
-```
-
-评论回复：
-
-```text
-1. interactions:scan --generate-reply-json
-   采集 comment / like，写入 interaction_events 和 work_comments
-   输出按作品分组的待回复评论 JSON
-
-2. comments:prepare
-   读取第一步 JSON 中的 reply_text
-   更新 work_comments.reply_status = prepared
-   更新 work_comments.reply_text
-
-3. comments:execute-all
-   直接使用同一个 JSON 执行回复
-   每条确认成功后更新 work_comments.reply_status = succeeded
-```
-
-明确回访：
-
-```text
-1. interactions:scan --generate-visit-json
-   采集用户明确要求的互动类型
-   输出待回访 JSON
-
-2. return-visit:prepare --items-file <待回访 JSON>
-   消费待回访 JSON，创建或更新 return_visit_tasks
-   按 --days / --max-items 边界进入用户主页采集上下文并生成回访评论
-
-3. return-visit:execute --execute
-   执行回访点赞 / 评论，并记录执行结果
-```
-
-关键约束：
-
-```text
-采集模块是通知面板唯一入口。
-回评模块只消费待回评 JSON。
-回访模块只消费待回访 JSON。
-actions:pending 不属于本推荐主流程；第一步已经拿到按作品分组的评论 JSON。
+采集模块是通知面板唯一入口（interactions:scan）。
+回评模块只消费待回评 JSON（comments:prepare / comments:execute-all）。
+回访模块只消费待回访 JSON（return-visit:prepare / return-visit:execute）。
+actions:pending 不属于主流程；第一步已经拿到按作品分组的评论 JSON。
 return-visit:prepare 不属于评论回复默认流程。
-只有用户明确要求回访时，才在评论回复结束后单独执行“回访任务流程”。
-执行回访准备时必须指定或配置 `--days` 和 `--max-items`，避免无边界读取历史用户。
+只有用户明确要求回访时，才在评论回复结束后单独执行回访流程。
 ```
 
 ---
