@@ -14,8 +14,12 @@ export const normalizeDouyinUrl = _norm;
 
 const SELF_URL = 'https://www.douyin.com/user/self';
 const REQUEST_TRACKER = Symbol.for('lishangwanglai.notificationRequestTracker');
-const NETWORK_WAIT_TIMEOUT_MS = 30000;
+const NETWORK_WAIT_TIMEOUT_MS = 60000;
 const NETWORK_IDLE_MS = 1200;
+
+function formatTimeoutSeconds(timeoutMs) {
+  return Math.round(timeoutMs / 1000);
+}
 
 function shouldTrackRequest(request) {
   const url = request.url ? request.url() : '';
@@ -95,7 +99,7 @@ async function waitForNetworkSettledOrTimeout(page, {
   const pending = snapshot.pendingRequests
     .map(item => `${item.type}:${item.ageMs}ms:${item.url}`)
     .join(' | ');
-  throw new Error(`网络不好，${label}等待超过30s${pending ? ` pending=${pending}` : ''}`);
+  throw new Error(`网络不好，${label}等待超过${formatTimeoutSeconds(timeoutMs)}s${pending ? ` pending=${pending}` : ''}`);
 }
 
 async function hasNotificationBell(page) {
@@ -162,7 +166,7 @@ export function generateNotificationItemKey(d) {
 
 export async function ensureNotificationPageReady(page) {
   ensureRequestTracker(page);
-  await page.goto(SELF_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.goto(SELF_URL, { waitUntil: 'domcontentloaded', timeout: NETWORK_WAIT_TIMEOUT_MS });
   console.error('[notify-page] 等待页面加载...');
   const start = Date.now();
   while (Date.now() - start < NETWORK_WAIT_TIMEOUT_MS) {
@@ -175,7 +179,7 @@ export async function ensureNotificationPageReady(page) {
     console.error('[notify-page] 页面请求已停，但通知铃铛未出现，准备重试检查...');
     await page.waitForTimeout(500);
   }
-  throw new Error('网络不好，通知页等待超过30s且通知铃铛未出现');
+  throw new Error(`网络不好，通知页等待超过${formatTimeoutSeconds(NETWORK_WAIT_TIMEOUT_MS)}s且通知铃铛未出现`);
 }
 
 export async function openNotificationPanel(page) {
@@ -367,7 +371,7 @@ export async function waitForNotificationPanelStable(page) {
       panelBox,
       networkBad: snapshot.inflightCount > 0,
       reason: snapshot.inflightCount > 0
-        ? `网络不好，通知面板等待超过30s${pending ? ` pending=${pending}` : ''}`
+        ? `网络不好，通知面板等待超过${formatTimeoutSeconds(NETWORK_WAIT_TIMEOUT_MS)}s${pending ? ` pending=${pending}` : ''}`
         : '通知面板请求已停，但内容未稳定',
     };
   }
@@ -389,7 +393,7 @@ export async function waitForNotificationPanelStable(page) {
       empty: false,
       panelBox: null,
       networkBad: true,
-      reason: `网络不好，通知面板等待超过30s${pending ? ` pending=${pending}` : ''}`,
+      reason: `网络不好，通知面板等待超过${formatTimeoutSeconds(NETWORK_WAIT_TIMEOUT_MS)}s${pending ? ` pending=${pending}` : ''}`,
     };
   }
 
