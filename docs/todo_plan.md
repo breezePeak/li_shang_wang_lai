@@ -1,6 +1,8 @@
 # 开发文档
 
-## 通知采集与评论回复主流程图
+## 一、采集模块（`interactions:scan`）
+
+### 1.1 主流程概览
 
 ```text
 开始
@@ -11,55 +13,38 @@
    ├─ 赞我的
    │  ↓
    │  通知级去重
-   │  ├─ 已存在: 状态码 SKIP_DUPLICATE_NOTIFICATION，打印跳过日志
-   │  └─ 不存在: 状态码 LIKE_EVENT_STORED，写入 interaction_events
+   │  ├─ 已存在: SKIP_DUPLICATE_NOTIFICATION
+   │  └─ 不存在: LIKE_EVENT_STORED，写入 interaction_events
    │
    ├─ 评论我的
    │  ↓
    │  提取缩略图作品唯一标识
    │  ↓
    │  作品级去重
-   │  ├─ 已采集: 状态码 SKIP_WORK_COLLECTED，打印跳过日志
+   │  ├─ 已采集: SKIP_WORK_COLLECTED
    │  └─ 未采集:
-   │      状态码 WORK_COLLECTING
-   │      点击缩略图进入作品
-   │      滚动采集评论
-   │      评论级去重
-   │      连续 3 条过期则停止
-   │      评论写入 work_comments
-   │      标记作品已采集
-   │      输出按作品分组 JSON
-   │      每条待回复评论状态码 COLLECT_PENDING_REPLY
+   │      WORK_COLLECTING
+   │      点击缩略图进入作品 → 滚动采集评论 → 评论级去重
+   │      连续 3 条过期则停止 → 写入 work_comments → 标记作品已采集
+   │      输出按作品分组 JSON (每条 COLLECT_PENDING_REPLY)
    │
    ├─ 回复我的 / 关注我的
-   │  ├─ 重复: 状态码 SKIP_DUPLICATE_NOTIFICATION，打印跳过日志
-   │  └─ 不重复: 状态码 NOTIFY_OWNER_STORED，分类入库，暂不处理
+   │  ├─ 重复: SKIP_DUPLICATE_NOTIFICATION
+   │  └─ 不重复: NOTIFY_OWNER_STORED，分类入库，暂不处理
    │
    └─ 其他通知
-      ├─ 能识别: 状态码 OTHER_STORED，分类入库
-      └─ 不能识别: 状态码 UNKNOWN_LOGGED，打印未知类型日志
+      ├─ 能识别: OTHER_STORED，分类入库
+      └─ 不能识别: UNKNOWN_LOGGED，打印未知类型日志
 
-2. 填写第一步 JSON 的 reply_text
-   状态码: PREPARE_WAIT_REPLY_TEXT
-   ↓
+2. 填写第一步 JSON 的 reply_text → PREPARE_WAIT_REPLY_TEXT
 
-3. comments:prepare -- --items-file <第一步 JSON>
-   状态码: PREPARE_JSON_UPDATED
-   读取 JSON -> 校验 reply_text -> 更新 work_comments
-   ├─ 校验通过: 每条评论状态码 PREPARE_READY，reply_status=prepared
-   └─ 校验失败: 每条评论状态码 PREPARE_FAILED，写入 prepare_error
+3. comments:prepare --items-file <JSON> → PREPARE_JSON_UPDATED
 
-4. comments:execute-all -- --items-file <同一个 JSON> --execute
-   状态码: EXECUTE_JSON_DONE / EXECUTE_JSON_PARTIAL
-   读取 JSON -> 按作品打开评论 -> 填写回复 -> 发送 -> 逐条确认
-   ├─ 确认成功: 每条评论状态码 EXECUTE_CONFIRMED，reply_status=succeeded
-   ├─ 发送未确认: 每条评论状态码 EXECUTE_SENT_UNVERIFIED，reply_status=sent_unverified
-    └─ 定位/发送失败: 每条评论状态码 EXECUTE_BLOCKED，reply_status=blocked
+4. comments:execute-all --items-file <JSON> --execute
+   → EXECUTE_JSON_DONE / EXECUTE_JSON_PARTIAL
 ```
 
-## 通知面板滚动采集内部流程
-
-下图是 `interactions:scan` 主流程中"步骤 1"通知扫描阶段的内部控制流，含滚动循环、停止条件和通知分类处理。
+### 1.2 通知面板滚动采集内部流程
 
 ```text
 导航到通知主页
@@ -92,19 +77,17 @@
 │     │  ├─ 作品级去重 → 已采集              → skip                  │
 │     │  └─ 未采集:                                                  │
 │     │     点击缩略图 → 等待作品弹窗                                 │
-│     │     │                                                        │
-│     │     └─ 作品评论采集 (collectCommentsFromNotificationWork)     │
+│     │     └─ collectCommentsFromNotificationWork                   │
 │     │        ├─ extractWorkModalContext → 作品上下文                │
 │     │        ├─ upsert work_contexts                               │
 │     │        ├─ findUnrepliedCommentsInModal (作品内滚动采集)       │
 │     │        │  └─ 连续 3 条过期 → 停止作品内滚动                   │
 │     │        ├─ upsert work_comments (评论级去重)                   │
 │     │        └─ 标记作品已采集                                     │
-│     │                                                              │
 │     │     关闭作品弹窗 → 恢复通知面板                               │
 │     │     ├─ 轻量恢复: Escape → waitForNotificationPanelStable      │
 │     │     │  ├─ 面板幸存（原位恢复）→ 继续                          │
-│     │     │  └─ 面板丢失 → 降级完整恢复 (page.goto + 重新打开面板)   │
+│     │     │  └─ 面板丢失 → 降级 page.goto + 重新打开面板            │
 │     │     └─ 恢复失败 → stopDueToOldRelevant → break               │
 │     │                                                              │
 │     ├─ like（赞我的作品）                                           │
@@ -124,524 +107,121 @@
 │                                                                   │
 └───────────────────────────────────────────────────────────────────┘
  ↓
-生成待回复评论 JSON (generateReplyJson)
-生成待回访 JSON      (generateVisitJson)
+生成待回复评论 JSON / 生成待回访 JSON
 ```
 
-## 状态码约定
+### 1.3 通知识别与分类
 
-| 阶段 | 状态码 | 写入位置 | 含义 |
-|---|---|---|---|
-| 扫描 | `SCAN_JSON_READY` | JSON 根字段 `workflow_status_code` | 第一阶段采集完成，JSON 可编辑 |
-| 扫描 | `COLLECT_PENDING_REPLY` | `works[].comments[].collect_status_code` | 评论已入库，等待填写回复 |
-| 扫描 | `SKIP_DUPLICATE_NOTIFICATION` | 日志 | 通知重复，跳过 |
-| 扫描 | `SKIP_WORK_COLLECTED` | 日志 | 作品评论已采集，跳过进入作品 |
-| 扫描 | `LIKE_EVENT_STORED` | 日志 / `interaction_events` | 点赞通知已入库 |
-| 扫描 | `NOTIFY_OWNER_STORED` | 日志 / 现有表 | 回复我的 / 关注我的记录，暂不处理 |
-| 扫描 | `UNKNOWN_LOGGED` | 日志 | 未知通知已记录 |
-| 准备 | `PREPARE_WAIT_REPLY_TEXT` | JSON 根字段 / 评论字段 | 等待填写 `reply_text` |
-| 准备 | `PREPARE_JSON_UPDATED` | JSON 根字段 `workflow_status_code` | 第二阶段已回写 JSON |
-| 准备 | `PREPARE_READY` | `works[].comments[].prepare_status_code` | 已写入 `work_comments.reply_text`，状态为 prepared |
-| 准备 | `PREPARE_FAILED` | `works[].comments[].prepare_status_code` | 准备失败，查看 `prepare_error` |
-| 执行 | `EXECUTE_WAIT_CONFIRM` | `works[].comments[].execute_status_code` | 已准备，等待真实执行 |
-| 执行 | `EXECUTE_JSON_DONE` | JSON 根字段 `workflow_status_code` | 第三阶段全部执行成功 |
-| 执行 | `EXECUTE_JSON_PARTIAL` | JSON 根字段 `workflow_status_code` | 第三阶段有失败或未确认 |
-| 执行 | `EXECUTE_CONFIRMED` | `works[].comments[].execute_status_code` | 已确认回复成功 |
-| 执行 | `EXECUTE_SENT_UNVERIFIED` | `works[].comments[].execute_status_code` | 已发送但未确认成功 |
-| 执行 | `EXECUTE_BLOCKED` | `works[].comments[].execute_status_code` | 定位、输入或发送失败 |
-
-## 三模块边界
-
-当前互动流程拆成三个模块：
-
-```text
-采集模块 interactions:scan
-  打开主页 -> 打开通知面板 -> 逐条扫描通知 -> 入库
-  根据 Agent 选择的 CLI 参数决定是否生成待回评 JSON / 待回访 JSON
-
-回评模块 comments:prepare / comments:execute-all
-  只消费待回评 JSON
-  不直接打开通知面板采集
-
-回访模块 return-visit:prepare / return-visit:execute
-  只消费待回访 JSON
-  不直接打开通知面板采集
-```
-
-Agent 决策上下文示例：
-
-```json
-{
-  "collect": true,
-  "replyComment": false,
-  "visitBack": false,
-  "collectTypes": ["like", "comment", "reply", "follow"],
-  "days": 7,
-  "maxCount": 100
-}
-```
-
-这些字段由 Agent 在对话中理解和维护，不由项目代码解析自然语言，也不新增数据库字段。项目 CLI 只接收明确参数，例如 `--display-only`、`--generate-reply-json`、`--generate-visit-json`、`--days`、`--max-count`。
-
-## 用户意图映射
-
-```text
-只看互动：
-  interactions:scan --display-only
-  只展示互动数据，不生成待回评 JSON，不生成待回访 JSON
-
-评论回复：
-  interactions:scan --generate-reply-json
-  comments:prepare --items-file <待回评 JSON>
-  comments:execute-all --items-file <待回评 JSON> --execute
-
-明确回访：
-  interactions:scan --generate-visit-json
-  return-visit:prepare --items-file <待回访 JSON>
-  return-visit:execute --execute
-
-评论回复并回访：
-  interactions:scan --generate-reply-json --generate-visit-json
-  先执行回评模块，再按用户明确意图执行回访模块
-```
-
-## 入口命令
-
-```bash
-npm run interactions:scan -- --type all --days 7
-```
-
-源码入口：
-
-```text
-src/cli/scan-interactions.mjs
-```
-
-支持类型：
-
-```text
-all
-comment
-like
-```
-
-当前不支持 `follow` 采集。
-
----
-
-## 通知采集改造同步说明
-
-本次通知采集改造必须基于当前已有表和字段表达业务含义，不新增数据库字段、不新增实体字段、不修改表结构。
-
-需求中的逻辑字段按当前代码映射如下：
-
-| 逻辑含义 | 当前字段 / 结构 |
-|---|---|
-| 通知类型 | `interaction_events.event_type`，当前约束为 `comment` / `like` |
-| 用户 ID | `actor_profile_key`；没有时用归一化后的 `actor_profile_url`，再退到 `actor_name` |
-| 用户昵称 | `actor_name` |
-| 作品唯一标识 | `target_work_id` / `works.work_id`；通知解析对象里仍叫 `workId` |
-| 作品 URL | `target_work_url` / `works.work_url`；通知解析对象里仍叫 `workUrl` |
-| 缩略图作品标识 | `thumbnailKey` 临时解析值，落库到 `works.thumbnail_key` 或 `raw_payload_json.thumbnailKey` |
-| 评论唯一标识 | `work_comments.comment_key` |
-| 通知时间 | `interaction_events.event_time_text` |
-| 采集时间 | `interaction_events.scanned_at`、`works.first_seen_at/last_seen_at`、`work_comments.first_seen_at/last_seen_at` |
-| 是否需要回复 | `work_comments.reply_status = 'pending'` |
-| 是否已回复 / 已处理 | `work_comments.reply_status` |
-| 回访处理状态 | `return_visit_tasks.status`、`return_visit_tasks.like_status`、`return_visit_tasks.comment_status` |
-| 原始通知数据 | `interaction_events.raw_payload_json` |
-| 原始评论数据 | `work_comments.raw_comment_json` |
-
-不要新建 `needVisit`、`needReply`、`needProcess`、`status`、`rawData`、`collectTime`、`workId`、`commentId`、`noticeTime` 等字段。若某个状态无法用上表表达，代码中只能加 TODO 注释说明需要人工确认是否扩表。
-
----
-
-## 改造后的目标流程
-
-新流程按“采集 -> 去重 -> 分类 -> 入库 -> 生成待回复评论文件 -> 评论回复准备使用”组织：
-
-```text
-初始化数据库迁移
-启动浏览器
-打开抖音个人主页 /user/self
-如果配置 --days，先从已有数据库记录构建去重上下文
-打开通知面板
-逐条解析并分类通知
-点赞通知按当前已有逻辑入库；不进入本次待回复评论 JSON
-评论通知先做作品级去重，未采集过才点击缩略图进入作品详情页
-作品详情页滚动采集评论，并做评论级去重
-回复我的 / 关注我的 / 其他通知只记录和日志提示，暂不进入后续处理
-统一写入当前已有表
-从 work_comments 读取 reply_status = pending 的评论
-按 work_id / modal_id 聚合成临时 JSON
-返回临时 JSON 文件路径，供 comments:prepare 或评论回复建议流程使用
-```
-
-当前 `interactions:scan` 的通知面板入口仍是 `src/cli/scan-interactions.mjs`。评论通知的“点击缩略图进入作品详情页采集全量评论”、入库到 `work_comments`、以及生成待回复临时 JSON 时，应优先复用 `work-repository.mjs`、`work-comment-repository.mjs` 和现有 JSON/文件工具，不允许通过扩表实现。
-
----
-
-## 去重上下文
-
-配置 `--days N` 时，打开通知面板前需要查询指定天数范围内已有数据并构建三类 KV。
-
-### 通知级去重
-
-来源表：
-
-```text
-interaction_events
-```
-
-优先 key：
-
-```text
-platform_event_id
-notification_item_key
-fingerprint
-```
-
-兜底 key 使用已有解析值组合：
-
-```text
-event_type + actor_profile_key/actor_profile_url/actor_name + target_work_id/target_work_url + comment_text + event_time_text
-```
-
-### 作品级去重
-
-来源表：
-
-```text
-works
-work_comments
-```
-
-优先 key：
-
-```text
-works.work_id
-works.modal_id
-works.thumbnail_key
-```
-
-通知解析时先从 `workId`、`workUrl`、`thumbnailKey` 映射到已有字段。评论通知必须先判断作品是否已采集：只要 `works` 中存在对应作品，或 `work_comments` 中已有该 `work_id/modal_id` 的评论记录，就跳过进入详情页。普通 `interaction_events.target_work_id` 只能说明通知已入库，不能单独作为“评论区已采集”的标记。
-
-### 评论级去重
-
-来源表：
-
-```text
-work_comments
-```
-
-优先 key：
-
-```text
-comment_key
-```
-
-如果页面没有稳定评论 ID，则用已有字段组合生成稳定 `comment_key`：
-
-```text
-work_id/modal_id + actor_profile_key/actor_profile_url/actor_name + comment_text + event_time_text
-```
-
-同一个 `work_id + comment_key` 依赖 `idx_work_comments_unique` 合并，不新增 commentId 字段。
-
----
-
-## 通知分类和处理策略
-
-通知分类以 `src/domain/notification-action-router.mjs` 为准：
+通知分类以 `src/domain/notification-action-router.mjs` 为准，只匹配固定短语：
 
 | 通知内容 | `notificationAction` | `eventType` | 后续动作 |
 |---|---|---|---|
-| 评论了你的作品 / 评论了你的视频 | `comment_on_my_work` | `comment` | `collect_work_comments`，点击缩略图 |
-| 回复了你的评论 | `reply_to_my_comment` | `comment` | `notify_owner`，暂不后续处理 |
-| 赞了你的作品 / 视频 / 评论 | `like_received` | `like` | 入库记录；不进入待回复评论 JSON |
-| 无法识别 | `unknown` | `unknown` | `notify_owner`，打印日志 |
+| 评论了你的作品 / 视频 | `comment_on_my_work` | `comment` | 点击缩略图采集作品评论 |
+| 回复了你的评论 | `reply_to_my_comment` | `comment` | 暂不后续处理 |
+| 赞了你的作品 / 视频 / 评论 | `like_received` | `like` | 入库记录，不进入待回复 JSON |
+| 无法识别 | `unknown` | `unknown` | 打印日志 |
 
-注意：`interaction_events.event_type` 当前数据库约束只允许 `comment` / `like`。如果出现关注我的或 unknown 通知，不能直接新增事件类型；应复用最接近的现有处理方式，或在代码中加 TODO 标明当前表结构无法表达该类型，需要人工确认是否扩表。
-
----
-
-## 跳过日志要求
-
-逐条扫描通知时，所有 `continue` / `return` / `skip` 前必须打印详细日志，不能静默跳过。
-
-日志尽量包含当前代码已有变量名：
+可识别动作列表：
 
 ```text
-[通知跳过] index=12 eventType=comment actorProfileKey=xxx actorName=张三 targetWorkId=video-987 thumbnailKey=thumb-987 eventTimeText=2026-06-02 10:21 dedupeKey=work:video-987 reason=该作品评论已采集过 rawText=张三评论了你的作品
+赞了你的作品  赞了你的评论  赞了你的视频  点赞了你的作品
+评论了你的作品  评论了你的视频  回复了你的评论
 ```
 
-如果实际变量叫 `workId`、`thumbnailKey`、`timeText`，可在采集阶段按解析对象打印；入库或文档描述数据库字段时必须使用 `target_work_id`、`event_time_text` 等真实字段。
+类型判断：包含"赞了"或"点赞" → `like`；其他已匹配评论类短语 → `comment`。
 
----
+**约束**：`interaction_events.event_type` 只允许 `comment` / `like`。出现未知通知类型时，复用最接近的现有处理方式，或在代码中加 TODO 标明需要人工确认是否扩表。
 
-## 临时 JSON 输出
+### 1.4 去重机制
 
-通知采集和入库完成后，待回复评论从当前已有查询读取：
+通知采集有三级去重：
 
-```text
-listPendingCommentsGroupedByWork()
-```
+**通知级去重**（来源表 `interaction_events`）：
+- 优先 key: `platform_event_id`
+- 其次: `fingerprint`
+- 再次: `target_work_id` + `actor_profile_key` + `event_type` 组合
 
-查询条件：
+**作品级去重**（来源表 `work_contexts`）：
+- key: `work_id` / `modal_id` / `thumbnail_key` / `work_url`
 
-```text
-work_comments.reply_status = 'pending'
-```
+**评论级去重**（来源表 `work_comments`）：
+- 优先 key: `comment_key`
+- 无稳定 ID 时组合生成: `work_id/modal_id + actor_profile_key + comment_text + event_time_text`
 
-聚合 key：
+**本次扫描内去重**：
+- 使用 `seenItemKeys`，优先 `notificationItemKey`，其次 `platformEventId`，再次组合 key
+- **`seenItemKeys` 是本次扫描级别去重，不是每轮去重**
 
-```text
-work_id || modal_id || '__unknown__'
-```
+**入库去重**（`upsertNotificationEvent`）：
+1. `platformEventId` 精确匹配
+2. `fingerprint` 匹配
+3. 有 `workId` 时做 partial match
+4. 都不匹配则插入新事件
 
-临时 JSON 字段优先沿用 `work_comments` 现有字段；不要重新设计 `needReply`、`commentId`、`workId` 等新字段。若评论回复准备流程已有固定 JSON 格式，以该流程实际要求为准，只做字段映射，不扩表。
+入库结果: `inserted` / `enriched` / `duplicate` / `ambiguous`
 
----
-
-## 通知识别规则
-
-通知动作只匹配固定短语，不是任意关键词泛匹配。
-
-当前可识别动作：
-
-```text
-赞了你的作品
-赞了你的评论
-赞了你的视频
-点赞了你的作品
-评论了你的作品
-评论了你的视频
-回复了你的评论
-```
-
-类型判断：
-
-```text
-包含“赞了”或“点赞” => like
-其他已匹配评论类短语 => comment
-```
-
----
-
-## 采集字段
+### 1.5 采集字段
 
 每条通知解析为：
 
 ```text
-username
-relation
-eventType
-action
-content
-timeText
-rawText
-actorProfileUrl
-actorProfileKey
-profileResolveMethod
-workUrl
-workId
-workTitle
-thumbnailSrc
-thumbnailAlt
-thumbnailKey
-platformEventId
-notificationItemKey
+username  relation  eventType  action  content  timeText  rawText
+actorProfileUrl  actorProfileKey  profileResolveMethod
+workUrl  workId  workTitle  thumbnailSrc  thumbnailAlt  thumbnailKey
+platformEventId  notificationItemKey
 ```
 
-其中：
+其中 `eventType = comment | like`。
+
+### 1.6 跳过日志
+
+所有 `continue` / `return` / `skip` 前必须打印详细日志，格式示例：
 
 ```text
-eventType = comment | like
+[通知跳过] index=12 eventType=comment actorName=张三 targetWorkId=video-987
+dedupeKey=work:video-987 reason=该作品评论已采集过 rawText=张三评论了你的作品
 ```
+
+### 1.7 数据表
+
+采集事件写入 `interaction_events`（事件类型只支持 `comment` / `like`）：
+
+```text
+platform  event_type  actor_name  actor_profile_key  actor_profile_url
+relation  my_work_title  comment_text  event_time_text
+platform_event_id  notification_item_key  fingerprint  raw_payload_json
+target_work_id  target_work_url  dedup_confidence
+profile_resolution_status  status  scanned_at
+```
+
+说明：业务数据通过 `upsertNotificationEvent()` 写入。命令启动时会执行数据库迁移。
+
+### 1.8 JSON 输出
+
+`--json` 输出分为 `data` 和 `summary`：
+
+| 位置 | 字段 |
+|---|---|
+| `data` | `events`, `failedEvents`, `ambiguousEvents`, `counts` |
+| `summary` | `totalScanned`, `inserted`, `duplicates`, `enriched`, `ambiguous`, `parseFailed`, `profileResolved`, `profileUnresolved`, `scrollRounds`, `source` |
+
+### 1.9 状态码（采集阶段）
+
+| 状态码 | 位置 | 含义 |
+|---|---|---|
+| `SCAN_JSON_READY` | JSON `workflow_status_code` | 采集完成，JSON 可编辑 |
+| `COLLECT_PENDING_REPLY` | `works[].comments[].collect_status_code` | 评论已入库，等待填写回复 |
+| `SKIP_DUPLICATE_NOTIFICATION` | 日志 | 通知重复，跳过 |
+| `SKIP_WORK_COLLECTED` | 日志 | 作品评论已采集，跳过 |
+| `LIKE_EVENT_STORED` | `interaction_events` | 点赞通知已入库 |
+| `NOTIFY_OWNER_STORED` | 现有表 | 回复我的/关注我的记录，暂不处理 |
+| `UNKNOWN_LOGGED` | 日志 | 未知通知已记录 |
 
 ---
 
-## 本次扫描内去重
+## 二、评论回复模块（`comments:prepare` / `comments:execute-all`）
 
-本次扫描内使用 `seenItemKeys` 去重。
-
-优先使用：
-
-```text
-notificationItemKey
-```
-
-兜底使用：
-
-```text
-username + action + content
-```
-
-注意：
-
-```text
-seenItemKeys 是本次扫描级别，不是每轮滚动级别。
-同一次 interactions:scan 中，前面滚动轮次见过的 notificationItemKey，后续轮次会跳过。
-```
-
----
-
-## 入库去重
-
-业务入库调用：
-
-```text
-upsertNotificationEvent()
-```
-
-入库去重优先级：
-
-```text
-1. platformEventId 精确匹配
-2. fingerprint 匹配
-3. 有 workId 时做 partial match
-4. 都不匹配则插入新事件
-```
-
-入库结果：
-
-```text
-inserted
-enriched
-duplicate
-ambiguous
-```
-
-新插入的通知事件：
-
-```text
-interaction_events.status = new
-```
-
----
-
-## “新通知”的含义
-
-日志里的 `newInBatch` 不是“新入库数量”。
-
-它表示：
-
-```text
-本次扫描内未见过
-并且通过 --type 过滤
-并且没有被 --days 过滤掉的相关通知数量
-```
-
-即使 DB upsert 结果是 `duplicate`，也可能让 `newInBatch` 增加。
-
-因此：
-
-```text
-连续 2 轮无新通知
-```
-
-准确含义是：
-
-```text
-连续 2 轮没有出现“本次扫描内未见过且通过过滤条件的通知”
-```
-
-不是：
-
-```text
-连续 2 轮没有新入库数据
-```
-
----
-
-## 数据表
-
-采集到的互动事件写入：
-
-```text
-interaction_events
-```
-
-事件类型只支持：
-
-```text
-comment
-like
-```
-
-主要字段：
-
-```text
-platform
-event_type
-actor_name
-actor_profile_key
-actor_profile_url
-relation
-my_work_title
-comment_text
-event_time_text
-platform_event_id
-notification_item_key
-fingerprint
-raw_payload_json
-target_work_id
-target_work_url
-dedup_confidence
-profile_resolution_status
-status
-scanned_at
-```
-
-说明：
-
-```text
-扫描业务数据通过 upsertNotificationEvent() 写入 interaction_events。
-但命令启动时会执行数据库迁移，迁移可能创建或修改 actions、return_visit_tasks 等表结构。
-```
-
----
-
-## JSON 输出
-
-`--json` 输出分为 data 和 summary。
-
-data 里包含：
-
-```text
-events
-failedEvents
-ambiguousEvents
-counts
-```
-
-summary 里包含：
-
-```text
-totalScanned
-inserted
-duplicates
-enriched
-ambiguous
-parseFailed
-profileResolved
-profileUnresolved
-scrollRounds
-source
-```
-
-注意字段名：
-
-```text
-summary 里是 duplicates，不是 duplicateCount。
-summary 里是 ambiguous，不是 ambiguousCount。
-```
-
----
-
-## 评论回复内部流程
-
-下图是 `comments:prepare` → `comments:execute-all` 的内部控制流。
+### 2.1 评论回复内部流程
 
 ```text
 JSON (含 reply_text)
@@ -649,16 +229,15 @@ JSON (含 reply_text)
 comments:prepare（准备阶段）
  ├─ 加载 JSON，提取评论项
  ├─ 逐条校验：
- │  ├─ 缺少 work_comments.id              → PREPARE_FAILED
- │  ├─ reply_text 为空                     → EMPTY_REPLY_TEXT
+ │  ├─ 缺少 work_comments.id                              → PREPARE_FAILED
+ │  ├─ reply_text 为空                                     → EMPTY_REPLY_TEXT
  │  ├─ 策略字段无效 (decision/riskLevel/
- │  │   relevance/replyMode/commentCategory) → BLOCKED
- │  ├─ 回复文本过长 / 命中模板黑名单          → BLOCKED
+ │  │   relevance/replyMode/commentCategory)               → BLOCKED
+ │  ├─ 回复文本过长 / 命中模板黑名单                          → BLOCKED
  │  └─ 通过 → 查找 work_comments
  │     ├─ 不存在 → PREPARE_FAILED
  │     └─ 存在 → markCommentReplyPrepared
  │        reply_status = prepared
- │        reply_text = reply_text
  └─ 回写 JSON 状态码
     ├─ 全部成功 → workflow_status_code: PREPARE_JSON_UPDATED
     └─ 部分失败 → 逐条记录 prepare_status_code
@@ -672,14 +251,12 @@ comments:execute-all（执行阶段）
     启动浏览器
     ↓
     遍历每条已 prepare 的评论（上限 --max-items 条）:
-    ├─ 校验失败 (missing id / not prepared /
-    │   empty reply / no workUrl) → blocked
+    ├─ 校验失败 → blocked
     │
     ├─ page.goto(workUrl) → 等待作品弹窗
     │  └─ 弹窗未出现 → markCommentBlocked
     │
-    ├─ findCommentInWorkModal (作品内滚动
-    │  最多 30 轮查找目标评论)
+    ├─ findCommentInWorkModal (作品内滚动最多 30 轮)
     │  └─ 找不到 → markCommentBlocked
     │
     ├─ openReplyBoxByIndex → 打开回复框
@@ -699,11 +276,29 @@ comments:execute-all（执行阶段）
        └─ 部分失败 → EXECUTE_JSON_PARTIAL
 ```
 
-## 回访任务内部流程
+### 2.2 状态码（回评阶段）
 
-下图是 `return-visit:prepare` → `return-visit:execute` 的完整控制流。
+| 状态码 | 位置 | 含义 |
+|---|---|---|
+| `PREPARE_WAIT_REPLY_TEXT` | JSON / 评论字段 | 等待填写 `reply_text` |
+| `PREPARE_JSON_UPDATED` | JSON `workflow_status_code` | 准备完成，JSON 已回写 |
+| `PREPARE_READY` | `works[].comments[].prepare_status_code` | 已写入 `reply_text`，`reply_status=prepared` |
+| `PREPARE_FAILED` | `works[].comments[].prepare_status_code` | 准备失败，查看 `prepare_error` |
+| `EXECUTE_JSON_DONE` | JSON `workflow_status_code` | 全部执行成功 |
+| `EXECUTE_JSON_PARTIAL` | JSON `workflow_status_code` | 有失败或未确认 |
+| `EXECUTE_CONFIRMED` | `works[].comments[].execute_status_code` | 已确认回复成功 |
+| `EXECUTE_SENT_UNVERIFIED` | `works[].comments[].execute_status_code` | 已发送但未确认 |
+| `EXECUTE_BLOCKED` | `works[].comments[].execute_status_code` | 定位/输入/发送失败 |
 
-### 准备阶段 (return-visit:prepare)
+#### 待回复评论 JSON
+
+采集完成后，从 `work_comments` 查询 `reply_status = 'pending'` 的评论，按 `work_id || modal_id || '__unknown__'` 聚合输出 JSON。字段优先沿用 `work_comments` 现有字段，不做扩表。
+
+---
+
+## 三、回访模块（`return-visit:prepare` / `return-visit:execute`）
+
+### 3.1 准备阶段（`return-visit:prepare`）
 
 ```text
 加载数据源
@@ -743,7 +338,7 @@ listReturnVisitPrepareTasks (状态: pending_visit 等)
    写入 targetWork + referenceComments + generatedComment
 ```
 
-### 执行阶段 (return-visit:execute)
+### 3.2 执行阶段（`return-visit:execute`）
 
 ```text
 listReturnVisitExecuteTasks (status: pending_execute 等)
@@ -780,60 +375,92 @@ listReturnVisitExecuteTasks (status: pending_execute 等)
 │
 └─ 结果处理:
    ├─ done → markReturnVisitDone
-   │  likeStatus=liked/already_liked
-   │  commentStatus=posted
+   │  likeStatus=liked/already_liked, commentStatus=posted
    ├─ dry-run → 回退 PENDING_EXECUTE
    ├─ skipped_* → 记录跳过原因
    └─ 失败 → markReturnVisitFailure (累计连续失败)
 ```
 
-## 模块约束
+### 3.3 任务状态枚举
 
 ```text
-采集模块是通知面板唯一入口（interactions:scan）。
-回评模块只消费待回评 JSON（comments:prepare / comments:execute-all）。
-回访模块只消费待回访 JSON（return-visit:prepare / return-visit:execute）。
-actions:pending 不属于主流程；第一步已经拿到按作品分组的评论 JSON。
+pending_visit → collecting_content → content_collected
+→ comment_generated → pending_execute → executing → done
+
+跳转路径: skipped_no_work / skipped_private / skipped_no_suitable_work
+失败路径: failed_collect / failed_generate_comment / failed_like / failed_comment / failed
+```
+
+### 3.4 状态码（回访阶段）
+
+> 回访模块不使用 JSON 状态码，任务状态直接记录在 `return_visit_tasks` 表的 `status`、`like_status`、`comment_status` 字段中。
+
+---
+
+## 附录
+
+### A. 模块边界与约束
+
+```text
+采集模块 (interactions:scan)     — 通知面板唯一入口
+回评模块 (comments:prepare/execute-all) — 只消费待回评 JSON
+回访模块 (return-visit:prepare/execute) — 只消费待回访 JSON
+
+actions:pending 不属于主流程；第一步已拿到按作品分组的评论 JSON。
 return-visit:prepare 不属于评论回复默认流程。
 只有用户明确要求回访时，才在评论回复结束后单独执行回访流程。
 ```
 
----
-
-## 仓库文档同步要求
-
-如果本文档作为新准则，需要同步检查并更新：
+用户意图 → 命令映射：
 
 ```text
-README.md
-SKILL.md
-docs/COMMANDS.md
-skills/creator-interaction-executor/SKILL.md
+只看互动:   interactions:scan --display-only
+评论回复:   interactions:scan --generate-reply-json
+           → comments:prepare --items-file <JSON>
+           → comments:execute-all --items-file <JSON> --execute
+明确回访:   interactions:scan --generate-visit-json
+           → return-visit:prepare --items-file <JSON>
+           → return-visit:execute --execute
+评论+回访:  interactions:scan --generate-reply-json --generate-visit-json
+           → 先回评，再按用户明确意图走回访
 ```
 
-重点检查是否还存在容易误导的旧说明：
+### B. 开发约束
+
+1. 采集类型只有 `all` / `comment` / `like`，暂无 `follow`
+2. 新互动采集入口以通知中心为准
+3. 采集业务数据通过 `upsertNotificationEvent()` 写入 `interaction_events`
+4. 评论回复由 `comments:prepare` 基于 JSON 更新 `work_comments`
+5. 回访任务由 `return-visit:prepare` 创建或更新
+6. `comments:prepare` 不更新 `interaction_events.status`
+7. `return-visit:prepare` 默认读取 `new`，可通过 `--event-status` 覆盖
+8. 日志里 `newInBatch` 不是"新入库数量"，是"本次扫描内未见过且通过过滤"
+9. `seenItemKeys` 是本次扫描级别去重，不是每轮去重
+
+### C. 仓库文档同步
+
+主要文档入口：
 
 ```text
-采集产物用于回访
-默认完整流程必须先 return-visit:prepare
+README.md                              — 安装、初始化、命令快速参考
+SKILL.md                               — Hermes/OpenClaw 路由入口
+docs/COMMANDS.md                       — 全部命令参数详情
+docs/todo_plan.md（本文件）              — 开发文档、流程图、架构约束
+skills/creator-interaction-executor/   — 互动执行 Skill 文档
+skills/creator-comment-suggestion/     — 评论回复建议 Skill 文档
 ```
 
-如果只是命令清单，可以同时保留评论回复和回访入口。
-如果写成默认主流程，应明确采集后的默认下游是评论回复准备，不是回访准备。
+需注意避免的旧说明：采集产物用于回访、默认完整流程必须先 return-visit:prepare。
 
----
+### D. 字段映射
 
-## 开发约束
-
-1. 当前采集类型只有 `all/comment/like`。
-2. 当前没有 `follow` 采集。
-3. 当前没有 `WAIT_GENERATE_REPLY`。
-4. 当前没有 `WAIT_PROFILE_SCAN`。
-5. 新互动采集入口以通知中心为准。
-6. 采集业务数据通过 `upsertNotificationEvent()` 写入 `interaction_events`。
-7. 评论回复由 `comments:prepare` 基于第一步 JSON 更新 `work_comments`。
-8. 回访任务由 `return-visit:prepare` 创建或更新。
-9. `comments:prepare` 不更新 `interaction_events.status`。
-10. `return-visit:prepare` 默认只读取 `new`，但可通过 `--event-status` 或配置覆盖。
-12. 不要把 `newInBatch` 理解为新入库数量。
-13. 不要把 `seenItemKeys` 写成每轮去重，它是本次扫描级别去重。
+| 逻辑含义 | 当前字段 / 结构 |
+|---|---|
+| 通知类型 | `interaction_events.event_type` (`comment` / `like`) |
+| 用户 ID | `actor_profile_key`；无则退到 `actor_profile_url`，再退到 `actor_name` |
+| 作品唯一标识 | `target_work_id` / `works.work_id` |
+| 作品 URL | `target_work_url` / `works.work_url` |
+| 评论唯一标识 | `work_comments.comment_key` |
+| 通知时间 | `interaction_events.event_time_text` |
+| 是否需要回复 | `work_comments.reply_status = 'pending'` |
+| 回访处理状态 | `return_visit_tasks.status` / `like_status` / `comment_status` |
