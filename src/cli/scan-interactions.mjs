@@ -358,6 +358,8 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
 
   const contextResult = await extractWorkModalContext(page);
   const context = contextResult.ok ? (contextResult.data || {}) : {};
+  console.error(`[scan] 作品标题: ${context.workTitle || '(无标题)'}`);
+  console.error(`[scan] 作品内容: ${context.workText || '(无内容)'}`);
   const identity = getWorkIdentity(n, context);
   if (!identity.workId && identity.modalId) identity.workId = identity.modalId;
 
