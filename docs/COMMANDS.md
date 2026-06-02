@@ -9,7 +9,7 @@
 | 主流程 | `auth`、`db:init`、`interactions:scan`、`comments:execute`、`return-visit:prepare`、`return-visit:execute` |
 | 只读/辅助入口 | `actions:pending`、`actions:plan`、`likes:plan`、`comments:classify`、`history` |
 | 兼容入口 | `likes:reciprocate` |
-| 调试/开发入口 | `notify:inspect`、`interactions:inspect`、`debug:like-dom`、`debug:like-state`、`dev:inspect-page`、`server`、`icon:profile` |
+| 调试/开发入口 | `notify:inspect`、`interactions:inspect`、`debug:like-dom`、`debug:like-state`、`debug:open`、`dev:inspect-page`、`server`、`icon:profile` |
 
 旧评论导出/应用/手动审批/二次确认链路已删除，不属于可用入口。
 
@@ -370,7 +370,20 @@ npm run server
 
 本地开发服务入口，用于内部页面或调试接口，不属于 CLI 主流程。
 
-## 20. icon:profile
+## 20. debug:open
+
+```bash
+npm run debug:open <URL>
+npm run debug:open https://www.douyin.com/user/self
+```
+
+源文件：`src/cli/open-page.mjs`
+
+打开指定页面，浏览器保持打开不做任何操作，用于手动排查页面 DOM 或调试问题。
+
+---
+
+## 21. icon:profile
 
 ```bash
 npm run icon:profile
