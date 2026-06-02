@@ -281,6 +281,7 @@ export async function waitForNotificationPanelStable(page) {
   let prevInfo = '';
   let stableRounds = 0;
   let settled = false;
+  let panelSeen = false;
 
   while (Date.now() < deadline) {
     const snapshot = getRequestTrackerSnapshot(page);
@@ -313,6 +314,9 @@ export async function waitForNotificationPanelStable(page) {
     });
 
     if (!info.found) {
+      if (panelSeen) {
+        return { stable: false, empty: false, panelBox: null, reason: 'panel-disappeared-after-visible' };
+      }
       if (snapshot.inflightCount === 0 && snapshot.idleForMs >= NETWORK_IDLE_MS) {
         return { stable: false, empty: false, panelBox: null, reason: 'panel-missing-after-network-idle' };
       }
@@ -320,10 +324,11 @@ export async function waitForNotificationPanelStable(page) {
       continue;
     }
 
+    panelSeen = true;
     const currentInfo = `${info.textLen}:${info.visibleCount}`;
     if (currentInfo === prevInfo) {
       stableRounds++;
-      if (stableRounds >= 2 && snapshot.inflightCount === 0 && snapshot.idleForMs >= NETWORK_IDLE_MS) {
+      if (stableRounds >= 2) {
         console.error('[notify-page] 通知面板已稳定');
         settled = true;
         break;
@@ -370,10 +375,10 @@ export async function waitForNotificationPanelStable(page) {
       stable: false,
       empty: false,
       panelBox,
-      networkBad: snapshot.inflightCount > 0,
-      reason: snapshot.inflightCount > 0
+      networkBad: !panelSeen && snapshot.inflightCount > 0,
+      reason: !panelSeen && snapshot.inflightCount > 0
         ? `网络不好，通知面板等待超过${formatTimeoutSeconds(NETWORK_WAIT_TIMEOUT_MS)}s${pending ? ` pending=${pending}` : ''}`
-        : '通知面板请求已停，但内容未稳定',
+        : (panelSeen ? '通知面板内容长时间未稳定' : '通知面板请求已停，但内容未稳定'),
     };
   }
 
