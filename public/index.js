@@ -696,7 +696,6 @@ window.selectStage = function(stageId) {
   renderRiverTimeline();
   renderStageDetail();
 
-  // 动态处理空间详情舱的 top/left 定位与箭头方向
   const cabin = document.getElementById('detail-cabin');
   if (cabin) {
     let layoutNode = STAGE_LAYOUT.find(n => n.id === stageId);
@@ -708,29 +707,33 @@ window.selectStage = function(stageId) {
       else if (stageId === 'archive') layoutNode = STAGE_LAYOUT.find(n => n.id === 'done');
     }
 
-    if (layoutNode) {
-      const yVal = layoutNode.y + 27; // 圆心 Y 坐标
-      let topPos = 0;
+    // 用 DOM 实际位置定位 cabin，不再依赖写死的 y 值
+    const activeNode = document.querySelector('.river-node-v2.is-active');
+    const nodeCircle = activeNode ? activeNode.querySelector('.node-circle-btn') : null;
+
+    if (layoutNode && nodeCircle) {
+      const nodeRect = nodeCircle.getBoundingClientRect();
+      const cabinHeight = cabin.offsetHeight || 280;
+      const marginTop = 24;
+      const marginBottom = 24;
 
       cabin.classList.remove('arrow-on-top', 'arrow-on-bottom');
 
-      // 若水位高 (yVal < 150)，详情舱悬浮在下方，三角形箭头在舱体顶部，指向上方圆形节点
-      if (yVal < 150) {
-        topPos = yVal + 40; 
-        cabin.classList.add('arrow-on-top');
-      } else {
-        // 若水位低 (yVal >= 150)，详情舱悬浮在上方，三角形箭头在舱体底部，指向下方圆形节点
-        topPos = yVal - 302; 
+      // 节点上方空间够 → cabin 在节点上方
+      if (nodeRect.top > cabinHeight + marginBottom) {
+        cabin.style.top = `${nodeRect.top - cabinHeight - marginBottom}px`;
         cabin.classList.add('arrow-on-bottom');
+      } else {
+        // 否则 cabin 在节点下方
+        cabin.style.top = `${nodeRect.bottom + marginTop}px`;
+        cabin.classList.add('arrow-on-top');
       }
 
-      cabin.style.left = layoutNode.left;
-      cabin.style.top = `${topPos}px`;
-      cabin.classList.add('active'); // 弹性淡入
+      cabin.style.left = `${nodeRect.left + nodeRect.width / 2}px`;
+      cabin.classList.add('active');
     }
   }
 
-  // 对没有额外展示界面的分支，进行优雅的气泡轻提示
   if (stageId === 'fallback') {
     showToast('当前入库通知暂无异常回退', 'success');
   } else if (stageId === 'risk') {

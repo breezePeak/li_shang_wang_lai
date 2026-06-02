@@ -739,7 +739,7 @@ body {
 
 /* 空间三维磨砂悬浮详情舱 (Glassmorphic Detail Cabin) */
 .floating-detail-cabin {
-  position: absolute;
+  position: fixed;
   width: 920px;
   height: 280px;
   z-index: 99;
