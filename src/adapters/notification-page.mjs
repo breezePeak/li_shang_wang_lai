@@ -343,7 +343,7 @@ export async function waitForNotificationPanelStable(page, { timeoutMs = NETWORK
     })();
     if (!panel) return { panelFound: false, empty: true };
     const text = (panel.innerText || '').trim();
-    const actionPatterns = ['赞了你的作品', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '赞了你的评论', '回复了你的评论', '关注了你', '回关了你'];
+    const actionPatterns = ['赞了你的作品', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '赞了你的评论', '点赞了你的评论', '回复了你的评论', '关注了你', '回关了你'];
     const hasEmpty = text.includes('暂无消息') || text.includes('暂无通知') || text.includes('没有更多了');
     const hasAction = actionPatterns.some(p => text.includes(p));
     return { panelFound: true, empty: hasEmpty && !hasAction };
@@ -607,7 +607,7 @@ export async function extractVisibleNotifications(page) {
         for (const pat of ACTION_PATTERNS) {
           if (lines[k].includes(pat)) {
             action = pat;
-            if (pat.includes('回复') || pat.includes('赞了你的评论')) {
+            if (pat.includes('回复') || (pat.includes('你的评论') && !pat.startsWith('评论了'))) {
               eventType = 'reply';
             } else if (pat.includes('关注') || pat.includes('回关')) {
               eventType = 'follow';
@@ -1358,7 +1358,7 @@ export async function debugDumpNotificationItems(page, debugDir) {
         for (const pat of ACTION_PATTERNS) {
           if (line.includes(pat)) {
             action = pat;
-            if (pat.includes('回复') || pat.includes('赞了你的评论')) {
+            if (pat.includes('回复') || (pat.includes('你的评论') && !pat.startsWith('评论了'))) {
               eventType = 'reply';
             } else if (pat.includes('关注') || pat.includes('回关')) {
               eventType = 'follow';

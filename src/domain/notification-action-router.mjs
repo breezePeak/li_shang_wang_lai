@@ -17,7 +17,7 @@ export function classifyNotificationAction(rawText = '') {
     };
   }
 
-  if (text.includes('回复了你的评论') || text.includes('赞了你的评论')) {
+  if (text.includes('回复了你的评论') || text.includes('赞了你的评论') || text.includes('点赞了你的评论')) {
     return {
       notificationAction: 'reply_to_my_comment',
       eventType: 'reply',

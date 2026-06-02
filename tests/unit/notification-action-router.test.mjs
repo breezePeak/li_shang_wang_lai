@@ -20,12 +20,14 @@ describe('classifyNotificationAction', () => {
     });
   });
 
-  it('routes like-of-comment to reply classification', () => {
-    expect(classifyNotificationAction('赞了你的评论')).toMatchObject({
-      notificationAction: 'reply_to_my_comment',
-      eventType: 'reply',
-      nextAction: 'notify_owner',
-    });
+  it('routes like-of-comment variants to reply classification', () => {
+    for (const rawText of ['赞了你的评论', '点赞了你的评论']) {
+      expect(classifyNotificationAction(rawText)).toMatchObject({
+        notificationAction: 'reply_to_my_comment',
+        eventType: 'reply',
+        nextAction: 'notify_owner',
+      });
+    }
   });
 
   it('routes like variants to revisit collection (works only)', () => {
