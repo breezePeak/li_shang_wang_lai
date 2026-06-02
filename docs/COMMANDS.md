@@ -6,7 +6,7 @@
 
 | 分类 | 命令 |
 |---|---|
-| 主流程 | `auth`、`db:init`、`interactions:scan`、`comments:prepare`、`comments:execute`、`return-visit:prepare`、`return-visit:execute` |
+| 主流程 | `auth`、`db:init`、`db:reset`、`interactions:scan`、`comments:prepare`、`comments:execute`、`return-visit:prepare`、`return-visit:execute` |
 | 只读/辅助入口 | `actions:pending`、`actions:plan`、`likes:plan`、`comments:classify`、`history` |
 | 兼容入口 | `likes:reciprocate` |
 | 调试/开发入口 | `notify:inspect`、`interactions:inspect`、`debug:like-dom`、`debug:like-state`、`dev:inspect-page`、`server`、`icon:profile` |

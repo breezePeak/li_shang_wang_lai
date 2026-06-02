@@ -20,6 +20,7 @@
     "auth": "node ./src/auth-douyin.mjs",
     "interactions:inspect": "node ./src/cli/inspect-interactions.mjs",
     "db:init": "node ./src/db/migrations.mjs",
+    "db:reset": "node ./src/cli/reset-db.mjs",
     "interactions:scan": "node ./src/cli/scan-interactions.mjs",
     "actions:pending": "node ./src/cli/report-pending.mjs",
     "likes:plan": "node ./src/cli/plan-likes.mjs",

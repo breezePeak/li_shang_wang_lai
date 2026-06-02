@@ -103,6 +103,7 @@ npm run auth
 |---|---|
 | 登录认证 | `npm run auth` |
 | 初始化数据库 | `npm run db:init` |
+| 清空互动数据 | `npm run db:reset` |
 | 只看互动 | `npm run interactions:scan -- --type all --days 7 --max-count 100 --display-only` |
 | 扫描并生成待回评 | `npm run interactions:scan -- --type comment --days 7 --max-count 100 --generate-reply-json` |
 | 扫描并生成待回访 | `npm run interactions:scan -- --type all --days 7 --max-count 100 --generate-visit-json` |
