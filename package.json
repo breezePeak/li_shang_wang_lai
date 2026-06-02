@@ -32,6 +32,7 @@
     "actions:plan": "node ./src/cli/plan-actions.mjs",
     "comments:classify": "node ./src/cli/classify-comment.mjs",
     "return-visit:prepare": "node ./src/cli/execute-return-visit-prepare.mjs",
+    "return-visit:comment": "node ./src/cli/set-return-visit-comment.mjs",
     "return-visit:execute": "node ./src/cli/execute-return-visit.mjs",
     "notify:inspect": "node ./src/cli/inspect-notifications.mjs",
     "debug:like-dom": "node ./scripts/debug-like-dom.mjs",

@@ -12,7 +12,7 @@ import {
   markReturnVisitFailure,
 } from '../services/return-visit-task-service.mjs';
 import { collectCandidateWorkFromProfile } from '../services/return-visit-work-collector.mjs';
-import { analyzeReturnVisitContext, generateReturnVisitComment } from '../services/return-visit-comment-generator.mjs';
+import { analyzeReturnVisitContext } from '../services/return-visit-comment-generator.mjs';
 import { readFileSync, unlinkSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
@@ -212,77 +212,8 @@ async function main() {
       lastError: null,
     });
 
-    log(args.json, `[return-visit:prepare] collected work: ${selectedWork.workUrl}`);
-
-    const analysis = analyzeReturnVisitContext({
-      workTitle: selectedWork.workTitle,
-      workText: selectedWork.workText,
-      contentSummary: selectedWork.contentSummary,
-      referenceComments: selectedWork.referenceComments || [],
-    });
-
-    if (!analysis.workTitle && analysis.referenceComments.length === 0) {
-      updateReturnVisitTask(task.taskId, {
-        status: RETURN_VISIT_STATUS.SKIPPED_NO_SUITABLE_WORK,
-        lastError: 'revisit_context_missing_work_and_comments',
-      });
-      taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.SKIPPED_NO_SUITABLE_WORK, reason: 'revisit_context_missing_work_and_comments' });
-      skipped++;
-      consecutiveFailures = 0;
-      continue;
-    }
-
-    if (analysis.sceneSignals.length === 0) {
-      updateReturnVisitTask(task.taskId, {
-        status: RETURN_VISIT_STATUS.SKIPPED_NO_SUITABLE_WORK,
-        lastError: 'revisit_context_no_scene_signal',
-      });
-      taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.SKIPPED_NO_SUITABLE_WORK, reason: 'revisit_context_no_scene_signal' });
-      skipped++;
-      consecutiveFailures = 0;
-      continue;
-    }
-
-    const commentResult = generateReturnVisitComment({
-      workTitle: selectedWork.workTitle,
-      workText: selectedWork.workText,
-      contentSummary: selectedWork.contentSummary,
-      referenceComments: selectedWork.referenceComments || [],
-    });
-
-    if (!commentResult.ok) {
-      if (commentResult.reason === 'content_too_short') {
-        updateReturnVisitTask(task.taskId, {
-          status: RETURN_VISIT_STATUS.SKIPPED_NO_SUITABLE_WORK,
-          lastError: 'content_too_short',
-        });
-        taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.SKIPPED_NO_SUITABLE_WORK, reason: 'content_too_short' });
-        skipped++;
-        consecutiveFailures = 0;
-      } else {
-        markReturnVisitFailure(task, {
-          status: RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT,
-          error: commentResult.reason || 'generate_comment_failed',
-        });
-        taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT, reason: commentResult.reason || 'generate_comment_failed' });
-        failed++;
-        consecutiveFailures++;
-      }
-      continue;
-    }
-
-    const generatedComment = commentResult.comment;
-    updateReturnVisitTask(task.taskId, {
-      status: RETURN_VISIT_STATUS.PENDING_EXECUTE,
-      generatedComment,
-      commentStatus: 'generated',
-      generatedAt: new Date().toISOString(),
-      lastError: null,
-    });
-
-    log(args.json, `[return-visit:prepare] generated comment: ${generatedComment}`);
-    log(args.json, `[return-visit:prepare] task updated to pending_execute`);
-    taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.PENDING_EXECUTE, generatedComment });
+    log(args.json, `[return-visit:prepare] collected work: ${selectedWork.workUrl}, status=content_collected, waiting for agent comment`);
+    taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.CONTENT_COLLECTED, workUrl: selectedWork.workUrl });
     prepared++;
     consecutiveFailures = 0;
   }

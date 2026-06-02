@@ -192,7 +192,7 @@ npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-
 
 源文件：`src/cli/execute-return-visit-prepare.mjs`
 
-优先消费 `interactions:scan -- --generate-visit-json` 生成的待回访 JSON，创建或更新待回访用户任务，再读取所有待回访任务，进入用户主页和作品页采集上下文，生成回访评论并写入数据库。该命令不会点赞，也不会发表评论。
+优先消费 `interactions:scan -- --generate-visit-json` 生成的待回访 JSON，创建或更新待回访用户任务，再读取所有待回访任务，进入用户主页和作品页采集上下文，整理并写入数据库。该命令**不会生成评论**，也不会点赞或发表评论。评论生成由 Agent 后续通过 `return-visit:comment` 完成。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
@@ -200,6 +200,23 @@ npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-
 | `--event-status` | 配置 `returnVisit.eventSourceStatus` 或 `new` | 用于创建任务的事件状态 |
 | `--keep-open` | `false` | 复用并保留浏览器 |
 | `--headless` | `false` | 无头运行 |
+| `--json` | `false` | JSON 输出 |
+
+## 7a. return-visit:comment
+
+```bash
+npm run return-visit:comment -- --task-id <taskId> --comment "<评论内容>"
+npm run return-visit:comment -- --task-id <taskId> --comment "<评论内容>" --json
+```
+
+源文件：`src/cli/set-return-visit-comment.mjs`
+
+Agent 在准备阶段完成后调用此命令，将生成的回访评论写入任务。命令会校验评论是否符合小猿人格规范，校验通过后任务状态变为 `pending_execute`，可被 `return-visit:execute` 消费。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--task-id` | `''` | 必填。`return-visit:prepare` 输出的任务 ID |
+| `--comment` | `''` | 必填。回访评论内容，需通过小猿人格校验 |
 | `--json` | `false` | JSON 输出 |
 
 ## 8. return-visit:execute
