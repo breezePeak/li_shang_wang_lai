@@ -893,7 +893,10 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
         commentKey = `${actorName}::${commentText.slice(0, 60)}`;
 
         const rect = items[i].getBoundingClientRect();
+        // 调试: 打印 raw text 的前10行
+        const rawLines = text.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 10);
         comments.push({
+          _debugLines: rawLines,
           commentIndex: i,
           actorName,
           commentText: commentText.slice(0, 300),
@@ -921,7 +924,11 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
     });
     console.error(`[work-modal] 首条评论原始 innerText:\n${rawSample}`);
     console.error(`[work-modal] 首轮采集 ${result.comments.length} 条评论:`);
-    result.comments.forEach(c => console.error(`  [${c.commentKey}] actor="${c.actorName}" isSelf=${c.isSelfComment} hasReply=${c.hasMyReply} text="${c.commentText.slice(0, 40)}"`));
+    result.comments.forEach(c => {
+      const lines = c._debugLines ? c._debugLines.join(' | ') : '(none)';
+      console.error(`  [${c.commentKey}] actor="${c.actorName}" isSelf=${c.isSelfComment} hasReply=${c.hasMyReply} text="${c.commentText.slice(0, 40)}"`);
+      console.error(`    lines: ${lines}`);
+    });
 
     if (hasConsecutiveOldAtTail()) {
       console.error(`[work-modal] 连续 ${oldCommentStopCount} 条评论超过 ${maxAgeDays} 天，停止该作品评论采集`);
