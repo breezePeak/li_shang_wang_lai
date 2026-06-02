@@ -2,7 +2,6 @@ const LIKE_PATTERNS = [
   '赞了你的作品',
   '赞了你的视频',
   '点赞了你的作品',
-  '赞了你的评论',
 ];
 
 export function classifyNotificationAction(rawText = '') {
@@ -18,13 +17,23 @@ export function classifyNotificationAction(rawText = '') {
     };
   }
 
-  if (text.includes('回复了你的评论')) {
+  if (text.includes('回复了你的评论') || text.includes('赞了你的评论')) {
     return {
       notificationAction: 'reply_to_my_comment',
-      eventType: 'comment',
+      eventType: 'reply',
       nextAction: 'notify_owner',
       clickTarget: null,
-      reason: 'reply_to_my_comment_requires_owner_review',
+      reason: 'reply_to_my_comment_or_like_requires_owner_review',
+    };
+  }
+
+  if (text.includes('关注了你') || text.includes('回关了你')) {
+    return {
+      notificationAction: 'follow_received',
+      eventType: 'follow',
+      nextAction: 'notify_owner',
+      clickTarget: null,
+      reason: 'follow_received_for_fan_management',
     };
   }
 

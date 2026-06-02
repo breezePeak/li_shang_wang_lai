@@ -14,14 +14,22 @@ describe('classifyNotificationAction', () => {
   it('routes replies to my comment to owner notification only', () => {
     expect(classifyNotificationAction('张三\n回复了你的评论\n谢谢')).toMatchObject({
       notificationAction: 'reply_to_my_comment',
-      eventType: 'comment',
+      eventType: 'reply',
       nextAction: 'notify_owner',
       clickTarget: null,
     });
   });
 
-  it('routes like variants to revisit collection', () => {
-    for (const rawText of ['赞了你的作品', '赞了你的视频', '点赞了你的作品', '赞了你的评论']) {
+  it('routes like-of-comment to reply classification', () => {
+    expect(classifyNotificationAction('赞了你的评论')).toMatchObject({
+      notificationAction: 'reply_to_my_comment',
+      eventType: 'reply',
+      nextAction: 'notify_owner',
+    });
+  });
+
+  it('routes like variants to revisit collection (works only)', () => {
+    for (const rawText of ['赞了你的作品', '赞了你的视频', '点赞了你的作品']) {
       expect(classifyNotificationAction(rawText)).toMatchObject({
         notificationAction: 'like_received',
         eventType: 'like',
@@ -30,8 +38,18 @@ describe('classifyNotificationAction', () => {
     }
   });
 
+  it('routes follow notifications to fan management', () => {
+    for (const rawText of ['关注了你', '回关了你']) {
+      expect(classifyNotificationAction(rawText)).toMatchObject({
+        notificationAction: 'follow_received',
+        eventType: 'follow',
+        nextAction: 'notify_owner',
+      });
+    }
+  });
+
   it('routes unknown notifications to owner notification only', () => {
-    expect(classifyNotificationAction('关注了你')).toMatchObject({
+    expect(classifyNotificationAction('一些随机文本')).toMatchObject({
       notificationAction: 'unknown',
       eventType: 'unknown',
       nextAction: 'notify_owner',

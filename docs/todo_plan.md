@@ -10,13 +10,13 @@
 1. interactions:scan
    状态码: SCAN_JSON_READY
    打开主页 -> 打开通知面板 -> 逐条扫描通知
-   ├─ 赞我的
+   ├─ 赞我的作品 / 赞我的视频 / 点赞我的作品
    │  ↓
    │  通知级去重
    │  ├─ 已存在: SKIP_DUPLICATE_NOTIFICATION
-   │  └─ 不存在: LIKE_EVENT_STORED，写入 interaction_events
+   │  └─ 不存在: LIKE_EVENT_STORED，写入 interaction_events (event_type=like)
    │
-   ├─ 评论我的
+   ├─ 评论我的作品 / 评论我的视频
    │  ↓
    │  提取缩略图作品唯一标识
    │  ↓
@@ -28,9 +28,17 @@
    │      连续 3 条过期则停止 → 写入 work_comments → 标记作品已采集
    │      输出按作品分组 JSON (每条 COLLECT_PENDING_REPLY)
    │
-   ├─ 回复我的 / 关注我的
+   ├─ 回复我的评论 / 赞我的评论
+   │  ↓
+   │  归入回复分类 (event_type=reply)
    │  ├─ 重复: SKIP_DUPLICATE_NOTIFICATION
-   │  └─ 不重复: NOTIFY_OWNER_STORED，分类入库，暂不处理
+   │  └─ 不重复: REPLY_EVENT_STORED，写入 interaction_events，暂不后续处理
+   │
+   ├─ 关注我 / 回关我
+   │  ↓
+   │  归入粉丝管理分类 (event_type=follow)
+   │  ├─ 重复: SKIP_DUPLICATE_NOTIFICATION
+   │  └─ 不重复: FOLLOW_EVENT_STORED，写入 interaction_events，暂不后续处理
    │
    └─ 其他通知
       ├─ 能识别: OTHER_STORED，分类入库
@@ -115,20 +123,27 @@
 | 通知内容 | `notificationAction` | `eventType` | 后续动作 |
 |---|---|---|---|
 | 评论了你的作品 / 视频 | `comment_on_my_work` | `comment` | 点击缩略图采集作品评论 |
-| 回复了你的评论 | `reply_to_my_comment` | `comment` | 暂不后续处理 |
-| 赞了你的作品 / 视频 / 评论 | `like_received` | `like` | 入库记录，不进入待回复 JSON |
+| 回复了你的评论 / 赞了你的评论 | `reply_to_my_comment` | `reply` | 归入回复分类，暂不后续处理 |
+| 赞了你的作品 / 视频 / 点赞了你的作品 | `like_received` | `like` | 入库记录，进入待回访 JSON |
+| 关注了你 / 回关了你 | `follow_received` | `follow` | 归入粉丝管理分类，暂不后续处理 |
 | 无法识别 | `unknown` | `unknown` | 打印日志 |
 
 可识别动作列表：
 
 ```text
-赞了你的作品  赞了你的评论  赞了你的视频  点赞了你的作品
-评论了你的作品  评论了你的视频  回复了你的评论
+赞了你的作品  赞了你的视频  点赞了你的作品
+评论了你的作品  评论了你的视频
+赞了你的评论  回复了你的评论
+关注了你  回关了你
 ```
 
-类型判断：包含"赞了"或"点赞" → `like`；其他已匹配评论类短语 → `comment`。
+类型判断：
+- 包含"回复" 或 "赞了你的评论" → `eventType = 'reply'`
+- 包含"关注" 或 "回关" → `eventType = 'follow'`
+- 包含"赞了" 或 "点赞" → `eventType = 'like'`
+- 其余已匹配评论类短语 → `eventType = 'comment'`
 
-**约束**：`interaction_events.event_type` 只允许 `comment` / `like`。出现未知通知类型时，复用最接近的现有处理方式，或在代码中加 TODO 标明需要人工确认是否扩表。
+**约束**：`interaction_events.event_type` 允许 `comment` / `like` / `reply` / `follow`。
 
 ### 1.4 去重机制
 

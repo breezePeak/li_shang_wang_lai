@@ -660,6 +660,8 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
 
   const wantComments = (type === 'all' || type === 'comment');
   const wantLikes = (type === 'all' || type === 'like');
+  const wantReplies = (type === 'all' || type === 'reply');
+  const wantFollows = (type === 'all' || type === 'follow');
   const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
   const maxCount = Number(scanPlan.maxCount || 0) > 0 ? Number(scanPlan.maxCount) : null;
   const dedupeContext = buildDedupeContext(notificationDays);
@@ -755,6 +757,14 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
         }
         if (!wantLikes && n.eventType === 'like') {
           logNotificationSkip(notificationIndex, n, '--type 过滤点赞通知', notificationDedupeKey);
+          continue;
+        }
+        if (!wantReplies && n.eventType === 'reply') {
+          logNotificationSkip(notificationIndex, n, '--type 过滤回复类通知', notificationDedupeKey);
+          continue;
+        }
+        if (!wantFollows && n.eventType === 'follow') {
+          logNotificationSkip(notificationIndex, n, '--type 过滤关注类通知', notificationDedupeKey);
           continue;
         }
 
@@ -986,7 +996,9 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
           }
           panelBox = restoredPanelBox;
         } else if (route.notificationAction === 'reply_to_my_comment') {
-          logNotificationSkip(notificationIndex, n, '回复我的通知暂不进入后续处理', notificationDedupeKey);
+          logNotificationSkip(notificationIndex, n, '回复/赞评论通知，归入回复分类（暂不后续处理）', notificationDedupeKey);
+        } else if (route.notificationAction === 'follow_received') {
+          logNotificationSkip(notificationIndex, n, '关注/回关通知，归入粉丝管理分类（暂不后续处理）', notificationDedupeKey);
         } else if (route.notificationAction === 'unknown') {
           logNotificationSkip(notificationIndex, n, '无法识别通知类型，暂不进入后续处理', notificationDedupeKey);
         }
@@ -1109,7 +1121,7 @@ async function main() {
     generateReplyJson: displayOnly ? false : (explicitReplyJson || (!explicitVisitJson && !displayOnly)),
     generateVisitJson: displayOnly ? false : explicitVisitJson,
   };
-  const validTypes = ['all', 'comment', 'like'];
+  const validTypes = ['all', 'comment', 'like', 'reply', 'follow'];
   if (!validTypes.includes(type)) {
     if (options.json) {
       printJsonError('interactions:scan', RESULT_CODES.BLOCKED,

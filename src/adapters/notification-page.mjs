@@ -343,7 +343,7 @@ export async function waitForNotificationPanelStable(page, { timeoutMs = NETWORK
     })();
     if (!panel) return { panelFound: false, empty: true };
     const text = (panel.innerText || '').trim();
-    const actionPatterns = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '回复了你的评论'];
+    const actionPatterns = ['赞了你的作品', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '赞了你的评论', '回复了你的评论', '关注了你', '回关了你'];
     const hasEmpty = text.includes('暂无消息') || text.includes('暂无通知') || text.includes('没有更多了');
     const hasAction = actionPatterns.some(p => text.includes(p));
     return { panelFound: true, empty: hasEmpty && !hasAction };
@@ -426,7 +426,7 @@ export async function scrollPanelDown(page, { deltaY = 600 } = {}) {
 export async function extractVisibleNotifications(page) {
   const result = await page.evaluate(() => {
     // --- Constants must be inline inside evaluate() ---
-    const ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '回复了你的评论'];
+    const ACTION_PATTERNS = ['赞了你的作品', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '赞了你的评论', '回复了你的评论', '关注了你', '回关了你'];
     const TIME_PATTERN = /^(\d{1,2}:\d{2}|\d+[秒分时天周月年]前|\d{2}-\d{2}|\d+月\d+日|昨天\s?\d{1,2}:\d{2}|(?:星期|周)[一二三四五六日天])$/;
     const SKIP_SET = new Set(['互动消息', '全部消息', '点击加载更多', '加载更多', '没有更多了', '暂无消息', '推荐了你的视频']);
 
@@ -607,7 +607,15 @@ export async function extractVisibleNotifications(page) {
         for (const pat of ACTION_PATTERNS) {
           if (lines[k].includes(pat)) {
             action = pat;
-            eventType = (pat.includes('赞了') || pat.includes('点赞')) ? 'like' : 'comment';
+            if (pat.includes('回复') || pat.includes('赞了你的评论')) {
+              eventType = 'reply';
+            } else if (pat.includes('关注') || pat.includes('回关')) {
+              eventType = 'follow';
+            } else if (pat.includes('赞了') || pat.includes('点赞')) {
+              eventType = 'like';
+            } else {
+              eventType = 'comment';
+            }
             if (k > idx) content = lines.slice(idx, k).join(' ');
             idx = k + 1;
             break;
@@ -944,7 +952,7 @@ export async function clickNotificationThumbnail(page, eventCtx) {
   const shortName = (ctx.username || '').slice(0, 20);
 
   const result = await page.evaluate(({ name, action, timeText, notificationItemKey, workUrl, workId, thumbnailKey, content, rawText, actorProfileKey }) => {
-    const ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '回复了你的评论'];
+    const ACTION_PATTERNS = ['赞了你的作品', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '赞了你的评论', '回复了你的评论', '关注了你', '回关了你'];
 
     function normalizeText(value) {
       return String(value || '').replace(/\s+/g, '');
@@ -1208,7 +1216,7 @@ export async function debugDumpNotificationItems(page, debugDir) {
 
   ensureDir(debugDir);
 
-  const ACTION_PATTERNS = ['赞了你的作品', '赞了你的评论', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '回复了你的评论'];
+  const ACTION_PATTERNS = ['赞了你的作品', '赞了你的视频', '点赞了你的作品', '评论了你的作品', '评论了你的视频', '赞了你的评论', '回复了你的评论', '关注了你', '回关了你'];
 
   const debugData = await page.evaluate((ACTION_PATTERNS) => {
     function findNotificationPanel() {
@@ -1350,7 +1358,15 @@ export async function debugDumpNotificationItems(page, debugDir) {
         for (const pat of ACTION_PATTERNS) {
           if (line.includes(pat)) {
             action = pat;
-            eventType = (pat.includes('赞了') || pat.includes('点赞')) ? 'like' : 'comment';
+            if (pat.includes('回复') || pat.includes('赞了你的评论')) {
+              eventType = 'reply';
+            } else if (pat.includes('关注') || pat.includes('回关')) {
+              eventType = 'follow';
+            } else if (pat.includes('赞了') || pat.includes('点赞')) {
+              eventType = 'like';
+            } else {
+              eventType = 'comment';
+            }
             break;
           }
         }

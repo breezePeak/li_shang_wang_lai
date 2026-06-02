@@ -21,7 +21,7 @@ export function runMigrations(dbPath = DB_PATH) {
     CREATE TABLE IF NOT EXISTS interaction_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       platform TEXT NOT NULL DEFAULT 'douyin',
-      event_type TEXT NOT NULL CHECK (event_type IN ('comment', 'like')),
+      event_type TEXT NOT NULL CHECK (event_type IN ('comment', 'like', 'reply', 'follow')),
       actor_name TEXT NOT NULL,
       actor_profile_key TEXT,
       actor_profile_url TEXT,
