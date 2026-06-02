@@ -279,7 +279,7 @@ app.post('/api/pending-comments/:id/reply', (req, res) => {
 
     const result = db.prepare(`
       UPDATE work_comments 
-      SET reply_status = 'prepared', last_seen_at = ?
+      SET last_seen_at = ?
       WHERE id = ?
     `).run(now, id);
 
@@ -287,7 +287,7 @@ app.post('/api/pending-comments/:id/reply', (req, res) => {
       return res.status(404).json({ ok: false, error: '未找到该评论' });
     }
 
-    res.json({ ok: true, message: '评论已移出暂存，成功加入待回复队列' });
+    res.json({ ok: true, message: '评论已标记待回复' });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

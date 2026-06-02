@@ -394,7 +394,7 @@ function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
         reply_status: row.reply_status,
         reply_text: row.reply_text || '',
         collect_status_code: 'COLLECT_PENDING_REPLY',
-        prepare_status_code: row.reply_status === 'prepared' ? 'PREPARE_READY' : 'PREPARE_WAIT_REPLY_TEXT',
+        prepare_status_code: (row.reply_text && row.reply_text.trim()) ? 'PREPARE_READY' : 'PREPARE_WAIT_REPLY_TEXT',
         execute_status_code: row.reply_status === 'succeeded' ? 'EXECUTE_CONFIRMED' : 'EXECUTE_WAIT_PREPARE',
       })),
     });
