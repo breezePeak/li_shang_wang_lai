@@ -962,7 +962,7 @@ async function main() {
   const pauseAfterOpen = pauseIdx >= 0 ? parseInt(remaining[pauseIdx + 1], 10) || 0 : 0;
   const debugNotificationDom = remaining.includes('--debug-notification-dom');
   const maxCountIdx = remaining.indexOf('--max-count');
-  const maxCount = maxCountIdx >= 0 ? Math.max(1, parseInt(remaining[maxCountIdx + 1], 10) || 1) : null;
+  const maxCount = maxCountIdx >= 0 ? Math.max(1, parseInt(remaining[maxCountIdx + 1], 10) || 1) : 100;
   const collectTypesIdx = remaining.indexOf('--collect-types');
   const collectTypes = collectTypesIdx >= 0 && remaining[collectTypesIdx + 1]
     ? remaining[collectTypesIdx + 1].split(',').map(type => type.trim()).filter(Boolean)

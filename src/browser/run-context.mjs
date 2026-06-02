@@ -29,7 +29,7 @@ const DEFAULT_OPTIONS = {
   aiTimeoutMs: 30000,
   replyMaxLength: 40,
   revisitLikeOnly: true,
-  days: null,
+  days: 7,
   writeRunFiles: false,
 };
 
