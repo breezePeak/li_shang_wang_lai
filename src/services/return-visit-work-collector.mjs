@@ -39,7 +39,7 @@ async function detectPrivateProfile(page) {
   });
 }
 
-async function listProfileWorkUrls(page, maxWorks = 3) {
+async function listProfileWorkUrls(page, maxWorks = 2) {
   const result = await page.evaluate((limit) => {
     const items = [];
     const seen = new Set();
@@ -47,6 +47,7 @@ async function listProfileWorkUrls(page, maxWorks = 3) {
     for (const link of links) {
       const href = link.getAttribute('href') || '';
       if (!href.includes('/video/') && !href.includes('/note/')) continue;
+      if (link.closest('[class*="pinned"]') || link.closest('[class*="top"]')) continue;
       const rect = link.getBoundingClientRect();
       if (rect.width < 30 || rect.height < 30) continue;
       const url = href.startsWith('http') ? href : `https://www.douyin.com${href}`;

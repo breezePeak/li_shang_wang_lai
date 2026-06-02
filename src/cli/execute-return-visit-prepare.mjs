@@ -59,7 +59,7 @@ async function main() {
 
   const eventStatus = args.eventStatus || returnVisitConfig.eventSourceStatus || 'new';
   const maxRetryCount = Number(returnVisitConfig.maxRetryCount ?? 2);
-  const maxWorksToCheck = Number(returnVisitConfig.maxWorksToCheck ?? 3);
+  const maxWorksToCheck = Number(returnVisitConfig.maxWorksToCheck ?? 2);
   const pageLoadRetryCount = Number(returnVisitConfig.pageLoadRetryCount ?? 1);
   const maxConsecutiveFailures = Number(returnVisitConfig.maxConsecutiveFailures ?? 3);
 
