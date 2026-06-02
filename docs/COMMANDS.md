@@ -35,9 +35,11 @@ npm run comments:execute-all -- --items-file data/pending-replies/pending-commen
 
 ```bash
 npm run interactions:scan -- --type all --days 7
-npm run return-visit:prepare
+npm run return-visit:prepare -- --days 7 --max-items 5
 npm run return-visit:execute -- --execute
 ```
+
+评论回复结束后只有在用户明确要求回访时，才进入回访流程。回访准备必须从数据库读取待回访用户，并同时受 `--days` 时间窗口、`--event-limit` 来源事件数和 `--max-items` 本轮处理数约束。
 
 ## 1. auth
 
@@ -175,19 +177,19 @@ npm run comments:execute-all -- --items-file data/pending-replies/pending-commen
 ## 7. return-visit:prepare
 
 ```bash
-npm run return-visit:prepare
-npm run return-visit:prepare -- --max-items 5 --json
+npm run return-visit:prepare -- --days 7 --max-items 5 --json
 ```
 
 源文件：`src/cli/execute-return-visit-prepare.mjs`
 
-从互动事件创建或更新回访任务，进入用户主页和作品页采集上下文，生成回访评论并写入数据库。该命令不会点赞，也不会发表评论。
+从数据库中的互动事件创建或更新待回访用户任务，再从符合时间窗口的回访任务中取本轮处理对象，进入用户主页和作品页采集上下文，生成回访评论并写入数据库。该命令不会点赞，也不会发表评论。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `--max-items` | 配置 `returnVisit.prepareMaxItems` 或 `20` | 本轮最多准备任务数 |
 | `--event-limit` | 配置 `returnVisit.taskEventLimit` 或 `500` | 从互动事件读取的上限 |
 | `--event-status` | 配置 `returnVisit.eventSourceStatus` 或 `new` | 用于创建任务的事件状态 |
+| `--days` | 配置 `returnVisit.sourceDays` 或 `7` | 只从过去 N 天扫描到的互动事件中获取待回访用户 |
 | `--keep-open` | `false` | 复用并保留浏览器 |
 | `--headless` | `false` | 无头运行 |
 | `--json` | `false` | JSON 输出 |

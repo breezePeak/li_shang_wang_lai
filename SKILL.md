@@ -33,7 +33,7 @@ npm run db:init
 npm run interactions:scan -- --type all --days 7
 npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json
 npm run comments:execute-all -- --items-file data/pending-replies/pending-comments-xxx.json --execute
-npm run return-visit:prepare
+npm run return-visit:prepare -- --days 7 --max-items 5
 npm run return-visit:execute -- --execute
 npm test
 ```
