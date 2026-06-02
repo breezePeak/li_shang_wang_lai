@@ -221,9 +221,6 @@ async function executeWorkCommentItems(items, args) {
         continue;
       }
 
-      // 写入 reply_text 到数据库
-      saveReplyText(validated.commentId, validated.replyText);
-
       try {
         await page.goto(validated.workUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await page.waitForTimeout(1500);
@@ -271,6 +268,7 @@ async function executeWorkCommentItems(items, args) {
         }
 
         markCommentReplied(validated.commentId);
+        saveReplyText(validated.commentId, validated.replyText);
         results.push({ ...validated, ok: true, status: 'succeeded', mode: 'execute' });
       } catch (err) {
         run.hadBlocked = true;
