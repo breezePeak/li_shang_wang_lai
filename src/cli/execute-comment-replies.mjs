@@ -10,7 +10,7 @@
 //   命令默认真实执行回复，不再需要 --execute。
 
 import { runMigrations } from '../db/migrations.mjs';
-import { getWorkComment, markCommentReplied, markCommentBlocked, markCommentSentUnverified } from '../db/work-comment-repository.mjs';
+import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentSentUnverified } from '../db/work-comment-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 import { createBrowserContext } from '../browser/browser-context.mjs';
@@ -220,6 +220,9 @@ async function executeWorkCommentItems(items, args) {
         results.push(validated);
         continue;
       }
+
+      // 写入 reply_text 到数据库
+      saveReplyText(validated.commentId, validated.replyText);
 
       try {
         await page.goto(validated.workUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });

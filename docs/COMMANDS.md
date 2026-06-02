@@ -6,7 +6,7 @@
 
 | 分类 | 命令 |
 |---|---|
-| 主流程 | `auth`、`db:init`、`db:reset`、`interactions:scan`、`comments:prepare`、`comments:execute`、`return-visit:prepare`、`return-visit:execute` |
+| 主流程 | `auth`、`db:init`、`interactions:scan`、`comments:execute`、`return-visit:prepare`、`return-visit:execute` |
 | 只读/辅助入口 | `actions:pending`、`actions:plan`、`likes:plan`、`comments:classify`、`history` |
 | 兼容入口 | `likes:reciprocate` |
 | 调试/开发入口 | `notify:inspect`、`interactions:inspect`、`debug:like-dom`、`debug:like-state`、`dev:inspect-page`、`server`、`icon:profile` |
@@ -22,12 +22,11 @@
 
 ## 主流程
 
-评论回复（默认 7 天 / 100 条）：
+评论回复（Agent 填写 reply_text 后直接执行）：
 
 ```bash
 npm run interactions:scan -- --type comment --generate-reply-json
 # Agent 根据评论内容、作品上下文和安全规则，生成并填写 reply_text
-npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json
 npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
 ```
 

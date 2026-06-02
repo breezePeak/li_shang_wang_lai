@@ -33,7 +33,6 @@ npm run db:init
 npm run interactions:scan -- --type all --display-only
 npm run interactions:scan -- --type comment --generate-reply-json
 npm run interactions:scan -- --type all --generate-visit-json
-npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json
 npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
 npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json
 npm run return-visit:execute -- --execute

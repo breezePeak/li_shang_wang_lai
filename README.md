@@ -108,8 +108,7 @@ npm run auth
 | 扫描并生成待回评 | `npm run interactions:scan -- --type comment --generate-reply-json` |
 | 扫描并生成待回访 | `npm run interactions:scan -- --generate-visit-json` |
 | 填写评论回复 | Agent 生成并填写 `data/pending-replies/pending-comments-xxx.json` 的 `reply_text` |
-| 批量准备评论回复 | `npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json` |
-| 批量执行评论回复 | `npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json` |
+| 执行评论回复 | `npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json` |
 | 准备回访 | `npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json` |
 | 执行回访 | `npm run return-visit:execute -- --execute` |
 | 运行默认测试 | `npm test` |

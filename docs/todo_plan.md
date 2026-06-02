@@ -38,10 +38,8 @@
 
 2. Agent 生成并填写第一步 JSON 的 reply_text → PREPARE_WAIT_REPLY_TEXT
 
-3. comments:prepare --items-file <JSON> → PREPARE_JSON_UPDATED
-
-4. comments:execute --items-file <JSON>
-   → EXECUTE_JSON_DONE / EXECUTE_JSON_PARTIAL
+3. comments:execute --items-file <JSON>
+   → 写入 reply_text 到 DB → 执行回复 → EXECUTE_JSON_DONE / EXECUTE_JSON_PARTIAL
 ```
 
 ### 1.2 通知面板滚动采集内部流程
@@ -219,30 +217,17 @@ profile_resolution_status  status  scanned_at
 
 ---
 
-## 二、评论回复模块（`comments:prepare` / `comments:execute`）
+## 二、评论回复模块（`comments:execute`）
 
 ### 2.1 评论回复内部流程
 
+Agent 直接填写 JSON 的 `reply_text`，`comments:execute` 执行时写 DB 并回复。
+
 ```text
-JSON (含 reply_text)
- ↓
-comments:prepare（准备阶段）
- ├─ 加载 JSON，提取评论项
- ├─ 逐条校验：
- │  ├─ 缺少 work_comments.id                              → PREPARE_FAILED
- │  ├─ reply_text 为空                                     → EMPTY_REPLY_TEXT
- │  ├─ 策略字段无效 (decision/riskLevel/
- │  │   relevance/replyMode/commentCategory)               → BLOCKED
- │  ├─ 回复文本过长 / 命中模板黑名单                          → BLOCKED
- │  └─ 通过 → 查找 work_comments
- │     ├─ 不存在 → PREPARE_FAILED
- │     └─ 存在 → saveReplyText（只写 reply_text，不改 reply_status）
- └─ 回写 JSON 状态码
-    ├─ 全部成功 → workflow_status_code: PREPARE_JSON_UPDATED
-    └─ 部分失败 → 逐条记录 prepare_status_code
+JSON（Agent 已填写 reply_text）
  ↓
 comments:execute（执行阶段 — 默认真实执行）
- ├─ 加载 JSON，提取全部评论（无 --max-items 限制）
+ ├─ 加载 JSON，提取全部评论（无数量限制）
  │
  ├─ 逐条检查：
  │  ├─ reply_text 为空 → 日志跳过（skipped_empty_reply）
@@ -252,6 +237,8 @@ comments:execute（执行阶段 — 默认真实执行）
  └─ 逐条真实执行：
     启动浏览器
     ↓
+    ├─ saveReplyText → 写入 reply_text 到 work_comments
+    │
     ├─ page.goto(workUrl) → 等待作品弹窗
     │  └─ 弹窗未出现 → markCommentBlocked
     │
@@ -405,7 +392,7 @@ pending_visit → collecting_content → content_collected
 
 ```text
 采集模块 (interactions:scan)     — 通知面板唯一入口
-回评模块 (comments:prepare/execute) — 只消费待回评 JSON
+回评模块 (comments:execute) — 只消费待回评 JSON，执行时写入 DB
 回访模块 (return-visit:prepare/execute) — 只消费待回访 JSON
 
 actions:pending 不属于主流程；第一步已拿到按作品分组的评论 JSON。
@@ -418,8 +405,7 @@ return-visit:prepare 不属于评论回复默认流程。
 ```text
 只看互动:   interactions:scan --display-only
 评论回复:   interactions:scan --generate-reply-json
-           → comments:prepare --items-file <JSON>
-           → comments:execute --items-file <JSON>
+           → Agent 填写 reply_text → comments:execute --items-file <JSON>
 明确回访:   interactions:scan --generate-visit-json
            → return-visit:prepare --items-file <JSON>
            → return-visit:execute --execute
@@ -432,12 +418,11 @@ return-visit:prepare 不属于评论回复默认流程。
 1. 采集类型只有 `all` / `comment` / `like`，暂无 `follow`
 2. 新互动采集入口以通知中心为准
 3. 采集业务数据通过 `upsertNotificationEvent()` 写入 `interaction_events`
-4. 评论回复由 `comments:prepare` 基于 JSON 更新 `work_comments`
+4. 评论回复由 `comments:execute` 写入 `reply_text` 到 `work_comments` 并执行
 5. 回访任务由 `return-visit:prepare` 创建或更新
-6. `comments:prepare` 不更新 `interaction_events.status`
-7. `return-visit:prepare` 默认读取 `new`，可通过 `--event-status` 覆盖
-8. 日志里 `newInBatch` 不是"新入库数量"，是"本次扫描内未见过且通过过滤"
-9. `seenItemKeys` 是本次扫描级别去重，不是每轮去重
+6. `return-visit:prepare` 默认读取 `new`，可通过 `--event-status` 覆盖
+7. 日志里 `newInBatch` 不是"新入库数量"，是"本次扫描内未见过且通过过滤"
+8. `seenItemKeys` 是本次扫描级别去重，不是每轮去重
 
 ### C. 仓库文档同步
 
