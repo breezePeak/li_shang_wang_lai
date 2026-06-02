@@ -913,6 +913,13 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
 
     let result = await collect();
     allComments.push(...result.comments);
+    // 打印首条评论的原始 innerText 用于调试
+    const rawSample = await page.evaluate(() => {
+      const item = document.querySelector('[data-e2e="comment-item"]');
+      if (!item) return '(no comment item found)';
+      return (item.innerText || '').substring(0, 400);
+    });
+    console.error(`[work-modal] 首条评论原始 innerText:\n${rawSample}`);
     console.error(`[work-modal] 首轮采集 ${result.comments.length} 条评论:`);
     result.comments.forEach(c => console.error(`  [${c.commentKey}] actor="${c.actorName}" isSelf=${c.isSelfComment} hasReply=${c.hasMyReply} text="${c.commentText.slice(0, 40)}"`));
 
