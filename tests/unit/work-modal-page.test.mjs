@@ -66,6 +66,11 @@ describe('parseDouyinTimeText', () => {
     expect(iso).toBeTruthy();
   });
 
+  it('支持 10分钟前', () => {
+    const iso = parseDouyinTimeText('10分钟前');
+    expect(iso).toBeTruthy();
+  });
+
   it('支持 刚刚', () => {
     const iso = parseDouyinTimeText('刚刚');
     expect(iso).toBeTruthy();
