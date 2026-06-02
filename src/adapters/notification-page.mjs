@@ -200,7 +200,7 @@ export async function openNotificationPanel(page) {
       await bell.waitFor({ state: 'attached', timeout: 5000 });
       for (let attempt = 1; attempt <= 3; attempt++) {
         await bell.hover({ timeout: 3000 });
-        const found = await waitForPanelContent(page, { maxWait: attempt === 1 ? 8000 : 12000 });
+        const found = await waitForPanelContent(page, { maxWait: NETWORK_WAIT_TIMEOUT_MS });
         if (found) {
           console.error(`[notify-page] ✅ hover 铃铛触发了通知面板 (attempt=${attempt})`);
           return true;
@@ -217,7 +217,7 @@ export async function openNotificationPanel(page) {
       const bellBtn = page.locator('div[data-e2e]:has(svg.LtuRRess)').first();
       for (let attempt = 1; attempt <= 3; attempt++) {
         await bellBtn.click({ timeout: 5000 });
-        const found = await waitForPanelContent(page, { maxWait: attempt === 1 ? 6000 : 10000 });
+        const found = await waitForPanelContent(page, { maxWait: NETWORK_WAIT_TIMEOUT_MS });
         if (found) {
           console.error(`[notify-page] ✅ click data-e2e 容器触发了通知面板 (attempt=${attempt})`);
           return true;
@@ -248,7 +248,7 @@ export async function openNotificationPanel(page) {
     for (let i = 0; i < candidates.length; i++) {
       const c = candidates[i];
       await page.mouse.move(c.x, c.y, { steps: 3 });
-      const found = await waitForPanelContent(page, { maxWait: 3000 });
+      const found = await waitForPanelContent(page, { maxWait: NETWORK_WAIT_TIMEOUT_MS });
       if (found) {
         console.error(`[notify-page] ✅ hover #${i + 1} 触发: (${c.x.toFixed(0)}, ${c.y.toFixed(0)})`);
         return true;
@@ -265,26 +265,23 @@ export async function openNotificationPanel(page) {
 }
 
 async function waitForPanelContent(page, { maxWait = 15000 } = {}) {
-  const result = await waitForPageSignalOrNetworkState(page, {
-    timeoutMs: maxWait,
-    label: '通知面板',
-    signalLabel: '通知面板出现',
-    checkSignal: () => hasNotificationPanel(page),
-  });
-  return !!result.ready;
+  const deadline = Date.now() + maxWait;
+  while (Date.now() < deadline) {
+    if (await hasNotificationPanel(page)) return true;
+    await page.waitForTimeout(300);
+  }
+  return false;
 }
 
-export async function waitForNotificationPanelStable(page) {
+export async function waitForNotificationPanelStable(page, { timeoutMs = NETWORK_WAIT_TIMEOUT_MS } = {}) {
   console.error('[notify-page] 等待通知面板稳定...');
-  const maxWait = 8000;
-  const deadline = Date.now() + maxWait;
+  const deadline = Date.now() + timeoutMs;
   let prevInfo = '';
   let stableRounds = 0;
   let settled = false;
   let panelSeen = false;
 
   while (Date.now() < deadline) {
-    const snapshot = getRequestTrackerSnapshot(page);
     const info = await page.evaluate(() => {
       const panel = (function findNotificationPanel() {
         for (const el of document.querySelectorAll('*')) {
@@ -317,10 +314,7 @@ export async function waitForNotificationPanelStable(page) {
       if (panelSeen) {
         return { stable: false, empty: false, panelBox: null, reason: 'panel-disappeared-after-visible' };
       }
-      if (snapshot.inflightCount === 0 && snapshot.idleForMs >= NETWORK_IDLE_MS) {
-        return { stable: false, empty: false, panelBox: null, reason: 'panel-missing-after-network-idle' };
-      }
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(300);
       continue;
     }
 
@@ -337,7 +331,7 @@ export async function waitForNotificationPanelStable(page) {
       stableRounds = 0;
     }
     prevInfo = currentInfo;
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(300);
   }
 
   const panelBox = await getPanelBoundingBox(page);
@@ -367,39 +361,24 @@ export async function waitForNotificationPanelStable(page) {
   });
 
   if (!settled) {
-    const snapshot = getRequestTrackerSnapshot(page);
-    const pending = snapshot.pendingRequests
-      .map(item => `${item.type}:${item.ageMs}ms:${item.url}`)
-      .join(' | ');
     return {
       stable: false,
       empty: false,
       panelBox,
-      networkBad: !panelSeen && snapshot.inflightCount > 0,
-      reason: !panelSeen && snapshot.inflightCount > 0
-        ? `网络不好，通知面板等待超过${formatTimeoutSeconds(maxWait)}s${pending ? ` pending=${pending}` : ''}`
-        : (panelSeen ? '通知面板内容长时间未稳定' : '通知面板请求已停，但面板未出现'),
+      networkBad: false,
+      reason: panelSeen
+        ? `通知面板内容长时间未稳定（>${formatTimeoutSeconds(timeoutMs)}s）`
+        : `通知面板未出现（>${formatTimeoutSeconds(timeoutMs)}s）`,
     };
   }
 
   if (!panelBox) {
-    const snapshot = getRequestTrackerSnapshot(page);
-    if (snapshot.inflightCount === 0 && snapshot.idleForMs >= NETWORK_IDLE_MS) {
-      return { stable: false, empty: false, panelBox: null, reason: 'panel-missing-after-network-idle' };
-    }
-  }
-
-  if (!panelBox) {
-    const snapshot = getRequestTrackerSnapshot(page);
-    const pending = snapshot.pendingRequests
-      .map(item => `${item.type}:${item.ageMs}ms:${item.url}`)
-      .join(' | ');
     return {
       stable: false,
       empty: false,
       panelBox: null,
-      networkBad: true,
-      reason: `网络不好，通知面板等待超过${formatTimeoutSeconds(NETWORK_WAIT_TIMEOUT_MS)}s${pending ? ` pending=${pending}` : ''}`,
+      networkBad: false,
+      reason: '通知面板已出现但无法定位边界',
     };
   }
 
