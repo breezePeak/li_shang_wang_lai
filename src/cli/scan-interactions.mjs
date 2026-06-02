@@ -690,6 +690,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   const runtimeCollectedWorkKeys = new Set();
   let consecutiveEmptyRounds = 0;
   let consecutiveOldRelevantCount = 0;
+  let consecutiveSessionDupRounds = 0;
   let stopDueToOldRelevant = false;
 
   console.error('[scan] 开始逐批采集通知...');
@@ -732,6 +733,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     let batchProfileUnresolved = 0;
     let newInBatch = 0;
     let processedInBatch = 0;
+    let sessionDupInBatch = 0;
 
     for (const [itemIndex, n] of notifications.entries()) {
       const notificationIndex = run.scanned + itemIndex + 1;
@@ -742,6 +744,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       }
       const itemKey = n.notificationItemKey || (n.username + '||' + n.action + '||' + (n.content || ''));
       if (seenItemKeys.has(itemKey)) {
+        sessionDupInBatch++;
         logNotificationSkip(notificationIndex, n, '本次扫描内重复通知', itemKey);
         continue;
       }
@@ -1034,10 +1037,14 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     }
 
     if (newInBatch === 0) {
-      consecutiveEmptyRounds++;
-      if (consecutiveEmptyRounds >= 2) {
-        console.error('[scan] 连续 2 轮无新通知，停止采集');
-        break;
+      if (sessionDupInBatch > 0) {
+        consecutiveEmptyRounds = 0;
+      } else {
+        consecutiveEmptyRounds++;
+        if (consecutiveEmptyRounds >= 2) {
+          console.error('[scan] 连续 2 轮无新通知，停止采集');
+          break;
+        }
       }
     } else {
       consecutiveEmptyRounds = 0;
@@ -1045,8 +1052,19 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
 
     const allDuplicate = notifications.length > 0 && processedInBatch === 0 && batchInserted === 0 && batchEnriched === 0;
     if (allDuplicate) {
-      console.error('[scan] 本轮全部为重复数据，停止采集');
-      break;
+      if (sessionDupInBatch > 0 && sessionDupInBatch >= notifications.length) {
+        consecutiveSessionDupRounds++;
+        if (consecutiveSessionDupRounds >= 5) {
+          console.error('[scan] 连续 5 轮均为本扫描已处理数据，停止采集');
+          break;
+        }
+        console.error(`[scan] 本轮全部为本扫描已处理数据 (${sessionDupInBatch}条)，继续滚动查找新数据 (${consecutiveSessionDupRounds}/5)`);
+      } else {
+        console.error('[scan] 本轮全部为重复数据，停止采集');
+        break;
+      }
+    } else {
+      consecutiveSessionDupRounds = 0;
     }
 
     const scrollResult = await scrollPanelDown(page, { deltaY: 600 });
