@@ -199,7 +199,7 @@ export async function collectWorkFromUrl(page, workUrl, options = {}) {
 
 export async function collectCandidateWorkFromProfile(page, profileUrl, options = {}) {
   const {
-    maxWorksToCheck = 3,
+    maxWorksToCheck = 2,
     pageLoadRetryCount = 1,
     maxReferenceComments = 5,
     validateWork = null,
@@ -270,7 +270,7 @@ export async function collectCandidateWorkFromProfile(page, profileUrl, options 
   return {
     ok: false,
     status: 'skipped_no_suitable_work',
-    reason: 'no_suitable_work_in_first_three',
+    reason: `no_suitable_work_in_first_${maxWorksToCheck}`,
     checkedWorks,
   };
 }
