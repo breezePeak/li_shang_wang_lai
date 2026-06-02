@@ -104,12 +104,11 @@ npm run auth
 | 登录认证 | `npm run auth` |
 | 初始化数据库 | `npm run db:init` |
 | 扫描互动 | `npm run interactions:scan -- --type all --days 7` |
-| 查看待处理 | `npm run actions:pending` |
-| 批量准备评论回复 | `npm run comments:prepare -- --items-file replies.json` |
-| 批量执行评论回复 | `npm run comments:execute-all -- --action-ids 1,2,3 --execute` |
+| 填写评论回复 | 编辑 `data/pending-replies/pending-comments-xxx.json` 的 `reply_text` |
+| 批量准备评论回复 | `npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json` |
+| 批量执行评论回复 | `npm run comments:execute-all -- --items-file data/pending-replies/pending-comments-xxx.json --execute` |
 | 准备回访 | `npm run return-visit:prepare` |
 | 执行回访 | `npm run return-visit:execute -- --execute` |
-| 恢复 blocked 评论动作 | `npm run actions:reset-blocked -- --action-id <action_id>` |
 | 运行默认测试 | `npm test` |
 
 完整命令参数见 `docs/COMMANDS.md`。

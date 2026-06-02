@@ -1,15 +1,7 @@
 import { runMigrations } from '../db/migrations.mjs';
-import {
-  getAction,
-  getActionWithEvent,
-  getActionsByStatus,
-  hasSucceededAction,
-} from '../db/action-repository.mjs';
-import { getEvent } from '../db/interaction-repository.mjs';
 import { getWorkComment, markCommentReplied, markCommentBlocked, markCommentSentUnverified } from '../db/work-comment-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
-import { executePreparedReply } from '../services/comment-reply-executor.mjs';
 import { createBrowserContext } from '../browser/browser-context.mjs';
 import { createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
 import { captureEvidence } from '../browser/failure-evidence.mjs';
@@ -25,9 +17,6 @@ import { resolve } from 'path';
 
 function parseArgs(argv) {
   const args = {
-    actionId: null,
-    actionIds: [],
-    allPrepared: false,
     itemsFile: '',
     execute: false,
     maxItems: 20,
@@ -35,14 +24,11 @@ function parseArgs(argv) {
   };
 
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--action-id' && argv[i + 1]) args.actionId = parseInt(argv[++i]);
-    if (argv[i] === '--action-ids' && argv[i + 1]) args.actionIds = argv[++i].split(',').map(v => parseInt(v.trim())).filter(Boolean);
-    if (argv[i] === '--all-prepared') args.allPrepared = true;
     if (argv[i] === '--items-file' && argv[i + 1]) args.itemsFile = argv[++i];
     if (argv[i] === '--execute') args.execute = true;
     if (argv[i] === '--json') args.json = true;
     if (argv[i] === '--max-items' && argv[i + 1]) {
-      const n = parseInt(argv[++i]);
+      const n = parseInt(argv[++i], 10);
       args.maxItems = Number.isFinite(n) && n > 0 ? n : 20;
     }
   }
@@ -115,6 +101,7 @@ function updateExecuteJsonFile(itemsFile, parsed, results) {
     const id = Number(comment.id ?? comment.commentId ?? comment.comment_id ?? comment.workCommentId ?? comment.work_comment_id);
     const result = byId.get(id);
     if (!result) return;
+
     if (result.ok && result.status === 'succeeded') {
       comment.reply_status = 'succeeded';
       comment.execute_status_code = 'EXECUTE_CONFIRMED';
@@ -139,67 +126,6 @@ function updateExecuteJsonFile(itemsFile, parsed, results) {
     execute: parsed.workflow_status_code,
   };
   writeFileSync(resolve(itemsFile), JSON.stringify(parsed, null, 2), 'utf8');
-}
-
-function collectActionIds(args) {
-  if (args.allPrepared) {
-    return getActionsByStatus('prepared', args.maxItems).map(action => action.id);
-  }
-  if (args.actionIds.length > 0) return args.actionIds.slice(0, args.maxItems);
-  if (args.actionId) return [args.actionId];
-  return [];
-}
-
-function validateDataGate(action) {
-  if (!action.commentText || action.commentText.trim().length === 0) {
-    return `无法获取原始评论内容（eventId=${action.eventId}），无法定位目标评论`;
-  }
-  if (!action.actionText || action.actionText.trim().length === 0) {
-    return '回复内容为空';
-  }
-  if (hasSucceededAction(action.eventId, 'reply_comment')) {
-    return '该评论已有成功回复记录';
-  }
-
-  const event = getEvent(action.eventId);
-  if (event && event.status === 'unstable') {
-    return `事件 #${action.eventId} 仍处于 unstable 状态，无法执行`;
-  }
-
-  let evidence = {};
-  try {
-    const fullAction = getAction(action.actionId);
-    evidence = fullAction?.evidence_json ? JSON.parse(fullAction.evidence_json) : {};
-  } catch (err) {
-    return `动作审计数据无法解析：${err.message}`;
-  }
-  if (evidence.autoExecuteAllowed === true) return 'autoExecuteAllowed 当前必须为 false，不允许自动真实发送';
-  if (evidence.decision && evidence.decision !== 'reply') return `决策为 "${evidence.decision}"，不允许真实发送`;
-  if (evidence.riskLevel && evidence.riskLevel !== 'low') return `风险等级为 "${evidence.riskLevel}"，不允许真实发送`;
-  if (evidence.relevance === 'irrelevant') return '相关性为 irrelevant，不允许真实发送';
-  if (evidence.replyMode === 'ignore') return 'replyMode=ignore 的评论不允许发送';
-
-  return null;
-}
-
-function validatePreparedAction(actionId) {
-  const action = getActionWithEvent(actionId);
-  if (!action) return { actionId, ok: false, error: `找不到动作 ID=${actionId}` };
-
-  if (action.status !== 'prepared') {
-    return { actionId, ok: false, status: action.status, error: `状态 ${action.status} 不可由 execute-all 处理` };
-  }
-
-  const gateError = validateDataGate(action);
-  if (gateError) return { actionId, ok: false, status: action.status, error: gateError };
-
-  return {
-    actionId,
-    ok: true,
-    status: 'prepared',
-    actorName: action.actorName,
-    replyText: action.actionText,
-  };
 }
 
 function validateWorkCommentItem(item) {
@@ -239,18 +165,6 @@ function validateWorkCommentItem(item) {
 }
 
 async function executeWorkCommentItems(items, args) {
-  const run = createRunContext('comment-execute-json', {
-    debug: true,
-    dryRun: !args.execute,
-    execute: args.execute,
-    json: args.json,
-    keepOpen: false,
-    keepOpenOnError: !args.json,
-    pauseOnError: !args.json,
-    writeRunFiles: false,
-    maxItems: args.maxItems,
-  });
-
   if (!args.execute) {
     return items.map(item => {
       const validated = validateWorkCommentItem(item);
@@ -259,6 +173,18 @@ async function executeWorkCommentItems(items, args) {
         : validated;
     });
   }
+
+  const run = createRunContext('comment-execute-json', {
+    debug: true,
+    dryRun: false,
+    execute: true,
+    json: args.json,
+    keepOpen: false,
+    keepOpenOnError: !args.json,
+    pauseOnError: !args.json,
+    writeRunFiles: false,
+    maxItems: args.maxItems,
+  });
 
   let browser = null;
   let page = null;
@@ -356,62 +282,34 @@ async function main() {
   runMigrations();
   const args = parseArgs(process.argv.slice(2));
 
-  if (args.itemsFile) {
-    let loaded = { parsed: null, items: [] };
-    try {
-      loaded = loadWorkCommentItemsFromFile(args.itemsFile, args.maxItems);
-    } catch (err) {
-      printJsonError('comments:execute-all', RESULT_CODES.INVALID_ARGUMENTS, err.message, { recoverable: false });
-      return;
-    }
-    const results = await executeWorkCommentItems(loaded.items, args);
-    updateExecuteJsonFile(args.itemsFile, loaded.parsed, results);
-    const succeeded = results.filter(item => item.ok).length;
-    const failed = results.length - succeeded;
-    if (args.json) {
-      printJsonResult('comments:execute-all', { results }, { succeeded, failed, execute: args.execute, mode: 'work_comment_json' });
-    } else {
-      console.log(`[comments:execute-all] mode=work_comment_json 成功 ${succeeded} 条，失败 ${failed} 条，真实执行=${args.execute}`);
-      for (const item of results) {
-        console.log(`  [comment#${item.commentId || '-'}] ${item.ok ? item.status : `failed ${item.error}`}`);
-      }
-    }
+  if (!args.itemsFile) {
+    printJsonError(
+      'comments:execute-all',
+      RESULT_CODES.INVALID_ARGUMENTS,
+      'comments:execute-all 只支持 --items-file <第一步JSON>',
+      { recoverable: false }
+    );
     return;
   }
 
-  const actionIds = collectActionIds(args);
-
-  if (actionIds.length === 0) {
-    printJsonError('comments:execute-all', RESULT_CODES.BLOCKED,
-      '缺少参数 --action-id、--action-ids 或 --all-prepared', { recoverable: false });
+  let loaded = { parsed: null, items: [] };
+  try {
+    loaded = loadWorkCommentItemsFromFile(args.itemsFile, args.maxItems);
+  } catch (err) {
+    printJsonError('comments:execute-all', RESULT_CODES.INVALID_ARGUMENTS, err.message, { recoverable: false });
     return;
   }
 
-  const results = [];
-  for (const actionId of actionIds) {
-    const validated = validatePreparedAction(actionId);
-    if (!validated.ok) {
-      results.push(validated);
-      continue;
-    }
-    if (!args.execute) {
-      results.push({ ...validated, mode: 'validate-only', next: `npm run comments:execute-all -- --action-id ${actionId} --execute` });
-      continue;
-    }
-    const executed = await executePreparedReply(actionId, { execute: true, json: args.json });
-    results.push(executed.ok
-      ? { actionId, ok: true, status: executed.status, detail: executed }
-      : { actionId, ok: false, status: 'execute_failed', error: executed.message || executed.code, detail: executed });
-  }
-
+  const results = await executeWorkCommentItems(loaded.items, args);
+  updateExecuteJsonFile(args.itemsFile, loaded.parsed, results);
   const succeeded = results.filter(item => item.ok).length;
   const failed = results.length - succeeded;
   if (args.json) {
-    printJsonResult('comments:execute-all', { results }, { succeeded, failed, execute: args.execute });
+    printJsonResult('comments:execute-all', { results }, { succeeded, failed, execute: args.execute, mode: 'work_comment_json' });
   } else {
-    console.log(`[comments:execute-all] 成功 ${succeeded} 条，失败 ${failed} 条，真实执行=${args.execute}`);
+    console.log(`[comments:execute-all] mode=work_comment_json 成功 ${succeeded} 条，失败 ${failed} 条，真实执行=${args.execute}`);
     for (const item of results) {
-      console.log(`  [${item.actionId}] ${item.ok ? item.status : `failed ${item.error}`}`);
+      console.log(`  [comment#${item.commentId || '-'}] ${item.ok ? item.status : `failed ${item.error}`}`);
     }
   }
 }
