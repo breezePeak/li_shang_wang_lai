@@ -306,11 +306,6 @@ async function executeWorkCommentItems(items, args) {
         const usedCommentKeys = new Set();
 
         for (const validated of group) {
-          try {
-            await page.keyboard.press('Escape');
-            await page.waitForTimeout(300);
-          } catch {}
-
           const scanned = await findUnrepliedCommentsInModal(page, {
             maxScrolls: 30,
             alreadyRepliedKeys: new Set(),
@@ -363,6 +358,11 @@ async function executeWorkCommentItems(items, args) {
           markCommentReplied(validated.commentId);
           saveReplyText(validated.commentId, validated.replyText);
           results.push({ ...validated, ok: true, status: 'succeeded', mode: 'execute' });
+
+          try {
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(300);
+          } catch {}
         }
       } catch (err) {
         run.hadBlocked = true;
