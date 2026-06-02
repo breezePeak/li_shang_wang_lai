@@ -227,7 +227,14 @@ function isWorkAlreadyCollected(dedupeContext, n) {
 }
 
 function addWorkKeys(dedupeContext, identity) {
-  if (identity.workId) dedupeContext.workKeys.add(`work_id:${identity.workId}`);
+  if (identity.workId) {
+    dedupeContext.workKeys.add(`work_id:${identity.workId}`);
+    // 通知解析的 workId 带 video-/note-/modal- 前缀，弹窗的不带，两边都加
+    const numeric = identity.workId.replace(/^(video|note|modal)-/, '');
+    if (numeric !== identity.workId) {
+      dedupeContext.workKeys.add(`work_id:${numeric}`);
+    }
+  }
   if (identity.modalId) dedupeContext.workKeys.add(`modal_id:${identity.modalId}`);
   if (identity.workUrl) dedupeContext.workKeys.add(`work_url:${identity.workUrl}`);
   if (identity.thumbnailKey) dedupeContext.workKeys.add(`thumbnail_key:${identity.thumbnailKey}`);
