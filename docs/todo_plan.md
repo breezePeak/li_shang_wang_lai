@@ -40,7 +40,7 @@
 
 3. comments:prepare --items-file <JSON> → PREPARE_JSON_UPDATED
 
-4. comments:execute --items-file <JSON> --execute
+4. comments:execute --items-file <JSON>
    → EXECUTE_JSON_DONE / EXECUTE_JSON_PARTIAL
 ```
 
@@ -241,19 +241,17 @@ comments:prepare（准备阶段）
     ├─ 全部成功 → workflow_status_code: PREPARE_JSON_UPDATED
     └─ 部分失败 → 逐条记录 prepare_status_code
  ↓
-comments:execute（执行阶段）
- ├─ dry-run（不带 --execute）
- │  └─ 逐条校验（id / workUrl / reply_text）→ 输出校验报告
- │     ├─ reply_text 为空 → 日志跳过（skipped_empty_reply）
- │     └─ 已回复 → 跳过重复执行
+comments:execute（执行阶段 — 默认真实执行）
+ ├─ 加载 JSON，提取全部评论（无 --max-items 限制）
  │
- └─ --execute 真实执行
+ ├─ 逐条检查：
+ │  ├─ reply_text 为空 → 日志跳过（skipped_empty_reply）
+ │  ├─ 已 succeeded → 跳过重复执行（EXECUTE_ALREADY_CONFIRMED）
+ │  └─ 已 sent_unverified → 跳过重复执行（EXECUTE_ALREADY_SENT_UNVERIFIED）
+ │
+ └─ 逐条真实执行：
     启动浏览器
     ↓
-    遍历每条待回复评论（上限 --max-items 条）:
-    ├─ reply_text 为空 → 日志跳过
-    ├─ 已回复 (succeeded/sent_unverified) → 跳过
-    │
     ├─ page.goto(workUrl) → 等待作品弹窗
     │  └─ 弹窗未出现 → markCommentBlocked
     │
@@ -274,8 +272,10 @@ comments:execute（执行阶段）
     │     reply_status = sent_unverified
     │
     └─ 回写 JSON 状态码
-       ├─ 全部成功 → EXECUTE_JSON_DONE
+       ├─ 全部成功/跳过 → EXECUTE_JSON_DONE
        └─ 部分失败 → EXECUTE_JSON_PARTIAL
+       重复执行已成功 → EXECUTE_ALREADY_CONFIRMED
+       重复执行已 sent_unverified → EXECUTE_ALREADY_SENT_UNVERIFIED
 ```
 
 ### 2.2 状态码（回评阶段）
@@ -419,7 +419,7 @@ return-visit:prepare 不属于评论回复默认流程。
 只看互动:   interactions:scan --display-only
 评论回复:   interactions:scan --generate-reply-json
            → comments:prepare --items-file <JSON>
-           → comments:execute --items-file <JSON> --execute
+           → comments:execute --items-file <JSON>
 明确回访:   interactions:scan --generate-visit-json
            → return-visit:prepare --items-file <JSON>
            → return-visit:execute --execute

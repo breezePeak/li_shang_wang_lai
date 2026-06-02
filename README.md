@@ -2,7 +2,7 @@
 
 基于 Node.js、Playwright 和 SQLite 的抖音创作者互动助手，支持 Hermes / OpenClaw Skill 加载。
 
-项目用于辅助创作者扫描互动、准备评论回复、准备回访任务，并在显式执行模式下完成评论回复或回访点赞 + 评论。默认状态是安全的：没有 `--execute` 时不会执行真实点赞、评论或回复。
+项目用于辅助创作者扫描互动、准备评论回复、准备回访任务，并在显式执行模式下完成评论回复或回访点赞 + 评论。评论回复默认真实执行；回访需 `--execute`。
 
 ## 文档边界
 
@@ -108,7 +108,7 @@ npm run auth
 | 扫描并生成待回访 | `npm run interactions:scan -- --type all --days 7 --max-count 100 --generate-visit-json` |
 | 填写评论回复 | 编辑 `data/pending-replies/pending-comments-xxx.json` 的 `reply_text` |
 | 批量准备评论回复 | `npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json` |
-| 批量执行评论回复 | `npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json --execute` |
+| 批量执行评论回复 | `npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json` |
 | 准备回访 | `npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json` |
 | 执行回访 | `npm run return-visit:execute -- --execute` |
 | 运行默认测试 | `npm test` |

@@ -15,7 +15,7 @@
 
 ## 安全默认值
 
-- 评论回复：`comments:execute` 不带 `--execute` 时只做数据门禁校验，不真实发送。
+- 评论回复：`comments:execute` 默认真实执行，不再需要 `--execute`。reply_text 由 Agent 生成并填写。
 - 回访：`return-visit:execute` 不带 `--execute` 时为 dry-run，不真实点赞或评论。
 - 旧回赞：`likes:reciprocate --execute` 固定返回 `FEATURE_DISABLED`，不真实点赞。
 - 所有真实动作必须经过登录态、页面稳定、状态判断、重复判断和失败阻断。
@@ -26,9 +26,9 @@
 
 ```bash
 npm run interactions:scan -- --type comment --days 7 --max-count 100 --generate-reply-json
-# 填写 data/pending-replies/pending-comments-xxx.json 中每条要回复评论的 reply_text
+# Agent 根据评论内容、作品上下文和安全规则，生成并填写 reply_text
 npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json
-npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json --execute
+npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
 ```
 
 回访：
@@ -164,20 +164,19 @@ JSON 中评论项示例：
 
 ```bash
 npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
-npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json --execute
 ```
 
 源文件：`src/cli/execute-comment-replies.mjs`
 
-读取同一个待回复评论 JSON，逐条打开作品评论区、定位原评论、填写并发送回复。每条发送后必须确认成功，再更新 `work_comments.reply_status` 和 `interaction_events.status`，并回写 JSON 状态码。不带 `--execute` 时只做门禁校验；带 `--execute` 才真实发送回复。
+读取同一个待回复评论 JSON，逐条处理已填写 `reply_text` 的评论。`reply_text` 由 Agent 根据评论内容、作品上下文和安全规则生成并填写。每条发送后必须确认成功，再更新 `work_comments.reply_status` 和 `interaction_events.status`，并回写 JSON 状态码。
 
-reply_text 为空的评论会打印日志跳过，不阻塞执行。
+命令默认真实执行，不再需要 `--execute`。
+
+reply_text 为空的评论会打印日志跳过。已经 succeeded / sent_unverified 的评论会跳过重复执行。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--items-file` | 必填 | `interactions:scan` 生成并已填写 reply_text 的 JSON |
-| `--max-items` | `20` | 本轮最多处理条数 |
-| `--execute` | `false` | 真实发送回复 |
+| `--items-file` | 必填 | `interactions:scan` 生成并已由 Agent 填写 reply_text 的 JSON |
 | `--json` | `false` | JSON 输出 |
 
 安全规则：
@@ -185,6 +184,7 @@ reply_text 为空的评论会打印日志跳过，不阻塞执行。
 - 只处理 `reply_text` 非空的评论。
 - 执行前检查原评论、回复文本和作品 URL。
 - 发送失败、页面定位失败或状态不确定会进入 `blocked` 或 `sent_unverified`。
+- 重复执行已成功评论回写 `EXECUTE_ALREADY_CONFIRMED`，不算失败。
 
 ## 7. return-visit:prepare
 
