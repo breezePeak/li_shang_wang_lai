@@ -303,34 +303,37 @@ async function executeWorkCommentItems(items, args) {
           continue;
         }
 
-        const scanned = await findUnrepliedCommentsInModal(page, {
-          maxScrolls: 30,
-          alreadyRepliedKeys: new Set(),
-          selfNickname: '',
-          maxAgeDays: null,
-          oldCommentStopCount: 0,
-        });
-        if (!scanned.ok) {
-          for (const validated of group) {
-            markCommentBlocked(validated.commentId, scanned.message || scanned.code || 'comment_scan_failed');
-            results.push({ ...validated, ok: false, status: 'blocked', error: scanned.message || scanned.code });
-          }
-          continue;
-        }
-
-        const scannedComments = scanned.data?.comments || [];
-        const usedIndexes = new Set();
+        const usedCommentKeys = new Set();
 
         for (const validated of group) {
+          try {
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(300);
+          } catch {}
+
+          const scanned = await findUnrepliedCommentsInModal(page, {
+            maxScrolls: 30,
+            alreadyRepliedKeys: new Set(),
+            selfNickname: '',
+            maxAgeDays: null,
+            oldCommentStopCount: 0,
+          });
+          if (!scanned.ok) {
+            markCommentBlocked(validated.commentId, scanned.message || scanned.code || 'comment_scan_failed');
+            results.push({ ...validated, ok: false, status: 'blocked', error: scanned.message || scanned.code });
+            continue;
+          }
+
+          const scannedComments = (scanned.data?.comments || []).filter(comment => !usedCommentKeys.has(comment.commentKey));
           console.log(`[comments:execute] 匹配评论 commentId=${validated.commentId} actor="${validated.actorName}" comment="${validated.commentText.slice(0, 40)}"`);
-          const matched = findMatchingCommentIndex(scannedComments, validated, usedIndexes);
+          const matched = findMatchingCommentIndex(scannedComments, validated);
           if (!matched) {
             console.log(`[comments:execute] 未找到评论 commentId=${validated.commentId} reason=no_matching_comment_in_scanned_work`);
             markCommentBlocked(validated.commentId, 'no_matching_comment_in_scanned_work');
             results.push({ ...validated, ok: false, status: 'blocked', error: 'no_matching_comment_in_scanned_work' });
             continue;
           }
-          usedIndexes.add(matched.commentIndex);
+          usedCommentKeys.add(matched.commentKey);
           console.log(`[comments:execute] 已定位评论 commentId=${validated.commentId} index=${matched.commentIndex}`);
 
           const opened = await openReplyBoxByIndex(page, matched.commentIndex);
