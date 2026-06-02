@@ -913,6 +913,8 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
 
     let result = await collect();
     allComments.push(...result.comments);
+    console.error(`[work-modal] 首轮采集 ${result.comments.length} 条评论:`);
+    result.comments.forEach(c => console.error(`  [${c.commentKey}] actor="${c.actorName}" isSelf=${c.isSelfComment} hasReply=${c.hasMyReply} text="${c.commentText.slice(0, 40)}"`));
 
     if (hasConsecutiveOldAtTail()) {
       console.error(`[work-modal] 连续 ${oldCommentStopCount} 条评论超过 ${maxAgeDays} 天，停止该作品评论采集`);
@@ -976,6 +978,10 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
         result = await collect();
         const newComments = result.comments.filter(c => !allComments.some(e => e.commentKey === c.commentKey));
         allComments.push(...newComments);
+        if (newComments.length > 0) {
+          console.error(`[work-modal] 本轮新增 ${newComments.length} 条评论:`);
+          newComments.forEach(c => console.error(`  [${c.commentKey}] actor=${c.actorName} isSelf=${c.isSelfComment} hasReply=${c.hasMyReply} text="${c.commentText.slice(0, 40)}"`));
+        }
 
         if (hasConsecutiveOldAtTail()) {
           console.error(`[work-modal] 连续 ${oldCommentStopCount} 条评论超过 ${maxAgeDays} 天，停止该作品评论采集`);
