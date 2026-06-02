@@ -106,7 +106,7 @@ npm run auth
 | 只看互动 | `npm run interactions:scan -- --type all --days 7 --max-count 100 --display-only` |
 | 扫描并生成待回评 | `npm run interactions:scan -- --type comment --days 7 --max-count 100 --generate-reply-json` |
 | 扫描并生成待回访 | `npm run interactions:scan -- --type all --days 7 --max-count 100 --generate-visit-json` |
-| 填写评论回复 | 编辑 `data/pending-replies/pending-comments-xxx.json` 的 `reply_text` |
+| 填写评论回复 | Agent 生成并填写 `data/pending-replies/pending-comments-xxx.json` 的 `reply_text` |
 | 批量准备评论回复 | `npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json` |
 | 批量执行评论回复 | `npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json` |
 | 准备回访 | `npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json` |

@@ -36,7 +36,7 @@
       ├─ 能识别: OTHER_STORED，分类入库
       └─ 不能识别: UNKNOWN_LOGGED，打印未知类型日志
 
-2. 填写第一步 JSON 的 reply_text → PREPARE_WAIT_REPLY_TEXT
+2. Agent 生成并填写第一步 JSON 的 reply_text → PREPARE_WAIT_REPLY_TEXT
 
 3. comments:prepare --items-file <JSON> → PREPARE_JSON_UPDATED
 
@@ -272,8 +272,8 @@ comments:execute（执行阶段 — 默认真实执行）
     │     reply_status = sent_unverified
     │
     └─ 回写 JSON 状态码
-       ├─ 全部成功/跳过 → EXECUTE_JSON_DONE
-       └─ 部分失败 → EXECUTE_JSON_PARTIAL
+       ├─ 全部成功或全部可跳过 → EXECUTE_JSON_DONE（使用 isSkippedResult 判断）
+       └─ 存在真正的失败 → EXECUTE_JSON_PARTIAL
        重复执行已成功 → EXECUTE_ALREADY_CONFIRMED
        重复执行已 sent_unverified → EXECUTE_ALREADY_SENT_UNVERIFIED
 ```
@@ -286,7 +286,7 @@ comments:execute（执行阶段 — 默认真实执行）
 | `PREPARE_JSON_UPDATED` | JSON `workflow_status_code` | 准备完成，JSON 已回写 |
 | `PREPARE_READY` | `works[].comments[].prepare_status_code` | 已写入 `reply_text`，等待执行 |
 | `PREPARE_FAILED` | `works[].comments[].prepare_status_code` | 准备失败，查看 `prepare_error` |
-| `EXECUTE_JSON_DONE` | JSON `workflow_status_code` | 全部执行成功 |
+| `EXECUTE_JSON_DONE` | JSON `workflow_status_code` | 全部成功或全部可跳过（空回复/已回复/已发送） |
 | `EXECUTE_JSON_PARTIAL` | JSON `workflow_status_code` | 有失败或未确认 |
 | `EXECUTE_CONFIRMED` | `works[].comments[].execute_status_code` | 已确认回复成功，同时更新 interaction_events.status=replied |
 | `EXECUTE_SENT_UNVERIFIED` | `works[].comments[].execute_status_code` | 已发送但未确认 |

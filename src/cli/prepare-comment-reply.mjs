@@ -271,13 +271,13 @@ function main() {
     console.log(`[prepare] mode=work_comment_json prepared=${prepared} failed=${failed} total=${results.length}`);
     for (const result of results) {
       if (result.ok) {
-        console.log(`  [comment#${result.commentId}] ${result.actorName}: ${result.replyText}`);
+        console.log(`  [comment#${result.commentId}] reply_text_written`);
       } else {
         console.log(`  [comment#${result.commentId || '-'}] failed ${result.code}: ${result.message}`);
       }
     }
     if (commentIds.length > 0) {
-      console.log(`  下一步: npm run comments:execute -- --items-file ${args.itemsFile} --execute`);
+      console.log(`  下一步: npm run comments:execute -- --items-file ${args.itemsFile}`);
     }
   }
 }

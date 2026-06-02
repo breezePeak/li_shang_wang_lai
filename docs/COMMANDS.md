@@ -123,7 +123,7 @@ npm run comments:prepare -- --items-file data/pending-replies/pending-comments-x
 
 源文件：`src/cli/prepare-comment-reply.mjs`
 
-读取 `interactions:scan` 输出的按作品分组 JSON，校验每条待回复评论的 `reply_text`，并更新 `work_comments.reply_text` / `work_comments.reply_status`。该命令只支持 `--items-file`。
+读取 `interactions:scan` 输出的按作品分组 JSON，校验每条待回复评论的 `reply_text`，并更新 `work_comments.reply_text`（不改变 `reply_status`）。该命令只支持 `--items-file`。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|

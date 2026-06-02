@@ -135,6 +135,6 @@ npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-
 
 - 不发送空评论、广告、引流、互关、互赞、辱骂或骚扰内容。
 - 不在命令失败后继续执行后续真实动作。
-- 评论回复必须先由 `comments:prepare -- --items-file <json>` 更新为 `prepared`。
+- 评论回复必须先由 `comments:prepare -- --items-file <json>` 写入 `reply_text` 并通过安全校验。
 - 回访必须先经过 `return-visit:prepare`，不得跳过上下文采集直接执行。
 - 页面未稳定、登录失效、点赞状态未知、重复执行风险或发送结果未确认时必须阻断。

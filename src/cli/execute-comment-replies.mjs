@@ -139,9 +139,7 @@ function updateExecuteJsonFile(itemsFile, parsed, results) {
     }
   });
 
-  const allOkOrSkipped = results.every(item =>
-    item.ok || item.status === 'skipped_empty_reply' || item.fromAlready
-  );
+  const allOkOrSkipped = results.every(item => item.ok || isSkippedResult(item));
   parsed.workflow_status_code = allOkOrSkipped ? 'EXECUTE_JSON_DONE' : 'EXECUTE_JSON_PARTIAL';
   parsed.status_codes = {
     ...(parsed.status_codes || {}),
