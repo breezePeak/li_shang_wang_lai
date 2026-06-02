@@ -86,7 +86,7 @@
 ```text
 采集模块 interactions:scan
   打开主页 -> 打开通知面板 -> 逐条扫描通知 -> 入库
-  根据运行时计划选择是否生成待回评 JSON / 待回访 JSON
+  根据 Agent 选择的 CLI 参数决定是否生成待回评 JSON / 待回访 JSON
 
 回评模块 comments:prepare / comments:execute-all
   只消费待回评 JSON
@@ -97,7 +97,7 @@
   不直接打开通知面板采集
 ```
 
-运行时计划字段：
+Agent 决策上下文示例：
 
 ```json
 {
@@ -110,7 +110,7 @@
 }
 ```
 
-这些字段只用于本轮执行计划，不新增数据库字段。
+这些字段由 Agent 在对话中理解和维护，不由项目代码解析自然语言，也不新增数据库字段。项目 CLI 只接收明确参数，例如 `--display-only`、`--generate-reply-json`、`--generate-visit-json`、`--days`、`--max-count`。
 
 ## 用户意图映射
 

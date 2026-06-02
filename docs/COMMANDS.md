@@ -6,7 +6,7 @@
 
 | 分类 | 命令 |
 |---|---|
-| 主流程 | `auth`、`db:init`、`interactions:run`、`interactions:scan`、`comments:prepare`、`comments:execute-all`、`return-visit:prepare`、`return-visit:execute` |
+| 主流程 | `auth`、`db:init`、`interactions:scan`、`comments:prepare`、`comments:execute-all`、`return-visit:prepare`、`return-visit:execute` |
 | 只读/辅助入口 | `actions:pending`、`actions:plan`、`likes:plan`、`comments:classify`、`history` |
 | 兼容入口 | `likes:reciprocate` |
 | 调试/开发入口 | `notify:inspect`、`interactions:inspect`、`debug:like-dom`、`debug:like-state`、`dev:inspect-page`、`server`、`icon:profile` |
@@ -42,19 +42,7 @@ npm run return-visit:execute -- --execute
 
 评论回复结束后只有在用户明确要求回访时，才进入回访流程。回访准备必须从数据库读取待回访用户，并同时受 `--days` 时间窗口、`--event-limit` 来源事件数和 `--max-items` 本轮处理数约束。
 
-## 1. interactions:run
-
-```bash
-npm run interactions:run -- --input "看看最近通知里有什么互动" --days 7 --max-count 100
-npm run interactions:run -- --input "看看谁给我评论了，回复一下" --days 7 --max-count 100
-npm run interactions:run -- --input "看看谁给我点赞了，回访一下" --days 7 --max-count 100
-```
-
-源文件：`src/cli/run-interaction-task.mjs`
-
-运行时计划入口，只负责把用户输入解析成执行计划和推荐命令，不直接执行浏览器动作。计划字段包括 `collect`、`replyComment`、`visitBack`、`collectTypes`、`days`、`maxCount`，这些字段不落库。
-
-## 2. auth
+## 1. auth
 
 ```bash
 npm run auth
@@ -66,7 +54,7 @@ npm run auth
 
 参数：无。
 
-## 3. db:init
+## 2. db:init
 
 ```bash
 npm run db:init
@@ -78,7 +66,7 @@ npm run db:init
 
 参数：无。
 
-## 4. interactions:scan
+## 3. interactions:scan
 
 ```bash
 npm run interactions:scan -- --type all --days 7 --max-count 100 --display-only
@@ -89,6 +77,8 @@ npm run interactions:scan -- --type like --days 7 --max-count 100 --generate-vis
 源文件：`src/cli/scan-interactions.mjs`
 
 打开抖音通知中心或评论管理页，采集评论和点赞互动，写入本地数据库。
+
+用户意图由 Agent 判断，项目 CLI 不解析自然语言。Agent 应根据用户是否只看互动、是否明确回评、是否明确回访，选择 `--display-only`、`--generate-reply-json` 或 `--generate-visit-json`。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
@@ -109,7 +99,7 @@ npm run interactions:scan -- --type like --days 7 --max-count 100 --generate-vis
 | `--pause-after-open` | `0` | 打开通知面板后停顿毫秒数 |
 | `--debug-notification-dom` | `false` | 保存通知 DOM 调试信息 |
 
-## 5. actions:pending
+## 4. actions:pending
 
 ```bash
 npm run actions:pending
@@ -125,7 +115,7 @@ npm run actions:pending -- --type comment --json
 | `--type` | `null` | 可选 `comment` / `like` |
 | `--json` | `false` | JSON 输出 |
 
-## 6. comments:prepare
+## 5. comments:prepare
 
 ```bash
 npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json
@@ -170,7 +160,7 @@ JSON 中评论项示例：
 }
 ```
 
-## 7. comments:execute-all
+## 6. comments:execute-all
 
 ```bash
 npm run comments:execute-all -- --items-file data/pending-replies/pending-comments-xxx.json
@@ -194,7 +184,7 @@ npm run comments:execute-all -- --items-file data/pending-replies/pending-commen
 - 执行前检查原评论、回复文本和作品 URL。
 - 发送失败、页面定位失败或状态不确定会进入 `blocked` 或 `sent_unverified`。
 
-## 8. return-visit:prepare
+## 7. return-visit:prepare
 
 ```bash
 npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json --days 7 --max-items 5 --json
@@ -215,7 +205,7 @@ npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-
 | `--headless` | `false` | 无头运行 |
 | `--json` | `false` | JSON 输出 |
 
-## 9. return-visit:execute
+## 8. return-visit:execute
 
 ```bash
 npm run return-visit:execute
@@ -246,7 +236,7 @@ npm run return-visit:execute -- --max-items 3 --execute
 - 评论发送后会确认结果；未确认会阻断并记录失败。
 - 连续失败达到配置上限时暂停本轮执行。
 
-## 10. actions:plan
+## 9. actions:plan
 
 ```bash
 npm run actions:plan -- --json
@@ -262,7 +252,7 @@ npm run actions:plan -- --json
 | `--limit` | `200` | 读取事件数 |
 | `--commit` | `false` | 当前未实现，仍按只读运行 |
 
-## 11. likes:plan
+## 10. likes:plan
 
 ```bash
 npm run likes:plan -- --json
@@ -277,7 +267,7 @@ npm run likes:plan -- --json
 | `--json` | `false` | JSON 输出 |
 | `--limit` | `200` | 读取事件数 |
 
-## 12. likes:reciprocate
+## 11. likes:reciprocate
 
 ```bash
 npm run likes:reciprocate -- --dry-run --plan plan.json
@@ -293,7 +283,7 @@ npm run likes:reciprocate -- --dry-run --plan plan.json
 | `--dry-run` | `false` | 预览模式 |
 | `--execute` | `false` | 固定禁用，返回 `FEATURE_DISABLED` |
 
-## 13. comments:classify
+## 12. comments:classify
 
 ```bash
 npm run comments:classify -- --text "求教程" --json
@@ -308,7 +298,7 @@ npm run comments:classify -- --text "求教程" --json
 | `--text` | 必填 | 要分类的评论文本 |
 | `--json` | `false` | JSON 输出 |
 
-## 14. history
+## 13. history
 
 ```bash
 npm run history
@@ -318,7 +308,7 @@ npm run history
 
 查看历史运行记录。
 
-## 15. interactions:inspect
+## 14. interactions:inspect
 
 ```bash
 npm run interactions:inspect
@@ -328,7 +318,7 @@ npm run interactions:inspect
 
 调试命令：检查已入库互动事件。
 
-## 16. notify:inspect
+## 15. notify:inspect
 
 ```bash
 npm run notify:inspect
@@ -338,7 +328,7 @@ npm run notify:inspect
 
 调试命令：检查通知面板 DOM 结构。
 
-## 17. dev:inspect-page
+## 16. dev:inspect-page
 
 ```bash
 npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
@@ -355,7 +345,7 @@ npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
 | `--label` | `''` | 页面标签 |
 | `--wait-after-enter-ms` | `0` | 进入后等待毫秒数 |
 
-## 18. debug:like-dom
+## 17. debug:like-dom
 
 ```bash
 npm run debug:like-dom
@@ -365,7 +355,7 @@ npm run debug:like-dom
 
 调试点赞按钮 DOM 结构。
 
-## 19. debug:like-state
+## 18. debug:like-state
 
 ```bash
 npm run debug:like-state
@@ -375,7 +365,7 @@ npm run debug:like-state
 
 调试点赞状态检测逻辑。
 
-## 20. server
+## 19. server
 
 ```bash
 npm run server
@@ -385,7 +375,7 @@ npm run server
 
 本地开发服务入口，用于内部页面或调试接口，不属于 CLI 主流程。
 
-## 21. icon:profile
+## 20. icon:profile
 
 ```bash
 npm run icon:profile
