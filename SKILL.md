@@ -88,13 +88,12 @@ npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-
 ```
 
 该命令负责：
-- 消费待回访 JSON
-- 创建或更新 `return_visit_tasks`
+- 读取待回访 JSON 中的 id，从数据库加载对应 return_visit_tasks（任务创建已在 interactions:scan --generate-visit-json 阶段完成）
 - 逐个打开用户主页
 - 监听 `/aweme/v1/web/aweme/post/`
 - 过滤置顶作品 `is_top = 1`
 - 选择第一条非置顶作品
-- 记录作品 ID、作品 URL、描述、`can_comment` 等上下文
+- 记录作品 ID、作品 URL、描述、`can_comment` 等元数据
 - 输出：
 
 ```text
