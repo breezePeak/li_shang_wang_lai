@@ -7,11 +7,9 @@
 ## 文档边界
 
 - `README.md`：项目介绍、安装方式、环境要求、首次初始化、常用入口命令。
-- `SKILL.md`：Hermes / OpenClaw 唯一主 Skill，直接描述完整互动主流程。
+- `skills/social-media/li-shang-wang-lai/SKILL.md`：Hermes / OpenClaw 主 Skill，直接描述完整互动主流程。
+- `skills/social-media/li-shang-wang-lai/references/comment-safety-rules.md`：评论回复与回访评论共用的生成规则和安全边界。
 - `docs/COMMANDS.md`：命令参考手册，和 `package.json` scripts、实际 CLI 参数保持一致。
-- `shared/comment-safety-rules.md`：评论回复与回访评论共用的生成规则和安全边界。
-
-根目录只保留 `SKILL.md`。不要同时创建 `skill.md` 和 `SKILL.md`，macOS 默认 APFS 大小写不敏感，两个文件名容易互相覆盖。
 
 ## 环境要求
 
@@ -25,12 +23,10 @@
 
 ## Skill 入口
 
-Hermes / OpenClaw 安装后识别根目录 `SKILL.md` 作为唯一主 Skill。
+项目按 Hermes 推荐的 tap 目录组织：Skill 放在 `skills/<category>/<skill>/SKILL.md`，支撑规则放在同目录下的 `references/`。
 
-- 主 Skill：`li-shang-wang-lai`
-- 共享规则文件：`shared/comment-safety-rules.md`
-
-评论生成规则统一放在 `shared/comment-safety-rules.md`。
+- 主 Skill：`skills/social-media/li-shang-wang-lai/SKILL.md`
+- 规则文件：`skills/social-media/li-shang-wang-lai/references/comment-safety-rules.md`
 
 ## 安装到 Hermes
 
