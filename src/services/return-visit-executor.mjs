@@ -214,12 +214,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   const nextLikeStatus = { value: task.likeStatus || 'pending' };
   const nextCommentStatus = { value: task.commentStatus || 'pending' };
 
-  let likeState;
-  if (isNotePage) {
-    likeState = { ok: true, data: { alreadyLiked: true, confidence: 'confirmed' } };
-  } else {
-    likeState = await checkLikeState(page);
-  }
+  const likeState = await checkLikeState(page);
   if (!likeState.ok || likeState.data?.confidence !== 'confirmed') {
     let debugCandidates = [];
     try {
