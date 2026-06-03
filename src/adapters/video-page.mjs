@@ -1070,10 +1070,10 @@ async function ensureCommentPanelOpen(page) {
     const isOpen = async () => await page.evaluate(() => {
       const selectors = [
         '.comment-mainContent',
-        '[class*="comment-input"]',
         '[class*="comment-main"]',
         '[class*="comment-list"]',
         '[class*="comment-container"]',
+        '[contenteditable="true"]',
         '[contenteditable="true"][data-placeholder*="评"]',
         '[contenteditable="true"][placeholder*="评"]',
         'textarea[placeholder*="评"]',
