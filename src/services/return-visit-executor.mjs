@@ -136,6 +136,7 @@ async function resolveWorkForExecution(page, task, options = {}) {
         fromFallback: false,
       };
     }
+    console.error(`[return-visit:execute] 直链解析失败 taskId=${task.taskId}: ${direct.error || direct.reason || 'unknown'}，降级到主页采集`);
   }
 
   const fallback = await collectCandidateWorkFromProfile(page, task.userProfileUrl, {
@@ -145,6 +146,7 @@ async function resolveWorkForExecution(page, task, options = {}) {
   });
 
   if (!fallback.ok) {
+    console.error(`[return-visit:execute] 作品解析失败 taskId=${task.taskId}: direct=${!knownWorkUrl ? 'no_url' : 'failed'} fallback_status=${fallback.status || 'failed'} reason=${fallback.reason || 'unknown'}`);
     return {
       ok: false,
       status: fallback.status || 'failed_collect',
@@ -309,7 +311,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   if (!canComment) {
     return {
       ok: false,
-      status: 'failed_comment',
+      status: 'skipped_comment_disabled',
       error: 'skip_comment_disabled',
       likeStatus: nextLikeStatus.value,
       commentStatus: nextCommentStatus.value,

@@ -321,6 +321,7 @@ async function main() {
       skipped++;
       consecutiveFailures = 0;
     } else {
+      log(args.json, `[return-visit:execute] 失败 ${task.taskId}: ${result.status || 'unknown'} reason=${result.error || 'unknown'}`);
       markReturnVisitFailure(task, {
         status: result.status || RETURN_VISIT_STATUS.FAILED,
         error: result.error || 'execute_failed',
