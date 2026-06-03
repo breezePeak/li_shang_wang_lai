@@ -227,7 +227,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
 
   let likeState;
   if (isNotePage) {
-    likeState = { ok: true, data: { alreadyLiked: false, confidence: 'confirmed' } };
+    likeState = { ok: true, data: { alreadyLiked: true, confidence: 'confirmed' } };
   } else {
     likeState = await checkLikeState(page);
   }
