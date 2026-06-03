@@ -1326,7 +1326,7 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
     await page.waitForTimeout(500);
 
     const sendBtnSelectors = [
-      '[class*="comment"] span svg[fill="#FE2C55"]',
+      'span.Law8JZNu',
       'span.FbVIhLlK',
       'button:has-text("发送")',
       'button:has-text("发布")',
@@ -1348,8 +1348,10 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
     }
 
     if (!clickedSend) {
-      console.error('[video-page] 找不到发送按钮，尝试使用 Control+Enter 兜底发送');
+      console.error('[video-page] 找不到发送按钮，尝试 Control+Enter / Enter 兜底发送');
       await page.keyboard.press('Control+Enter');
+      await page.waitForTimeout(300);
+      await page.keyboard.press('Enter');
       await page.waitForTimeout(500);
       clickedSend = true;
     }
