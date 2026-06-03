@@ -1312,6 +1312,8 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
     await page.waitForTimeout(500);
 
     const sendBtnSelectors = [
+      '[class*="comment"] span svg[fill="#FE2C55"]',
+      'span.FbVIhLlK',
       'button:has-text("发送")',
       'button:has-text("发布")',
       '[data-e2e="comment-submit"]',
