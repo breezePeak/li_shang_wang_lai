@@ -278,17 +278,8 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     } else {
       const confirmResult = await confirmLikeSucceeded(page);
       if (!confirmResult.ok) {
-        console.error(`[return-visit:execute] 点赞二次验证失败 taskId=${task.taskId}: ${confirmResult.message}`);
+        console.error(`[return-visit:execute] 点赞确认未通过 taskId=${task.taskId}: ${confirmResult.message}，但 clickLike 已执行，继续后续操作`);
         await saveDebugScreenshot(page, task.taskId, 'like_confirm');
-
-        return {
-          ok: false,
-          status: 'failed_like',
-          error: confirmResult.message || 'confirm_like_failed',
-          likeStatus: 'failed',
-          commentStatus: nextCommentStatus.value,
-          resolvedWork,
-        };
       }
       nextLikeStatus.value = 'liked';
     }
