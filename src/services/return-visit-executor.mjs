@@ -296,7 +296,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     };
   }
 
-  // can_comment 来自 API 不可信，改为只看 generatedComment 是否填写
+
   const commentText = String(task.generatedComment || '').trim();
   if (!commentText) {
     // 无评论文本时，仅凭点赞状态判断是否完成

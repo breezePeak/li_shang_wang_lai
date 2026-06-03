@@ -93,7 +93,7 @@ npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-
 - 监听 `/aweme/v1/web/aweme/post/`
 - 过滤置顶作品 `is_top = 1`
 - 选择第一条非置顶作品
-- 记录作品 ID、作品 URL、描述、`can_comment` 等元数据
+- 记录作品 ID、作品 URL、描述等元数据
 - 输出：
 
 ```text
@@ -105,14 +105,6 @@ Agent 读取该 JSON，根据作品描述和共享规则填写：
 ```text
 comment
 ```
-
-如果：
-
-```text
-can_comment === false
-```
-
-则不要填写评论，保持 `comment` 为空。
 
 最后执行：
 
@@ -136,5 +128,5 @@ npm run return-visit:execute -- --execute --items-file data/pending-visits/pendi
 - 不发送广告、引流、互关、互赞、骚扰内容。
 - 不在命令失败后继续真实动作。
 - 不跳过 `return-visit:prepare` 直接执行回访。
-- `can_comment=false` 的作品只点赞不评论。
+
 - 页面未稳定、登录失效、点赞状态未知、重复执行风险或发送结果未确认时必须阻断。

@@ -49,6 +49,4 @@
 
 不要编造没有看到的画面、人物、地点、事件或情绪。
 
-## can_comment=false
 
-当记录中 `can_comment=false` 时，不生成评论，保持 `comment` 为空。

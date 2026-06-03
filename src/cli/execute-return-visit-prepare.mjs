@@ -211,7 +211,6 @@ async function main() {
         createTime: selectedWork.createTime,
         isTop: selectedWork.isTop,
         userDigged: selectedWork.userDigged,
-        canComment: selectedWork.canComment,
         diggCount: selectedWork.diggCount,
         commentCount: selectedWork.commentCount,
         awemeType: selectedWork.awemeType,
@@ -235,7 +234,6 @@ async function main() {
       aweme_type: selectedWork.awemeType,
       media_type: selectedWork.mediaType,
       is_multi_content: selectedWork.isMultiContent,
-      can_comment: Boolean(selectedWork.canComment),
       user_digged: Number(selectedWork.userDigged || 0),
       comment: '',
     });

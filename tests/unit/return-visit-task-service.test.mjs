@@ -118,17 +118,5 @@ describe('return-visit execute filtering & state flow logic', () => {
     expect(updated.status).toBe('failed_comment');
   });
 
-  it('allows like-only execution when can_comment is false', () => {
-    const issue = getReturnVisitTaskExecutionIssue({
-      status: 'pending_execute',
-      generatedComment: '',
-      targetWork: {
-        workUrl: 'https://www.douyin.com/video/1',
-        canComment: false,
-      },
-      commentStatus: 'pending',
-    });
 
-    expect(issue).toBeNull();
-  });
 });

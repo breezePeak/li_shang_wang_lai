@@ -408,7 +408,7 @@ export async function extractWorkModalContext(page) {
 
 export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay = false } = {}) {
   try {
-    const removed = await detectVideoRemoved(page);
+    const removed = await detectVideoRemoved(page).catch(() => null);
     if (removed) {
       return blocking(RESULT_CODES.BLOCKED, `作品已删除/不可见: ${removed}`, { recoverable: true, videoRemoved: true });
     }
@@ -418,13 +418,13 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
     while (Date.now() - startedAt < timeoutMs) {
       modalVisible = await isWorkModalVisible(page).catch(() => false);
       if (modalVisible) break;
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(300).catch(() => {});
     }
     if (!modalVisible) {
-      await page.waitForSelector('[data-e2e="modal-video-container"], .modal-video-container', { state: 'visible', timeout: 1000 });
+      await page.waitForSelector('[data-e2e="modal-video-container"], .modal-video-container', { state: 'visible', timeout: 1000 }).catch(() => {});
     }
 
-    const removedAfter = await detectVideoRemoved(page);
+    const removedAfter = await detectVideoRemoved(page).catch(() => null);
     if (removedAfter) {
       return blocking(RESULT_CODES.BLOCKED, `作品已删除/不可见: ${removedAfter}`, { recoverable: true, videoRemoved: true });
     }
@@ -438,7 +438,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
         if (text.includes('加载失败') || text.includes('网络') || text.includes('稍后重试')) return text.slice(0, 80);
       }
       return null;
-    });
+    }).catch(() => null);
     if (loadFailed) {
       return blocking(RESULT_CODES.BLOCKED, `作品加载失败: ${loadFailed}`, { recoverable: true });
     }
@@ -456,7 +456,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           if (switchBtn) { switchBtn.click(); return { found: true, alreadyOff: false, method: 'switch' }; }
           autoPlayEl.click();
           return { found: true, alreadyOff: false, method: 'parent' };
-        });
+        }).catch(() => ({ found: false }));
         if (!autoPlayResult.found) break;
         if (autoPlayResult.alreadyOff) {
           console.error('[work-modal] 连播已关闭');
@@ -467,7 +467,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
         const verifyOff = await page.evaluate(() => {
           const el = document.querySelector('.xgplayer-autoplay-setting [data-e2e-state]');
           return el ? el.getAttribute('data-e2e-state') : '';
-        });
+        }).catch(() => '');
         if (verifyOff.includes('no-auto-play')) {
           console.error('[work-modal] 连播已关闭');
           break;
@@ -482,7 +482,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
         if (rect.width > 50 && rect.height > 50) return true;
       }
       return false;
-    });
+    }).catch(() => false);
 
     async function clickCommentOpenControl() {
       return await page.evaluate(() => {
@@ -505,7 +505,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           }
         }
         return { clicked: false };
-      });
+      }).catch(() => ({ clicked: false }));
     }
 
     if (!(await isCommentAreaVisible())) {
@@ -532,7 +532,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
       }
     }
 
-    await page.waitForSelector('.comment-mainContent', { state: 'visible', timeout: 10000 });
+    await page.waitForSelector('.comment-mainContent', { state: 'visible', timeout: 10000 }).catch(() => {});
     return success({ modalVisible: true });
   } catch (err) {
     const removed = await detectVideoRemoved(page).catch(() => '');
@@ -1243,7 +1243,7 @@ export async function verifyReplyInWorkModal(page, item, replyText, { timeoutMs 
       if (replyPrefix.length >= 5 && text.includes(replyPrefix)) return { verified: true, method: 'prefix' };
 
       return { verified: false };
-    }, { commentText, replyNeedle, replyPrefix });
+    }, { commentText, replyNeedle, replyPrefix }).catch(() => ({ verified: false }));
 
     if (found.verified) {
       console.error(`[work-modal] 验证成功 method=${found.method}`);

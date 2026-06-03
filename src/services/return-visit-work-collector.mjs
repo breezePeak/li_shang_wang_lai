@@ -98,7 +98,6 @@ function normalizeAwemeForVisit(aweme = {}) {
     createTime: aweme?.create_time || null,
     isTop: Number(aweme?.is_top || 0),
     userDigged: Number(aweme?.user_digged || 0),
-    canComment: Boolean(aweme?.can_comment),
     diggCount: Number(aweme?.statistics?.digg_count ?? aweme?.digg_count ?? 0),
     commentCount: Number(aweme?.statistics?.comment_count ?? aweme?.comment_count ?? 0),
     awemeType: aweme?.aweme_type ?? null,

@@ -78,7 +78,6 @@ function randomInRange(min, max) {
 export function getReturnVisitTaskExecutionIssue(task) {
   const hasComment = task?.generatedComment && String(task.generatedComment).trim();
   const hasWorkUrl = task?.targetWork?.workUrl && String(task.targetWork.workUrl).trim();
-  const commentRequired = task?.targetWork?.canComment !== false;
 
   const isTargetStatus = [
     RETURN_VISIT_STATUS.PENDING_EXECUTE,
@@ -90,7 +89,7 @@ export function getReturnVisitTaskExecutionIssue(task) {
   if (!isTargetStatus) {
     return 'non_executable_status';
   }
-  if (commentRequired && !hasComment) {
+  if (!hasComment) {
     return 'no_generated_comment';
   }
   if (!hasWorkUrl) {
@@ -157,9 +156,8 @@ async function main() {
         continue;
       }
 
-      const canComment = Boolean(item.can_comment);
       const generatedComment = String(item.comment || '').trim();
-      const nextStatus = (!canComment || generatedComment)
+      const nextStatus = generatedComment
         ? RETURN_VISIT_STATUS.PENDING_EXECUTE
         : RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT;
 
@@ -178,7 +176,6 @@ async function main() {
           awemeType: item.aweme_type ?? task.targetWork?.awemeType ?? null,
           mediaType: item.media_type ?? task.targetWork?.mediaType ?? null,
           isMultiContent: item.is_multi_content ?? task.targetWork?.isMultiContent ?? null,
-          canComment,
           userDigged: Number(item.user_digged ?? task.targetWork?.userDigged ?? 0),
         },
         lastError: nextStatus === RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT ? 'no_generated_comment' : null,

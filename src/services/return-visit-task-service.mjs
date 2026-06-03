@@ -99,7 +99,6 @@ function buildTargetWorkSummaryValue(targetWork = {}) {
     createTime: targetWork.createTime || null,
     isTop: targetWork.isTop ?? null,
     userDigged: targetWork.userDigged ?? null,
-    canComment: targetWork.canComment ?? null,
     diggCount: targetWork.diggCount ?? null,
     commentCount: targetWork.commentCount ?? null,
     awemeType: targetWork.awemeType ?? null,
@@ -193,7 +192,7 @@ function mapRowToTask(row) {
       createTime: targetSummary.meta.createTime || null,
       isTop: targetSummary.meta.isTop ?? null,
       userDigged: targetSummary.meta.userDigged ?? null,
-      canComment: targetSummary.meta.canComment ?? null,
+
       diggCount: targetSummary.meta.diggCount ?? null,
       commentCount: targetSummary.meta.commentCount ?? null,
       awemeType: targetSummary.meta.awemeType ?? null,
@@ -528,7 +527,7 @@ export function updateReturnVisitTask(taskId, patch = {}) {
     if (Object.prototype.hasOwnProperty.call(targetWork, 'workText')) setCol('target_work_text', targetWork.workText || null);
     const needsMetaSummary = [
       'contentSummary', 'shareUrl', 'desc', 'itemTitle', 'createTime', 'isTop',
-      'userDigged', 'canComment', 'diggCount', 'commentCount', 'awemeType',
+      'userDigged', 'diggCount', 'commentCount', 'awemeType',
       'mediaType', 'isMultiContent',
     ].some(key => Object.prototype.hasOwnProperty.call(targetWork, key));
     if (needsMetaSummary) setCol('target_work_summary', buildTargetWorkSummaryValue(targetWork));

@@ -268,8 +268,45 @@ async function executeWorkCommentItems(items, args) {
   });
 
   let browser = null;
+  let ctx = null;
   let page = null;
   const results = [];
+
+  function isFatalPageError(err) {
+    const msg = (err.message || '').toLowerCase();
+    return msg.includes('target page, context or browser has been closed')
+        || msg.includes('execution context was destroyed');
+  }
+
+  async function recreatePage() {
+    if (page && !page.isClosed()) {
+      try { await page.close().catch(() => {}); } catch {}
+    }
+    if (ctx && ctx.context) {
+      try {
+        page = await ctx.context.newPage();
+        console.error('[comments:execute] 已重建页面');
+        return true;
+      } catch {
+        console.error('[comments:execute] 重建页面失败');
+      }
+    }
+    return false;
+  }
+
+  async function captureGroupEvidence(err, currentWork) {
+    if (!page || page.isClosed()) return;
+    try {
+      const { evidenceDir } = await captureEvidence(page, {
+        outputDir: run.outputDir,
+        step: `work-comment-group-${currentWork.commentId || 'unknown'}`,
+        code: RESULT_CODES.UNKNOWN_ERROR,
+        message: err.message,
+        recoverable: true,
+      });
+      run.evidenceDirectories.push(evidenceDir);
+    } catch {}
+  }
 
   try {
     const prepared = items.map(validateWorkCommentItem);
@@ -281,7 +318,7 @@ async function executeWorkCommentItems(items, args) {
       return results;
     }
 
-    const ctx = await createBrowserContext({ headless: false, enableReuse: false });
+    ctx = await createBrowserContext({ headless: false, enableReuse: false });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
@@ -290,6 +327,10 @@ async function executeWorkCommentItems(items, args) {
     for (const group of workGroups) {
       const currentWork = group[0];
       try {
+        if (page.isClosed()) {
+          throw new Error('Target page, context or browser has been closed');
+        }
+
         console.log(`[comments:execute] 打开作品 work="${currentWork.workId || currentWork.modalId || currentWork.workUrl}" comments=${group.length}`);
         await page.goto(currentWork.workUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await page.waitForTimeout(1500);
@@ -370,17 +411,15 @@ async function executeWorkCommentItems(items, args) {
           markCommentBlocked(validated.commentId, err.message);
           results.push({ ...validated, ok: false, status: 'blocked', error: err.message });
         }
-        if (page) {
-          try {
-            const { evidenceDir } = await captureEvidence(page, {
-              outputDir: run.outputDir,
-              step: `work-comment-group-${currentWork.commentId || 'unknown'}`,
-              code: RESULT_CODES.UNKNOWN_ERROR,
-              message: err.message,
-              recoverable: true,
-            });
-            run.evidenceDirectories.push(evidenceDir);
-          } catch {}
+        await captureGroupEvidence(err, currentWork);
+
+        if (isFatalPageError(err)) {
+          console.error(`[comments:execute] 检测到页面致命错误，重建页面: ${err.message}`);
+          const recreated = await recreatePage();
+          if (!recreated) {
+            console.error('[comments:execute] 页面重建失败，停止执行');
+            break;
+          }
         }
       }
     }
