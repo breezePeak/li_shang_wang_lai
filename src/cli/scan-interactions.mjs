@@ -354,7 +354,7 @@ async function restoreNotificationPanel(page, panelTools, panelBox) {
   }
 }
 
-async function collectCommentsFromNotificationWork(page, n, { sourceEventId, notificationDays, dedupeContext }) {
+async function collectCommentsFromNotificationWork(page, n, { sourceEventId, notificationDays, dedupeContext, runtimeCollectedWorkKeys }) {
   const {
     waitForWorkModal,
     extractWorkModalContext,
@@ -372,6 +372,14 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
   console.error(`[scan] 作品内容: ${context.workText || '(无内容)'}`);
   const identity = getWorkIdentity(n, context);
   if (!identity.workId && identity.modalId) identity.workId = identity.modalId;
+
+  if (runtimeCollectedWorkKeys) {
+    const hit = getRuntimeWorkSeenKeys(identity).find(key => runtimeCollectedWorkKeys.has(key));
+    if (hit) {
+      console.error(`[scan]   作品 ${identity.workId || identity.modalId} 已在本轮采集过评论，跳过重复采集 (${hit})`);
+      return { ok: true, skipped: true, workId: identity.workId, modalId: identity.modalId, total: 0, inWindow: 0, pending: 0, inserted: 0, enriched: 0, duplicate: 0 };
+    }
+  }
 
   const workResult = upsertWorkContext({
     workId: identity.workId,
@@ -970,6 +978,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
             sourceEventId: result.eventId || null,
             notificationDays,
             dedupeContext,
+            runtimeCollectedWorkKeys,
           });
           if (!collectResult.ok) {
             logNotificationSkip(notificationIndex, n, `作品评论采集失败: ${collectResult.reason}`, notificationDedupeKey);
@@ -980,11 +989,15 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
             totalWorkCommentInserted += collectResult.inserted;
             totalWorkCommentDuplicate += collectResult.duplicate;
             totalWorkCommentEnriched += collectResult.enriched;
-            console.error(
-              `[scan]   评论采集 workId=${collectResult.workId || ''} modalId=${collectResult.modalId || ''}: ` +
-              `${collectResult.inserted} 新增, ${collectResult.enriched} 补全, ${collectResult.duplicate} 重复, ` +
-              `pending=${collectResult.pending}, total=${collectResult.total}`
-            );
+            if (collectResult.skipped) {
+              console.error(`[scan]   作品评论已采集，跳过 workId=${collectResult.workId || ''} modalId=${collectResult.modalId || ''}`);
+            } else {
+              console.error(
+                `[scan]   评论采集 workId=${collectResult.workId || ''} modalId=${collectResult.modalId || ''}: ` +
+                `${collectResult.inserted} 新增, ${collectResult.enriched} 补全, ${collectResult.duplicate} 重复, ` +
+                `pending=${collectResult.pending}, total=${collectResult.total}`
+              );
+            }
           }
 
           const restoredPanelBox = await restoreNotificationPanel(page, panelTools, panelBox);

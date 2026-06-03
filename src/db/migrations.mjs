@@ -294,7 +294,93 @@ export function runMigrations(dbPath = DB_PATH) {
     console.error('[db:init] published_at 列已添加');
   }
 
-  // Migrate: add target_work_id, target_work_url, dedup_confidence, profile_resolution_status
+  // Migrate: rebuild interaction_events to add reply/follow to event_type CHECK constraint
+  const checkEventsConstraint = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='interaction_events'"
+  ).get();
+  const eventsConstraintSql = checkEventsConstraint ? (checkEventsConstraint.sql || '') : '';
+  const needsEventsConstraintMigration =
+    eventsConstraintSql &&
+    eventsConstraintSql.includes("event_type") &&
+    !eventsConstraintSql.includes("'reply'");
+
+  if (needsEventsConstraintMigration) {
+    console.error('[db:init] 检测到旧版 interaction_events event_type 约束（缺少 reply/follow），重建中...');
+
+    const oldCols = db.prepare("PRAGMA table_info(interaction_events)").all();
+    const hasScannedAt = oldCols.some(c => c.name === 'scanned_at');
+
+    let newTableDef = `
+      CREATE TABLE IF NOT EXISTS interaction_events_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platform TEXT NOT NULL DEFAULT 'douyin',
+        event_type TEXT NOT NULL CHECK (event_type IN ('comment', 'like', 'reply', 'follow')),
+        actor_name TEXT NOT NULL,
+        actor_profile_key TEXT,
+        actor_profile_url TEXT,
+        relation TEXT NOT NULL DEFAULT 'unknown',
+        my_work_title TEXT,
+        comment_text TEXT,
+        event_time_text TEXT,
+        platform_event_id TEXT,
+        notification_item_key TEXT,
+        fingerprint TEXT NOT NULL UNIQUE,
+        raw_payload_json TEXT,
+        target_work_id TEXT,
+        target_work_url TEXT,
+        dedup_confidence TEXT,
+        profile_resolution_status TEXT,
+        status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','replied','succeeded','blocked','planned')),
+        scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`;
+    db.exec(newTableDef);
+
+    let insertSql;
+    if (hasScannedAt) {
+      insertSql = `
+        INSERT INTO interaction_events_new
+          (id, platform, event_type, actor_name, actor_profile_key, actor_profile_url,
+            relation, my_work_title, comment_text, event_time_text, platform_event_id,
+            notification_item_key, fingerprint, raw_payload_json, target_work_id,
+            target_work_url, dedup_confidence, profile_resolution_status, status,
+            scanned_at, created_at, updated_at)
+          SELECT id, platform, event_type, actor_name, actor_profile_key, actor_profile_url,
+            relation, my_work_title, comment_text, event_time_text, platform_event_id,
+            notification_item_key, fingerprint, raw_payload_json, target_work_id,
+            target_work_url, dedup_confidence, profile_resolution_status, status,
+            scanned_at, created_at, updated_at
+          FROM interaction_events ORDER BY id`;
+    } else {
+      insertSql = `
+        INSERT INTO interaction_events_new
+          (id, platform, event_type, actor_name, actor_profile_key, actor_profile_url,
+            relation, my_work_title, comment_text, event_time_text, platform_event_id,
+            notification_item_key, fingerprint, raw_payload_json, target_work_id,
+            target_work_url, dedup_confidence, profile_resolution_status, status,
+            created_at, updated_at)
+          SELECT id, platform, event_type, actor_name, actor_profile_key, actor_profile_url,
+            relation, my_work_title, comment_text, event_time_text, platform_event_id,
+            notification_item_key, fingerprint, raw_payload_json, target_work_id,
+            target_work_url, dedup_confidence, profile_resolution_status, status,
+            created_at, updated_at
+          FROM interaction_events ORDER BY id`;
+    }
+    db.exec(insertSql);
+
+    db.exec(`DROP TABLE interaction_events`);
+    db.exec(`ALTER TABLE interaction_events_new RENAME TO interaction_events`);
+
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_event_fingerprint ON interaction_events(fingerprint)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_event_type_status ON interaction_events(event_type, status)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_event_actor ON interaction_events(actor_profile_key)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_event_time ON interaction_events(event_time_text)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_event_platform_event_id ON interaction_events(platform_event_id) WHERE platform_event_id IS NOT NULL`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_event_notification_item_key ON interaction_events(notification_item_key) WHERE notification_item_key IS NOT NULL`);
+
+    console.error('[db:init] interaction_events 表已重建（event_type 约束已更新）');
+  }
   const newColumns = [
     { col: 'target_work_id', check: 'target_work_id' },
     { col: 'target_work_url', check: 'target_work_url' },
