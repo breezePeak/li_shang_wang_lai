@@ -83,7 +83,11 @@ async function typeIntoReplyDraftEditor(page, replyText) {
   const editor = page.locator('.comment-input-container [contenteditable="true"]').last();
   await editor.waitFor({ state: 'visible', timeout: 3000 });
   await editor.click({ timeout: 3000 });
-  await page.keyboard.insertText(replyText);
+
+  // 逐字输入模拟真人打字效果
+  for (const char of replyText) {
+    await page.keyboard.type(char, { delay: 40 + Math.floor(Math.random() * 80) });
+  }
 
   const typed = await page.evaluate((text) => {
     const container = document.querySelector('.comment-input-container');
