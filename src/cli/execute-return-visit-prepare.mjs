@@ -6,15 +6,15 @@ import { RESULT_CODES } from '../domain/result-codes.mjs';
 import {
   RETURN_VISIT_STATUS,
   createOrUpdateReturnVisitTasksFromEvents,
-  createOrUpdateReturnVisitTasksFromItems,
   listReturnVisitPrepareTasks,
+  listReturnVisitTasksByIds,
   updateReturnVisitTask,
   markReturnVisitFailure,
 } from '../services/return-visit-task-service.mjs';
-import { collectCandidateWorkFromProfile } from '../services/return-visit-work-collector.mjs';
-import { analyzeReturnVisitContext } from '../services/return-visit-comment-generator.mjs';
+import { collectFirstNonTopAwemeFromProfile } from '../services/return-visit-work-collector.mjs';
 import { readFileSync, unlinkSync, existsSync } from 'fs';
 import { resolve } from 'path';
+import { writeJSON } from '../utils/filesystem.mjs';
 
 function parseArgs(argv) {
   const args = {
@@ -39,15 +39,22 @@ function parseArgs(argv) {
 
 function loadVisitItems(itemsFile) {
   const parsed = JSON.parse(readFileSync(resolve(itemsFile), 'utf8'));
+  if (Array.isArray(parsed)) return parsed;
   if (Array.isArray(parsed?.users)) return parsed.users;
   if (Array.isArray(parsed?.items)) return parsed.items;
-  if (Array.isArray(parsed)) return parsed;
-  throw new Error('--items-file 必须是 interactions:scan 生成的 users 数组、items 数组或用户数组');
+  throw new Error('--items-file 必须是 interactions:scan 生成的最小待回访数组');
 }
 
 function log(useJson, ...args) {
   if (useJson) console.error(...args);
   else console.log(...args);
+}
+
+function writePendingVisitCommentJson(items) {
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const filePath = resolve('data', 'pending-visits', `pending-visit-comments-${ts}.json`);
+  writeJSON(filePath, items);
+  return { filePath, totalItems: items.length };
 }
 
 async function main() {
@@ -64,13 +71,24 @@ async function main() {
   const maxConsecutiveFailures = Number(returnVisitConfig.maxConsecutiveFailures ?? 3);
 
   let sourceSummary;
+  let tasks;
   try {
     if (args.itemsFile) {
       const items = loadVisitItems(args.itemsFile);
-      sourceSummary = createOrUpdateReturnVisitTasksFromItems(items);
+      const ids = items.map(item => item.id || item.task_id || '').filter(Boolean);
+      tasks = listReturnVisitTasksByIds(ids);
+      sourceSummary = {
+        totalItems: items.length,
+        inserted: 0,
+        enriched: tasks.length,
+        skipped: Math.max(0, items.length - tasks.length),
+      };
     } else {
       sourceSummary = createOrUpdateReturnVisitTasksFromEvents({
         status: eventStatus,
+      });
+      tasks = listReturnVisitPrepareTasks({
+        maxRetryCount,
       });
     }
   } catch (err) {
@@ -80,10 +98,6 @@ async function main() {
     }
     throw err;
   }
-
-  const tasks = listReturnVisitPrepareTasks({
-    maxRetryCount,
-  });
 
   log(args.json, `[return-visit:prepare] sourced ${args.itemsFile ? 'json users' : 'events'}: ${sourceSummary.totalEvents ?? sourceSummary.totalItems}, inserted=${sourceSummary.inserted}, enriched=${sourceSummary.enriched}, skipped=${sourceSummary.skipped}`);
   log(args.json, `[return-visit:prepare] loaded pending tasks: ${tasks.length}`);
@@ -124,6 +138,7 @@ async function main() {
   let failed = 0;
   let consecutiveFailures = 0;
   const taskResults = [];
+  const preparedItems = [];
 
   for (const task of tasks) {
     if (consecutiveFailures >= maxConsecutiveFailures) {
@@ -136,13 +151,13 @@ async function main() {
     log(args.json, `[return-visit:prepare] opening profile: ${actorName}`);
 
     if (!profileUrl) {
-      markReturnVisitFailure(task, {
-        status: RETURN_VISIT_STATUS.FAILED_COLLECT,
-        error: 'no_profile_url',
+      updateReturnVisitTask(task.taskId, {
+        status: RETURN_VISIT_STATUS.SKIPPED_NO_WORK,
+        lastError: 'skip_no_homepage_url',
       });
-      taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.FAILED_COLLECT, reason: 'no_profile_url' });
-      failed++;
-      consecutiveFailures++;
+      taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.SKIPPED_NO_WORK, reason: 'skip_no_homepage_url' });
+      skipped++;
+      consecutiveFailures = 0;
       continue;
     }
 
@@ -152,37 +167,17 @@ async function main() {
       userProfileUrl: profileUrl,
     });
 
-    const collected = await collectCandidateWorkFromProfile(page, profileUrl, {
-      maxWorksToCheck,
+    const collected = await collectFirstNonTopAwemeFromProfile(page, profileUrl, {
       pageLoadRetryCount,
-      maxReferenceComments: 5,
-      validateWork: (work) => {
-        if (work.likeState === 'already_liked') {
-          return { ok: false, reason: 'revisit_work_already_liked' };
-        }
-        const analysis = analyzeReturnVisitContext({
-          workTitle: work.workTitle,
-          workText: work.workText,
-          contentSummary: work.contentSummary,
-          referenceComments: work.referenceComments || [],
-        });
-        if (!analysis.workTitle && analysis.referenceComments.length === 0) {
-          return { ok: false, reason: 'revisit_context_missing_work_and_comments' };
-        }
-        if (analysis.sceneSignals.length === 0) {
-          return { ok: false, reason: 'revisit_context_no_scene_signal' };
-        }
-        return { ok: true };
-      },
     });
 
     if (!collected.ok) {
-      if (collected.status && collected.status.startsWith('skipped_')) {
+      if (collected.status === 'skipped') {
         updateReturnVisitTask(task.taskId, {
-          status: collected.status,
-          lastError: collected.reason || collected.status,
+          status: RETURN_VISIT_STATUS.SKIPPED_NO_WORK,
+          lastError: collected.reason || 'skip_post_api_empty',
         });
-        taskResults.push({ taskId: task.taskId, status: collected.status, reason: collected.reason || collected.status });
+        taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.SKIPPED_NO_WORK, reason: collected.reason || 'skip_post_api_empty' });
         skipped++;
         consecutiveFailures = 0;
       } else {
@@ -197,29 +192,58 @@ async function main() {
       continue;
     }
 
-    const selectedWork = collected.selectedWork;
+    const selectedWork = collected.aweme;
     updateReturnVisitTask(task.taskId, {
       status: RETURN_VISIT_STATUS.CONTENT_COLLECTED,
       targetWork: {
-        workId: selectedWork.workId,
+        workId: selectedWork.awemeId,
         workUrl: selectedWork.workUrl,
-        workTitle: selectedWork.workTitle,
-        workText: selectedWork.workText,
+        workTitle: selectedWork.itemTitle || selectedWork.desc || null,
+        workText: selectedWork.desc || null,
         contentSummary: selectedWork.contentSummary,
         publishTime: selectedWork.publishTime,
+        shareUrl: selectedWork.shareUrl,
+        desc: selectedWork.desc,
+        itemTitle: selectedWork.itemTitle,
+        createTime: selectedWork.createTime,
+        isTop: selectedWork.isTop,
+        userDigged: selectedWork.userDigged,
+        canComment: selectedWork.canComment,
+        diggCount: selectedWork.diggCount,
+        commentCount: selectedWork.commentCount,
+        awemeType: selectedWork.awemeType,
+        mediaType: selectedWork.mediaType,
+        isMultiContent: selectedWork.isMultiContent,
       },
-      referenceComments: selectedWork.referenceComments || [],
-      likeStatus: selectedWork.likeState === 'already_liked' ? 'already_liked' : 'pending',
+      referenceComments: [],
+      likeStatus: Number(selectedWork.userDigged) === 1 ? 'already_liked' : 'pending',
       commentStatus: 'pending',
       collectedAt: new Date().toISOString(),
       lastError: null,
     });
 
-    log(args.json, `[return-visit:prepare] collected work: ${selectedWork.workUrl}, status=content_collected, waiting for agent comment`);
-    taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.CONTENT_COLLECTED, workUrl: selectedWork.workUrl });
+    preparedItems.push({
+      id: task.taskId,
+      homepage_url: profileUrl,
+      aweme_id: selectedWork.awemeId,
+      aweme_url: selectedWork.workUrl,
+      desc: selectedWork.desc || '',
+      item_title: selectedWork.itemTitle || '',
+      aweme_type: selectedWork.awemeType,
+      media_type: selectedWork.mediaType,
+      is_multi_content: selectedWork.isMultiContent,
+      can_comment: Boolean(selectedWork.canComment),
+      user_digged: Number(selectedWork.userDigged || 0),
+      comment: '',
+    });
+
+    log(args.json, `[return-visit:prepare] collected work: ${selectedWork.workUrl}, status=content_collected`);
+    taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.CONTENT_COLLECTED, workUrl: selectedWork.workUrl, awemeId: selectedWork.awemeId });
     prepared++;
     consecutiveFailures = 0;
   }
+
+  const pendingCommentFile = writePendingVisitCommentJson(preparedItems);
 
   const summary = {
     loaded: tasks.length,
@@ -229,11 +253,13 @@ async function main() {
     inserted: sourceSummary.inserted,
     enriched: sourceSummary.enriched,
     sourceSkipped: sourceSummary.skipped,
+    pendingCommentFile: pendingCommentFile.filePath,
   };
 
   log(args.json, `[return-visit:prepare] summary prepared=${prepared} skipped=${skipped} failed=${failed}`);
+  log(args.json, `[return-visit:prepare] 待填写评论 JSON: ${pendingCommentFile.filePath} (${pendingCommentFile.totalItems} 条)`);
   if (args.json) {
-    printJsonResult('return-visit:prepare', { tasks: taskResults }, summary);
+    printJsonResult('return-visit:prepare', { tasks: taskResults, pendingCommentFile }, summary);
   }
 
   if (browser && !args.keepOpen) {

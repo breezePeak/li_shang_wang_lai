@@ -6,6 +6,105 @@ import {
   extractVideoCommentContext,
 } from '../adapters/video-page.mjs';
 
+function buildAwemeVideoUrl(awemeId) {
+  return awemeId ? `https://www.douyin.com/video/${awemeId}` : '';
+}
+
+function createProfilePostApiCollector(page) {
+  const awemes = [];
+  const seenAwemeIds = new Set();
+  const seenResponseUrls = new Set();
+  const meta = {
+    responseCount: 0,
+    parseFailed: 0,
+    lastResponseAt: 0,
+  };
+
+  async function onResponse(response) {
+    const url = typeof response.url === 'function' ? response.url() : '';
+    if (!url.includes('/aweme/v1/web/aweme/post/')) return;
+    if (typeof response.status === 'function' && response.status() !== 200) return;
+    if (seenResponseUrls.has(url)) return;
+    seenResponseUrls.add(url);
+
+    let json;
+    try {
+      json = await response.json();
+    } catch (err) {
+      meta.parseFailed++;
+      console.error(`[return-visit:prepare] 解析作品接口失败: ${err.message}`);
+      return;
+    }
+
+    const list = Array.isArray(json?.aweme_list) ? json.aweme_list : [];
+    let added = 0;
+    for (const aweme of list) {
+      const awemeId = String(aweme?.aweme_id || '');
+      if (!awemeId || seenAwemeIds.has(awemeId)) continue;
+      seenAwemeIds.add(awemeId);
+      awemes.push(aweme);
+      added++;
+    }
+    meta.responseCount++;
+    meta.lastResponseAt = Date.now();
+    console.error(`[return-visit:prepare] 捕获作品接口: response=${meta.responseCount}, added=${added}, total=${awemes.length}`);
+  }
+
+  page.on('response', onResponse);
+
+  return {
+    getAwemes() {
+      return awemes.slice();
+    },
+    getStats() {
+      return { ...meta, awemeCount: awemes.length };
+    },
+    async waitForAwemes({ beforeCount = 0, timeoutMs = 3000 } = {}) {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (awemes.length > beforeCount) return true;
+        await page.waitForTimeout(200);
+      }
+      return awemes.length > beforeCount;
+    },
+    stop() {
+      page.off('response', onResponse);
+    },
+  };
+}
+
+function normalizeAwemeForVisit(aweme = {}) {
+  const awemeId = String(aweme?.aweme_id || '').trim();
+  const desc = String(aweme?.desc || '').trim();
+  const itemTitle = String(aweme?.item_title || '').trim();
+  const shareUrl = normalizeDouyinUrl(aweme?.share_url || aweme?.share_info?.share_url || '') || '';
+  const isMultiContent = aweme?.is_multi_content != null
+    ? Number(aweme.is_multi_content)
+    : ((Array.isArray(aweme?.images) && aweme.images.length > 1) ? 1 : 0);
+
+  return {
+    awemeId,
+    workId: awemeId,
+    workUrl: buildAwemeVideoUrl(awemeId),
+    shareUrl,
+    desc,
+    itemTitle,
+    workTitle: itemTitle || desc || null,
+    workText: desc || null,
+    contentSummary: [itemTitle, desc].filter(Boolean).join(' ').slice(0, 120) || null,
+    publishTime: aweme?.create_time ? String(aweme.create_time) : null,
+    createTime: aweme?.create_time || null,
+    isTop: Number(aweme?.is_top || 0),
+    userDigged: Number(aweme?.user_digged || 0),
+    canComment: Boolean(aweme?.can_comment),
+    diggCount: Number(aweme?.statistics?.digg_count ?? aweme?.digg_count ?? 0),
+    commentCount: Number(aweme?.statistics?.comment_count ?? aweme?.comment_count ?? 0),
+    awemeType: aweme?.aweme_type ?? null,
+    mediaType: aweme?.media_type ?? null,
+    isMultiContent,
+  };
+}
+
 function extractWorkIdFromUrl(workUrl) {
   const url = String(workUrl || '');
   let m = url.match(/\/video\/(\d+)/);
@@ -273,4 +372,70 @@ export async function collectCandidateWorkFromProfile(page, profileUrl, options 
     reason: `no_suitable_work_in_first_${maxWorksToCheck}`,
     checkedWorks,
   };
+}
+
+export async function collectFirstNonTopAwemeFromProfile(page, profileUrl, options = {}) {
+  const {
+    pageLoadRetryCount = 1,
+    waitTimeoutMs = 3000,
+  } = options;
+
+  const profile = normalizeDouyinUrl(profileUrl || '') || profileUrl;
+  if (!profile) {
+    return { ok: false, status: 'skipped', reason: 'skip_no_homepage_url' };
+  }
+
+  const collector = createProfilePostApiCollector(page);
+  try {
+    const open = await gotoWithRetry(page, profile, { pageLoadRetryCount });
+    if (!open.ok) {
+      return { ok: false, status: 'skipped', reason: 'skip_homepage_load_failed' };
+    }
+
+    const isPrivate = await detectPrivateProfile(page);
+    if (isPrivate) {
+      return { ok: false, status: 'skipped', reason: 'skip_homepage_load_failed' };
+    }
+
+    const beforeCount = collector.getAwemes().length;
+    await page.waitForTimeout(1200);
+    await collector.waitForAwemes({ beforeCount, timeoutMs: waitTimeoutMs });
+
+    if (collector.getAwemes().length === 0) {
+      await page.mouse.wheel(0, 900).catch(() => {});
+      await page.waitForTimeout(1000);
+      await collector.waitForAwemes({ beforeCount, timeoutMs: waitTimeoutMs });
+    }
+
+    const awemeList = collector.getAwemes();
+    const stats = collector.getStats();
+    if (stats.responseCount === 0 || awemeList.length === 0) {
+      return { ok: false, status: 'skipped', reason: 'skip_post_api_empty', stats };
+    }
+
+    const nonTop = awemeList.filter(aweme => Number(aweme?.is_top) !== 1);
+    if (nonTop.length === 0) {
+      const hadAnyAweme = awemeList.some(aweme => String(aweme?.aweme_id || '').trim());
+      return {
+        ok: false,
+        status: 'skipped',
+        reason: hadAnyAweme ? 'skip_only_top_aweme' : 'skip_no_aweme',
+        stats,
+      };
+    }
+
+    const selected = normalizeAwemeForVisit(nonTop[0]);
+    if (!selected.awemeId) {
+      return { ok: false, status: 'skipped', reason: 'skip_aweme_id_missing', stats };
+    }
+
+    return {
+      ok: true,
+      status: 'ready',
+      stats,
+      aweme: selected,
+    };
+  } finally {
+    collector.stop();
+  }
 }

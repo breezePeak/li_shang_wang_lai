@@ -4,6 +4,7 @@ import {
   buildTaskId,
   canMarkDone,
 } from '../../src/services/return-visit-task-service.mjs';
+import { getReturnVisitTaskExecutionIssue } from '../../src/cli/execute-return-visit.mjs';
 
 describe('return-visit task identity', () => {
   it('prefers userId over url and name', () => {
@@ -116,5 +117,18 @@ describe('return-visit execute filtering & state flow logic', () => {
     expect(updated.commentStatus).toBe('failed');
     expect(updated.status).toBe('failed_comment');
   });
-});
 
+  it('allows like-only execution when can_comment is false', () => {
+    const issue = getReturnVisitTaskExecutionIssue({
+      status: 'pending_execute',
+      generatedComment: '',
+      targetWork: {
+        workUrl: 'https://www.douyin.com/video/1',
+        canComment: false,
+      },
+      commentStatus: 'pending',
+    });
+
+    expect(issue).toBeNull();
+  });
+});

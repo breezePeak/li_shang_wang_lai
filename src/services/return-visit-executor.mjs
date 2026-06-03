@@ -170,7 +170,8 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     watchSeconds = [5, 8],
   } = options;
 
-  if (!task?.generatedComment || !String(task.generatedComment).trim()) {
+  const canComment = task?.targetWork?.canComment !== false;
+  if (canComment && (!task?.generatedComment || !String(task.generatedComment).trim())) {
     return {
       ok: false,
       status: 'failed_generate_comment',
@@ -253,6 +254,8 @@ export async function executeReturnVisitTask(page, task, options = {}) {
 
   if (likeState.data.alreadyLiked) {
     nextLikeStatus.value = 'already_liked';
+  } else if (Number(task?.targetWork?.userDigged || 0) === 1) {
+    nextLikeStatus.value = 'already_liked';
   } else if (!execute) {
     nextLikeStatus.value = 'pending';
   } else {
@@ -300,6 +303,17 @@ export async function executeReturnVisitTask(page, task, options = {}) {
       commentStatus: nextCommentStatus.value,
       resolvedWork,
       dryRun: true,
+    };
+  }
+
+  if (!canComment) {
+    return {
+      ok: false,
+      status: 'failed_comment',
+      error: 'skip_comment_disabled',
+      likeStatus: nextLikeStatus.value,
+      commentStatus: nextCommentStatus.value,
+      resolvedWork,
     };
   }
 

@@ -3,9 +3,12 @@ import { createBrowserContext } from '../browser/browser-context.mjs';
 import { loadConfig } from '../config/user-config.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import {
   RETURN_VISIT_STATUS,
   listReturnVisitExecuteTasks,
+  listReturnVisitTasksByIds,
   updateReturnVisitTask,
   markReturnVisitFailure,
   markReturnVisitDone,
@@ -24,6 +27,7 @@ function parseArgs(argv) {
     execute: false,
     watchPolicy: null,
     watchSeconds: null,
+    itemsFile: '',
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -35,6 +39,7 @@ function parseArgs(argv) {
     else if (arg === '--execute') { args.execute = true; args.dryRun = false; }
     else if (arg === '--watch-policy' && i + 1 < argv.length) args.watchPolicy = argv[++i];
     else if (arg === '--watch-seconds' && i + 1 < argv.length) args.watchSeconds = argv[++i];
+    else if (arg === '--items-file' && i + 1 < argv.length) args.itemsFile = String(argv[++i] || '').trim();
   }
 
   return args;
@@ -56,6 +61,15 @@ function getRange(range, fallbackMin, fallbackMax) {
   return [fallbackMin, fallbackMax];
 }
 
+function loadVisitExecutionItems(itemsFile) {
+  const raw = readFileSync(resolve(itemsFile), 'utf8');
+  const parsed = JSON.parse(raw);
+  if (!Array.isArray(parsed)) {
+    throw new Error('--items-file 必须是回访准备阶段生成并由 agent 填写 comment 的数组 JSON');
+  }
+  return parsed;
+}
+
 function randomInRange(min, max) {
   if (max <= min) return min;
   return Math.floor(min + Math.random() * (max - min + 1));
@@ -64,6 +78,7 @@ function randomInRange(min, max) {
 export function getReturnVisitTaskExecutionIssue(task) {
   const hasComment = task?.generatedComment && String(task.generatedComment).trim();
   const hasWorkUrl = task?.targetWork?.workUrl && String(task.targetWork.workUrl).trim();
+  const commentRequired = task?.targetWork?.canComment !== false;
 
   const isTargetStatus = [
     RETURN_VISIT_STATUS.PENDING_EXECUTE,
@@ -75,7 +90,7 @@ export function getReturnVisitTaskExecutionIssue(task) {
   if (!isTargetStatus) {
     return 'non_executable_status';
   }
-  if (!hasComment) {
+  if (commentRequired && !hasComment) {
     return 'no_generated_comment';
   }
   if (!hasWorkUrl) {
@@ -107,6 +122,10 @@ async function main() {
   // 映射视频观看策略与秒数默认值
   const watchPolicy = args.watchPolicy || returnVisitConfig.watchPolicy || 'seconds';
   const watchSecondsRaw = args.watchSeconds || returnVisitConfig.watchSeconds || '5-8';
+  const taskResults = [];
+  let done = 0;
+  let skipped = 0;
+  let failed = 0;
 
   let watchSeconds = [5, 8];
   if (typeof watchSecondsRaw === 'string') {
@@ -123,15 +142,57 @@ async function main() {
     watchSeconds = [watchSecondsRaw, watchSecondsRaw];
   }
 
-  const allTasks = listReturnVisitExecuteTasks({
-    maxRetryCount,
-  });
+  let allTasks;
+  if (args.itemsFile) {
+    const items = loadVisitExecutionItems(args.itemsFile);
+    const tasksById = listReturnVisitTasksByIds(items.map(item => item.id || item.task_id || ''));
+    const taskMap = new Map(tasksById.map(task => [task.taskId, task]));
+    allTasks = [];
+    for (const item of items) {
+      const taskId = String(item.id || item.task_id || '').trim();
+      const task = taskMap.get(taskId);
+      if (!task) {
+        taskResults.push({ taskId, status: RETURN_VISIT_STATUS.FAILED_COLLECT, reason: 'task_not_found' });
+        failed++;
+        continue;
+      }
+
+      const canComment = Boolean(item.can_comment);
+      const generatedComment = String(item.comment || '').trim();
+      const nextStatus = (!canComment || generatedComment)
+        ? RETURN_VISIT_STATUS.PENDING_EXECUTE
+        : RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT;
+
+      const updated = updateReturnVisitTask(task.taskId, {
+        status: nextStatus,
+        generatedComment: generatedComment || null,
+        commentStatus: generatedComment ? 'generated' : 'pending',
+        generatedAt: generatedComment ? new Date().toISOString() : task.generatedAt,
+        targetWork: {
+          workId: String(item.aweme_id || task.targetWork?.workId || '').trim() || null,
+          workUrl: String(item.aweme_url || task.targetWork?.workUrl || '').trim() || null,
+          workTitle: String(item.item_title || task.targetWork?.workTitle || '').trim() || null,
+          workText: String(item.desc || task.targetWork?.workText || '').trim() || null,
+          desc: String(item.desc || task.targetWork?.desc || '').trim() || null,
+          itemTitle: String(item.item_title || task.targetWork?.itemTitle || '').trim() || null,
+          awemeType: item.aweme_type ?? task.targetWork?.awemeType ?? null,
+          mediaType: item.media_type ?? task.targetWork?.mediaType ?? null,
+          isMultiContent: item.is_multi_content ?? task.targetWork?.isMultiContent ?? null,
+          canComment,
+          userDigged: Number(item.user_digged ?? task.targetWork?.userDigged ?? 0),
+        },
+        lastError: nextStatus === RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT ? 'no_generated_comment' : null,
+      });
+
+      allTasks.push(updated);
+    }
+  } else {
+    allTasks = listReturnVisitExecuteTasks({
+      maxRetryCount,
+    });
+  }
 
   const tasks = [];
-  const taskResults = [];
-  let done = 0;
-  let skipped = 0;
-  let failed = 0;
 
   for (const task of allTasks) {
     const issue = getReturnVisitTaskExecutionIssue(task);

@@ -65,6 +65,50 @@ function parseJsonArray(raw) {
   }
 }
 
+function parseJsonObject(raw) {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseTargetWorkSummary(raw) {
+  const meta = parseJsonObject(raw);
+  if (!meta || meta.metaVersion !== 1) {
+    return {
+      contentSummary: raw || null,
+      meta: {},
+    };
+  }
+  return {
+    contentSummary: meta.contentSummary || null,
+    meta,
+  };
+}
+
+function buildTargetWorkSummaryValue(targetWork = {}) {
+  const metadata = {
+    metaVersion: 1,
+    contentSummary: targetWork.contentSummary || null,
+    shareUrl: targetWork.shareUrl || null,
+    desc: targetWork.desc || null,
+    itemTitle: targetWork.itemTitle || null,
+    createTime: targetWork.createTime || null,
+    isTop: targetWork.isTop ?? null,
+    userDigged: targetWork.userDigged ?? null,
+    canComment: targetWork.canComment ?? null,
+    diggCount: targetWork.diggCount ?? null,
+    commentCount: targetWork.commentCount ?? null,
+    awemeType: targetWork.awemeType ?? null,
+    mediaType: targetWork.mediaType ?? null,
+    isMultiContent: targetWork.isMultiContent ?? null,
+  };
+  return JSON.stringify(metadata);
+}
+
 function toUniqueArray(values) {
   const unique = [];
   const seen = new Set();
@@ -123,6 +167,7 @@ export function canMarkDone({ likeStatus, commentStatus }) {
 
 function mapRowToTask(row) {
   if (!row) return null;
+  const targetSummary = parseTargetWorkSummary(row.target_work_summary);
   return {
     id: row.id,
     taskId: row.task_id,
@@ -140,8 +185,20 @@ function mapRowToTask(row) {
       workUrl: row.target_work_url,
       workTitle: row.target_work_title,
       workText: row.target_work_text,
-      contentSummary: row.target_work_summary,
+      contentSummary: targetSummary.contentSummary,
       publishTime: row.target_work_publish_time,
+      shareUrl: targetSummary.meta.shareUrl || null,
+      desc: targetSummary.meta.desc || row.target_work_text || null,
+      itemTitle: targetSummary.meta.itemTitle || row.target_work_title || null,
+      createTime: targetSummary.meta.createTime || null,
+      isTop: targetSummary.meta.isTop ?? null,
+      userDigged: targetSummary.meta.userDigged ?? null,
+      canComment: targetSummary.meta.canComment ?? null,
+      diggCount: targetSummary.meta.diggCount ?? null,
+      commentCount: targetSummary.meta.commentCount ?? null,
+      awemeType: targetSummary.meta.awemeType ?? null,
+      mediaType: targetSummary.meta.mediaType ?? null,
+      isMultiContent: targetSummary.meta.isMultiContent ?? null,
     },
     referenceComments: parseJsonArray(row.reference_comments_json),
     generatedComment: row.generated_comment,
@@ -422,6 +479,18 @@ export function getReturnVisitTask(taskId) {
   return mapRowToTask(getTaskRowByTaskId(taskId));
 }
 
+export function listReturnVisitTasksByIds(taskIds = []) {
+  const ids = Array.from(new Set((taskIds || []).map(id => String(id || '').trim()).filter(Boolean)));
+  if (ids.length === 0) return [];
+  const db = getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db.prepare(`SELECT * FROM return_visit_tasks WHERE task_id IN (${placeholders})`).all(...ids);
+  const order = new Map(ids.map((id, index) => [id, index]));
+  return rows
+    .map(mapRowToTask)
+    .sort((a, b) => (order.get(a.taskId) ?? 0) - (order.get(b.taskId) ?? 0));
+}
+
 export function updateReturnVisitTask(taskId, patch = {}) {
   const db = getDb();
   const updates = [];
@@ -457,7 +526,12 @@ export function updateReturnVisitTask(taskId, patch = {}) {
     if (Object.prototype.hasOwnProperty.call(targetWork, 'workUrl')) setCol('target_work_url', targetWork.workUrl || null);
     if (Object.prototype.hasOwnProperty.call(targetWork, 'workTitle')) setCol('target_work_title', targetWork.workTitle || null);
     if (Object.prototype.hasOwnProperty.call(targetWork, 'workText')) setCol('target_work_text', targetWork.workText || null);
-    if (Object.prototype.hasOwnProperty.call(targetWork, 'contentSummary')) setCol('target_work_summary', targetWork.contentSummary || null);
+    const needsMetaSummary = [
+      'contentSummary', 'shareUrl', 'desc', 'itemTitle', 'createTime', 'isTop',
+      'userDigged', 'canComment', 'diggCount', 'commentCount', 'awemeType',
+      'mediaType', 'isMultiContent',
+    ].some(key => Object.prototype.hasOwnProperty.call(targetWork, key));
+    if (needsMetaSummary) setCol('target_work_summary', buildTargetWorkSummaryValue(targetWork));
     if (Object.prototype.hasOwnProperty.call(targetWork, 'publishTime')) setCol('target_work_publish_time', targetWork.publishTime || null);
   }
 

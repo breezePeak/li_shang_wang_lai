@@ -22,6 +22,11 @@ import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { writeJSON } from '../utils/filesystem.mjs';
 import { createHash } from 'crypto';
 import { resolve } from 'path';
+import {
+  createOrUpdateReturnVisitTasksFromItems,
+  buildIdentityKey,
+  buildTaskId,
+} from '../services/return-visit-task-service.mjs';
 
 async function runCommentScan(page, run) {
   console.error('[scan] === 评论扫描 ===');
@@ -543,46 +548,46 @@ function writePendingVisitJson(events, { days = null, maxCount = 100, collectTyp
   const users = [];
   const seen = new Set();
 
+  const sourceItems = [];
+
   for (const event of events || []) {
     const sourceType = getVisitSourceType(event);
     if (allowed.size > 0 && !allowed.has(sourceType)) continue;
+    if (!event.actorProfileUrl) continue;
+    const relation = String(event.relation || '').trim().toLowerCase();
+    if (relation !== 'friend' && relation !== 'mutual') continue;
     const identityKey = event.actorProfileKey || event.actorProfileUrl || event.actorName || '';
     if (!identityKey || seen.has(identityKey)) continue;
     seen.add(identityKey);
-    users.push({
+    sourceItems.push({
       source_type: sourceType,
       source_event_id: event.eventId || null,
       actor_name: event.actorName || '',
       actor_profile_key: event.actorProfileKey || null,
       actor_profile_url: event.actorProfileUrl || null,
       relation: event.relation || 'unknown',
-      target_work_id: event.targetWorkId || null,
-      target_work_url: event.targetWorkUrl || null,
-      event_time_text: event.eventTimeText || null,
-      visit_status: 'pending',
-      collect_status_code: 'COLLECT_PENDING_VISIT',
     });
-    if (users.length >= maxCount) break;
+    if (sourceItems.length >= maxCount) break;
+  }
+
+  createOrUpdateReturnVisitTasksFromItems(sourceItems);
+
+  for (const item of sourceItems) {
+    const identityKey = buildIdentityKey({
+      userId: item.actor_profile_key || '',
+      userProfileUrl: item.actor_profile_url || '',
+      userName: item.actor_name || '',
+    });
+    const taskId = buildTaskId(identityKey);
+    users.push({
+      id: taskId,
+      homepage_url: item.actor_profile_url || '',
+    });
   }
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const filePath = resolve('data', 'pending-visits', `pending-visits-${ts}.json`);
-  writeJSON(filePath, {
-    generatedAt: new Date().toISOString(),
-    source: 'interactions:scan',
-    task_type: 'return_visit',
-    workflow_status_code: 'SCAN_VISIT_JSON_READY',
-    status_codes: {
-      scan: 'SCAN_VISIT_JSON_READY',
-      prepare: 'VISIT_PREPARE_WAIT',
-      execute: 'VISIT_EXECUTE_WAIT',
-    },
-    days,
-    maxCount,
-    collectTypes,
-    totalUsers: users.length,
-    users,
-  });
+  writeJSON(filePath, users);
   return { filePath, totalUsers: users.length };
 }
 
