@@ -6,8 +6,10 @@ import {
   extractVideoCommentContext,
 } from '../adapters/video-page.mjs';
 
-function buildAwemeVideoUrl(awemeId) {
-  return awemeId ? `https://www.douyin.com/video/${awemeId}` : '';
+function buildAwemeUrl(awemeId, awemeType) {
+  if (!awemeId) return '';
+  if (Number(awemeType) === 68) return `https://www.douyin.com/note/${awemeId}`;
+  return `https://www.douyin.com/video/${awemeId}`;
 }
 
 function createProfilePostApiCollector(page) {
@@ -85,7 +87,7 @@ function normalizeAwemeForVisit(aweme = {}) {
   return {
     awemeId,
     workId: awemeId,
-    workUrl: buildAwemeVideoUrl(awemeId),
+    workUrl: buildAwemeUrl(awemeId, aweme?.aweme_type),
     shareUrl,
     desc,
     itemTitle,
