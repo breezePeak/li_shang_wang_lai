@@ -151,6 +151,7 @@ async function main() {
     log(args.json, `[return-visit:prepare] opening profile: ${actorName}`);
 
     if (!profileUrl) {
+      log(args.json, `[return-visit:prepare] 跳过 ${actorName}: 缺少主页 URL`);
       updateReturnVisitTask(task.taskId, {
         status: RETURN_VISIT_STATUS.SKIPPED_NO_WORK,
         lastError: 'skip_no_homepage_url',
@@ -173,6 +174,7 @@ async function main() {
 
     if (!collected.ok) {
       if (collected.status === 'skipped') {
+        log(args.json, `[return-visit:prepare] 跳过 ${actorName}: ${collected.reason || '无法采集作品'}`);
         updateReturnVisitTask(task.taskId, {
           status: RETURN_VISIT_STATUS.SKIPPED_NO_WORK,
           lastError: collected.reason || 'skip_post_api_empty',
@@ -181,6 +183,7 @@ async function main() {
         skipped++;
         consecutiveFailures = 0;
       } else {
+        log(args.json, `[return-visit:prepare] 采集失败 ${actorName}: ${collected.reason || 'collect_failed'}`);
         markReturnVisitFailure(task, {
           status: RETURN_VISIT_STATUS.FAILED_COLLECT,
           error: collected.reason || 'collect_failed',
