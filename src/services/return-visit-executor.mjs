@@ -211,13 +211,26 @@ export async function executeReturnVisitTask(page, task, options = {}) {
 
   const resolvedWork = resolved.work;
 
+  // 检测是否是图文/note 页面（非视频），跳过视频专属操作
+  const currentUrl = page.url();
+  const isNotePage = currentUrl.includes('/note/') || String(resolvedWork?.awemeType || '') === '68';
+
   // 频率与时长调控防线: 点赞评论动作下发前强行进行观看拦截
-  await handleVideoWatch(page, watchPolicy, watchSeconds);
+  if (!isNotePage) {
+    await handleVideoWatch(page, watchPolicy, watchSeconds);
+  } else {
+    console.error(`[return-visit:execute] 图文/note 页面，跳过视频监控 taskId=${task.taskId} url=${currentUrl}`);
+  }
 
   const nextLikeStatus = { value: task.likeStatus || 'pending' };
   const nextCommentStatus = { value: task.commentStatus || 'pending' };
 
-  const likeState = await checkLikeState(page);
+  let likeState;
+  if (isNotePage) {
+    likeState = { ok: true, data: { alreadyLiked: false, confidence: 'confirmed' } };
+  } else {
+    likeState = await checkLikeState(page);
+  }
   if (!likeState.ok || likeState.data?.confidence !== 'confirmed') {
     let debugCandidates = [];
     try {
@@ -309,9 +322,10 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   }
 
   if (!canComment) {
+    console.error(`[return-visit:execute] 跳过评论 taskId=${task.taskId}: can_comment=false（作品不允许评论）`);
     return {
       ok: false,
-      status: 'skipped_comment_disabled',
+      status: 'skipped_no_suitable_work',
       error: 'skip_comment_disabled',
       likeStatus: nextLikeStatus.value,
       commentStatus: nextCommentStatus.value,
