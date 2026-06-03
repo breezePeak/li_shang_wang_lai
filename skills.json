@@ -1,64 +1,21 @@
 {
   "name": "li-shang-wang-lai-skills",
   "version": "0.1.0",
-  "description": "A GitHub-cloneable skill pack for creator interaction workflows. The root skill routes installation, auth, command lookup, interaction collection, comment reply, return visit, and comment suggestion requests to the correct document or sub-skill.",
+  "description": "礼尚往来抖音创作者互动助手 Skill。",
   "skills": [
     {
       "name": "li-shang-wang-lai",
       "path": ".",
       "entry": "SKILL.md",
-      "description": "Main Hermes / OpenClaw routing entry for the 礼尚往来 creator interaction assistant. It identifies user intent and routes to README.md, docs/COMMANDS.md, or the specialized skills without duplicating their full instructions.",
+      "description": "执行互动采集、评论回复、回访准备、回访评论生成与回访执行流程。",
       "outputs": [
-        "routing decision",
-        "next action",
-        "diagnostic result"
-      ],
-      "doesNotDo": [
-        "duplicate full installation docs",
-        "duplicate complete interaction workflows",
-        "duplicate complete return-visit workflows",
-        "answer installation status from memory"
-      ]
-    },
-    {
-      "name": "creator-comment-suggestion",
-      "path": "skills/creator-comment-suggestion",
-      "entry": "skills/creator-comment-suggestion/SKILL.md",
-      "description": "Generate exactly one safe, natural Chinese comment suggestion based only on provided work context.",
-      "outputs": [
-        "one Chinese comment text"
-      ],
-      "doesNotDo": [
-        "open pages",
-        "click like",
-        "post comments",
-        "execute platform actions"
-      ]
-    },
-    {
-      "name": "creator-interaction-executor",
-      "path": "skills/creator-interaction-executor",
-      "entry": "skills/creator-interaction-executor/SKILL.md",
-      "description": "Execute creator interaction workflows, including interaction collection, comment reply preparation and execution, return-visit preparation, liking, posting prepared comments, and recording results.",
-      "dependsOn": [
-        {
-          "name": "creator-comment-suggestion",
-          "entry": "skills/creator-comment-suggestion/SKILL.md",
-          "usage": "Required whenever a comment draft is needed."
-        }
-      ],
-      "outputs": [
-        "prepared task",
+        "interaction scan result",
+        "reply json",
+        "visit json",
         "execution result",
-        "blocked result",
-        "unsupported result"
+        "blocked result"
       ]
     }
-  ],
-  "recommendedLoadOrder": [
-    "li-shang-wang-lai",
-    "creator-comment-suggestion",
-    "creator-interaction-executor"
   ],
   "shared": [
     "shared/comment-safety-rules.md"

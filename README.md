@@ -7,10 +7,9 @@
 ## 文档边界
 
 - `README.md`：项目介绍、安装方式、环境要求、首次初始化、常用入口命令。
-- `SKILL.md`：Hermes / OpenClaw 主入口调度，不写完整流程细节。
+- `SKILL.md`：Hermes / OpenClaw 唯一主 Skill，直接描述完整互动主流程。
 - `docs/COMMANDS.md`：命令参考手册，和 `package.json` scripts、实际 CLI 参数保持一致。
-- `skills/creator-interaction-executor/SKILL.md`：互动执行流程。
-- `skills/creator-comment-suggestion/SKILL.md`：只生成一条评论回复建议，不执行命令。
+- `shared/comment-safety-rules.md`：评论回复与回访评论共用的生成规则和安全边界。
 
 根目录只保留 `SKILL.md`。不要同时创建 `skill.md` 和 `SKILL.md`，macOS 默认 APFS 大小写不敏感，两个文件名容易互相覆盖。
 
@@ -26,13 +25,12 @@
 
 ## Skill 入口
 
-Hermes / OpenClaw 安装后应能识别三个 Skill：
+Hermes / OpenClaw 安装后识别根目录 `SKILL.md` 作为唯一主 Skill。
 
-- `li-shang-wang-lai`：根入口，负责路由。
-- `creator-interaction-executor`：互动采集、评论回复、回访执行流程。
-- `creator-comment-suggestion`：只生成一条评论回复建议。
+- 主 Skill：`li-shang-wang-lai`
+- 共享规则文件：`shared/comment-safety-rules.md`
 
-主入口不维护完整流程细节。互动执行请看 `skills/creator-interaction-executor/SKILL.md`，评论回复建议请看 `skills/creator-comment-suggestion/SKILL.md`。
+评论生成规则统一放在 `shared/comment-safety-rules.md`。
 
 ## 安装到 Hermes
 
@@ -110,7 +108,7 @@ npm run auth
 | 填写评论回复 | Agent 生成并填写 `data/pending-replies/pending-comments-xxx.json` 的 `reply_text` |
 | 执行评论回复 | `npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json` |
 | 准备回访 | `npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json` |
-| 执行回访 | `npm run return-visit:execute -- --execute` |
+| 执行回访 | `npm run return-visit:execute -- --execute --items-file data/pending-visits/pending-visit-comments-xxx.json` |
 | 运行默认测试 | `npm test` |
 
 完整命令参数见 `docs/COMMANDS.md`。

@@ -1,50 +1,141 @@
 ---
 name: li-shang-wang-lai
-description: 抖音互动采集、回访、回复建议与执行入口 Skill，负责把任务路由到具体子 Skill。
+description: 抖音互动采集、评论回复、回访准备、评论生成与回访执行入口 Skill。
 ---
 
-# 礼尚往来主入口 Skill
+# 礼尚往来主 Skill
 
-这是 `礼尚往来 / li-shang-wang-lai` 的 Hermes / OpenClaw 主入口 Skill。它只负责由 Agent 理解用户意图、核对当前仓库文件，并把任务路由到 README、命令文档或具体子 Skill；项目代码不解析自然语言意图。
+这是 `li_shang_wang_lai` 项目的唯一主 Skill。它直接描述完整互动主流程，不再把执行流程路由到子 Skill。
 
-本文件不放安装流程、不重复完整互动执行流程、不维护评论回复细则。安装和初始化请看 `README.md`；详细互动执行流程请看 `skills/creator-interaction-executor/SKILL.md`；评论回复建议请看 `skills/creator-comment-suggestion/SKILL.md`。
+Agent 生成或填写评论时，必须遵守 [shared/comment-safety-rules.md](D:/my_project/li_shang_wang_lai/shared/comment-safety-rules.md)。
 
-## 适用场景
+## 基本原则
 
-- 安装、初始化、认证、命令查询：读取 `README.md` 和 `docs/COMMANDS.md`。
-- 扫描互动、准备评论回复、执行评论回复、准备回访、执行回访：路由到 `skills/creator-interaction-executor/SKILL.md`。
-- 只生成一条抖音评论回复建议：路由到 `skills/creator-comment-suggestion/SKILL.md`。
-- 检查项目状态或排查命令失败：先读取当前文件和命令输出，再判断下一步。
+- 只调用项目已有 CLI，不直接写 Playwright 脚本。
+- 不直接修改 SQLite。
+- 不绕过登录、验证码、滑块或平台风控。
+- 所有 `npm run` 参数必须放在 `--` 后面。
+- 命令失败后停止后续真实动作，先读取错误并诊断。
+- 评论回复由 `comments:execute` 读取 JSON 执行。
+- 回访必须带 `--execute` 才真实点赞和评论。
+- Agent 只填写 JSON 中的 `reply_text` 或 `comment`，不能改 `id`，不能删条目。
 
-## 路由规则
+## 用户意图映射
 
-- 用户问安装、Hermes、OpenClaw、依赖、首次登录：以 `README.md` 为准。
-- 用户问可用命令、参数、默认值、旧命令是否存在：以 `package.json` scripts 和 `docs/COMMANDS.md` 为准。
-- 用户要执行采集、评论回复或回访：进入 `skills/creator-interaction-executor/SKILL.md`，由 Agent 根据用户意图选择 `interactions:scan` 参数。评论回复默认真实执行；回访仍需 `--execute` 门禁。
-- 用户要回复某条评论但不执行平台动作：进入 `skills/creator-comment-suggestion/SKILL.md`，只输出一条自然回复。
+| 用户意图 | 采集命令 | 后续动作 |
+|---|---|---|
+| 只看互动 | `npm run interactions:scan -- --type all --days N --max-count M --display-only` | 只展示互动数据 |
+| 评论回复 | `npm run interactions:scan -- --type comment --days N --max-count M --generate-reply-json` | Agent 填 `reply_text`，然后 `comments:execute` |
+| 明确回访 | `npm run interactions:scan -- --type all --days N --max-count M --generate-visit-json` | `return-visit:prepare`，然后 Agent 填 `comment`，再 `return-visit:execute --execute` |
+| 评论回复并回访 | `npm run interactions:scan -- --type all --days N --max-count M --generate-reply-json --generate-visit-json` | 先回评，再按用户明确要求回访 |
 
-## 常用命令
+## 评论回复流程
 
-以下命令以 `package.json` scripts 为准：
+先扫描并生成待回评 JSON：
 
 ```bash
-npm run auth
-npm run db:init
-npm run interactions:scan -- --type all --display-only
 npm run interactions:scan -- --type comment --generate-reply-json
-npm run interactions:scan -- --type all --generate-visit-json
-npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
-npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json
-npm run return-visit:execute -- --execute
-npm test
 ```
 
-完整参数和调试入口见 `docs/COMMANDS.md`。
+生成文件：
 
-## 执行原则
+```text
+data/pending-replies/pending-comments-xxx.json
+```
 
-- 不凭记忆回答安装状态、文件名或命令参数。
-- 执行 npm 命令前确认当前在项目根目录。
-- 命令失败后读取真实错误并诊断。
-- 不绕过登录、验证码、滑块或平台风控。
-- 评论回复不再需要 `--execute` 门禁；回访和回赞仍需 `--execute`。
+Agent 读取 JSON，根据评论内容、作品上下文和共享规则填写：
+
+```text
+reply_text
+prepare_status_code: PREPARE_READY
+```
+
+然后执行：
+
+```bash
+npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
+```
+
+## 回访流程
+
+先扫描并生成最小待回访 JSON：
+
+```bash
+npm run interactions:scan -- --generate-visit-json
+```
+
+生成文件：
+
+```text
+data/pending-visits/pending-visits-xxx.json
+```
+
+该 JSON 只包含类似：
+
+```json
+[
+  {
+    "id": "数据库记录ID",
+    "homepage_url": "https://www.douyin.com/user/xxx"
+  }
+]
+```
+
+然后执行回访准备：
+
+```bash
+npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json
+```
+
+该命令负责：
+- 消费待回访 JSON
+- 创建或更新 `return_visit_tasks`
+- 逐个打开用户主页
+- 监听 `/aweme/v1/web/aweme/post/`
+- 过滤置顶作品 `is_top = 1`
+- 选择第一条非置顶作品
+- 记录作品 ID、作品 URL、描述、`can_comment` 等上下文
+- 输出：
+
+```text
+data/pending-visits/pending-visit-comments-xxx.json
+```
+
+Agent 读取该 JSON，根据作品描述和共享规则填写：
+
+```text
+comment
+```
+
+如果：
+
+```text
+can_comment === false
+```
+
+则不要填写评论，保持 `comment` 为空。
+
+最后执行：
+
+```bash
+npm run return-visit:execute -- --execute --items-file data/pending-visits/pending-visit-comments-xxx.json
+```
+
+不带 `--execute` 时只能 dry-run，不得真实点赞或评论。
+
+## ID 规则
+
+- 评论回复使用 `work_comments.id`。
+- 回访执行使用 `return_visit_tasks.taskId`。
+- Agent 不能改 JSON 中的 `id`。
+- Agent 不能删除 JSON 条目。
+- Agent 只填写 `reply_text` 或 `comment` 字段。
+
+## 安全限制
+
+- 不发送空评论。
+- 不发送广告、引流、互关、互赞、骚扰内容。
+- 不在命令失败后继续真实动作。
+- 不跳过 `return-visit:prepare` 直接执行回访。
+- `can_comment=false` 的作品只点赞不评论。
+- 页面未稳定、登录失效、点赞状态未知、重复执行风险或发送结果未确认时必须阻断。
