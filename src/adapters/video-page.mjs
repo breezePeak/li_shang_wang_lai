@@ -7,6 +7,9 @@ export const DOUYIN_PLAYER_ACTION_SELECTORS = Object.freeze({
   share: '[data-e2e="video-player-share"]',
 });
 
+export const DOUYIN_ACTION_BAR_ITEM_SELECTOR = '.t5VMknM2 .MinpposV > .AOWKbsTg';
+export const TEMP_LIKE_BUTTON_SELECTOR = '[data-temp-like-btn="true"]';
+
 export const DOUYIN_PLAYER_ACTION_STATES = Object.freeze({
   liked: 'video-player-is-digged',
   notLiked: 'video-player-no-digged',
@@ -879,14 +882,6 @@ export async function findDouyinActionBarLikeItem(page) {
 
 export async function clickLike(page, { execute = false } = {}) {
   try {
-    if (!execute) {
-      return blocking(
-        RESULT_CODES.ACTION_NOT_READY,
-        '非 execute 模式，拒绝真实点赞操作',
-        { recoverable: false }
-      );
-    }
-
     const likeState = await checkLikeState(page);
     if (!likeState.ok) {
       return blocking(
@@ -904,41 +899,33 @@ export async function clickLike(page, { execute = false } = {}) {
       );
     }
 
-    const targetBtn = page.locator('[data-temp-like-btn="true"]').first();
-    const count = await targetBtn.count();
-    if (count > 0) {
-      try {
-        await targetBtn.click({ timeout: 5000 });
-      } catch {
-        const clicked = await page.evaluate(() => {
-          const marked = document.querySelector('[data-temp-like-btn="true"]');
-          if (!marked) return false;
-          const innerButton = marked.querySelector('button, [role="button"]');
-          (innerButton || marked).click();
-          return true;
-        });
-        if (!clicked) {
-          await targetBtn.click({ force: true, timeout: 5000 });
-        }
-      }
-      console.error(`[video-page] 已点击点赞按钮 (${likeState.data?.signal || 'marked-btn'})`);
-      await page.waitForTimeout(2000);
-      return success({ clicked: true });
-    }
+    const targetBtn = page.locator(TEMP_LIKE_BUTTON_SELECTOR).first();
+    const targetCount = await targetBtn.count();
+    const actionBarLikeBtn = page.locator(DOUYIN_ACTION_BAR_ITEM_SELECTOR).first();
+    const actionBarCount = await actionBarLikeBtn.count();
+    const targetFound = targetCount > 0 || actionBarCount > 0;
 
-    // 备用兜底
-    const fallbackBtn = page.locator('.t5VMknM2 .MinpposV > .AOWKbsTg').first();
-    if (await fallbackBtn.count() > 0) {
-      await fallbackBtn.click();
-      console.error('[video-page] 已点击点赞按钮 (action bar fallback)');
-      await page.waitForTimeout(2000);
-      return success({ clicked: true });
+    if (!targetFound) {
+      return blocking(
+        RESULT_CODES.BLOCKED,
+        '找不到点赞按钮，无法确认可点击目标',
+        { data: {} }
+      );
     }
 
     return blocking(
-      RESULT_CODES.BLOCKED,
-      '找不到点赞按钮，且所有兜底策略失效',
-      { data: {} }
+      RESULT_CODES.ACTION_NOT_READY,
+      execute
+        ? '真实点赞仍禁用：已复用 checkLikeState 完成定位，但暂不执行 clickLike'
+        : '非 execute 模式，且真实点赞仍禁用',
+      {
+        recoverable: false,
+        data: {
+          actionBarFound: actionBarCount > 0,
+          targetFound,
+          signal: likeState.data?.signal || null,
+        }
+      }
     );
   } catch (err) {
     return blocking(
@@ -973,6 +960,7 @@ export async function confirmLikeSucceeded(page) {
 export async function extractVideoCommentContext(page) {
   try {
     const ctx = await page.evaluate(() => {
+      const actionBarItemSelector = '.t5VMknM2 .MinpposV > .AOWKbsTg';
       const titleEl = document.querySelector('title');
       const targetWorkTitle = titleEl ? titleEl.innerText.trim() : '';
 
@@ -1006,7 +994,7 @@ export async function extractVideoCommentContext(page) {
       let commentCount = null;
       let shareCount = null;
 
-      const actionItems = document.querySelectorAll('.t5VMknM2 .MinpposV > .AOWKbsTg');
+      const actionItems = document.querySelectorAll(actionBarItemSelector);
       if (actionItems.length >= 3) {
         const countEls = actionItems[0].querySelectorAll('span');
         for (const sp of countEls) {
@@ -1084,7 +1072,7 @@ async function ensureCommentPanelOpen(page) {
     if (await isOpen()) return true;
 
     const commentBtns = [
-      page.locator('.t5VMknM2 .MinpposV > .AOWKbsTg').nth(1), // action bar 第二个
+      page.locator(DOUYIN_ACTION_BAR_ITEM_SELECTOR).nth(1), // action bar 第二个
       page.locator('[data-e2e="video-comment"]'),
       page.locator('[data-e2e="comment-icon"]'),
       page.locator('[aria-label*="评论"]'),
