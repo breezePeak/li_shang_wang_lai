@@ -96,11 +96,12 @@ export async function navigateToVideo(page, videoUrl, options = {}) {
       const url = window.location.href;
       return {
         isVideoPage: url.includes('/video/'),
+        isNotePage: url.includes('/note/'),
         hasContent: text.length > 100,
       };
     });
 
-    if (!pageState.isVideoPage) {
+    if (!pageState.isVideoPage && !pageState.isNotePage) {
       return blocking(
         RESULT_CODES.BLOCKED,
         '未能导航到视频页面',
@@ -108,7 +109,11 @@ export async function navigateToVideo(page, videoUrl, options = {}) {
       );
     }
 
-    return success({ url: page.url(), isVideoPage: true });
+    if (pageState.isNotePage) {
+      console.error(`[video-page] 页面重定向到 note: ${page.url()}`);
+    }
+
+    return success({ url: page.url(), isVideoPage: pageState.isVideoPage, isNotePage: pageState.isNotePage });
   } catch (err) {
     return blocking(
       RESULT_CODES.BLOCKED,

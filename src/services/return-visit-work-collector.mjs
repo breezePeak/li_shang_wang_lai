@@ -244,12 +244,6 @@ export async function collectWorkFromUrl(page, workUrl, options = {}) {
     navResult = await navigateToVideo(page, workUrl);
     if (navResult.ok) break;
     lastErr = navResult.message || navResult.code || 'video_navigation_failed';
-    // 检测是否永久跳转（如 video→note），不再重试
-    const currentUrl = page.url();
-    if (currentUrl.includes('/note/')) {
-      console.error(`[video-page] 检测到永久跳转到 note 页面，不再重试: ${currentUrl}`);
-      break;
-    }
     if (i < pageLoadRetryCount) {
       await page.waitForTimeout(1500);
     }
