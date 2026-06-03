@@ -419,13 +419,23 @@ export async function collectFirstNonTopAwemeFromProfile(page, profileUrl, optio
       return { ok: false, status: 'skipped', reason: 'skip_post_api_empty', stats };
     }
 
-    const nonTop = awemeList.filter(aweme => Number(aweme?.is_top) !== 1);
+    // 过滤置顶 + 图文/note 类型（aweme_type 68=图文，55=图集，非视频无法互动）
+    const nonTop = awemeList.filter(aweme => {
+      if (Number(aweme?.is_top) === 1) return false;
+      const awemeType = Number(aweme?.aweme_type);
+      if (awemeType === 68 || awemeType === 55) return false;
+      return true;
+    });
     if (nonTop.length === 0) {
       const hadAnyAweme = awemeList.some(aweme => String(aweme?.aweme_id || '').trim());
+      const hadOnlyTopOrNote = awemeList.some(aweme => {
+        const type = Number(aweme?.aweme_type);
+        return Number(aweme?.is_top) !== 1 && type !== 68 && type !== 55;
+      }) === false;
       return {
         ok: false,
         status: 'skipped',
-        reason: hadAnyAweme ? 'skip_only_top_aweme' : 'skip_no_aweme',
+        reason: hadOnlyTopOrNote ? 'skip_only_top_or_note_aweme' : (hadAnyAweme ? 'skip_only_top_aweme' : 'skip_no_aweme'),
         stats,
       };
     }
