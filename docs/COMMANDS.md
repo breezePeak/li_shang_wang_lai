@@ -143,7 +143,7 @@ npm run comments:prepare -- --items-file data/pending-replies/pending-comments-x
 - 批量项可覆盖 `decision`、`riskLevel`、`relevance`、`workContextId`、`commentCategory`、`replyMode` 等字段；未提供时使用 CLI 默认值。
 - 只有 `decision=reply`、`risk-level=low`、`relevance != irrelevant` 可准备回复。
 - `auto_simple` 只用于调用方已经选择模板池文本的场景。
-- `auto_natural` 是主流程默认模式，用于接收符合 `skills/social-media/li-shang-wang-lai/references/comment-safety-rules.md` 的一条自然回复，并做长度和禁用词校验。
+- `auto_natural` 是主流程默认模式，用于接收符合 `references/comment-safety-rules.md` 的一条自然回复，并做长度和禁用词校验。
 - 已回复或已发送未确认的评论会阻断，避免重复准备。
 
 JSON 中评论项示例：

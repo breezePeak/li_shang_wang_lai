@@ -478,11 +478,11 @@ return-visit:prepare 不属于评论回复默认流程。
 主要文档入口：
 
 ```text
-README.md                                                    — 安装、初始化、命令快速参考
-skills/social-media/li-shang-wang-lai/SKILL.md              — Hermes/OpenClaw 主 Skill
-skills/social-media/li-shang-wang-lai/references/comment-safety-rules.md — 评论回复与回访评论共用规则
-docs/COMMANDS.md                                             — 全部命令参数详情
-docs/todo_plan.md（本文件）                                    — 开发文档、流程图、架构约束
+README.md                              — 安装、初始化、命令快速参考
+SKILL.md                               — Hermes/OpenClaw 主 Skill
+references/comment-safety-rules.md     — 评论回复与回访评论共用规则
+docs/COMMANDS.md                       — 全部命令参数详情
+docs/todo_plan.md（本文件）              — 开发文档、流程图、架构约束
 ```
 
 需注意避免的旧说明：采集产物用于回访、默认完整流程必须先 return-visit:prepare。
