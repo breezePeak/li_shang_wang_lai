@@ -605,7 +605,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   const wantLikes = (type === 'all' || type === 'like');
   const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
   const maxCount = Number(scanPlan.maxCount || 0) > 0 ? Number(scanPlan.maxCount) : null;
-  const maxScrollRounds = 100;
+  const maxScrollRounds = Number(scanPlan.maxScrollRounds || 100);
   const dedupeContext = buildDedupeContext(notificationDays);
   const processedNoticeIds = new Set();
   const allEvents = [];
@@ -627,6 +627,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   let consecutiveOldRelevantCount = 0;
 
   const apiCollector = createNoticeApiCollector(page);
+  const getTotalParseFailed = () => parseFailedCount + apiCollector.getStats().parseFailed;
 
   async function processNoticeApiItem(item, notificationIndex) {
     const normalized = normalizeNoticeApiItem(item);
@@ -904,7 +905,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
             ambiguousCount: totalAmbiguousCount,
             profileResolved: totalProfileResolved,
             profileUnresolved: totalProfileUnresolved,
-            parseFailed: parseFailedCount,
+            parseFailed: getTotalParseFailed(),
             scrollRounds,
             workCommentsInserted: totalWorkCommentInserted,
             workCommentsEnriched: totalWorkCommentEnriched,
@@ -933,7 +934,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
             ambiguousCount: totalAmbiguousCount,
             profileResolved: totalProfileResolved,
             profileUnresolved: totalProfileUnresolved,
-            parseFailed: parseFailedCount,
+            parseFailed: getTotalParseFailed(),
             scrollRounds,
             workCommentsInserted: totalWorkCommentInserted,
             workCommentsEnriched: totalWorkCommentEnriched,
@@ -1021,7 +1022,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     console.error(
       `[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalAmbiguousCount} 歧义 | ` +
       `${totalProfileResolved} 主页已解析 | ${totalProfileUnresolved} 主页未解析 | work_comments ${totalWorkCommentInserted} 新增/${totalWorkCommentEnriched} 补全/${totalWorkCommentDuplicate} 重复 | ` +
-      `${parseFailedCount} 条解析失败 | ${scrollRounds} 轮滚动`
+      `${getTotalParseFailed()} 条解析失败 | ${scrollRounds} 轮滚动`
     );
 
     return success({
@@ -1031,7 +1032,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       ambiguousCount: totalAmbiguousCount,
       profileResolved: totalProfileResolved,
       profileUnresolved: totalProfileUnresolved,
-      parseFailed: parseFailedCount,
+      parseFailed: getTotalParseFailed(),
       scrollRounds,
       workCommentsInserted: totalWorkCommentInserted,
       workCommentsEnriched: totalWorkCommentEnriched,
@@ -1058,6 +1059,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
 
 async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 0, debugNotificationDom = false, scanPlan = {}) {
   console.error('[scan] === 通知面板扫描（增量逐批采集） ===');
+  console.error('[scan] DOM 兜底模式将使用旧流程，可能点击作品缩略图采集评论');
 
   const {
     ensureNotificationPageReady, openNotificationPanel, closeNotificationPanel,
