@@ -1198,6 +1198,9 @@ async function activateCommentComposer(page) {
 
     const patterns = ['善语结善缘', '说点什么', '留下评论', '发表评论', '写评论', '评论'];
     const selectors = [
+      '.LpZjb4Yg',
+      '.comment-input-inner-container',
+      '.j_kd_P_l',
       '[class*="comment"]',
       '[id*="comment"]',
       '[data-e2e*="comment"]',
