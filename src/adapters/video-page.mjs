@@ -1196,11 +1196,33 @@ async function activateCommentComposer(page) {
       return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
     }
 
+    function clickFirst(selector) {
+      const el = document.querySelector(selector);
+      if (el && visible(el)) {
+        const rect = el.getBoundingClientRect();
+        if (rect.top < 0 || rect.bottom > window.innerHeight) {
+          el.scrollIntoView({ block: 'center', behavior: 'instant' });
+        }
+        el.click();
+        return { ok: true, text: (el.innerText || el.textContent || '').trim().slice(0, 40) };
+      }
+      return null;
+    }
+
+    // --- Tier 1: 按 HTML 结构直接定位（不依赖文字匹配）---
+    const structuralSelectors = [
+      '.comment-input-inner-container',
+      '.LpZjb4Yg',
+      '.j_kd_P_l',
+    ];
+    for (const sel of structuralSelectors) {
+      const result = clickFirst(sel);
+      if (result) return result;
+    }
+
+    // --- Tier 2: 文字匹配兜底 ---
     const patterns = ['善语结善缘', '说点什么', '留下评论', '发表评论', '写评论', '评论'];
     const selectors = [
-      '.LpZjb4Yg',
-      '.comment-input-inner-container',
-      '.j_kd_P_l',
       '[class*="comment"]',
       '[id*="comment"]',
       '[data-e2e*="comment"]',
@@ -1213,7 +1235,6 @@ async function activateCommentComposer(page) {
       for (const el of document.querySelectorAll(selector)) {
         if (!visible(el)) continue;
         const text = (el.innerText || el.textContent || '').trim();
-        // 排除 "没有更多评论" 这类提示文字
         if (/没有更多|暂无/.test(text)) continue;
         const placeholder = el.getAttribute('placeholder') || el.getAttribute('data-placeholder') || '';
         const combined = `${text} ${placeholder}`.trim();
