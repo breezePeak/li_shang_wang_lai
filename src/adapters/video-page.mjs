@@ -1213,6 +1213,8 @@ async function activateCommentComposer(page) {
       for (const el of document.querySelectorAll(selector)) {
         if (!visible(el)) continue;
         const text = (el.innerText || el.textContent || '').trim();
+        // 排除 "没有更多评论" 这类提示文字
+        if (/没有更多|暂无/.test(text)) continue;
         const placeholder = el.getAttribute('placeholder') || el.getAttribute('data-placeholder') || '';
         const combined = `${text} ${placeholder}`.trim();
         if (!combined || combined.length > 80) continue;
@@ -1270,6 +1272,15 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
         console.error(`[video-page] 已点击评论输入入口 (${activateResult.text || 'placeholder'})`);
         await page.waitForTimeout(1200);
         input = await findCommentInput(page);
+      } else {
+        // 兜底：直接点击评论输入容器
+        const inputContainer = page.locator('.comment-input-inner-container').first();
+        if (await inputContainer.count() > 0 && await inputContainer.isVisible()) {
+          console.error('[video-page] 直接点击评论输入容器激活');
+          await inputContainer.click();
+          await page.waitForTimeout(1500);
+          input = await findCommentInput(page);
+        }
       }
     }
 
