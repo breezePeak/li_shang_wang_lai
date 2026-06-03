@@ -54,27 +54,117 @@ export function getNoticeActorIdentity(item) {
   };
 }
 
+export function getNoticeCommentText(c = {}) {
+  const text = String(c?.text || '').trim();
+  if (text) return text;
+
+  if (c?.sticker) return '[表情]';
+
+  if (Array.isArray(c?.image_list) && c.image_list.length > 0) {
+    return '[图片]';
+  }
+
+  if (Array.isArray(c?.video_list) && c.video_list.length > 0) {
+    return '[视频]';
+  }
+
+  return '';
+}
+
+export function classifyCommentNotice(item = {}) {
+  const block = item?.comment || {};
+  const c = block?.comment || {};
+
+  const bizId = Number(item?.interactive_biz_id || 0);
+  const commentType = Number(block?.comment_type || 0);
+
+  const awemeId = String(
+    item?.aweme_id ||
+    block?.forward_id ||
+    c?.aweme_id ||
+    ''
+  ).trim();
+
+  const parentId = String(block?.parent_id || '').trim();
+  const hasReplyComment = !!block?.reply_comment;
+
+  // 回复了你的评论
+  if (
+    bizId === 1003102 ||
+    commentType === 2 ||
+    (hasReplyComment && parentId && awemeId && parentId !== awemeId)
+  ) {
+    return 'reply_to_my_comment';
+  }
+
+  // 评论了你的作品
+  if (
+    bizId === 1003101 ||
+    commentType === 1 ||
+    !parentId ||
+    (parentId && awemeId && parentId === awemeId)
+  ) {
+    return 'comment_on_my_work';
+  }
+
+  return 'unknown_comment_notice';
+}
+
 export function normalizeCommentNotice(item) {
+  const kind = classifyCommentNotice(item);
   const commentBlock = item?.comment || {};
   const c = commentBlock?.comment || {};
   const work = getNoticeWorkIdentity(item);
   const actor = getNoticeActorIdentity(item);
   const notificationId = item?.nid_str || String(item?.nid || '');
   const commentId = String(c?.cid || '');
+  const commentText = getNoticeCommentText(c);
 
-  return {
-    eventType: 'comment',
-    notificationAction: 'comment_on_my_work',
+  console.error(
+    `[notice-api] classified comment notice` +
+    ` nid=${notificationId}` +
+    ` biz=${item?.interactive_biz_id || '-'}` +
+    ` commentType=${commentBlock?.comment_type || '-'}` +
+    ` parent=${commentBlock?.parent_id || '-'}` +
+    ` aweme=${work.workId}` +
+    ` action=${kind}` +
+    ` reason=${kind}`
+  );
+
+  const base = {
     notificationId,
     platformEventId: commentId || notificationId,
     ...actor,
     relation: normalizeRelation(commentBlock?.label_text || commentBlock?.label_list?.[0]?.text || ''),
-    commentText: c?.text || '',
+    commentText,
     commentId,
     eventTimeText: item?.create_time ? String(item.create_time) : '',
     eventTimestamp: item?.create_time || null,
     ...work,
     rawPayloadJson: buildNoticeRawPayloadJson(item),
+  };
+
+  if (kind === 'reply_to_my_comment') {
+    return {
+      ...base,
+      eventType: 'reply',
+      notificationAction: 'reply_to_my_comment',
+      originalCommentText: String(commentBlock?.reply_comment?.text || ''),
+    };
+  }
+
+  if (kind === 'comment_on_my_work') {
+    return {
+      ...base,
+      eventType: 'comment',
+      notificationAction: 'comment_on_my_work',
+    };
+  }
+
+  return {
+    ...base,
+    eventType: 'unknown',
+    notificationAction: 'unknown_comment_notice',
   };
 }
 

@@ -608,6 +608,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
 
   const wantComments = (type === 'all' || type === 'comment');
   const wantLikes = (type === 'all' || type === 'like');
+  const wantReplies = (type === 'all' || type === 'reply');
   const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
   const maxCount = Number(scanPlan.maxCount || 0) > 0 ? Number(scanPlan.maxCount) : null;
   const maxScrollRounds = Number(scanPlan.maxScrollRounds || 100);
@@ -655,13 +656,17 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       logApiNotificationSkip(notificationIndex, normalized, '--type 过滤点赞通知', notificationId);
       return { counted: false };
     }
+    if (!wantReplies && normalized.eventType === 'reply') {
+      logApiNotificationSkip(notificationIndex, normalized, '--type 过滤回复类通知', notificationId);
+      return { counted: false };
+    }
 
     if (maxCount && totalProcessedCount >= maxCount) {
       logApiNotificationSkip(notificationIndex, normalized, `达到最大采集条数 maxCount=${maxCount}`, notificationId);
       return { counted: false, stop: 'max-count' };
     }
 
-    if (notificationDays && (normalized.eventType === 'comment' || normalized.eventType === 'like')) {
+    if (notificationDays && (normalized.eventType === 'comment' || normalized.eventType === 'like' || normalized.eventType === 'reply')) {
       const eventMs = Number(normalized.eventTimestamp || 0) * 1000;
       if (eventMs > 0 && eventMs < Date.now() - notificationDays * 86400000) {
         consecutiveOldRelevantCount++;
@@ -770,7 +775,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       return { counted: true };
     }
 
-    if (normalized.eventType === 'comment') {
+    if (normalized.eventType === 'comment' && normalized.notificationAction === 'comment_on_my_work') {
       const commentKey = normalized.commentId || stableHash([
         normalized.workId,
         normalized.actorProfileKey,
@@ -800,6 +805,8 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       if (commentResult.action === 'inserted') totalWorkCommentInserted++;
       else if (commentResult.action === 'enriched') totalWorkCommentEnriched++;
       else totalWorkCommentDuplicate++;
+    } else if (normalized.eventType === 'reply') {
+      console.error(`[notice-api] skip work_comments for reply_to_my_comment nid=${normalized.notificationId}`);
     }
 
     allEvents.push({
