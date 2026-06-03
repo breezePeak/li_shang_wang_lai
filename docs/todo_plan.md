@@ -7,26 +7,23 @@
 ```text
 开始
  ↓
-1. interactions:scan（仅通过通知中心扫描）
+1. interactions:scan（仅通过通知中心扫描，主路径使用 notice API）
     状态码: SCAN_JSON_READY
-    打开抖音通知中心 -> 打开通知面板 -> 逐条扫描通知
+    打开抖音通知中心 -> 打开通知面板 -> 启动 notice API 监听 -> 滚动面板
+    ↓
+    拦截 /aweme/v1/web/notice/ API 响应，逐条解码通知
    ├─ 赞我的作品 / 赞我的视频 / 点赞我的作品
    │  ↓
-   │  通知级去重
-   │  ├─ 已存在: SKIP_DUPLICATE_NOTIFICATION
+   │  通知级去重 (platformEventId / fingerprint)
+   │  ├─ 已存在: duplicate
    │  └─ 不存在: LIKE_EVENT_STORED，写入 interaction_events (event_type=like)
    │
    ├─ 评论我的作品 / 评论我的视频
    │  ↓
-   │  提取缩略图作品唯一标识
-   │  ↓
-   │  作品级去重
-   │  ├─ 已采集: SKIP_WORK_COLLECTED
-   │  └─ 未采集:
-   │      WORK_COLLECTING
-   │      点击缩略图进入作品 → 滚动采集评论 → 评论级去重
-   │      连续 3 条过期则停止 → 写入 work_comments → 标记作品已采集
-   │      输出按作品分组 JSON (每条 COLLECT_PENDING_REPLY)
+   │  从 notice API payload 直接提取评论文本、用户、作品信息
+   │  ├─ 通知级去重 → upsert interaction_events (event_type=comment)
+   │  └─ 评论级去重 → upsert work_comments (reply_status=pending, COLLECT_PENDING_REPLY)
+   │     注: 主路径不打开作品弹窗，评论文本来自 API 数据结构
    │
    ├─ 回复我的评论 / 赞我的评论
    │  ↓
@@ -50,10 +47,12 @@
     → 校验并执行回复 → EXECUTE_JSON_DONE / EXECUTE_JSON_PARTIAL
 ```
 
-### 1.2 通知面板滚动采集内部流程
+### 1.2 通知采集内部流程（notice API 主路径 + DOM 降级）
+
+主路径通过拦截 notice API 响应采集数据，仅在 API 无法捕获时降级到 DOM 解析。
 
 ```text
-导航到通知主页
+导航到通知主页 (creator.douyin.com/creator-micro/interactive)
  ↓
 打开通知面板 (铃铛 hover/click)
  ↓
@@ -61,54 +60,42 @@
  ↓
 鼠标移入面板 (保持悬浮态)
  ↓
-┌── 滚动采集循环 (while true) ────────────────────────────────────┐
+启动 notice API 监听器 (createNoticeApiCollector)
+  拦截 /aweme/v1/web/notice/ 响应
+  解码 notice_list_v2，按 nid_str 去重压入 items[]
+ ↓
+┌── 滚动采集循环 (while round < maxScrollRounds) ──────────────────┐
 │                                                                   │
-│  extractVisibleNotifications()                                    │
-│  ├─ 失败（首轮）→ 阻断返回                                        │
-│  └─ 成功 → 获取可见通知列表 + noMoreData 标记                       │
+│  检查 notice API 兜底:                                             │
+│  └─ 2+ 轮后 items 仍为空 && responseCount=0                       │
+│     → 降级到 DOM 解析路径 (runNotificationScanDomFallback)        │
 │                                                                   │
-│  遍历每条通知:                                                     │
-│  ├─ 本次扫描内重复 (seenItemKeys)                 → skip           │
-│  ├─ 数据库已存在 (dedupeContext.notificationKeys) → skip           │
-│  ├─ --type 过滤 (comment/like 不匹配)             → skip           │
-│  ├─ --days N 天数窗口                           → 天数检测          │
-│  │  ├─ 超过 N 天 → 累计连续过期计数                                │
-│  │  │  └─ 连续 ≥ 3 条 → stopDueToOldRelevant → break              │
-│  │  └─ 在窗口内 → 重置连续计数为 0                                  │
-│  ├─ --max-count M 条数限制                      → 条数检测          │
-│  │  └─ seenItemKeys ≥ M → stopDueToOldRelevant → break            │
+│  遍历 apiCollector.getItems() 中的每条通知:                       │
+│  ├─ 本次扫描内重复 (processedNoticeIds)         → skip           │
+│  ├─ --type 过滤 (comment/like 不匹配)           → skip           │
+│  ├─ --max-count M 条数限制                      → return(成功)    │
+│  ├─ --days N 天数窗口 (事件 create_time 比较)                     │
+│  │  ├─ 超过 N 天 → 累计连续过期计数                               │
+│  │  │  └─ 连续 ≥ 3 条 → stop='old-relevant' → break             │
+│  │  └─ 在窗口内 → 重置连续计数为 0                                 │
 │  │                                                                 │
-│  └─ 按通知类型分发:                                                 │
-│     ├─ comment_on_my_work（评论我的作品）                           │
-│     │  ├─ 作品级去重 → 已采集              → skip                  │
-│     │  └─ 未采集:                                                  │
-│     │     点击缩略图 → 等待作品弹窗                                 │
-│     │     └─ collectCommentsFromNotificationWork                   │
-│     │        ├─ extractWorkModalContext → 作品上下文                │
-│     │        ├─ upsert work_contexts                               │
-│     │        ├─ findUnrepliedCommentsInModal (作品内滚动采集)       │
-│     │        │  └─ 连续 3 条过期 → 停止作品内滚动                   │
-│     │        ├─ upsert work_comments (评论级去重)                   │
-│     │        └─ 标记作品已采集                                     │
-│     │     关闭作品弹窗 → 恢复通知面板                               │
-│     │     ├─ 轻量恢复: Escape → waitForNotificationPanelStable      │
-│     │     │  ├─ 面板幸存（原位恢复）→ 继续                          │
-│     │     │  └─ 面板丢失 → 降级 page.goto + 重新打开面板            │
-│     │     └─ 恢复失败 → stopDueToOldRelevant → break               │
-│     │                                                              │
-│     ├─ like（赞我的作品）                                           │
-│     │  └─ 写入 interaction_events                                  │
-│     │                                                              │
-│     ├─ reply_to_my_comment（回复我的评论）→ skip（暂不处理）         │
-│     └─ unknown（其他）                  → skip                     │
+│  └─ 每条通知处理 (processNoticeApiItem):                           │
+│     ├─ normalizeNoticeApiItem → 标准化字段                         │
+│     ├─ upsert work_contexts (作品信息)                             │
+│     ├─ upsertNotificationEvent (interaction_events)                │
+│     │  去重: platformEventId → fingerprint → workId+actor+type    │
+│     │  结果: inserted / enriched / duplicate / ambiguous           │
+│     └─ 对 comment 类型:                                           │
+│        └─ upsertWorkComment (work_comments)                        │
+│           评论文本来自 API payload，不打开作品弹窗                  │
+│           结果: inserted / enriched / duplicate                    │
 │                                                                   │
-│  ── 一批处理完毕 ──                                                │
-│  stopDueToOldRelevant?                          → break            │
-│  noMoreData（面板显示"暂无更多数据"）?            → break            │
-│  连续 2 轮无新通知 (consecutiveEmptyRounds ≥ 2)? → break            │
-│  本轮全部重复 (allDuplicate)?                    → break            │
+│  ── 一轮处理完毕 ──                                               │
+│  apiCollector.getMeta().hasMore === 0?          → break           │
+│  DOM 显示 "暂无更多数据"?                         → break           │
+│  达到最大滚动轮次 maxScrollRounds?               → break           │
 │                                                                   │
-│  scrollPanelDown(600px)  (wheel 滚动)                              │
+│  scrollPanelDown() → apiCollector.waitForNewItems()                │
 │  └─ 滚动失败? → break                                              │
 │                                                                   │
 └───────────────────────────────────────────────────────────────────┘
@@ -116,13 +103,50 @@
 生成待回复评论 JSON / 生成待回访 JSON
 ```
 
+#### DOM 降级路径 (runNotificationScanDomFallback)
+
+当 notice API 无法捕获数据（2+ 轮后 items 为空），降级到 DOM 解析：
+
+```text
+降级触发: 2+ 轮后 apiCollector items=0 && responseCount=0
+ ↓
+关闭通知面板 → 重新导航 → 重新打开面板
+ ↓
+┌── DOM 滚动采集循环 ───────────────────────────────────────────┐
+│  extractVisibleNotifications() (DOM 解析)                     │
+│  遍历每条通知:                                                  │
+│                                                                │
+│  └─ 按通知类型分发:                                              │
+│     ├─ comment_on_my_work（评论我的作品）                       │
+│     │  ├─ 作品级去重 → 已采集              → skip              │
+│     │  └─ 未采集:                                              │
+│     │     点击缩略图 → 等待作品弹窗                              │
+│     │     └─ collectCommentsFromNotificationWork               │
+│     │        ├─ extractWorkModalContext → 作品上下文            │
+│     │        ├─ upsert work_contexts                           │
+│     │        ├─ findUnrepliedCommentsInModal (作品内滚动采集)   │
+│     │        │  └─ 连续 3 条过期 → 停止作品内滚动               │
+│     │        ├─ upsert work_comments (评论级去重)               │
+│     │        └─ 标记作品已采集                                  │
+│     │     关闭作品弹窗 → 恢复通知面板                            │
+│     │     └─ 恢复失败 → break                                  │
+│     │                                                          │
+│     ├─ like（赞我的作品）→ 写入 interaction_events               │
+│     ├─ reply_to_my_comment → skip（暂不处理）                   │
+│     └─ unknown → skip                                          │
+│                                                                │
+│  停止条件: hasMore=0 / noMoreData / 连续空轮 / 全重复           │
+│  scrollPanelDown(600px)                                        │
+└──────────────────────────────────────────────────────────────────┘
+```
+
 ### 1.3 通知识别与分类
 
-通知分类以 `src/domain/notification-action-router.mjs` 为准，只匹配固定短语：
+主路径通过 `normalizeNoticeApiItem()`（`src/domain/notice-api-normalization.mjs`）解码 notice API payload；DOM 降级路径通过 `normalizeCommentEvent()`（`src/domain/notification-action-router.mjs`）匹配固定短语：
 
 | 通知内容 | `notificationAction` | `eventType` | 后续动作 |
 |---|---|---|---|
-| 评论了你的作品 / 视频 | `comment_on_my_work` | `comment` | 点击缩略图采集作品评论 |
+| 评论了你的作品 / 视频 | `comment_on_my_work` | `comment` | API 路径直接 upsert work_comments；DOM 降级路径点击缩略图采集作品评论 |
 | 回复了你的评论 / 赞了你的评论 | `reply_to_my_comment` | `reply` | 归入回复分类，暂不后续处理 |
 | 赞了你的作品 / 视频 / 点赞了你的作品 | `like_received` | `like` | 入库记录，进入待回访 JSON |
 | 关注了你 / 回关了你 | `follow_received` | `follow` | 归入粉丝管理分类，暂不后续处理 |
@@ -137,17 +161,29 @@
 关注了你  回关了你
 ```
 
-类型判断：
-- 包含"回复" 或 "赞了你的评论" → `eventType = 'reply'`
-- 包含"关注" 或 "回关" → `eventType = 'follow'`
-- 包含"赞了" 或 "点赞" → `eventType = 'like'`
-- 其余已匹配评论类短语 → `eventType = 'comment'`
+类型判断（notice API 路径通过 `item.type` 字段区分；DOM 降级通过文本匹配）：
+
+- API 路径：`normalizeNoticeApiItem()` 根据 `notice_list_v2[].type` 字段判断
+- DOM 降级路径：
+  - 包含"回复" 或 "赞了你的评论" → `eventType = 'reply'`
+  - 包含"关注" 或 "回关" → `eventType = 'follow'`
+  - 包含"赞了" 或 "点赞" → `eventType = 'like'`
+  - 其余已匹配评论类短语 → `eventType = 'comment'`
+
+> 注：主路径（notice API）评论通知的 `comment_text` 直接来自 API payload，不再打开作品弹窗滚动采集。DOM 降级路径仍会点击缩略图进入作品弹窗采集评论。
 
 **约束**：`interaction_events.event_type` 允许 `comment` / `like` / `reply` / `follow`。
 
 ### 1.4 去重机制
 
-通知采集有三级去重：
+通知采集有四级去重：
+
+**API 级去重**（主路径，`processedNoticeIds`）：
+- 主路径: `nid_str` 去重，确保每个通知只处理一次
+
+**内存级去重**（DOM 降级路径，`seenItemKeys`）：
+- 使用 `seenItemKeys`，优先 `notificationItemKey`，其次 `platformEventId`，再次组合 key
+- **是本次扫描级别去重，不是每轮去重**
 
 **通知级去重**（来源表 `interaction_events`）：
 - 优先 key: `platform_event_id`
@@ -161,10 +197,6 @@
 - 优先 key: `comment_key`
 - 无稳定 ID 时组合生成: `work_id/modal_id + actor_profile_key + comment_text + event_time_text`
 
-**本次扫描内去重**：
-- 使用 `seenItemKeys`，优先 `notificationItemKey`，其次 `platformEventId`，再次组合 key
-- **`seenItemKeys` 是本次扫描级别去重，不是每轮去重**
-
 **入库去重**（`upsertNotificationEvent`）：
 1. `platformEventId` 精确匹配
 2. `fingerprint` 匹配
@@ -175,16 +207,18 @@
 
 ### 1.5 采集字段
 
-每条通知解析为：
+主路径每条通知从 notice API payload 解码，字段映射由 `notice-api-normalization.mjs` 负责。
 
 ```text
-username  relation  eventType  action  content  timeText  rawText
+username  relation  eventType  action  content  timeText
 actorProfileUrl  actorProfileKey  profileResolveMethod
 workUrl  workId  workTitle  thumbnailSrc  thumbnailAlt  thumbnailKey
 platformEventId  notificationItemKey
 ```
 
-其中 `eventType = comment | like`。
+其中 `eventType = comment | like | reply | follow`。
+
+> 主路径 comment 类型通知的 `comment_text` 来自 notice API 数据结构，不来自作品弹窗 DOM 采集。DOM 降级路径的 comment_text 来自 `collectCommentsFromNotificationWork()` 中的作品弹窗 DOM 提取。
 
 ### 1.6 跳过日志
 
@@ -197,7 +231,7 @@ dedupeKey=work:video-987 reason=该作品评论已采集过 rawText=张三评论
 
 ### 1.7 数据表
 
-采集事件写入 `interaction_events`（事件类型只支持 `comment` / `like`）：
+采集事件写入 `interaction_events`（事件类型支持 `comment` / `like` / `reply` / `follow`）：
 
 ```text
 platform  event_type  actor_name  actor_profile_key  actor_profile_url
@@ -222,7 +256,7 @@ profile_resolution_status  status  scanned_at
 
 | 状态码 | 位置 | 含义 |
 |---|---|---|
-| `SCAN_JSON_READY` | JSON `workflow_status_code` | 采集完成，JSON 可编辑 |
+| `SCAN_JSON_READY` | JSON `workflow_status_code` | 采集完成（主路径 notice API + 降级 DOM），JSON 可编辑 |
 | `COLLECT_PENDING_REPLY` | `works[].comments[].collect_status_code` | 评论已入库，等待填写回复 |
 | `SKIP_DUPLICATE_NOTIFICATION` | 日志 | 通知重复，跳过 |
 | `SKIP_WORK_COLLECTED` | 日志 | 作品评论已采集，跳过 |
@@ -431,7 +465,7 @@ return-visit:prepare 不属于评论回复默认流程。
 ### B. 开发约束
 
 1. 采集类型只有 `all` / `comment` / `like`，暂无 `follow`
-2. 新互动采集入口以通知中心为准
+2. 新互动采集入口以通知中心为准，主路径使用 notice API（拦截 /aweme/v1/web/notice/），DOM 解析为降级路径
 3. 采集业务数据通过 `upsertNotificationEvent()` 写入 `interaction_events`
 4. 评论回复由 `comments:execute` 写入 `reply_text` 到 `work_comments` 并执行
 5. 回访任务由 `return-visit:prepare` 创建或更新
