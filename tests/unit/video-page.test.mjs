@@ -39,7 +39,7 @@ describe('video-page adapters mock testing', () => {
     expect(res.data.signal).toBe('douyin-actionbar-liked');
   });
 
-  it('clickLike with execution only confirms target and refuses real click', async () => {
+  it('clickLike with execution clicks temporary tagged button', async () => {
     const mockPage = {
       evaluate: vi.fn().mockResolvedValue({
         liked: false,
@@ -55,12 +55,9 @@ describe('video-page adapters mock testing', () => {
     };
 
     const res = await clickLike(mockPage, { execute: true });
-    expect(res.ok).toBe(false);
-    expect(res.code).toBe('ACTION_NOT_READY');
-    expect(res.data.targetFound).toBe(true);
-    expect(res.data.actionBarFound).toBe(false);
+    expect(res.ok).toBe(true);
+    expect(res.data.clicked).toBe(true);
     expect(mockPage.locator).toHaveBeenCalledWith('[data-temp-like-btn="true"]');
-    expect(mockPage.locator).toHaveBeenCalledWith('.t5VMknM2 .MinpposV > .AOWKbsTg');
   });
 
   it('postVideoComment auto opens comment panel and types comment', async () => {

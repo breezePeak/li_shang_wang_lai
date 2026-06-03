@@ -172,6 +172,18 @@ function logNotificationSkip(index, n, reason, dedupeKey = '') {
   );
 }
 
+function logApiNotificationSkip(index, normalized, reason, dedupeKey = '') {
+  logNotificationSkip(index, {
+    eventType: normalized?.eventType || 'unknown',
+    actorProfileKey: normalized?.actorProfileKey || '',
+    username: normalized?.actorName || '',
+    workId: normalized?.workId || '',
+    thumbnailKey: normalized?.thumbnailKey || '',
+    timeText: normalized?.eventTimeText || '',
+    rawText: normalized?.rawPayloadJson || '',
+  }, reason, dedupeKey);
+}
+
 function buildCommentKey({ workId, modalId, comment }) {
   if (comment.commentKey) return comment.commentKey;
   const actor = comment.actorProfileKey || comment.actorProfileUrl || comment.actorName || '';
@@ -575,6 +587,476 @@ function writePendingVisitJson(events, { days = null, maxCount = 100, collectTyp
 }
 
 async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNotificationDom = false, scanPlan = {}) {
+  console.error('[scan] === 通知面板扫描（notice api 主流程） ===');
+
+  const {
+    ensureNotificationPageReady,
+    openNotificationPanel,
+    closeNotificationPanel,
+    extractVisibleNotifications,
+    scrollPanelDown,
+    waitForNotificationPanelStable,
+    moveMouseIntoPanel,
+  } = await import('../adapters/notification-page.mjs');
+  const { createNoticeApiCollector } = await import('../adapters/notice-api-listener.mjs');
+  const { normalizeNoticeApiItem } = await import('../domain/notice-api-normalization.mjs');
+
+  const wantComments = (type === 'all' || type === 'comment');
+  const wantLikes = (type === 'all' || type === 'like');
+  const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
+  const maxCount = Number(scanPlan.maxCount || 0) > 0 ? Number(scanPlan.maxCount) : null;
+  const maxScrollRounds = 100;
+  const dedupeContext = buildDedupeContext(notificationDays);
+  const processedNoticeIds = new Set();
+  const allEvents = [];
+  const ambiguousEvents = [];
+  const failedEvents = [];
+
+  let totalInserted = 0;
+  let totalDuplicateCount = 0;
+  let totalAmbiguousCount = 0;
+  let totalEnrichedCount = 0;
+  let totalWorkCommentInserted = 0;
+  let totalWorkCommentDuplicate = 0;
+  let totalWorkCommentEnriched = 0;
+  let totalProfileResolved = 0;
+  let totalProfileUnresolved = 0;
+  let parseFailedCount = 0;
+  let scrollRounds = 0;
+  let totalProcessedCount = 0;
+  let consecutiveOldRelevantCount = 0;
+
+  const apiCollector = createNoticeApiCollector(page);
+
+  async function processNoticeApiItem(item, notificationIndex) {
+    const normalized = normalizeNoticeApiItem(item);
+    if (!normalized) {
+      console.error(`[scan] 未支持 notice 类型，跳过 index=${notificationIndex} type=${item?.type ?? 'unknown'} nid=${item?.nid_str || item?.nid || ''}`);
+      return { counted: false };
+    }
+
+    const notificationId = normalized.notificationId || '';
+    if (!notificationId || processedNoticeIds.has(notificationId)) {
+      return { counted: false };
+    }
+    processedNoticeIds.add(notificationId);
+
+    if (!wantComments && normalized.eventType === 'comment') {
+      logApiNotificationSkip(notificationIndex, normalized, '--type 过滤评论通知', notificationId);
+      return { counted: false };
+    }
+    if (!wantLikes && normalized.eventType === 'like') {
+      logApiNotificationSkip(notificationIndex, normalized, '--type 过滤点赞通知', notificationId);
+      return { counted: false };
+    }
+
+    if (maxCount && totalProcessedCount >= maxCount) {
+      logApiNotificationSkip(notificationIndex, normalized, `达到最大采集条数 maxCount=${maxCount}`, notificationId);
+      return { counted: false, stop: 'max-count' };
+    }
+
+    if (notificationDays && (normalized.eventType === 'comment' || normalized.eventType === 'like')) {
+      const eventMs = Number(normalized.eventTimestamp || 0) * 1000;
+      if (eventMs > 0 && eventMs < Date.now() - notificationDays * 86400000) {
+        consecutiveOldRelevantCount++;
+        logApiNotificationSkip(
+          notificationIndex,
+          normalized,
+          `超过 ${notificationDays} 天时间窗口 create_time=${normalized.eventTimestamp}`,
+          notificationId
+        );
+        if (consecutiveOldRelevantCount >= 3) {
+          console.error(`[scan] 连续 3 条评论/点赞通知超过 ${notificationDays} 天，停止继续滚动`);
+          return { counted: false, stop: 'old-relevant' };
+        }
+        return { counted: false };
+      }
+      consecutiveOldRelevantCount = 0;
+    }
+
+    totalProcessedCount++;
+
+    const profileResolutionStatus = normalized.actorProfileUrl ? 'api_resolved' : 'unresolved';
+    if (normalized.actorProfileUrl) totalProfileResolved++;
+    else totalProfileUnresolved++;
+
+    const actionText = normalized.eventType === 'comment' ? '评论了你的作品' : '赞了你的作品';
+    const content = normalized.eventType === 'comment' ? normalized.commentText : null;
+    const { fp, confidence } = notificationFingerprint({
+      eventType: normalized.eventType,
+      username: normalized.actorName,
+      actorProfileKey: normalized.actorProfileKey,
+      actorProfileUrl: normalized.actorProfileUrl,
+      action: actionText,
+      content,
+      rawText: '',
+      notificationItemKey: normalized.notificationId,
+      platformEventId: normalized.platformEventId,
+      workId: normalized.workId,
+      workUrl: normalized.workUrl,
+      thumbnailKey: normalized.thumbnailKey,
+    });
+
+    const result = upsertNotificationEvent({
+      eventType: normalized.eventType,
+      actorName: normalized.actorName,
+      actorProfileKey: normalized.actorProfileKey || null,
+      actorProfileUrl: normalized.actorProfileUrl || null,
+      relation: normalized.relation,
+      commentText: content,
+      eventTimeText: normalized.eventTimeText,
+      fingerprint: fp,
+      dedupConfidence: confidence,
+      platformEventId: normalized.platformEventId || null,
+      notificationItemKey: normalized.notificationId || null,
+      workId: normalized.workId || null,
+      workUrl: normalized.workUrl || null,
+      action: actionText,
+      content,
+      rawPayloadJson: normalized.rawPayloadJson,
+      targetWorkId: normalized.workId || null,
+      targetWorkUrl: normalized.workUrl || null,
+      profileResolutionStatus,
+      myWorkTitle: normalized.workTitle || null,
+    });
+
+    dedupeContext.notificationKeys.add(notificationId);
+    if (normalized.platformEventId) dedupeContext.notificationKeys.add(normalized.platformEventId);
+    if (fp) dedupeContext.notificationKeys.add(fp);
+
+    upsertWorkContext({
+      workId: normalized.workId || null,
+      modalId: null,
+      workUrl: normalized.workUrl || null,
+      workTitle: normalized.workTitle || null,
+      workType: normalized.workType || null,
+      thumbnailKey: normalized.thumbnailKey || null,
+      thumbnailSrc: normalized.thumbnailSrc || null,
+      authorName: null,
+      authorProfileUrl: null,
+      authorProfileKey: null,
+      publishedAt: normalized.workCreateTime ? String(normalized.workCreateTime) : null,
+      rawContextJson: normalized.rawPayloadJson,
+    });
+
+    addWorkKeys(dedupeContext, {
+      workId: normalized.workId || null,
+      modalId: null,
+      workUrl: normalized.workUrl || null,
+      thumbnailKey: normalized.thumbnailKey || null,
+    });
+
+    if (result.action === 'inserted') totalInserted++;
+    else if (result.action === 'enriched') totalEnrichedCount++;
+    else if (result.action === 'duplicate') totalDuplicateCount++;
+    else if (result.action === 'ambiguous') totalAmbiguousCount++;
+
+    if (result.action === 'ambiguous') {
+      ambiguousEvents.push({
+        eventType: normalized.eventType,
+        actorName: normalized.actorName,
+        actorProfileUrl: normalized.actorProfileUrl || null,
+        relation: normalized.relation,
+        platformEventId: normalized.platformEventId || null,
+        targetWorkId: normalized.workId || null,
+        error: result.error || 'ambiguous',
+      });
+      return { counted: true };
+    }
+
+    if (normalized.eventType === 'comment') {
+      const commentKey = normalized.commentId || stableHash([
+        normalized.workId,
+        normalized.actorProfileKey,
+        normalized.actorName,
+        normalized.commentText,
+        normalized.eventTimeText,
+      ].join('||'));
+
+      const commentResult = upsertWorkComment({
+        workId: normalized.workId || null,
+        workUrl: normalized.workUrl || null,
+        modalId: null,
+        actorName: normalized.actorName || null,
+        actorProfileUrl: normalized.actorProfileUrl || null,
+        actorProfileKey: normalized.actorProfileKey || null,
+        commentText: normalized.commentText || '',
+        eventTimeText: normalized.eventTimeText || null,
+        commentKey,
+        sourceEventId: result.eventId || null,
+        sourceNotificationKey: normalized.notificationId || null,
+        rawCommentJson: normalized.rawPayloadJson,
+      });
+
+      const commentDedupeKey = `${normalized.workId || '__unknown__'}:${commentKey}`;
+      dedupeContext.commentKeys.add(commentDedupeKey);
+
+      if (commentResult.action === 'inserted') totalWorkCommentInserted++;
+      else if (commentResult.action === 'enriched') totalWorkCommentEnriched++;
+      else totalWorkCommentDuplicate++;
+    }
+
+    allEvents.push({
+      eventId: result.eventId || null,
+      eventType: normalized.eventType,
+      actorName: normalized.actorName,
+      actorProfileUrl: normalized.actorProfileUrl || null,
+      actorProfileKey: normalized.actorProfileKey || null,
+      relation: normalized.relation,
+      profileResolutionStatus,
+      dbAction: result.action,
+      dedupConfidence: confidence,
+      notificationAction: normalized.notificationAction,
+      platformEventId: normalized.platformEventId || null,
+      targetWorkId: normalized.workId || null,
+      targetWorkUrl: normalized.workUrl || null,
+      eventTimeText: normalized.eventTimeText || null,
+    });
+
+    console.error(
+      `[scan] api通知处理 index=${notificationIndex} eventType=${normalized.eventType} actor=${compactLogValue(normalized.actorName, 40)} ` +
+      `workId=${compactLogValue(normalized.workId, 40)} notificationId=${notificationId} platformEventId=${compactLogValue(normalized.platformEventId, 40)} ` +
+      `create_time=${compactLogValue(normalized.eventTimeText, 40)} result=${result.action}`
+    );
+
+    return { counted: true };
+  }
+
+  try {
+    try {
+      await ensureNotificationPageReady(page);
+    } catch (err) {
+      if ((err.message || '').includes('网络不好')) {
+        return blocking(RESULT_CODES.BLOCKED, err.message, { recoverable: true, data: { step: 'notify-navigate' } });
+      }
+      return blocking(RESULT_CODES.NAVIGATION_TIMEOUT, `通知页面导航超时: ${err.message}`, { data: { step: 'notify-navigate' } });
+    }
+
+    let opened = false;
+    try {
+      opened = await openNotificationPanel(page);
+    } catch (err) {
+      if ((err.message || '').includes('网络不好')) {
+        return blocking(RESULT_CODES.BLOCKED, err.message, { recoverable: true, data: { step: 'notify-open-panel' } });
+      }
+      throw err;
+    }
+    if (!opened) {
+      return blocking(
+        RESULT_CODES.NOTIFICATION_PANEL_NOT_FOUND,
+        '无法打开通知面板（未找到铃铛图标或面板未出现）',
+        { data: { step: 'notify-open-panel' } }
+      );
+    }
+
+    const panelState = await waitForNotificationPanelStable(page);
+    if (panelState.networkBad) {
+      return blocking(RESULT_CODES.BLOCKED, panelState.reason || '网络不好', { recoverable: true, data: { step: 'notify-panel-unstable' } });
+    }
+    if (!panelState.stable || panelState.empty) {
+      if (!panelState.stable) {
+        return blocking(RESULT_CODES.NOTIFICATION_PANEL_NOT_FOUND, '通知面板未稳定或已消失', { data: { step: 'notify-panel-unstable' } });
+      }
+      console.error('[scan] 通知面板为空（暂无消息）');
+      await closeNotificationPanel(page);
+      return success({
+        inserted: 0, duplicateCount: 0, enriched: 0, ambiguousCount: 0,
+        profileResolved: 0, profileUnresolved: 0, parseFailed: 0,
+        scrollRounds: 0, events: [], ambiguousEvents: [], failedEvents: [],
+        empty: true, step: 'notify-scan',
+      });
+    }
+
+    await moveMouseIntoPanel(page, panelState.panelBox);
+    console.error('[scan] 通知面板已就绪，鼠标保持在面板内');
+
+    if (pauseAfterOpen > 0) {
+      console.error(`[scan] --pause-after-open: 暂停 ${pauseAfterOpen}ms，可人工确认面板...`);
+      await page.waitForTimeout(pauseAfterOpen);
+    }
+
+    await page.waitForTimeout(1200);
+    console.error('[scan] 开始使用 notice api 数据采集');
+
+    for (let round = 0; round < maxScrollRounds; round++) {
+      const domBatch = await extractVisibleNotifications(page).catch(() => null);
+      const currentItems = apiCollector.getItems();
+      let roundProcessed = 0;
+
+      for (const item of currentItems) {
+        const notificationIndex = totalProcessedCount + 1;
+        const result = await processNoticeApiItem(item, notificationIndex);
+        if (result?.counted) roundProcessed++;
+        if (result?.stop === 'max-count') {
+          console.error(`[scan] 达到最大采集条数 maxCount=${maxCount}，停止采集`);
+          scrollRounds = round;
+          if (!run.options?.keepOpen) await closeNotificationPanel(page);
+          const pendingReplyFile = scanPlan.generateReplyJson
+            ? writePendingReplyJson({ days: notificationDays, maxCount: maxCount || 500 })
+            : null;
+          const pendingVisitFile = scanPlan.generateVisitJson
+            ? writePendingVisitJson(allEvents, { days: notificationDays, maxCount: maxCount || 100, collectTypes: scanPlan.collectTypes })
+            : null;
+          return success({
+            inserted: totalInserted,
+            duplicateCount: totalDuplicateCount,
+            enriched: totalEnrichedCount,
+            ambiguousCount: totalAmbiguousCount,
+            profileResolved: totalProfileResolved,
+            profileUnresolved: totalProfileUnresolved,
+            parseFailed: parseFailedCount,
+            scrollRounds,
+            workCommentsInserted: totalWorkCommentInserted,
+            workCommentsEnriched: totalWorkCommentEnriched,
+            workCommentsDuplicate: totalWorkCommentDuplicate,
+            pendingReplyFile,
+            pendingVisitFile,
+            events: allEvents,
+            ambiguousEvents,
+            failedEvents,
+            step: 'notify-scan',
+          });
+        }
+        if (result?.stop === 'old-relevant') {
+          scrollRounds = round;
+          const pendingReplyFile = scanPlan.generateReplyJson
+            ? writePendingReplyJson({ days: notificationDays, maxCount: maxCount || 500 })
+            : null;
+          const pendingVisitFile = scanPlan.generateVisitJson
+            ? writePendingVisitJson(allEvents, { days: notificationDays, maxCount: maxCount || 100, collectTypes: scanPlan.collectTypes })
+            : null;
+          if (!run.options?.keepOpen) await closeNotificationPanel(page);
+          return success({
+            inserted: totalInserted,
+            duplicateCount: totalDuplicateCount,
+            enriched: totalEnrichedCount,
+            ambiguousCount: totalAmbiguousCount,
+            profileResolved: totalProfileResolved,
+            profileUnresolved: totalProfileUnresolved,
+            parseFailed: parseFailedCount,
+            scrollRounds,
+            workCommentsInserted: totalWorkCommentInserted,
+            workCommentsEnriched: totalWorkCommentEnriched,
+            workCommentsDuplicate: totalWorkCommentDuplicate,
+            pendingReplyFile,
+            pendingVisitFile,
+            events: allEvents,
+            ambiguousEvents,
+            failedEvents,
+            step: 'notify-scan',
+          });
+        }
+      }
+
+      run.scanned = totalProcessedCount;
+      run.enriched = totalEnrichedCount;
+      console.error(
+        `[scan] 使用 notice api 数据采集: 本轮新增 ${roundProcessed} 条`
+      );
+      console.error(
+        `[scan] api通知入库 +${totalInserted}, 重复 ${totalDuplicateCount}, 补全 ${totalEnrichedCount}, 评论入库 +${totalWorkCommentInserted}, 点赞 ${allEvents.filter(e => e.eventType === 'like').length}`
+      );
+
+      if (apiCollector.getMeta().hasMore === 0) {
+        console.error('[scan] notice api has_more=0，停止滚动');
+        scrollRounds = round;
+        break;
+      }
+
+      if (domBatch?.ok && domBatch.data?.noMoreData) {
+        console.error('[scan] 面板显示"暂无更多数据"，停止采集');
+        scrollRounds = round;
+        break;
+      }
+
+      if (round >= maxScrollRounds - 1) {
+        scrollRounds = maxScrollRounds;
+        console.error(`[scan] 达到最大滚动轮次 ${maxScrollRounds}，停止采集，防止死循环`);
+        break;
+      }
+
+      const beforeCount = apiCollector.getItems().length;
+      const scrollResult = await scrollPanelDown(page, { deltaY: 600 });
+      if (!scrollResult.scrolled) {
+        console.error('[scan] 无法滚动通知面板，停止采集');
+        scrollRounds = round + 1;
+        break;
+      }
+
+      scrollRounds = round + 1;
+      await apiCollector.waitForNewItems({ beforeCount, timeoutMs: 3000 });
+
+      const stats = apiCollector.getStats();
+      if (scrollRounds >= 2 && stats.itemCount === 0 && stats.responseCount === 0) {
+        console.error('[scan] 未捕获 notice api 数据，退回 DOM 解析兜底');
+        if (!run.options?.keepOpen) {
+          await closeNotificationPanel(page).catch(() => {});
+        }
+        return await runNotificationScanDomFallback(page, run, type, pauseAfterOpen, debugNotificationDom, scanPlan);
+      }
+    }
+
+    if (!run.options?.keepOpen) {
+      await closeNotificationPanel(page);
+    }
+
+    const pendingReplyFile = scanPlan.generateReplyJson
+      ? writePendingReplyJson({ days: notificationDays, maxCount: maxCount || 500 })
+      : null;
+    if (pendingReplyFile) {
+      console.error(`[scan] 待回复评论 JSON: ${pendingReplyFile.filePath} (${pendingReplyFile.totalComments} 条, ${pendingReplyFile.workCount} 个作品)`);
+    } else {
+      console.error('[scan] 本次计划不生成待回复评论 JSON');
+    }
+
+    const pendingVisitFile = scanPlan.generateVisitJson
+      ? writePendingVisitJson(allEvents, { days: notificationDays, maxCount: maxCount || 100, collectTypes: scanPlan.collectTypes })
+      : null;
+    if (pendingVisitFile) {
+      console.error(`[scan] 待回访 JSON: ${pendingVisitFile.filePath} (${pendingVisitFile.totalUsers} 个用户)`);
+    } else {
+      console.error('[scan] 本次计划不生成待回访 JSON');
+    }
+
+    console.error(
+      `[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalAmbiguousCount} 歧义 | ` +
+      `${totalProfileResolved} 主页已解析 | ${totalProfileUnresolved} 主页未解析 | work_comments ${totalWorkCommentInserted} 新增/${totalWorkCommentEnriched} 补全/${totalWorkCommentDuplicate} 重复 | ` +
+      `${parseFailedCount} 条解析失败 | ${scrollRounds} 轮滚动`
+    );
+
+    return success({
+      inserted: totalInserted,
+      duplicateCount: totalDuplicateCount,
+      enriched: totalEnrichedCount,
+      ambiguousCount: totalAmbiguousCount,
+      profileResolved: totalProfileResolved,
+      profileUnresolved: totalProfileUnresolved,
+      parseFailed: parseFailedCount,
+      scrollRounds,
+      workCommentsInserted: totalWorkCommentInserted,
+      workCommentsEnriched: totalWorkCommentEnriched,
+      workCommentsDuplicate: totalWorkCommentDuplicate,
+      pendingReplyFile,
+      pendingVisitFile,
+      events: allEvents,
+      ambiguousEvents,
+      failedEvents,
+      step: 'notify-scan',
+    });
+  } catch (err) {
+    parseFailedCount++;
+    failedEvents.push({ actorName: 'unknown', eventType: 'unknown', error: err.message || 'notice-api-scan-error' });
+    return blocking(
+      RESULT_CODES.BLOCKED,
+      `notice api 扫描失败: ${err.message}`,
+      { recoverable: true, data: { step: 'notify-scan' } }
+    );
+  } finally {
+    apiCollector.stop();
+  }
+}
+
+async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 0, debugNotificationDom = false, scanPlan = {}) {
   console.error('[scan] === 通知面板扫描（增量逐批采集） ===');
 
   const {
