@@ -172,17 +172,6 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     watchSeconds = [5, 8],
   } = options;
 
-  const canComment = task?.targetWork?.canComment !== false;
-  if (canComment && (!task?.generatedComment || !String(task.generatedComment).trim())) {
-    return {
-      ok: false,
-      status: 'failed_generate_comment',
-      error: 'no_generated_comment',
-      likeStatus: task.likeStatus || 'pending',
-      commentStatus: task.commentStatus || 'pending',
-    };
-  }
-
   const resolved = await resolveWorkForExecution(page, task, {
     pageLoadRetryCount,
     maxWorksToCheck,
@@ -321,21 +310,23 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     };
   }
 
-  if (!canComment) {
-    console.error(`[return-visit:execute] 跳过评论 taskId=${task.taskId}: can_comment=false（作品不允许评论）`);
+  // can_comment 来自 API 不可信，改为只看 generatedComment 是否填写
+  const commentText = String(task.generatedComment || '').trim();
+  if (!commentText) {
+    // 无评论文本时，仅凭点赞状态判断是否完成
+    const done = canMarkDone({ likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value });
     return {
-      ok: false,
-      status: 'skipped_no_suitable_work',
-      error: 'skip_comment_disabled',
+      ok: done,
+      status: done ? 'done' : 'skipped_no_suitable_work',
+      error: 'no_comment_text',
       likeStatus: nextLikeStatus.value,
       commentStatus: nextCommentStatus.value,
-      resolvedWork,
+      resolvedWork: done ? resolvedWork : undefined,
     };
   }
 
   await waitRandom(page, waitBetweenLikeAndCommentMs, 2000, 6000);
 
-  const commentText = String(task.generatedComment || '').trim();
   const commentResult = await postVideoComment(page, commentText, { execute: true });
   if (!commentResult.ok) {
     console.error(`[return-visit:execute] 评论失败 taskId=${task.taskId} URL=${page.url()}`);
