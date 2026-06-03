@@ -31,7 +31,7 @@ export function getNoticeWorkIdentity(item) {
 
   return {
     workId: awemeId || '',
-    workUrl: awemeId ? `https://www.douyin.com/video/${awemeId}` : '',
+    workUrl: awemeId ? `https://www.douyin.com/jingxuan?modal_id=${awemeId}` : '',
     workTitle: aweme?.desc || '',
     workType: aweme?.aweme_type != null ? String(aweme.aweme_type) : null,
     workCreateTime: aweme?.create_time || null,

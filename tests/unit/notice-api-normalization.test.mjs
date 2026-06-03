@@ -49,7 +49,7 @@ describe('notice api normalization', () => {
     expect(result.actorProfileUrl).toBe('https://www.douyin.com/user/sec1');
     expect(result.relation).toBe('friend');
     expect(result.workId).toBe('123456');
-    expect(result.workUrl).toBe('https://www.douyin.com/video/123456');
+    expect(result.workUrl).toBe('https://www.douyin.com/jingxuan?modal_id=123456');
     expect(result.thumbnailKey).toBe('cover-uri');
   });
 

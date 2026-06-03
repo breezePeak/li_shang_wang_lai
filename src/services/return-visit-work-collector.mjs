@@ -9,7 +9,7 @@ import {
 function buildAwemeUrl(awemeId, awemeType) {
   if (!awemeId) return '';
   if (Number(awemeType) === 68) return `https://www.douyin.com/note/${awemeId}`;
-  return `https://www.douyin.com/video/${awemeId}`;
+  return `https://www.douyin.com/jingxuan?modal_id=${awemeId}`;
 }
 
 function createProfilePostApiCollector(page) {
