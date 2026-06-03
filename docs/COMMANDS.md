@@ -81,7 +81,7 @@ npm run interactions:scan -- --generate-visit-json
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--type` | `all` | `all` / `comment` / `like` |
+| `--type` | `all` | `all` / `comment` / `like` / `reply` / `follow` |
 | `--days` | `7` | 限定最近 N 天通知，传 `0` 取消限制 |
 | `--max-count` | `100` | 最大采集通知条数 |
 | `--display-only` | `false` | 只采集和展示互动数据，不生成待回评 / 待回访 JSON |
@@ -322,27 +322,40 @@ npm run history
 
 源文件：`src/cli/show-history.mjs`
 
-查看历史运行记录。
+**尚未实现。** 当前仅输出 `[TODO] history — 运行记录查看尚未实现`。
 
 ## 14. interactions:inspect
 
 ```bash
 npm run interactions:inspect
+npm run interactions:inspect -- --page comment
+npm run interactions:inspect -- --page like
+npm run interactions:inspect -- --page notice
 ```
 
 源文件：`src/cli/inspect-interactions.mjs`
 
-调试命令：检查已入库互动事件。
+调试命令：打开浏览器，导航到互动页，采集页面诊断数据。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--page` | `comment` | 目标页面类型：`comment` / `like` / `notice` |
+| `--keep-open` | `false` | 采集后保持浏览器打开 |
 
 ## 15. notify:inspect
 
 ```bash
 npm run notify:inspect
+npm run notify:inspect -- --keep-open
 ```
 
 源文件：`src/cli/inspect-notifications.mjs`
 
-调试命令：检查通知面板 DOM 结构。
+调试命令：打开抖音通知面板，采集通知列表数据。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--keep-open` | `false` | 采集后保持浏览器打开 |
 
 ## 16. dev:inspect-page
 
@@ -356,10 +369,10 @@ npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--url` | `null` | 要打开的 URL |
-| `--keep-open` | `false` | 保持浏览器打开 |
+| `--url` | `https://www.douyin.com/user/self` | 要打开的 URL |
+| `--keep-open` | `true` | 保持浏览器打开 |
 | `--label` | `''` | 页面标签 |
-| `--wait-after-enter-ms` | `0` | 进入后等待毫秒数 |
+| `--wait-after-enter-ms` | `500` | 进入后等待毫秒数 |
 
 ## 17. debug:like-dom
 
@@ -371,6 +384,14 @@ npm run debug:like-dom
 
 调试点赞按钮 DOM 结构。
 
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--url` | `''` | 要打开的视频页 URL（为空则使用内置测试 URL） |
+| `--out` | `''` | 输出目录（为空则自动生成 `debug-output/dom-<timestamp>/`） |
+| `--wait-ms` | `5000` | 页面加载后等待毫秒数 |
+| `--keep-open` | `false` | 采集后保持浏览器打开 |
+| `--selector` | `''` | 自定义 CSS 选择器（为空则使用内置默认） |
+
 ## 18. debug:like-state
 
 ```bash
@@ -380,6 +401,12 @@ npm run debug:like-state
 源文件：`scripts/debug-like-state.mjs`
 
 调试点赞状态检测逻辑。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--url` | `''` | 要打开的视频页 URL |
+| `--wait-ms` | `5000` | 页面加载后等待毫秒数 |
+| `--keep-open` | `false` | 采集后保持浏览器打开 |
 
 ## 19. server
 
@@ -410,6 +437,4 @@ npm run debug:open https://www.douyin.com/user/self
 npm run icon:profile
 ```
 
-源文件：`.sisyphus/icon-profile.mjs`
-
-内部图标资料工具，不属于互动主流程。
+源文件：`.sisyphus/icon-profile.mjs`（文件不存在，命令尚未实现）

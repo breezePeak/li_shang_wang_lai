@@ -72,10 +72,11 @@ function promptForEnter(message = '') {
 }
 
 async function main() {
-  // Parse --page argument
+  // Parse CLI arguments
   const args = process.argv.slice(2);
   const pageArgIdx = args.indexOf('--page');
   const pageType = pageArgIdx >= 0 ? args[pageArgIdx + 1] : 'comment';
+  const keepOpen = args.includes('--keep-open');
   const urls = PAGE_URLS[pageType] || PAGE_URLS.comment;
 
   logger.setLevel('INFO');
@@ -93,7 +94,7 @@ async function main() {
   try {
     // 2. 启动浏览器
     console.log('[inspect] 正在启动浏览器...');
-    const ctx = await createBrowserContext({ headless: false, enableReuse: options.keepOpen });
+    const ctx = await createBrowserContext({ headless: false, enableReuse: keepOpen });
     browser = ctx.browser;
 
     const pages = ctx.context.pages();
@@ -175,9 +176,11 @@ async function main() {
     console.error('[inspect] 发生错误:', err.message);
     process.exitCode = 1;
   } finally {
-    if (browser) {
+    if (browser && !keepOpen) {
       console.log('[inspect] 正在关闭浏览器...');
       await browser.close();
+    } else if (browser) {
+      console.log('[inspect] --keep-open 已指定，浏览器保持打开。按 Ctrl+C 退出。');
     }
   }
 }
