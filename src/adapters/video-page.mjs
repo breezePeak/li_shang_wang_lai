@@ -1089,6 +1089,7 @@ async function ensureCommentPanelOpen(page) {
     if (await isOpen()) return true;
 
     const commentBtns = [
+      page.locator('[data-e2e="feed-comment-icon"]'),
       page.locator('.t5VMknM2 .MinpposV > .AOWKbsTg').nth(1), // action bar 第二个
       page.locator('[data-e2e="video-comment"]'),
       page.locator('[data-e2e="comment-icon"]'),
