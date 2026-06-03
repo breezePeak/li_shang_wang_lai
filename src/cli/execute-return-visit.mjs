@@ -3,7 +3,7 @@ import { createBrowserContext } from '../browser/browser-context.mjs';
 import { loadConfig } from '../config/user-config.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
-import { readFileSync } from 'fs';
+import { readFileSync, unlinkSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import {
   RETURN_VISIT_STATUS,
@@ -357,6 +357,17 @@ async function main() {
     mode: executeMode ? 'execute' : 'dry-run',
   };
   log(args.json, `[return-visit:execute] summary done=${done} skipped=${skipped} failed=${failed}`);
+
+  // 全部成功则删除中间 JSON
+  if (args.itemsFile && failed === 0) {
+    const absPath = resolve(args.itemsFile);
+    if (existsSync(absPath)) {
+      unlinkSync(absPath);
+      log(args.json, `[return-visit:execute] 已删除中间 JSON: ${args.itemsFile}`);
+    }
+  } else if (args.itemsFile) {
+    log(args.json, `[return-visit:execute] 保留中间 JSON（有失败项）: ${args.itemsFile}`);
+  }
 
   if (args.json) {
     printJsonResult('return-visit:execute', { tasks: taskResults }, summary);
