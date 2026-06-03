@@ -7,9 +7,9 @@
 ```text
 开始
  ↓
-1. interactions:scan
-   状态码: SCAN_JSON_READY
-   打开主页 -> 打开通知面板 -> 逐条扫描通知
+1. interactions:scan（仅通过通知中心扫描）
+    状态码: SCAN_JSON_READY
+    打开抖音通知中心 -> 打开通知面板 -> 逐条扫描通知
    ├─ 赞我的作品 / 赞我的视频 / 点赞我的作品
    │  ↓
    │  通知级去重
@@ -44,10 +44,10 @@
       ├─ 能识别: OTHER_STORED，分类入库
       └─ 不能识别: UNKNOWN_LOGGED，打印未知类型日志
 
-2. Agent 生成并填写第一步 JSON 的 reply_text → PREPARE_WAIT_REPLY_TEXT
+2. Agent 读取 JSON，直接填写 reply_text 和 prepare_status_code → PREPARE_READY
 
 3. comments:execute --items-file <JSON>
-   → 写入 reply_text 到 DB → 执行回复 → EXECUTE_JSON_DONE / EXECUTE_JSON_PARTIAL
+    → 校验并执行回复 → EXECUTE_JSON_DONE / EXECUTE_JSON_PARTIAL
 ```
 
 ### 1.2 通知面板滚动采集内部流程

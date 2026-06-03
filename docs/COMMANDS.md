@@ -74,7 +74,7 @@ npm run interactions:scan -- --generate-visit-json
 
 源文件：`src/cli/scan-interactions.mjs`
 
-打开抖音通知中心或评论管理页，采集评论和点赞互动，写入本地数据库。
+打开抖音通知中心，通过通知面板逐条扫描互动通知，点击作品缩略图采集评论，写入本地数据库。`runCommentScan()` 仅保留用于回复执行定位，不再用于新事件采集。
 
 用户意图由 Agent 判断，项目 CLI 不解析自然语言。Agent 应根据用户是否只看互动、是否明确回评、是否明确回访，选择 `--display-only`、`--generate-reply-json` 或 `--generate-visit-json`。
 
@@ -121,7 +121,7 @@ npm run comments:prepare -- --items-file data/pending-replies/pending-comments-x
 
 源文件：`src/cli/prepare-comment-reply.mjs`
 
-读取 `interactions:scan` 输出的按作品分组 JSON，校验每条待回复评论的 `reply_text`，并更新 `work_comments.reply_text`（不改变 `reply_status`）。该命令只支持 `--items-file`。
+**备注**：当前主流程已简化，Agent 直接在扫描生成的 JSON 中填写 `reply_text`，然后由 `comments:execute` 读取 JSON 并写库执行。`comments:prepare` 仍可用作独立的校验和写库步骤，但在主流程中非必需。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
