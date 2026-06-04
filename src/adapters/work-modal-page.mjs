@@ -81,71 +81,87 @@ async function captureReplyBoxDebug(page, phase) {
 }
 
 async function typeIntoReplyDraftEditor(page, replyText) {
-  const editorPrepared = await page.evaluate(() => {
-    const SEARCH_PHRASES = ['搜索', 'search', '查询'];
-    const DIRECT_SELECTORS = [
-      '.comment-input-container [contenteditable="true"]',
-      '.comment-input-container textarea',
-      '.comment-input-container input[type="text"]',
-      '.comment-input-inner-container [contenteditable="true"]',
-      '.comment-input-inner-container textarea',
-      '.comment-input-inner-container input[type="text"]',
-      '[contenteditable="true"][data-placeholder*="评"]',
-      '[contenteditable="true"][placeholder*="评"]',
-      '[contenteditable="true"][data-placeholder*="说点什么"]',
-      '[contenteditable="true"][placeholder*="说点什么"]',
-      'textarea[placeholder*="评"]',
-      'textarea[placeholder*="说点什么"]',
-      'input[placeholder*="评"]',
-      'input[placeholder*="说点什么"]',
-      'input[placeholder*="弹幕"]',
-    ];
-
-    function visible(el) {
-      if (!el) return false;
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 20 || rect.height < 18) return false;
-      const style = window.getComputedStyle(el);
-      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-    }
-
-    function isSearchInput(el) {
-      const placeholder = (el.getAttribute('placeholder') || el.getAttribute('data-placeholder') || '').toLowerCase();
-      const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-      const combined = `${placeholder} ${ariaLabel}`;
-      return SEARCH_PHRASES.some(text => combined.includes(text));
-    }
-
-    document.querySelectorAll('[data-return-visit-editor="true"]').forEach(el => el.removeAttribute('data-return-visit-editor'));
-
-    const candidates = [];
-    for (const selector of DIRECT_SELECTORS) {
-      for (const el of document.querySelectorAll(selector)) {
-        if (!visible(el) || isSearchInput(el)) continue;
+  async function prepareStrictEditor() {
+    return page.evaluate(() => {
+      function visible(el) {
+        if (!el) return false;
         const rect = el.getBoundingClientRect();
-        candidates.push({ el, rect, score: rect.y + rect.height });
+        if (rect.width < 20 || rect.height < 18) return false;
+        const style = window.getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
       }
-    }
 
-    if (!candidates.length) {
-      for (const el of document.querySelectorAll('input, textarea, [contenteditable="true"], [role="textbox"]')) {
-        if (!visible(el) || isSearchInput(el)) continue;
-        const rect = el.getBoundingClientRect();
-        if (rect.top < window.innerHeight * 0.45) continue;
-        candidates.push({ el, rect, score: rect.y + rect.height });
+      document.querySelectorAll('[data-return-visit-editor="true"]').forEach(el => el.removeAttribute('data-return-visit-editor'));
+      document.querySelectorAll('[data-return-visit-comment-host="true"]').forEach(el => el.removeAttribute('data-return-visit-comment-host'));
+
+      const commentInputContainer = document.querySelector('.comment-input-container');
+      if (!visible(commentInputContainer)) return { ok: false, reason: 'comment_input_container_not_found' };
+
+      commentInputContainer.setAttribute('data-return-visit-comment-host', 'true');
+
+      const editorSelectors = [
+        '.public-DraftEditor-content[contenteditable="true"]',
+        '.DraftEditor-editorContainer .public-DraftEditor-content[contenteditable="true"]',
+        '[contenteditable="true"]',
+        '[role="combobox"][contenteditable="true"]',
+        '[role="textbox"][contenteditable="true"]',
+      ];
+
+      let target = null;
+      for (const selector of editorSelectors) {
+        const match = commentInputContainer.querySelector(selector);
+        if (visible(match)) {
+          target = match;
+          break;
+        }
       }
+
+      if (target) {
+        target.setAttribute('data-return-visit-editor', 'true');
+        target.scrollIntoView({ block: 'center', behavior: 'instant' });
+        target.focus?.();
+        target.click?.();
+        return { ok: true };
+      }
+
+      const activators = [
+        commentInputContainer.querySelector('.comment-input-inner-container'),
+        commentInputContainer.querySelector('.LpZjb4Yg'),
+        commentInputContainer.querySelector('.j_kd_P_l'),
+        commentInputContainer,
+      ].filter(Boolean);
+
+      for (const el of activators) {
+        el.scrollIntoView({ block: 'center', behavior: 'instant' });
+        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        el.click?.();
+      }
+
+      const rect = commentInputContainer.getBoundingClientRect();
+      return {
+        ok: false,
+        reason: 'editor_not_activated_yet',
+        clickPoint: {
+          x: Math.round(rect.left + Math.min(40, rect.width * 0.2)),
+          y: Math.round(rect.top + rect.height / 2),
+        },
+      };
+    }).catch(() => ({ ok: false, reason: 'prepare_editor_failed' }));
+  }
+
+  let editorPrepared = await prepareStrictEditor();
+  for (let attempt = 0; attempt < 3 && !editorPrepared.ok; attempt++) {
+    if (editorPrepared.clickPoint?.x > 0 && editorPrepared.clickPoint?.y > 0) {
+      await page.mouse.click(editorPrepared.clickPoint.x, editorPrepared.clickPoint.y).catch(() => {});
+    } else {
+      const host = page.locator('[data-return-visit-comment-host="true"]').last();
+      await host.click({ timeout: 1500 }).catch(() => {});
     }
-
-    candidates.sort((a, b) => b.score - a.score || b.rect.width - a.rect.width);
-    const target = candidates[0]?.el;
-    if (!target) return { ok: false, reason: 'visible_editor_not_found' };
-
-    target.setAttribute('data-return-visit-editor', 'true');
-    target.scrollIntoView({ block: 'center', behavior: 'instant' });
-    target.focus?.();
-    target.click?.();
-    return { ok: true };
-  }).catch(() => ({ ok: false, reason: 'prepare_editor_failed' }));
+    await page.waitForTimeout(300);
+    editorPrepared = await prepareStrictEditor();
+  }
 
   if (!editorPrepared.ok) {
     return { ok: false, reason: editorPrepared.reason || 'prepare_editor_failed' };
@@ -155,49 +171,39 @@ async function typeIntoReplyDraftEditor(page, replyText) {
   await editor.waitFor({ state: 'visible', timeout: 3000 });
   await editor.click({ timeout: 3000 }).catch(() => {});
 
-  // 逐字输入模拟真人打字效果
-  for (const char of replyText) {
-    await page.keyboard.type(char, { delay: 40 + Math.floor(Math.random() * 80) });
-  }
-
   const typed = await page.evaluate((text) => {
-    const container = document.querySelector('.comment-input-container') || document.querySelector('.comment-input-inner-container');
+    const container = document.querySelector('.comment-input-container');
     const editorEl = document.querySelector('[data-return-visit-editor="true"]')
-      || container?.querySelector('[contenteditable="true"], textarea, input[type="text"]');
-    const editorText = typeof editorEl?.value === 'string' ? editorEl.value : (editorEl?.innerText || editorEl?.textContent);
-    const visibleText = (container?.innerText || editorText || '').trim();
-    if (visibleText.includes(text) || visibleText.includes(text.slice(0, Math.min(10, text.length)))) {
-      return { ok: true, method: 'keyboard_insertText' };
-    }
-
+      || container?.querySelector('.public-DraftEditor-content[contenteditable="true"]')
+      || container?.querySelector('[contenteditable="true"]');
     if (!editorEl) return { ok: false, reason: 'editor disappeared after insertText' };
     const rect = editorEl.getBoundingClientRect();
     if (rect.width < 50 || rect.height < 10) return { ok: false, reason: 'editor too small after insertText' };
 
     editorEl.focus();
-    if (editorEl.matches('input, textarea')) {
-      const proto = editorEl.tagName === 'TEXTAREA'
-        ? window.HTMLTextAreaElement.prototype
-        : window.HTMLInputElement.prototype;
-      const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-      nativeSetter?.call(editorEl, text);
-      editorEl.dispatchEvent(new Event('input', { bubbles: true }));
-      editorEl.dispatchEvent(new Event('change', { bubbles: true }));
-    } else {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(editorEl);
-      range.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      document.execCommand('insertText', false, text);
-      editorEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    editorEl.click?.();
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(editorEl);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.execCommand('selectAll', false, null);
+    document.execCommand('delete', false, null);
+    const beforeInput = new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: text });
+    editorEl.dispatchEvent(beforeInput);
+    document.execCommand('insertText', false, text);
+    if ((editorEl.innerText || '').trim() !== text.trim()) {
+      editorEl.textContent = text;
     }
+    editorEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    editorEl.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Process' }));
+    editorEl.dispatchEvent(new Event('change', { bubbles: true }));
 
-    const fallbackRaw = typeof editorEl?.value === 'string' ? editorEl.value : editorEl.innerText;
+    const fallbackRaw = editorEl.innerText;
     const fallbackText = (container?.innerText || fallbackRaw || '').trim();
     if (fallbackText.includes(text) || fallbackText.includes(text.slice(0, Math.min(10, text.length)))) {
-      return { ok: true, method: 'execCommand_fallback' };
+      return { ok: true, method: 'draft_editor_exec_command' };
     }
     return { ok: false, reason: 'text not reflected in reply editor' };
   }, replyText);
@@ -214,29 +220,32 @@ async function clickReplySendControl(page) {
       return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
     }
 
-    const container = document.querySelector('.comment-input-container') || document.querySelector('.comment-input-inner-container');
-    const roots = container ? [container, document] : [document];
-    const candidates = roots.flatMap(root => Array.from(root.querySelectorAll('button, [role="button"], div, span')))
-      .filter(visible)
-      .map(el => {
-        const text = (el.innerText || el.textContent || '').trim();
-        const aria = el.getAttribute('aria-label') || '';
-        const title = el.getAttribute('title') || '';
-        const rect = el.getBoundingClientRect();
-        return { el, rect, label: `${text} ${aria} ${title}`.trim() };
-      })
-      .filter(({ label, rect }) => (label === '发送' || label.includes('发送')) && rect.top >= window.innerHeight * 0.45);
+    const container = document.querySelector('.comment-input-container');
+    if (!visible(container)) return { ok: false, reason: 'comment_input_container_not_found' };
 
-    candidates.sort((a, b) => b.rect.y - a.rect.y || b.rect.width - a.rect.width);
+    const sendArea = container.querySelector('.commentInput-right-ct');
+    if (!visible(sendArea)) return { ok: false, reason: 'comment_send_area_not_found' };
 
-    for (const { el } of candidates) {
-      const target = el.closest('button,[role="button"]') || el;
-      if (!visible(target)) continue;
-      target.click();
-      return { ok: true, method: 'send_control_click', label: (el.innerText || el.textContent || '').trim() };
+    const iconTargets = [
+      '.FbVIhLlK',
+      '[class*="send"]',
+      'span',
+      'div',
+    ];
+    for (const selector of iconTargets) {
+      const matches = Array.from(sendArea.querySelectorAll(selector)).filter(visible);
+      for (const el of matches) {
+        const target = el.closest('button,[role="button"],span,div') || el;
+        if (!visible(target)) continue;
+        target.click?.();
+        target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+        target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        return { ok: true, method: 'send_control_click', label: selector };
+      }
     }
 
-    return { ok: false, reason: 'send control not found' };
+    return { ok: false, reason: 'strict_send_control_not_found' };
   });
 }
 
@@ -1845,36 +1854,13 @@ export async function fillWorkReplyText(page, replyText) {
     const filled = await typeIntoReplyDraftEditor(page, replyText);
 
     if (!filled.ok) {
-      const fallback = await page.evaluate((text) => {
-        const SEARCH_PHRASES = ['搜索', 'search', '查询'];
-        function isSearchInput(input) {
-          const ph = (input.getAttribute('placeholder') || '').toLowerCase();
-          const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
-          return SEARCH_PHRASES.some(s => (ph + ' ' + ariaLabel).includes(s));
-        }
-        const allInputs = document.querySelectorAll('input[type="text"]');
-        for (const input of allInputs) {
-          const rect = input.getBoundingClientRect();
-          if (rect.width < 50 || rect.height < 20) continue;
-          if (isSearchInput(input)) continue;
-          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-          nativeInputValueSetter.call(input, text);
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-          input.focus();
-          return { ok: true, method: 'input_fallback' };
-        }
-        return { ok: false };
-      }, replyText);
-
-      if (!fallback.ok) {
-        await captureReplyBoxDebug(page, 'fill-no-input');
-        return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '找不到回复输入框', { recoverable: true });
-      }
+      await captureReplyBoxDebug(page, 'fill-no-input');
+      return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, `找不到严格评论输入框: ${filled.reason || 'unknown'}`, { recoverable: true });
     }
 
-    console.error(`[work-modal] 已填入回复，未点击发送 method=${filled.method || 'fallback'}`);
-    return success({ filled: true, sent: false, method: filled.method || 'preview' });
+    await captureReplyBoxDebug(page, 'fill-success');
+    console.error(`[work-modal] 已填入回复，未点击发送 method=${filled.method}`);
+    return success({ filled: true, sent: false, method: filled.method });
   } catch (err) {
     return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, `填入回复异常: ${err.message}`, { recoverable: true });
   }
@@ -1885,15 +1871,11 @@ export async function clickSendWorkReply(page) {
     const clicked = await clickReplySendControl(page);
     if (clicked.ok) {
       console.error(`[work-modal] 点击发送控件 method=${clicked.method}`);
+      await captureReplyBoxDebug(page, 'send-clicked');
       await page.waitForTimeout(2000);
       return success({ sent: true, method: clicked.method });
     }
-
-    await page.keyboard.press('Enter');
-    console.error(`[work-modal] 未找到发送控件，按 Enter 发送`);
-    await page.waitForTimeout(2000);
-
-    return success({ sent: true, method: 'enter_key', sendControlReason: clicked.reason });
+    return blocking(RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND, `严格发送控件未找到: ${clicked.reason}`, { recoverable: true });
   } catch (err) {
     return blocking(RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND, `发送回复异常: ${err.message}`, { recoverable: true });
   }

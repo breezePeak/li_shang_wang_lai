@@ -12,9 +12,7 @@ import {
 } from '../adapters/work-modal-page.mjs';
 import { canMarkDone } from './return-visit-task-service.mjs';
 import {
-  collectWorkFromUrl,
   collectCurrentOpenedWork,
-  collectCandidateWorkFromProfile,
   openProfileWorkByAwemeId,
 } from './return-visit-work-collector.mjs';
 
@@ -172,9 +170,8 @@ export async function postReturnVisitComment(page, text, presentation = {}, { ex
 }
 
 async function resolveWorkForExecution(page, task, options = {}) {
-  const { pageLoadRetryCount = 1, maxWorksToCheck = 3, maxReferenceComments = 5 } = options;
+  const { pageLoadRetryCount = 1, maxReferenceComments = 5 } = options;
   const knownWorkId = String(task?.targetWork?.workId || '').trim();
-  const knownWorkUrl = task?.targetWork?.workUrl || null;
 
   if (task?.userProfileUrl && knownWorkId) {
     const opened = await openProfileWorkByAwemeId(page, task.userProfileUrl, knownWorkId, {
@@ -195,40 +192,23 @@ async function resolveWorkForExecution(page, task, options = {}) {
       }
     } else {
       console.error(`[return-visit:execute] 主页定向打开作品失败 taskId=${task.taskId}: ${opened.reason || 'unknown'}`);
-    }
-  }
-
-  if (knownWorkUrl) {
-    const direct = await collectWorkFromUrl(page, knownWorkUrl, { pageLoadRetryCount, maxReferenceComments });
-    if (direct.ok) {
       return {
-        ok: true,
-        work: direct.work,
-        fromFallback: false,
+        ok: false,
+        status: 'failed_open_work_from_profile',
+        reason: opened.reason || 'open_profile_work_failed',
       };
     }
-    console.error(`[return-visit:execute] 直链解析失败 taskId=${task.taskId}: ${direct.error || direct.reason || 'unknown'}，降级到主页采集`);
-  }
-
-  const fallback = await collectCandidateWorkFromProfile(page, task.userProfileUrl, {
-    pageLoadRetryCount,
-    maxWorksToCheck,
-    maxReferenceComments,
-  });
-
-  if (!fallback.ok) {
-    console.error(`[return-visit:execute] 作品解析失败 taskId=${task.taskId}: direct=${!knownWorkUrl ? 'no_url' : 'failed'} fallback_status=${fallback.status || 'failed'} reason=${fallback.reason || 'unknown'}`);
     return {
       ok: false,
-      status: fallback.status || 'failed_collect',
-      reason: fallback.reason || 'fallback_collect_failed',
+      status: 'failed_collect',
+      reason: 'opened_work_collect_failed',
     };
   }
 
   return {
-    ok: true,
-    work: fallback.selectedWork,
-    fromFallback: true,
+    ok: false,
+    status: 'failed_collect',
+    reason: 'missing_profile_url_or_work_id',
   };
 }
 
