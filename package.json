@@ -24,8 +24,6 @@
     "interactions:scan": "node ./src/cli/scan-interactions.mjs",
     "actions:pending": "node ./src/cli/report-pending.mjs",
     "comments:execute": "node ./src/cli/execute-comment-replies.mjs",
-    "comments:execute-all": "node ./src/cli/execute-comment-replies.mjs",
-    "actions:reset-blocked": "node ./src/cli/reset-blocked-action.mjs",
     "comments:classify": "node ./src/cli/classify-comment.mjs",
     "return-visit:prepare": "node ./src/cli/execute-return-visit-prepare.mjs",
     "return-visit:comment": "node ./src/cli/set-return-visit-comment.mjs",

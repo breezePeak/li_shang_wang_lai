@@ -9,7 +9,7 @@
 
 | 环境 | 要求 |
 |---|---|
-| Node.js | 20+ |
+| Node.js | 24+ |
 | npm | 随 Node.js 安装 |
 | 浏览器 | Playwright Chromium |
 | 数据库 | SQLite |
