@@ -702,18 +702,32 @@ function writePendingVisitJson(events, { days = null, maxCount = 100, collectTyp
   const allowed = new Set((collectTypes || []).map(type => String(type || '').trim()).filter(Boolean));
   const users = [];
   const seen = new Set();
+  const stats = {
+    skipRelationUnknown: 0,
+    skipNoProfileUrl: 0,
+    addedFriend: 0,
+    addedMutual: 0,
+  };
 
   const sourceItems = [];
 
   for (const event of events || []) {
     const sourceType = getVisitSourceType(event);
     if (allowed.size > 0 && !allowed.has(sourceType)) continue;
-    if (!event.actorProfileUrl) continue;
+    if (!event.actorProfileUrl) {
+      stats.skipNoProfileUrl++;
+      continue;
+    }
     const relation = String(event.relation || '').trim().toLowerCase();
-    if (relation !== 'friend' && relation !== 'mutual') continue;
+    if (relation !== 'friend' && relation !== 'mutual') {
+      stats.skipRelationUnknown++;
+      continue;
+    }
     const identityKey = event.actorProfileKey || event.actorProfileUrl || event.actorName || '';
     if (!identityKey || seen.has(identityKey)) continue;
     seen.add(identityKey);
+    if (relation === 'friend') stats.addedFriend++;
+    if (relation === 'mutual') stats.addedMutual++;
     sourceItems.push({
       source_type: sourceType,
       source_event_id: event.eventId || null,
@@ -724,6 +738,13 @@ function writePendingVisitJson(events, { days = null, maxCount = 100, collectTyp
     });
     if (sourceItems.length >= maxCount) break;
   }
+
+  console.error(
+    `[scan] pending_visit_skip_relation_unknown=${stats.skipRelationUnknown} ` +
+    `pending_visit_skip_no_profile_url=${stats.skipNoProfileUrl} ` +
+    `pending_visit_added_friend=${stats.addedFriend} ` +
+    `pending_visit_added_mutual=${stats.addedMutual}`
+  );
 
   createOrUpdateReturnVisitTasksFromItems(sourceItems);
 

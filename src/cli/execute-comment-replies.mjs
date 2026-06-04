@@ -192,17 +192,31 @@ export function extractTargetCommentId(item = {}, row = {}) {
   }
 }
 
-function updateExecuteJsonFile(itemsFile, parsed, results) {
-  if (!itemsFile || !parsed) return;
-  const byId = new Map();
-  for (const result of results) {
-    if (result.commentId) byId.set(Number(result.commentId), result);
-  }
-  if (byId.size === 0) return;
+export function isDoneWithoutRetryResult(result) {
+  return Boolean(result?.ok)
+    || (!result?.ok && result?.status === 'succeeded')
+    || (!result?.ok && result?.status === 'sent_unverified');
+}
 
+export function updateExecuteJsonFile(itemsFile, parsed, results) {
+  if (!itemsFile || !parsed) return;
+  const byItemIndex = new Map();
+  const byInputId = new Map();
+  const byCommentId = new Map();
+  for (const result of results) {
+    if (Number.isInteger(result?.itemIndex)) byItemIndex.set(result.itemIndex, result);
+    if (result?.inputCommentId) byInputId.set(Number(result.inputCommentId), result);
+    if (result?.commentId) byCommentId.set(Number(result.commentId), result);
+  }
+  if (byItemIndex.size === 0 && byInputId.size === 0 && byCommentId.size === 0) return;
+
+  let currentIndex = -1;
   visitJsonComments(parsed, (comment) => {
+    currentIndex++;
     const id = Number(comment.id ?? comment.commentId ?? comment.comment_id ?? comment.workCommentId ?? comment.work_comment_id);
-    const result = byId.get(id);
+    const result = byItemIndex.get(currentIndex)
+      || byInputId.get(id)
+      || byCommentId.get(id);
     if (!result) return;
 
     // 本轮真实执行成功
@@ -238,8 +252,8 @@ function updateExecuteJsonFile(itemsFile, parsed, results) {
     }
   });
 
-  const allOkOrSkipped = results.every(item => item.ok || isSkippedResult(item));
-  parsed.workflow_status_code = allOkOrSkipped ? 'EXECUTE_JSON_DONE' : 'EXECUTE_JSON_PARTIAL';
+  const allDoneWithoutRetry = results.length > 0 && results.every(isDoneWithoutRetryResult);
+  parsed.workflow_status_code = allDoneWithoutRetry ? 'EXECUTE_JSON_DONE' : 'EXECUTE_JSON_PARTIAL';
   parsed.status_codes = {
     ...(parsed.status_codes || {}),
     execute: parsed.workflow_status_code,
@@ -248,8 +262,9 @@ function updateExecuteJsonFile(itemsFile, parsed, results) {
 }
 
 export function validateWorkCommentItem(item) {
+  const inputCommentId = Number(item.commentId);
   if (!item.commentId) {
-    return { itemIndex: item.itemIndex, ok: false, error: '缺少 work_comments.id；请使用 interactions:scan 生成的 JSON' };
+    return { itemIndex: item.itemIndex, inputCommentId, ok: false, error: '缺少 work_comments.id；请使用 interactions:scan 生成的 JSON' };
   }
   let row = getWorkComment(item.commentId);
   if (!row) {
@@ -264,33 +279,34 @@ export function validateWorkCommentItem(item) {
     }
   }
   if (!row) {
-    return { itemIndex: item.itemIndex, commentId: item.commentId, ok: false, error: `找不到 work_comments.id=${item.commentId}` };
+    return { itemIndex: item.itemIndex, inputCommentId, commentId: item.commentId, ok: false, error: `找不到 work_comments.id=${item.commentId}` };
   }
 
   const replyText = String(item.replyText || row.reply_text || '').trim();
   if (!replyText) {
     console.error(`[comments:execute] commentId=${item.commentId} reply_text 为空，跳过执行`);
-    return { itemIndex: item.itemIndex, commentId: item.commentId, ok: false, status: 'skipped_empty_reply' };
+    return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, status: 'skipped_empty_reply' };
   }
 
   if (row.reply_status === 'succeeded') {
     console.error(`[comments:execute] commentId=${item.commentId} 已回复成功，跳过重复执行`);
-    return { itemIndex: item.itemIndex, commentId: item.commentId, ok: false, status: 'succeeded' };
+    return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, status: 'succeeded' };
   }
   if (row.reply_status === 'sent_unverified') {
     console.error(`[comments:execute] commentId=${item.commentId} 已发送但未确认，跳过重复执行`);
-    return { itemIndex: item.itemIndex, commentId: item.commentId, ok: false, status: 'sent_unverified', fromAlready: true };
+    return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, status: 'sent_unverified', fromAlready: true };
   }
 
   const workUrl = resolveWorkUrlFromItem(item, row);
   if (!workUrl) {
-    return { itemIndex: item.itemIndex, commentId: item.commentId, ok: false, error: 'work_url 为空，无法打开作品' };
+    return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, error: 'work_url 为空，无法打开作品' };
   }
 
   return {
     ...item,
     itemIndex: item.itemIndex,
-    commentId: item.commentId,
+    inputCommentId,
+    commentId: row.id,
     ok: true,
     status: row.reply_status,
     rowId: row.id,
@@ -864,8 +880,8 @@ async function main() {
   const results = await executeWorkCommentItems(loaded.items, args);
   updateExecuteJsonFile(args.itemsFile, loaded.parsed, results);
 
-  const allSucceeded = results.length > 0 && results.every(item => item.ok && item.status === 'succeeded');
-  if (allSucceeded) {
+  const allDoneWithoutRetry = results.length > 0 && results.every(isDoneWithoutRetryResult);
+  if (allDoneWithoutRetry) {
     try {
       const absPath = resolve(args.itemsFile);
       if (existsSync(absPath)) {

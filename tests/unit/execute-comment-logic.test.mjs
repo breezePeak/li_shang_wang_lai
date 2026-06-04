@@ -2,13 +2,17 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { resolve, join } from 'path';
-import { writeFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
+import { getDb, resetDb } from '../../src/db/database.mjs';
 import {
   executeSinglePassForWorkGroup,
   extractTargetCommentId,
+  isDoneWithoutRetryResult,
   loadWorkCommentItemsFromFile,
   planViewportPendingMatches,
   resolveWorkUrlFromItem,
+  updateExecuteJsonFile,
+  validateWorkCommentItem,
 } from '../../src/cli/execute-comment-replies.mjs';
 
 // ============================================================
@@ -18,6 +22,7 @@ const testDir = join(__dirname, '../../data/test-execute-logic');
 const testDb = join(testDir, 'test-execute.db');
 
 function cleanup() {
+  resetDb();
   if (existsSync(testDir)) {
     try { rmSync(testDir, { recursive: true }); } catch {}
   }
@@ -81,6 +86,8 @@ function setup() {
   db.prepare("INSERT INTO interaction_events (id, event_type, actor_name, fingerprint, status, scanned_at) VALUES (3, 'comment', 'user3', 'fp3', 'new', CURRENT_TIMESTAMP)").run();
 
   db.close();
+  resetDb();
+  getDb(testDb);
   return testDb;
 }
 
@@ -234,6 +241,71 @@ describe('comments:execute refactored logic', () => {
       comment_key: 'cid-from-comment-key',
     });
     expect(cid).toBe('cid-from-comment-key');
+  });
+
+  it('旧 commentId 失效时会 fallback 到当前 row.id，并保留 inputCommentId', () => {
+    const db = new Database(testDb);
+    db.prepare(`
+      INSERT INTO work_comments (
+        id, work_id, work_url, modal_id, actor_name, comment_text,
+        event_time_text, comment_key, reply_text, reply_status, raw_comment_json
+      ) VALUES (
+        10, '7639733344284064741', 'https://www.douyin.com/video/7639733344284064741',
+        '7639733344284064741', 'fallback-user', 'fallback comment',
+        '1天前', 'cid-fallback', 'fallback reply', 'pending',
+        '{"comment":{"comment":{"cid":"cid-fallback"}}}'
+      )
+    `).run();
+    db.close();
+
+    const validated = validateWorkCommentItem({
+      itemIndex: 0,
+      commentId: 999,
+      replyText: 'json reply',
+      workId: '7639733344284064741',
+      modalId: '7639733344284064741',
+      actorName: 'fallback-user',
+      commentText: 'fallback comment',
+    });
+
+    expect(validated.ok).toBe(true);
+    expect(validated.inputCommentId).toBe(999);
+    expect(validated.commentId).toBe(10);
+    expect(validated.rowId).toBe(10);
+  });
+
+  it('updateExecuteJsonFile 优先按 itemIndex 回写原 JSON 条目，并允许结果 commentId 改成新 row.id', () => {
+    const filePath = join(testDir, 'pending-fallback-update.json');
+    const parsed = {
+      workflow_status_code: 'PREPARE_JSON_UPDATED',
+      works: [{
+        workKey: 'work-fallback',
+        comments: [
+          { id: 999, reply_text: 'reply one', actor_name: 'fallback-user', comment_text: 'fallback comment' },
+          { id: 1000, reply_text: '', actor_name: 'empty-user', comment_text: 'empty comment' },
+        ],
+      }],
+    };
+    writeFileSync(filePath, JSON.stringify(parsed, null, 2));
+
+    updateExecuteJsonFile(filePath, parsed, [
+      { itemIndex: 0, inputCommentId: 999, commentId: 10, ok: true, status: 'succeeded' },
+      { itemIndex: 1, inputCommentId: 1000, commentId: 11, ok: false, status: 'skipped_empty_reply' },
+    ]);
+
+    const updated = JSON.parse(readFileSync(filePath, 'utf8'));
+    expect(updated.works[0].comments[0].reply_status).toBe('succeeded');
+    expect(updated.works[0].comments[0].execute_status_code).toBe('EXECUTE_CONFIRMED');
+    expect(updated.works[0].comments[1].execute_status_code).toBe('EXECUTE_SKIPPED_EMPTY');
+    expect(updated.workflow_status_code).toBe('EXECUTE_JSON_PARTIAL');
+  });
+
+  it('isDoneWithoutRetryResult 只把成功或已处理项视为完成，不把空回复跳过当完成', () => {
+    expect(isDoneWithoutRetryResult({ ok: true, status: 'succeeded' })).toBe(true);
+    expect(isDoneWithoutRetryResult({ ok: false, status: 'succeeded' })).toBe(true);
+    expect(isDoneWithoutRetryResult({ ok: false, status: 'sent_unverified' })).toBe(true);
+    expect(isDoneWithoutRetryResult({ ok: false, status: 'skipped_empty_reply' })).toBe(false);
+    expect(isDoneWithoutRetryResult({ ok: false, status: 'blocked' })).toBe(false);
   });
 
   it('主流程源码不再引用 creator 评论管理页或 ensureCommentPageReady', async () => {

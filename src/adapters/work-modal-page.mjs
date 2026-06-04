@@ -1630,7 +1630,7 @@ export async function fillWorkReplyText(page, replyText) {
     return blocking(RESULT_CODES.EMPTY_REPLY_TEXT, '回复内容为空', { recoverable: false });
   }
 
-  console.error(`[work-modal] 填入回复(预演): "${replyText.slice(0, 60)}"`);
+  console.error(`[work-modal] 填入回复内容: "${replyText.slice(0, 60)}"`);
 
   try {
     const filled = await typeIntoReplyDraftEditor(page, replyText);
