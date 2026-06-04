@@ -1,11 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { resolve, join } from 'path';
 import { writeFileSync } from 'fs';
 import {
+  executeSinglePassForWorkGroup,
   extractTargetCommentId,
   loadWorkCommentItemsFromFile,
+  planViewportPendingMatches,
   resolveWorkUrlFromItem,
 } from '../../src/cli/execute-comment-replies.mjs';
 
@@ -63,6 +65,11 @@ function setup() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+  `);
+
+  db.exec(`
+    DELETE FROM work_comments;
+    DELETE FROM interaction_events;
   `);
 
   // Insert test data
@@ -289,5 +296,176 @@ describe('comments:execute refactored logic', () => {
     expect(failed).toBe(1);
     // Total
     expect(succeeded + skipped + failed).toBe(results.length);
+  });
+});
+
+describe('comments:execute single-pass per work', () => {
+  function createFakePage() {
+    return {
+      keyboard: {
+        press: vi.fn(async () => {}),
+      },
+      waitForTimeout: vi.fn(async () => {}),
+    };
+  }
+
+  it('同作品 3 条 pending：第 1 屏出现 A/C，第 2 屏出现 B，只滚动 1 次', async () => {
+    const page = createFakePage();
+    let scrollRound = 0;
+    const collectCandidates = vi.fn(async () => ({
+      ok: true,
+      candidates: scrollRound === 0
+        ? [
+          { domIndex: 0, cid: 'A', actorName: 'u1', commentText: 'A', timeText: '', hasReplyButton: true },
+          { domIndex: 1, cid: 'C', actorName: 'u3', commentText: 'C', timeText: '', hasReplyButton: true },
+        ]
+        : [
+          { domIndex: 0, cid: 'B', actorName: 'u2', commentText: 'B', timeText: '', hasReplyButton: true },
+        ],
+    }));
+    const scrollOnce = vi.fn(async () => {
+      scrollRound++;
+      return { ok: true };
+    });
+    const openMatchedReplyBox = vi.fn(async (_page, target, candidate, { matchedBy }) => ({
+      ok: true,
+      data: { target, candidate, matchedBy },
+    }));
+    const fillReply = vi.fn(async () => ({ ok: true }));
+    const clickSend = vi.fn(async () => ({ ok: true }));
+    const verifyReply = vi.fn(async () => ({ ok: true }));
+    const onResult = vi.fn();
+    const saveSucceeded = vi.fn();
+
+    const group = [
+      { commentId: 1, replyText: 'r1', targetCommentId: 'A', actorName: 'u1', commentText: 'A' },
+      { commentId: 2, replyText: 'r2', targetCommentId: 'B', actorName: 'u2', commentText: 'B' },
+      { commentId: 3, replyText: 'r3', targetCommentId: 'C', actorName: 'u3', commentText: 'C' },
+    ];
+    const collector = { getByCid: () => null, getStats: () => ({ hasMore: 1 }) };
+
+    const results = await executeSinglePassForWorkGroup(page, group, collector, {
+      collectCandidates,
+      scrollOnce,
+      openMatchedReplyBox,
+      fillReply,
+      clickSend,
+      verifyReply,
+      saveSucceeded,
+      saveBlocked: vi.fn(),
+      saveSentUnverified: vi.fn(),
+      onResult,
+    });
+
+    expect(scrollOnce).toHaveBeenCalledTimes(1);
+    expect(results.filter(item => item.status === 'succeeded')).toHaveLength(3);
+    expect(saveSucceeded).toHaveBeenCalledTimes(3);
+  });
+
+  it('当前屏同时出现多条 pending，先处理完当前屏再滚动', async () => {
+    const page = createFakePage();
+    const collectCandidates = vi.fn(async () => ({
+      ok: true,
+      candidates: [
+        { domIndex: 0, cid: 'A', actorName: 'u1', commentText: 'A', timeText: '', hasReplyButton: true },
+        { domIndex: 1, cid: 'B', actorName: 'u2', commentText: 'B', timeText: '', hasReplyButton: true },
+      ],
+    }));
+
+    const results = await executeSinglePassForWorkGroup(page, [
+      { commentId: 1, replyText: 'r1', targetCommentId: 'A', actorName: 'u1', commentText: 'A' },
+      { commentId: 2, replyText: 'r2', targetCommentId: 'B', actorName: 'u2', commentText: 'B' },
+    ], { getByCid: () => null, getStats: () => ({ hasMore: 1 }) }, {
+      collectCandidates,
+      scrollOnce: vi.fn(async () => ({ ok: true })),
+      openMatchedReplyBox: vi.fn(async () => ({ ok: true })),
+      fillReply: vi.fn(async () => ({ ok: true })),
+      clickSend: vi.fn(async () => ({ ok: true })),
+      verifyReply: vi.fn(async () => ({ ok: true })),
+      saveSucceeded: vi.fn(),
+      saveBlocked: vi.fn(),
+      saveSentUnverified: vi.fn(),
+      onResult: vi.fn(),
+    });
+
+    expect(results.filter(item => item.status === 'succeeded')).toHaveLength(2);
+    expect(collectCandidates.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('not_unique / actor_not_verified / time_not_verified 只阻断当前 item，继续处理其他 pending', async () => {
+    const page = createFakePage();
+    const visibleCandidates = [
+      { domIndex: 0, cid: '', actorName: 'u1', commentText: 'same', timeText: '06-01', hasReplyButton: true },
+      { domIndex: 1, cid: '', actorName: 'u1', commentText: 'same', timeText: '06-01', hasReplyButton: true },
+      { domIndex: 2, cid: '', actorName: 'good', commentText: 'ok', timeText: '06-02', hasReplyButton: true },
+    ];
+    const saveBlocked = vi.fn();
+
+    const results = await executeSinglePassForWorkGroup(page, [
+      { commentId: 1, replyText: 'r1', actorName: 'u1', commentText: 'same', eventTimeText: '06-01' },
+      { commentId: 2, replyText: 'r2', actorName: 'bad', commentText: 'ok', eventTimeText: '06-02' },
+      { commentId: 3, replyText: 'r3', actorName: 'good', commentText: 'ok', eventTimeText: '06-02' },
+    ], { getByCid: () => null, getStats: () => ({ hasMore: 0 }) }, {
+      collectCandidates: vi.fn(async () => ({ ok: true, candidates: visibleCandidates })),
+      openMatchedReplyBox: vi.fn(async () => ({ ok: true })),
+      fillReply: vi.fn(async () => ({ ok: true })),
+      clickSend: vi.fn(async () => ({ ok: true })),
+      verifyReply: vi.fn(async () => ({ ok: true })),
+      scrollOnce: vi.fn(async () => ({ ok: true })),
+      saveSucceeded: vi.fn(),
+      saveBlocked,
+      saveSentUnverified: vi.fn(),
+      onResult: vi.fn(),
+    });
+
+    expect(results.filter(item => item.status === 'blocked')).toHaveLength(2);
+    expect(results.filter(item => item.status === 'succeeded')).toHaveLength(1);
+    expect(saveBlocked).toHaveBeenCalledTimes(2);
+  });
+
+  it('滚到底仍找不到的 pending 标记 blocked，原因包含 single_pass_not_found', async () => {
+    const page = createFakePage();
+    const saveBlocked = vi.fn();
+
+    const results = await executeSinglePassForWorkGroup(page, [
+      { commentId: 1, replyText: 'r1', actorName: 'u1', commentText: 'missing' },
+    ], { getByCid: () => null, getStats: () => ({ hasMore: 0 }) }, {
+      collectCandidates: vi.fn(async () => ({ ok: true, candidates: [] })),
+      scrollOnce: vi.fn(async () => ({ ok: false, reason: 'comment_container_not_found' })),
+      openMatchedReplyBox: vi.fn(),
+      fillReply: vi.fn(),
+      clickSend: vi.fn(),
+      verifyReply: vi.fn(),
+      saveSucceeded: vi.fn(),
+      saveBlocked,
+      saveSentUnverified: vi.fn(),
+      onResult: vi.fn(),
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].error).toContain('single_pass_not_found');
+    expect(saveBlocked).toHaveBeenCalledWith(expect.objectContaining({ commentId: 1 }), 'single_pass_not_found');
+  });
+
+  it('planViewportPendingMatches 会为当前屏产出可执行项和阻断项', () => {
+    const plan = planViewportPendingMatches([
+      { commentId: 1, actorName: 'u1', commentText: 'same', eventTimeText: '06-01' },
+      { commentId: 2, actorName: 'u2', commentText: 'ok', eventTimeText: '06-02' },
+    ], [
+      { domIndex: 0, cid: '', actorName: 'u1', commentText: 'same', timeText: '06-01', hasReplyButton: true },
+      { domIndex: 1, cid: '', actorName: 'u1', commentText: 'same', timeText: '06-01', hasReplyButton: true },
+      { domIndex: 2, cid: '', actorName: 'u2', commentText: 'ok', timeText: '06-02', hasReplyButton: true },
+    ]);
+
+    expect(plan.blocked).toHaveLength(1);
+    expect(plan.actionable).toHaveLength(1);
+    expect(plan.actionable[0].item.commentId).toBe(2);
+  });
+
+  it('源码确保 group 级 finally 中 stop collector，并在打开失败前也 stop', async () => {
+    const fs = await import('fs');
+    const source = fs.readFileSync(resolve(__dirname, '../../src/cli/execute-comment-replies.mjs'), 'utf8');
+    expect(source.includes('commentListCollector.stop();')).toBe(true);
+    expect(source.includes('finally {\n          commentListCollector.stop();')).toBe(true);
   });
 });

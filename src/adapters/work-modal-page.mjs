@@ -1147,7 +1147,7 @@ export function pickWorkCommentCandidate(candidates = [], target = {}) {
   return { ok: true, candidate: matched[0], matchedBy: actorName ? 'actor+text' : 'text' };
 }
 
-async function collectVisibleWorkCommentCandidates(page) {
+export async function collectVisibleWorkCommentCandidates(page) {
   return page.evaluate(({ containerSelectors, itemSelectors }) => {
     const TIME_PATTERNS = [
       /^\d{1,2}:\d{2}$/,
@@ -1481,20 +1481,7 @@ export async function openReplyBoxForWorkComment(page, target, { maxScrollRounds
     if (collected.ok) {
       const picked = pickWorkCommentCandidate(collected.candidates, replyTarget);
       if (picked.ok && picked.candidate) {
-        const clicked = await clickReplyButtonForCandidate(page, picked.candidate);
-        if (!clicked.ok) {
-          return blocking(RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND, clicked.reason, { recoverable: true });
-        }
-
-        const inputVisible = await waitForWorkReplyInput(page);
-        if (!inputVisible) {
-          await captureReplyBoxDebug(page, 'open-no-input');
-          return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '点击回复后输入框未出现', { recoverable: true });
-        }
-
-        await captureReplyBoxDebug(page, 'open-success');
-        console.error(`[work-modal] 已唯一定位评论并打开回复框 matchedBy=${picked.matchedBy}`);
-        return success({ replyBoxOpened: true, matchedBy: picked.matchedBy, candidate: picked.candidate });
+        return openReplyBoxForMatchedWorkComment(page, replyTarget, picked.candidate, { matchedBy: picked.matchedBy });
       }
 
       if (picked.reason === 'not_unique') {
@@ -1535,6 +1522,25 @@ export async function openReplyBoxForWorkComment(page, target, { maxScrollRounds
     `滚动评论区 ${maxScrollRounds} 轮后仍未找到目标评论 "${preview}"`,
     { recoverable: true, data: { target: preview, actorName: replyTarget.actorName } }
   );
+}
+
+export async function openReplyBoxForMatchedWorkComment(page, target, candidate, { matchedBy = 'unknown' } = {}) {
+  const clicked = await clickReplyButtonForCandidate(page, candidate);
+  if (!clicked.ok) {
+    return blocking(RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND, clicked.reason, { recoverable: true });
+  }
+
+  const inputVisible = await waitForWorkReplyInput(page);
+  if (!inputVisible) {
+    await captureReplyBoxDebug(page, 'open-no-input');
+    return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '点击回复后输入框未出现', { recoverable: true });
+  }
+
+  await captureReplyBoxDebug(page, 'open-success');
+  console.error(
+    `[work-modal] 已唯一定位评论并打开回复框 matchedBy=${matchedBy} actor="${target?.actorName || ''}" comment="${String(target?.commentText || '').slice(0, 40)}"`
+  );
+  return success({ replyBoxOpened: true, matchedBy, candidate });
 }
 
 export async function fillWorkReplyText(page, replyText) {

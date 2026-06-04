@@ -19,10 +19,13 @@ import { captureEvidence } from '../browser/failure-evidence.mjs';
 import {
   buildWorkReplyTarget,
   clickSendWorkReply,
+  collectVisibleWorkCommentCandidates,
   fillWorkReplyText,
-  findCommentByCidViaCommentListApi,
+  openReplyBoxForMatchedWorkComment,
   openReplyBoxForWorkComment,
   openWorkPageForReply,
+  pickWorkCommentCandidate,
+  scrollCommentAreaOnce,
   waitForWorkCommentArea,
   waitForWorkModal,
   verifyWorkReplyVisible,
@@ -297,6 +300,272 @@ export function validateWorkCommentItem(item) {
   };
 }
 
+function buildPendingMap(group) {
+  return new Map(group.map(item => [item.commentId, item]));
+}
+
+function normalizeVisibleCandidatesResult(collected) {
+  if (!collected?.ok) return [];
+  return Array.isArray(collected.candidates) ? collected.candidates : [];
+}
+
+function getCollectorTargetComment(validated, commentListCollector) {
+  if (!validated?.targetCommentId || !commentListCollector?.getByCid) return null;
+  return commentListCollector.getByCid(validated.targetCommentId) || null;
+}
+
+export function planViewportPendingMatches(pendingItems, visibleCandidates, {
+  commentListCollector = null,
+  buildTarget = buildWorkReplyTarget,
+  pickCandidate = pickWorkCommentCandidate,
+} = {}) {
+  const actionable = [];
+  const blocked = [];
+  const usedDomIndexes = new Set();
+
+  for (const pendingItem of pendingItems) {
+    const apiComment = getCollectorTargetComment(pendingItem, commentListCollector);
+    const target = buildTarget(pendingItem, apiComment);
+    const availableCandidates = (visibleCandidates || []).filter(candidate => !usedDomIndexes.has(candidate.domIndex));
+    const picked = pickCandidate(availableCandidates, target);
+
+    if (picked.ok && picked.candidate) {
+      usedDomIndexes.add(picked.candidate.domIndex);
+      actionable.push({ item: pendingItem, target, picked });
+      continue;
+    }
+
+    if (picked.reason === 'not_unique' || picked.reason === 'actor_not_verified' || picked.reason === 'time_not_verified') {
+      blocked.push({ item: pendingItem, target, picked });
+    }
+  }
+
+  return { actionable, blocked };
+}
+
+function formatBlockedReason(blockedEntry) {
+  const picked = blockedEntry?.picked || {};
+  const target = blockedEntry?.target || {};
+  if (picked.reason === 'not_unique') {
+    return `not_unique:${target.commentText || ''}`;
+  }
+  if (picked.reason === 'actor_not_verified') {
+    return `actor_not_verified:${target.actorName || ''}`;
+  }
+  if (picked.reason === 'time_not_verified') {
+    return `time_not_verified:${target.eventTimeText || ''}`;
+  }
+  return picked.reason || 'blocked';
+}
+
+function getCandidateSignature(candidates = []) {
+  return (candidates || [])
+    .map(candidate => `${candidate.domIndex}:${candidate.cid || ''}:${candidate.actorName || ''}:${candidate.commentText || ''}`)
+    .join('|');
+}
+
+export async function executeSinglePassForWorkGroup(page, group, commentListCollector, {
+  maxViewportRounds = 20,
+  maxNoProgressRounds = 3,
+  collectCandidates = collectVisibleWorkCommentCandidates,
+  openMatchedReplyBox = openReplyBoxForMatchedWorkComment,
+  fillReply = fillWorkReplyText,
+  clickSend = clickSendWorkReply,
+  verifyReply = verifyWorkReplyVisible,
+  scrollOnce = scrollCommentAreaOnce,
+  saveSucceeded = (item) => {
+    markCommentReplied(item.commentId);
+    saveReplyText(item.commentId, item.replyText);
+  },
+  saveBlocked = (item, reason) => {
+    markCommentBlocked(item.commentId, reason);
+  },
+  saveSentUnverified = (item, reason) => {
+    markCommentSentUnverified(item.commentId, reason);
+  },
+  onResult = () => {},
+} = {}) {
+  const currentWork = group[0] || {};
+  const pendingMap = buildPendingMap(group);
+  const localResults = [];
+  let viewportRound = 0;
+  let noProgressRounds = 0;
+  let lastSignature = '';
+  let succeededCount = 0;
+  let blockedCount = 0;
+
+  console.log(`[comments:execute] single-pass start work=${currentWork.workId || currentWork.modalId || currentWork.workUrl} pending=${pendingMap.size}`);
+
+  while (pendingMap.size > 0 && viewportRound <= maxViewportRounds) {
+    const collected = await collectCandidates(page);
+    const visibleCandidates = normalizeVisibleCandidatesResult(collected);
+    const signature = getCandidateSignature(visibleCandidates);
+
+    console.log(`[comments:execute] viewport round=${viewportRound} visible=${visibleCandidates.length} pending=${pendingMap.size}`);
+
+    let progressedInViewport = false;
+
+    while (pendingMap.size > 0) {
+      const pendingItems = [...pendingMap.values()];
+      const plan = planViewportPendingMatches(pendingItems, visibleCandidates, { commentListCollector });
+
+      if (plan.blocked.length > 0) {
+        for (const blockedEntry of plan.blocked) {
+          if (!pendingMap.has(blockedEntry.item.commentId)) continue;
+          const reason = formatBlockedReason(blockedEntry);
+          saveBlocked(blockedEntry.item, reason);
+          pendingMap.delete(blockedEntry.item.commentId);
+          blockedCount++;
+          progressedInViewport = true;
+          const result = { ...blockedEntry.item, ok: false, status: 'blocked', error: reason };
+          localResults.push(result);
+          onResult(result);
+          console.log(`[comments:execute] blocked commentId=${blockedEntry.item.commentId} reason=${pickedReasonLabel(blockedEntry.picked.reason)} pending=${pendingMap.size}`);
+        }
+        continue;
+      }
+
+      const nextAction = plan.actionable[0];
+      if (!nextAction) break;
+
+      const opened = await openMatchedReplyBox(page, nextAction.target, nextAction.picked.candidate, {
+        matchedBy: nextAction.picked.matchedBy,
+      });
+      if (!opened.ok) {
+        const reason = opened.message || opened.code || 'reply_box_not_opened';
+        saveBlocked(nextAction.item, reason);
+        pendingMap.delete(nextAction.item.commentId);
+        blockedCount++;
+        progressedInViewport = true;
+        const result = { ...nextAction.item, ok: false, status: 'blocked', error: reason };
+        localResults.push(result);
+        onResult(result);
+        console.log(`[comments:execute] blocked commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
+        continue;
+      }
+
+      const filled = await fillReply(page, nextAction.item.replyText);
+      if (!filled.ok) {
+        const reason = filled.message || filled.code || 'fill_failed';
+        saveBlocked(nextAction.item, reason);
+        pendingMap.delete(nextAction.item.commentId);
+        blockedCount++;
+        progressedInViewport = true;
+        const result = { ...nextAction.item, ok: false, status: 'blocked', error: reason };
+        localResults.push(result);
+        onResult(result);
+        console.log(`[comments:execute] blocked commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
+        continue;
+      }
+
+      const sent = await clickSend(page);
+      if (!sent.ok) {
+        const reason = sent.message || sent.code || 'send_failed';
+        saveBlocked(nextAction.item, reason);
+        pendingMap.delete(nextAction.item.commentId);
+        blockedCount++;
+        progressedInViewport = true;
+        const result = { ...nextAction.item, ok: false, status: 'blocked', error: reason };
+        localResults.push(result);
+        onResult(result);
+        console.log(`[comments:execute] blocked commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
+        continue;
+      }
+
+      const verified = await verifyReply(page, {
+        commentText: nextAction.target.commentText,
+        actorName: nextAction.target.actorName,
+      }, nextAction.item.replyText, { timeoutMs: 7000 });
+      if (!verified.ok) {
+        const reason = verified.message || verified.code || 'send_unverified';
+        saveSentUnverified(nextAction.item, reason);
+        pendingMap.delete(nextAction.item.commentId);
+        progressedInViewport = true;
+        const result = { ...nextAction.item, ok: false, status: 'sent_unverified', error: reason };
+        localResults.push(result);
+        onResult(result);
+        console.log(`[comments:execute] sent_unverified commentId=${nextAction.item.commentId} pending=${pendingMap.size}`);
+        try {
+          await page.keyboard.press('Escape');
+          await page.waitForTimeout(300);
+        } catch {}
+        continue;
+      }
+
+      saveSucceeded(nextAction.item);
+      pendingMap.delete(nextAction.item.commentId);
+      succeededCount++;
+      progressedInViewport = true;
+      const result = {
+        ...nextAction.item,
+        ok: true,
+        status: 'succeeded',
+        mode: 'execute',
+        matchedBy: nextAction.picked.matchedBy,
+      };
+      localResults.push(result);
+      onResult(result);
+      console.log(`[comments:execute] replied commentId=${nextAction.item.commentId} matchedBy=${nextAction.picked.matchedBy} pending=${pendingMap.size}`);
+
+      try {
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(300);
+      } catch {}
+
+      break;
+    }
+
+    if (pendingMap.size === 0) break;
+
+    if (progressedInViewport) {
+      noProgressRounds = 0;
+      lastSignature = '';
+      continue;
+    }
+
+    const stats = commentListCollector?.getStats?.() || {};
+    if (Number(stats.hasMore) === 0) {
+      break;
+    }
+
+    if (signature === lastSignature) {
+      noProgressRounds++;
+    } else {
+      noProgressRounds = 1;
+      lastSignature = signature;
+    }
+
+    if (noProgressRounds > maxNoProgressRounds || viewportRound === maxViewportRounds) {
+      break;
+    }
+
+    const scrollResult = await scrollOnce(page);
+    if (!scrollResult.ok) {
+      break;
+    }
+
+    viewportRound++;
+    console.log(`[comments:execute] scroll round=${viewportRound} pending=${pendingMap.size}`);
+  }
+
+  for (const leftover of pendingMap.values()) {
+    const reason = 'single_pass_not_found';
+    saveBlocked(leftover, reason);
+    blockedCount++;
+    const result = { ...leftover, ok: false, status: 'blocked', error: reason };
+    localResults.push(result);
+    onResult(result);
+  }
+
+  console.log(`[comments:execute] single-pass done work=${currentWork.workId || currentWork.modalId || currentWork.workUrl} succeeded=${succeededCount} blocked=${blockedCount}`);
+  return localResults;
+}
+
+function pickedReasonLabel(reason) {
+  if (!reason) return 'blocked';
+  return reason;
+}
+
 async function executeWorkCommentItems(items, args) {
   const run = createRunContext('comment-execute-json', {
     debug: true,
@@ -406,65 +675,13 @@ async function executeWorkCommentItems(items, args) {
         }
 
         try {
-          for (const validated of group) {
-            let apiComment = null;
-            if (validated.targetCommentId) {
-              const apiResult = await findCommentByCidViaCommentListApi(page, {
-                targetCommentId: validated.targetCommentId,
-                maxScrollPages: 5,
-                waitTimeoutMs: 5000,
-                collector: commentListCollector,
-              });
-              if (apiResult.ok && apiResult.comment) {
-                apiComment = apiResult.comment;
-                console.log(`[comments:execute] comment/list 命中 cid=${validated.targetCommentId} actor="${apiComment.actorName || ''}" comment="${String(apiComment.commentText || '').slice(0, 40)}"`);
-              } else {
-                console.log(`[comments:execute] comment/list 未命中 cid=${validated.targetCommentId}，回退 DOM 匹配`);
-              }
-            }
-
-            const replyTarget = buildWorkReplyTarget(validated, apiComment);
-            console.log(`[comments:execute] 匹配评论 commentId=${validated.commentId} actor="${replyTarget.actorName}" comment="${replyTarget.commentText.slice(0, 40)}" cid=${replyTarget.targetCommentId || '-'}`);
-
-            const opened = await openReplyBoxForWorkComment(page, replyTarget, { maxScrollRounds: 12 });
-            if (!opened.ok) {
-              markCommentBlocked(validated.commentId, opened.message || opened.code || 'reply_box_not_opened');
-              results.push({ ...validated, ok: false, status: 'blocked', error: opened.message || opened.code });
-              continue;
-            }
-
-            const filled = await fillWorkReplyText(page, validated.replyText);
-            if (!filled.ok) {
-              markCommentBlocked(validated.commentId, filled.message || filled.code || 'fill_failed');
-              results.push({ ...validated, ok: false, status: 'blocked', error: filled.message || filled.code });
-              continue;
-            }
-
-            const sent = await clickSendWorkReply(page);
-            if (!sent.ok) {
-              markCommentBlocked(validated.commentId, sent.message || sent.code || 'send_failed');
-              results.push({ ...validated, ok: false, status: 'blocked', error: sent.message || sent.code });
-              continue;
-            }
-
-            const verified = await verifyWorkReplyVisible(page, {
-              commentText: replyTarget.commentText,
-              actorName: replyTarget.actorName,
-            }, validated.replyText, { timeoutMs: 7000 });
-            if (!verified.ok) {
-              markCommentSentUnverified(validated.commentId, verified.message || verified.code || 'send_unverified');
-              results.push({ ...validated, ok: false, status: 'sent_unverified', error: verified.message || verified.code });
-              continue;
-            }
-
-            markCommentReplied(validated.commentId);
-            saveReplyText(validated.commentId, validated.replyText);
-            results.push({ ...validated, ok: true, status: 'succeeded', mode: 'execute' });
-
-            try {
-              await page.keyboard.press('Escape');
-              await page.waitForTimeout(300);
-            } catch {}
+          const groupResults = await executeSinglePassForWorkGroup(page, group, commentListCollector, {
+            onResult(result) {
+              results.push(result);
+            },
+          });
+          if (groupResults.some(result => !result.ok && result.status === 'blocked')) {
+            run.hadBlocked = true;
           }
         } finally {
           commentListCollector.stop();
