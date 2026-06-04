@@ -7,17 +7,15 @@
 | 分类 | 命令 |
 |---|---|
 | 主流程 | `auth`、`db:init`、`interactions:scan`、`comments:execute`、`return-visit:prepare`、`return-visit:execute` |
-| 只读/辅助入口 | `actions:pending`、`actions:plan`、`likes:plan`、`comments:classify`、`return-visit:comment`、`history` |
-| 兼容入口 | `likes:reciprocate` |
-| 调试/开发入口 | `notify:inspect`、`interactions:inspect`、`debug:like-dom`、`debug:like-state`、`debug:open`、`dev:inspect-page`、`server`、`icon:profile` |
+| 只读/辅助入口 | `actions:pending`、`comments:classify`、`return-visit:comment` |
+| 调试/开发入口 | `notify:inspect`、`interactions:inspect`、`debug:like-dom`、`debug:like-state`、`debug:open`、`dev:inspect-page`、`server` |
 
-旧评论导出/应用/手动审批/二次确认链路已删除，不属于可用入口。
+旧评论导出/应用/手动审批/二次确认链路及 `comments:prepare`、`actions:plan`、`likes:plan`、`likes:reciprocate`、`history`、`icon:profile` 已删除，不属于可用入口。
 
 ## 安全默认值
 
 - 评论回复：`comments:execute` 默认真实执行，不再需要 `--execute`。reply_text 由 Agent 生成并填写。
 - 回访：`return-visit:execute` 不带 `--execute` 时为 dry-run，不真实点赞或评论。
-- 旧回赞：`likes:reciprocate --execute` 固定返回 `FEATURE_DISABLED`，不真实点赞。
 - 所有真实动作必须经过登录态、页面稳定、状态判断、重复判断和失败阻断。
 
 ## 主流程
@@ -114,52 +112,7 @@ npm run actions:pending -- --type comment --json
 | `--type` | `null` | 可选 `comment` / `like` |
 | `--json` | `false` | JSON 输出 |
 
-## 5. comments:prepare
-
-```bash
-npm run comments:prepare -- --items-file data/pending-replies/pending-comments-xxx.json
-```
-
-源文件：`src/cli/prepare-comment-reply.mjs`
-
-**备注**：当前主流程已简化，Agent 直接在扫描生成的 JSON 中填写 `reply_text`，然后由 `comments:execute` 读取 JSON 并写库执行。`comments:prepare` 仍可用作独立的校验和写库步骤，但在主流程中非必需。
-
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `--items-file` | 必填 | `interactions:scan` 生成的 `data/pending-replies/pending-comments-xxx.json` |
-| `--decision` | `reply` | `reply` / `manual_review` / `ignore` |
-| `--risk-level` | `low` | `low` / `medium` / `high` |
-| `--decision-reason` | `''` | 决策理由 |
-| `--relevance` | `neutral` | `relevant` / `neutral` / `irrelevant` |
-| `--work-context-id` | `''` | 可选审计字段，不触发额外读取或校验 |
-| `--comment-category` | `unclear` | 评论分类 |
-| `--reply-mode` | `auto_natural` | `auto_natural` / `auto_simple` / `needs_review` / `ignore` |
-| `--json` | `false` | JSON 输出 |
-
-安全规则：
-
-- 缺少 `--items-file` 时直接报错。
-- 输入必须是 `interactions:scan` 生成的 `works[].comments[]`、`comments[]` 或评论数组。
-- 每条要回复的评论必须包含 `work_comments.id` 和非空 `reply_text`。
-- 批量项可覆盖 `decision`、`riskLevel`、`relevance`、`workContextId`、`commentCategory`、`replyMode` 等字段；未提供时使用 CLI 默认值。
-- 只有 `decision=reply`、`risk-level=low`、`relevance != irrelevant` 可准备回复。
-- `auto_simple` 只用于调用方已经选择模板池文本的场景。
-- `auto_natural` 是主流程默认模式，用于接收符合 `references/comment-safety-rules.md` 的一条自然回复，并做长度和禁用词校验。
-- 已回复或已发送未确认的评论会阻断，避免重复准备。
-
-JSON 中评论项示例：
-
-```json
-{
-  "id": 42,
-  "comment_text": "这个做法有意思",
-  "reply_text": "这个小虾也觉得挺有意思",
-  "reply_status": "pending",
-  "prepare_status_code": "PREPARE_WAIT_REPLY_TEXT"
-}
-```
-
-## 6. comments:execute
+## 5. comments:execute
 
 ```bash
 npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
@@ -186,7 +139,7 @@ reply_text 为空的评论会打印日志跳过。已经 succeeded / sent_unveri
 - 发送失败、页面定位失败或状态不确定会进入 `blocked` 或 `sent_unverified`。
 - 重复执行已成功评论回写 `EXECUTE_ALREADY_CONFIRMED`，不算失败。
 
-## 7. return-visit:prepare
+## 6. return-visit:prepare
 
 ```bash
 npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json --json
@@ -204,7 +157,7 @@ npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-
 | `--headless` | `false` | 无头运行 |
 | `--json` | `false` | JSON 输出 |
 
-## 7a. return-visit:comment
+## 6a. return-visit:comment
 
 ```bash
 npm run return-visit:comment -- --task-id <taskId> --comment "<评论内容>"
@@ -223,7 +176,7 @@ npm run return-visit:comment -- --task-id <taskId> --comment "<评论内容>" --
 | `--comment` | `''` | 必填。回访评论内容，需通过小猿人格校验 |
 | `--json` | `false` | JSON 输出 |
 
-## 8. return-visit:execute
+## 7. return-visit:execute
 
 ```bash
 npm run return-visit:execute -- --execute --items-file data/pending-visits/pending-visit-comments-xxx.json
@@ -253,54 +206,7 @@ npm run return-visit:execute -- --dry-run
 - 评论发送后会确认结果；未确认会阻断并记录失败。
 - 连续失败达到配置上限时暂停本轮执行。
 
-## 9. actions:plan
-
-```bash
-npm run actions:plan -- --json
-```
-
-源文件：`src/cli/plan-actions.mjs`
-
-只读辅助入口：从事件生成评论回复候选和回访候选预览。当前主流程不依赖该命令；Agent 不应把它作为执行链路入口。
-
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `--json` | `false` | JSON 输出 |
-| `--limit` | `200` | 读取事件数 |
-| `--commit` | `false` | 当前未实现，仍按只读运行 |
-
-## 10. likes:plan
-
-```bash
-npm run likes:plan -- --json
-```
-
-源文件：`src/cli/plan-likes.mjs`
-
-只读点赞候选预览。所有候选都带 `previewOnly: true` 和 `executeAllowed: false`。
-
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `--json` | `false` | JSON 输出 |
-| `--limit` | `200` | 读取事件数 |
-
-## 11. likes:reciprocate
-
-```bash
-npm run likes:reciprocate -- --dry-run --plan plan.json
-```
-
-源文件：`src/cli/execute-reciprocal-likes.mjs`
-
-兼容旧 Agent 的入口，不推荐使用。真实回赞已禁用，`--execute` 固定返回 `FEATURE_DISABLED`。真实回访必须使用 `return-visit:prepare` / `return-visit:execute -- --execute`。
-
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `--plan` | `null` | 旧计划文件路径 |
-| `--dry-run` | `false` | 预览模式 |
-| `--execute` | `false` | 固定禁用，返回 `FEATURE_DISABLED` |
-
-## 12. comments:classify
+## 8. comments:classify
 
 ```bash
 npm run comments:classify -- --text "求教程" --json
@@ -315,17 +221,7 @@ npm run comments:classify -- --text "求教程" --json
 | `--text` | 必填 | 要分类的评论文本 |
 | `--json` | `false` | JSON 输出 |
 
-## 13. history
-
-```bash
-npm run history
-```
-
-源文件：`src/cli/show-history.mjs`
-
-**尚未实现。** 当前仅输出 `[TODO] history — 运行记录查看尚未实现`。
-
-## 14. interactions:inspect
+## 9. interactions:inspect
 
 ```bash
 npm run interactions:inspect
@@ -343,7 +239,7 @@ npm run interactions:inspect -- --page notice
 | `--page` | `comment` | 目标页面类型：`comment` / `like` / `notice` |
 | `--keep-open` | `false` | 采集后保持浏览器打开 |
 
-## 15. notify:inspect
+## 10. notify:inspect
 
 ```bash
 npm run notify:inspect
@@ -358,7 +254,7 @@ npm run notify:inspect -- --keep-open
 |---|---|---|
 | `--keep-open` | `false` | 采集后保持浏览器打开 |
 
-## 16. dev:inspect-page
+## 11. dev:inspect-page
 
 ```bash
 npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
@@ -375,7 +271,7 @@ npm run dev:inspect-page -- --url "https://www.douyin.com" --keep-open
 | `--label` | `''` | 页面标签 |
 | `--wait-after-enter-ms` | `500` | 进入后等待毫秒数 |
 
-## 17. debug:like-dom
+## 12. debug:like-dom
 
 ```bash
 npm run debug:like-dom
@@ -393,7 +289,7 @@ npm run debug:like-dom
 | `--keep-open` | `false` | 采集后保持浏览器打开 |
 | `--selector` | `''` | 自定义 CSS 选择器（为空则使用内置默认） |
 
-## 18. debug:like-state
+## 13. debug:like-state
 
 ```bash
 npm run debug:like-state
@@ -409,7 +305,7 @@ npm run debug:like-state
 | `--wait-ms` | `5000` | 页面加载后等待毫秒数 |
 | `--keep-open` | `false` | 采集后保持浏览器打开 |
 
-## 19. server
+## 14. server
 
 ```bash
 npm run server
@@ -419,7 +315,7 @@ npm run server
 
 本地开发服务入口，用于内部页面或调试接口，不属于 CLI 主流程。
 
-## 20. debug:open
+## 15. debug:open
 
 ```bash
 npm run debug:open <URL>
@@ -430,12 +326,4 @@ npm run debug:open https://www.douyin.com/user/self
 
 打开指定页面，浏览器保持打开不做任何操作，用于手动排查页面 DOM 或调试问题。
 
----
 
-## 21. icon:profile
-
-```bash
-npm run icon:profile
-```
-
-源文件：`.sisyphus/icon-profile.mjs`（文件不存在，命令尚未实现）
