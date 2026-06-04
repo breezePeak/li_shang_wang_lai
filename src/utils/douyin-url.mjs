@@ -17,6 +17,29 @@ export function buildDouyinWorkUrl(awemeId) {
   return `https://www.douyin.com/jingxuan?modal_id=${encodeURIComponent(value)}`;
 }
 
+export function buildPreferredDouyinWorkUrl(awemeId, options = {}) {
+  const value = String(awemeId || '').trim();
+  if (!value) return '';
+
+  const shareUrl = normalizeDouyinUrl(options.shareUrl || '');
+  if (shareUrl.includes('/video/')) return shareUrl;
+  if (shareUrl.includes('/note/')) return shareUrl;
+
+  const awemeType = Number(options.awemeType);
+  const mediaType = Number(options.mediaType);
+  const isMultiContent = Number(options.isMultiContent);
+
+  if (awemeType === 68 || mediaType === 2 || isMultiContent === 1) {
+    return `https://www.douyin.com/note/${encodeURIComponent(value)}`;
+  }
+
+  if (!Number.isNaN(awemeType) || !Number.isNaN(mediaType)) {
+    return `https://www.douyin.com/video/${encodeURIComponent(value)}`;
+  }
+
+  return buildDouyinWorkUrl(value);
+}
+
 export function normalizeDouyinUrl(href) {
   if (!href) return '';
   let s = href.trim();

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { extractWorkIdFromUrl, normalizeAwemeForVisit } from '../../src/services/return-visit-work-collector.mjs';
 
 describe('return-visit work collector url normalization', () => {
-  it('aweme_type=68 的图文也统一生成 modal_id 地址', () => {
+  it('aweme_type=68 的图文优先生成 note 地址', () => {
     const result = normalizeAwemeForVisit({
       aweme_id: '7636032429409601465',
       aweme_type: 68,
@@ -12,8 +12,28 @@ describe('return-visit work collector url normalization', () => {
 
     expect(result.awemeId).toBe('7636032429409601465');
     expect(result.workId).toBe('7636032429409601465');
-    expect(result.workUrl).toBe('https://www.douyin.com/jingxuan?modal_id=7636032429409601465');
+    expect(result.workUrl).toBe('https://www.douyin.com/note/7636032429409601465');
     expect(result.shareUrl).toBe('https://www.douyin.com/note/7636032429409601465');
+  });
+
+  it('普通视频优先生成 video 地址', () => {
+    const result = normalizeAwemeForVisit({
+      aweme_id: '7647191897097693115',
+      aweme_type: 0,
+      media_type: 4,
+      desc: '视频作品',
+    });
+
+    expect(result.workUrl).toBe('https://www.douyin.com/video/7647191897097693115');
+  });
+
+  it('无法区分类型时回退 modal_id 地址', () => {
+    const result = normalizeAwemeForVisit({
+      aweme_id: '7647191897097693115',
+      desc: '未知类型作品',
+    });
+
+    expect(result.workUrl).toBe('https://www.douyin.com/jingxuan?modal_id=7647191897097693115');
   });
 
   it('extractWorkIdFromUrl 支持从 modal_id 提取纯 awemeId', () => {

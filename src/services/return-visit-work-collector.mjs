@@ -1,4 +1,4 @@
-import { buildDouyinWorkUrl, normalizeDouyinUrl } from '../utils/douyin-url.mjs';
+import { buildPreferredDouyinWorkUrl, normalizeDouyinUrl } from '../utils/douyin-url.mjs';
 import {
   navigateToVideo,
   checkLikeState,
@@ -81,7 +81,12 @@ export function normalizeAwemeForVisit(aweme = {}) {
   return {
     awemeId,
     workId: awemeId,
-    workUrl: buildDouyinWorkUrl(awemeId),
+    workUrl: buildPreferredDouyinWorkUrl(awemeId, {
+      shareUrl,
+      awemeType: aweme?.aweme_type,
+      mediaType: aweme?.media_type,
+      isMultiContent,
+    }),
     shareUrl,
     desc,
     itemTitle,
