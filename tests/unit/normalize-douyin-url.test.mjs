@@ -4,6 +4,7 @@ import { buildDouyinWorkUrl, normalizeDouyinUrl } from '../../src/utils/douyin-u
 describe('normalizeDouyinUrl', () => {
   it('buildDouyinWorkUrl 统一生成 jingxuan modal_id 地址', () => {
     expect(buildDouyinWorkUrl('7647191897097693115')).toBe('https://www.douyin.com/jingxuan?modal_id=7647191897097693115');
+    expect(buildDouyinWorkUrl('abc/def?x=1')).toBe('https://www.douyin.com/jingxuan?modal_id=abc%2Fdef%3Fx%3D1');
     expect(buildDouyinWorkUrl('')).toBe('');
   });
 

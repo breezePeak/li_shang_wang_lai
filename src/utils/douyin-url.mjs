@@ -14,7 +14,7 @@
 export function buildDouyinWorkUrl(awemeId) {
   const value = String(awemeId || '').trim();
   if (!value) return '';
-  return `https://www.douyin.com/jingxuan?modal_id=${value}`;
+  return `https://www.douyin.com/jingxuan?modal_id=${encodeURIComponent(value)}`;
 }
 
 export function normalizeDouyinUrl(href) {
