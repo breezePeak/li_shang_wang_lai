@@ -216,6 +216,26 @@ describe('comments:execute refactored logic', () => {
     expect(cid).toBe('cid-from-raw');
   });
 
+  it('extractTargetCommentId 能兼容 notification 原始结构中的 comment.comment.cid', () => {
+    const cid = extractTargetCommentId({}, {
+      raw_comment_json: JSON.stringify({
+        comment: {
+          comment: {
+            cid: 'cid-from-nested-raw',
+          },
+        },
+      }),
+    });
+    expect(cid).toBe('cid-from-nested-raw');
+  });
+
+  it('extractTargetCommentId 在缺少 targetCommentId 时回退到 comment_key', () => {
+    const cid = extractTargetCommentId({}, {
+      comment_key: 'cid-from-comment-key',
+    });
+    expect(cid).toBe('cid-from-comment-key');
+  });
+
   it('主流程源码不再引用 creator 评论管理页或 ensureCommentPageReady', async () => {
     const fs = await import('fs');
     const source = fs.readFileSync(resolve(__dirname, '../../src/cli/execute-comment-replies.mjs'), 'utf8');

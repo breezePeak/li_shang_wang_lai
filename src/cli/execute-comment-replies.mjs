@@ -164,8 +164,10 @@ export function extractTargetCommentId(item = {}, row = {}) {
     item.commentTargetId ??
     item.commentCid ??
     item.cid ??
+    item.comment_key ??
     item.comment_id ??
     row.target_comment_id ??
+    row.comment_key ??
     ''
   ).trim();
   if (direct) return direct;
@@ -176,6 +178,8 @@ export function extractTargetCommentId(item = {}, row = {}) {
   try {
     const parsed = JSON.parse(rawCommentJson);
     return String(
+      parsed?.comment?.comment?.commentId ??
+      parsed?.comment?.comment?.cid ??
       parsed?.comment?.commentId ??
       parsed?.comment?.cid ??
       parsed?.targetCommentId ??
