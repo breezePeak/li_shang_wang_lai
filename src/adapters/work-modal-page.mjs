@@ -1852,7 +1852,51 @@ export async function postWorkModalComment(page, commentText) {
   }
 
   console.error(`[work-modal] 发送顶层评论: "${commentText.slice(0, 60)}"`);
-  return sendReplyInWorkModal(page, commentText);
+  const sent = await sendReplyInWorkModal(page, commentText);
+  if (!sent.ok) return sent;
+
+  const replyNeedle = commentText.trim();
+  const replyPrefix = replyNeedle.slice(0, 20);
+  const startedAt = Date.now();
+  let lastState = { visible: false, inputCleared: false };
+
+  while (Date.now() - startedAt < 5000) {
+    const state = await page.evaluate(({ replyNeedle, replyPrefix }) => {
+      const commentArea = document.querySelector('.comment-mainContent');
+      const commentTextVisible = (commentArea?.innerText || '').trim();
+      const visible = commentTextVisible.includes(replyNeedle)
+        || (replyPrefix.length >= 5 && commentTextVisible.includes(replyPrefix));
+
+      const container = document.querySelector('.comment-input-container') || document.querySelector('.comment-input-inner-container');
+      const editorEl = document.querySelector('[data-return-visit-editor="true"]')
+        || container?.querySelector('[contenteditable="true"], textarea, input[type="text"]');
+      const editorText = (typeof editorEl?.value === 'string' ? editorEl.value : (editorEl?.innerText || editorEl?.textContent || '')).trim();
+      const containerText = (container?.innerText || '').trim();
+      const inputCleared = !editorText.includes(replyPrefix) && !containerText.includes(replyPrefix);
+
+      return {
+        visible,
+        inputCleared,
+        commentPreview: commentTextVisible.slice(0, 200),
+      };
+    }, { replyNeedle, replyPrefix }).catch(() => ({ visible: false, inputCleared: false }));
+
+    lastState = state;
+    if (state.visible) {
+      console.error('[work-modal] 顶层评论已在评论区可见');
+      return success({ ...sent.data, verified: true, unconfirmed: false });
+    }
+
+    await page.waitForTimeout(400).catch(() => {});
+  }
+
+  console.error(`[work-modal] 顶层评论发送未确认 visible=${lastState.visible} inputCleared=${lastState.inputCleared}`);
+  return success({
+    ...sent.data,
+    verified: false,
+    unconfirmed: true,
+    verification: lastState,
+  });
 }
 
 export async function verifyReplyInWorkModal(page, item, replyText, options = {}) {

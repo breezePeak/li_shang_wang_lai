@@ -325,8 +325,6 @@ export async function executeReturnVisitTask(page, task, options = {}) {
 
   if (likeState.data.alreadyLiked) {
     nextLikeStatus.value = 'already_liked';
-  } else if (Number(task?.targetWork?.userDigged || 0) === 1) {
-    nextLikeStatus.value = 'already_liked';
   } else if (!execute) {
     nextLikeStatus.value = 'pending';
   } else {
