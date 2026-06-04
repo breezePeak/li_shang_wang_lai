@@ -1607,11 +1607,12 @@ async function main() {
   const displayOnly = remaining.includes('--display-only');
   const explicitReplyJson = remaining.includes('--generate-reply-json');
   const explicitVisitJson = remaining.includes('--generate-visit-json');
+  const noExplicitJsonFlags = !explicitReplyJson && !explicitVisitJson;
   const scanPlan = {
     maxCount,
     collectTypes,
-    generateReplyJson: displayOnly ? false : (explicitReplyJson || (!explicitVisitJson && !displayOnly)),
-    generateVisitJson: displayOnly ? false : explicitVisitJson,
+    generateReplyJson: displayOnly ? false : (explicitReplyJson || noExplicitJsonFlags),
+    generateVisitJson: displayOnly ? false : (explicitVisitJson || noExplicitJsonFlags),
   };
   const validTypes = ['all', 'comment', 'like', 'reply', 'follow'];
   if (!validTypes.includes(type)) {
