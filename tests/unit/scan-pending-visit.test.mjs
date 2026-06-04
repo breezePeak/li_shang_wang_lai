@@ -7,7 +7,7 @@ import { upsertWorkComment } from '../../src/db/work-comment-repository.mjs';
 import {
   buildIdentityKey,
   buildTaskId,
-  listReturnVisitPendingPrepareTasksByIds,
+  listReturnVisitScanJsonTasks,
   RETURN_VISIT_STATUS,
   updateReturnVisitTask,
 } from '../../src/services/return-visit-task-service.mjs';
@@ -357,7 +357,7 @@ describe('writePendingVisitJson', () => {
   });
 });
 
-describe('listReturnVisitPendingPrepareTasksByIds', () => {
+describe('listReturnVisitScanJsonTasks', () => {
   beforeEach(() => {
     if (existsSync(TEST_DB)) rmSync(TEST_DB, { force: true });
     resetDb();
@@ -381,14 +381,182 @@ describe('listReturnVisitPendingPrepareTasksByIds', () => {
     const file = writePendingVisitJson([event], { maxCount: 10 });
     cleanupJson(file.filePath);
 
-    const taskId = taskIdFor('window-user', 'https://www.douyin.com/user/window-user', '窗口测试');
     const oldUpdatedAt = new Date(Date.now() - 3 * 86400000).toISOString();
-    getDb().prepare('UPDATE return_visit_tasks SET updated_at = ? WHERE task_id = ?').run(oldUpdatedAt, taskId);
+    getDb().prepare('UPDATE return_visit_tasks SET updated_at = ?').run(oldUpdatedAt);
 
-    const result = listReturnVisitPendingPrepareTasksByIds([taskId], { days: 1, limit: 10 });
+    const result = listReturnVisitScanJsonTasks({ days: 1, limit: 10 });
     expect(result.candidateCount).toBe(1);
     expect(result.filteredStatusCount).toBe(0);
     expect(result.filteredDaysCount).toBe(1);
     expect(result.tasks).toEqual([]);
+  });
+
+  it('returns pending tasks even when current scan has no events', () => {
+    // 直接通过 DB 创建任务（模拟之前扫描已入库）
+    const db = getDb();
+    const now = new Date().toISOString();
+    const taskId = taskIdFor('legacy-user', 'https://www.douyin.com/user/legacy-user', '遗留用户');
+    db.prepare(`
+      INSERT INTO return_visit_tasks (
+        task_id, identity_key, user_id, user_name, user_profile_url,
+        source_type, source_types_json, source_event_ids_json,
+        action_type, status, like_status, comment_status,
+        retry_count, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?,
+        'like', '["like"]', '[]',
+        'like_and_comment', ?, 'pending', 'pending',
+        0, ?, ?
+      )
+    `).run(taskId, 'legacy-key', 'legacy-user', '遗留用户',
+      'https://www.douyin.com/user/legacy-user',
+      RETURN_VISIT_STATUS.PENDING_VISIT, now, now);
+
+    // 空 events 也应该能查到 DB 中已有任务
+    const result = listReturnVisitScanJsonTasks({ limit: 10 });
+    expect(result.candidateCount).toBe(1);
+    expect(result.filteredStatusCount).toBe(0);
+    expect(result.filteredDaysCount).toBe(0);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].taskId).toBe(taskId);
+  });
+
+  it('returns failed_collect tasks for re-prepare', () => {
+    const db = getDb();
+    const now = new Date().toISOString();
+    const taskId = taskIdFor('failed-collect-user', 'https://www.douyin.com/user/fc-user', '失败采集');
+    db.prepare(`
+      INSERT INTO return_visit_tasks (
+        task_id, identity_key, user_id, user_name, user_profile_url,
+        source_type, source_types_json, source_event_ids_json,
+        action_type, status, like_status, comment_status,
+        retry_count, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?,
+        'like', '["like"]', '[]',
+        'like_and_comment', ?, 'pending', 'pending',
+        0, ?, ?
+      )
+    `).run(taskId, 'fc-key', 'failed-collect-user', '失败采集',
+      'https://www.douyin.com/user/fc-user',
+      RETURN_VISIT_STATUS.FAILED_COLLECT, now, now);
+
+    const result = listReturnVisitScanJsonTasks({ limit: 10 });
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].taskId).toBe(taskId);
+  });
+
+  it('excludes content_collected / comment_generated / pending_execute / done / skipped', () => {
+    const db = getDb();
+    const now = new Date().toISOString();
+    const undesiredStatuses = [
+      RETURN_VISIT_STATUS.CONTENT_COLLECTED,
+      RETURN_VISIT_STATUS.COMMENT_GENERATED,
+      RETURN_VISIT_STATUS.PENDING_EXECUTE,
+      RETURN_VISIT_STATUS.DONE,
+      RETURN_VISIT_STATUS.SKIPPED_NO_WORK,
+      RETURN_VISIT_STATUS.SKIPPED_PRIVATE,
+      RETURN_VISIT_STATUS.SKIPPED_NO_SUITABLE_WORK,
+      RETURN_VISIT_STATUS.EXECUTING,
+      RETURN_VISIT_STATUS.FAILED_LIKE,
+      RETURN_VISIT_STATUS.FAILED_COMMENT,
+      RETURN_VISIT_STATUS.FAILED,
+    ];
+    let idx = 0;
+    for (const status of undesiredStatuses) {
+      const taskId = taskIdFor(`unwanted-${idx}`, `https://www.douyin.com/user/unwanted-${idx}`, `排除用户${idx}`);
+      db.prepare(`
+        INSERT INTO return_visit_tasks (
+          task_id, identity_key, user_id, user_name, user_profile_url,
+          source_type, source_types_json, source_event_ids_json,
+          action_type, status, like_status, comment_status,
+          retry_count, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?,
+          'like', '["like"]', '[]',
+          'like_and_comment', ?, 'pending', 'pending',
+          0, ?, ?
+        )
+      `).run(taskId, `key-${idx}`, `unwanted-${idx}`, `排除用户${idx}`,
+        `https://www.douyin.com/user/unwanted-${idx}`,
+        status, now, now);
+      idx++;
+    }
+
+    const result = listReturnVisitScanJsonTasks({ limit: 100 });
+    expect(result.tasks).toHaveLength(0);
+    expect(result.filteredStatusCount).toBe(undesiredStatuses.length);
+  });
+
+  it('respects days filter', () => {
+    const db = getDb();
+    const now = new Date().toISOString();
+    const oldDate = new Date(Date.now() - 3 * 86400000).toISOString();
+
+    const recentTaskId = taskIdFor('recent-user', 'https://www.douyin.com/user/recent-user', '最近用户');
+    db.prepare(`
+      INSERT INTO return_visit_tasks (
+        task_id, identity_key, user_id, user_name, user_profile_url,
+        source_type, source_types_json, source_event_ids_json,
+        action_type, status, like_status, comment_status,
+        retry_count, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?,
+        'like', '["like"]', '[]',
+        'like_and_comment', ?, 'pending', 'pending',
+        0, ?, ?
+      )
+    `).run(recentTaskId, 'recent-key', 'recent-user', '最近用户',
+      'https://www.douyin.com/user/recent-user',
+      RETURN_VISIT_STATUS.PENDING_VISIT, now, now);
+
+    const oldTaskId = taskIdFor('old-user', 'https://www.douyin.com/user/old-user', '旧用户');
+    db.prepare(`
+      INSERT INTO return_visit_tasks (
+        task_id, identity_key, user_id, user_name, user_profile_url,
+        source_type, source_types_json, source_event_ids_json,
+        action_type, status, like_status, comment_status,
+        retry_count, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?,
+        'like', '["like"]', '[]',
+        'like_and_comment', ?, 'pending', 'pending',
+        0, ?, ?
+      )
+    `).run(oldTaskId, 'old-key', 'old-user', '旧用户',
+      'https://www.douyin.com/user/old-user',
+      RETURN_VISIT_STATUS.PENDING_VISIT, oldDate, oldDate);
+
+    const result = listReturnVisitScanJsonTasks({ days: 1, limit: 10 });
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].taskId).toBe(recentTaskId);
+    expect(result.filteredDaysCount).toBe(1);
+  });
+
+  it('respects maxCount limit', () => {
+    const db = getDb();
+    const now = new Date().toISOString();
+    for (let i = 0; i < 5; i++) {
+      const taskId = taskIdFor(`limit-user-${i}`, `https://www.douyin.com/user/limit-${i}`, `限制用户${i}`);
+      db.prepare(`
+        INSERT INTO return_visit_tasks (
+          task_id, identity_key, user_id, user_name, user_profile_url,
+          source_type, source_types_json, source_event_ids_json,
+          action_type, status, like_status, comment_status,
+          retry_count, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?,
+          'like', '["like"]', '[]',
+          'like_and_comment', ?, 'pending', 'pending',
+          0, ?, ?
+        )
+      `).run(taskId, `key-${i}`, `limit-user-${i}`, `限制用户${i}`,
+        `https://www.douyin.com/user/limit-${i}`,
+        RETURN_VISIT_STATUS.PENDING_VISIT, now, now);
+    }
+
+    const result = listReturnVisitScanJsonTasks({ limit: 3 });
+    expect(result.tasks).toHaveLength(3);
+    expect(result.candidateCount).toBe(5);
   });
 });

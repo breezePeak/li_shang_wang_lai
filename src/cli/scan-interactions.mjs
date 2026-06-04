@@ -26,7 +26,7 @@ import {
   createOrUpdateReturnVisitTasksFromItems,
   buildIdentityKey,
   buildTaskId,
-  listReturnVisitPendingPrepareTasksByIds,
+  listReturnVisitScanJsonTasks,
 } from '../services/return-visit-task-service.mjs';
 
 async function runCommentScan(page, run) {
@@ -783,16 +783,9 @@ export function writePendingVisitJson(events, { days = null, maxCount = 100, col
 
   const sourceItems = Array.from(groupedItems.values()).flatMap(group => group.items);
   createOrUpdateReturnVisitTasksFromItems(sourceItems);
-  const taskIds = Array.from(groupedItems.values()).map(({ primary: item }) => {
-    const identityKey = buildIdentityKey({
-      userId: item.actor_profile_key || '',
-      userProfileUrl: item.actor_profile_url || '',
-      userName: item.actor_name || '',
-    });
-    return identityKey ? buildTaskId(identityKey) : '';
-  }).filter(Boolean);
 
-  const dbResult = listReturnVisitPendingPrepareTasksByIds(taskIds, {
+  // 从数据库全量查询所有符合扫描参数的待回访准备任务，不限定本轮 taskIds
+  const dbResult = listReturnVisitScanJsonTasks({
     days,
     limit: maxCount,
   });

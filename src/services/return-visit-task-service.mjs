@@ -555,6 +555,70 @@ export function listReturnVisitPendingPrepareTasksByIds(taskIds = [], {
   };
 }
 
+/**
+ * 从数据库全量查询待回访准备任务（不限定本轮 taskIds）
+ * 用于 interactions:scan 生成 pending-visits JSON。
+ *
+ * 状态过滤：只输出 pending_visit / failed_collect。
+ * 不输出 content_collected / comment_generated / pending_execute 等后续阶段状态，
+ * 也不输出 done / skipped_* / failed_like / failed_comment 等终态。
+ *
+ * @param {Object} options
+ * @param {number|null} options.days - 时间窗口（天），基于 updated_at，>0 生效
+ * @param {number} options.limit - 最大输出条数
+ * @param {number} options.maxRetryCount - 最大重试次数
+ * @returns {{ tasks: Array, candidateCount: number, filteredStatusCount: number, filteredDaysCount: number }}
+ */
+export function listReturnVisitScanJsonTasks({
+  days = null,
+  limit = 100,
+  maxRetryCount = 2,
+} = {}) {
+  const db = getDb();
+  const statusSet = new Set(RETURN_VISIT_SCAN_JSON_STATUS);
+  const nowMs = Date.now();
+  const minUpdatedAtMs = Number(days || 0) > 0 ? nowMs - Number(days) * 86400000 : null;
+
+  const allRows = db.prepare(`
+    SELECT *
+    FROM return_visit_tasks
+    WHERE retry_count <= ?
+      AND user_profile_url IS NOT NULL
+      AND TRIM(user_profile_url) != ''
+    ORDER BY updated_at ASC, id ASC
+  `).all(maxRetryCount);
+
+  const candidateCount = allRows.length;
+  let filteredStatusCount = 0;
+  let filteredDaysCount = 0;
+  const tasks = [];
+
+  for (const row of allRows) {
+    if (!statusSet.has(row.status)) {
+      filteredStatusCount++;
+      continue;
+    }
+
+    if (minUpdatedAtMs !== null) {
+      const updatedAtMs = Date.parse(row.updated_at || '');
+      if (!Number.isFinite(updatedAtMs) || updatedAtMs < minUpdatedAtMs) {
+        filteredDaysCount++;
+        continue;
+      }
+    }
+
+    tasks.push(mapRowToTask(row));
+    if (tasks.length >= limit) break;
+  }
+
+  return {
+    tasks,
+    candidateCount,
+    filteredStatusCount,
+    filteredDaysCount,
+  };
+}
+
 export function updateReturnVisitTask(taskId, patch = {}) {
   const db = getDb();
   const updates = [];
