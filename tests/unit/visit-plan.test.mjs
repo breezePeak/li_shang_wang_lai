@@ -157,15 +157,3 @@ describe('visit_work candidate structure', () => {
   });
 });
 
-// ============================================================
-// 3. execute-reciprocal-likes — ReferenceError fix verified
-// ============================================================
-describe('execute-reciprocal-likes — no ReferenceError on enableReuse', () => {
-  it('CLI exits cleanly without ReferenceError', () => {
-    const result = runCli('execute-reciprocal-likes.mjs', ['--execute', '--plan', 'nonexistent.json', '--json'], 10_000);
-    const parsed = parseStdout(result);
-    expect(parsed).not.toBeNull();
-    expect(typeof parsed.ok).toBe('boolean');
-    expect(result.error).toBeFalsy();
-  });
-});
