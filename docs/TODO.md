@@ -270,49 +270,85 @@ profile_resolution_status  status  scanned_at
 
 ### 2.1 评论回复内部流程
 
-Agent 直接填写 JSON 的 `reply_text`，`comments:execute` 执行时写 DB 并回复。
+Agent 直接填写 JSON 的 `reply_text`，`comments:execute` 按作品分组执行“单作品单遍向下扫描”。
 
 ```text
 JSON（Agent 已填写 reply_text）
  ↓
 comments:execute（执行阶段 — 默认真实执行）
- ├─ 加载 JSON，提取全部评论（无数量限制）
+ ├─ 加载 JSON，提取全部评论（无数量限制，兼容 works[].comments[] / 顶层数组）
  │
- ├─ 逐条检查：
+ ├─ 逐条校验 / 补全执行上下文：
  │  ├─ reply_text 为空 → 日志跳过（skipped_empty_reply）
  │  ├─ 已 succeeded → 跳过重复执行（EXECUTE_ALREADY_CONFIRMED）
  │  └─ 已 sent_unverified → 跳过重复执行（EXECUTE_ALREADY_SENT_UNVERIFIED）
  │
- └─ 逐条真实执行：
+ ├─ 按作品分组 (workUrl / workId / modalId)
+ │
+ └─ 每个作品 group 只打开一次：
     启动浏览器
     ↓
-    ├─ saveReplyText → 写入 reply_text 到 work_comments
+    ├─ 创建 commentListCollector（监听 /aweme/v1/web/comment/list/）
+    │  └─ group 级 finally 统一 stop()
     │
-    ├─ page.goto(workUrl) → 等待作品弹窗
-    │  └─ 弹窗未出现 → markCommentBlocked
+    ├─ page.goto(workUrl) → waitForWorkModal → waitForWorkCommentArea
+    │  └─ 失败 → 当前 group 全部 markCommentBlocked
     │
-    ├─ findCommentInWorkModal (作品内滚动最多 30 轮)
-    │  └─ 找不到 → markCommentBlocked
+    ├─ 建立 pendingMap（当前作品全部待回复评论）
     │
-    ├─ openReplyBoxByIndex → 打开回复框
-    │  └─ 失败 → markCommentBlocked
+    ├─ executeSinglePassForWorkGroup
+    │  ┌── 当前作品单遍扫描循环 ────────────────────────────────────────┐
+    │  │                                                               │
+    │  │  collectVisibleWorkCommentCandidates()                        │
+    │  │  └─ 采集当前屏可见评论候选：cid / actor / comment / time      │
+    │  │                                                               │
+    │  │  planViewportPendingMatches()                                 │
+    │  │  ├─ buildWorkReplyTarget()                                    │
+    │  │  │  目标评论优先使用 JSON / DB / raw_comment_json / comment_key │
+    │  │  ├─ comment/list 旁路补全 actor/comment/cid                   │
+    │  │  └─ pickWorkCommentCandidate()                                │
+    │  │     匹配优先级: cid → text+actor → text                       │
+    │  │                                                               │
+    │  │  当前屏命中时：                                                │
+    │  │  ├─ openReplyBoxForMatchedWorkComment()                       │
+    │  │  │  真实鼠标点击“回复”，并确保底部 editor 已进入可输入态        │
+    │  │  ├─ fillWorkReplyText()                                       │
+    │  │  │  优先 contenteditable；失败回退 textarea/input             │
+    │  │  ├─ clickSendWorkReply()                                      │
+    │  │  │  优先发送按钮，找不到则回退 Enter                          │
+    │  │  ├─ verifyWorkReplyVisible()                                  │
+    │  │  ├─ 成功 → markCommentReplied + saveReplyText                 │
+    │  │  └─ 未确认 → markCommentSentUnverified                        │
+    │  │                                                               │
+    │  │  每成功/阻断一条后：                                           │
+    │  │  ├─ 从 pendingMap 移除                                        │
+    │  │  └─ 重新采集当前屏 candidates，继续处理本屏剩余 pending       │
+    │  │                                                               │
+    │  │  当前屏无可处理项时才 scrollCommentAreaOnce()                 │
+    │  │                                                               │
+    │  │  停止条件：                                                   │
+    │  │  ├─ pending 清空                                              │
+    │  │  ├─ comment/list has_more=0 且当前屏无命中                    │
+    │  │  ├─ 评论区滚动失败 / 到底                                      │
+    │  │  ├─ 连续无进展                                                │
+    │  │  └─ 达到最大 viewport 轮次                                    │
+    │  └───────────────────────────────────────────────────────────────┘
     │
-    ├─ 模拟打字 → sendReplyInWorkModal → 发送
-    │  └─ 失败 → markCommentBlocked
-    │
-    ├─ verifyReplyInWorkModal → 确认回复
-    │  ├─ 确认成功 → markCommentReplied
-    │  │  reply_status = succeeded
-    │  │  同时更新 interaction_events.status = replied
-    │  └─ 已发送未确认 → markCommentSentUnverified
-    │     reply_status = sent_unverified
+    ├─ 剩余 pending → markCommentBlocked(single_pass_not_found)
     │
     └─ 回写 JSON 状态码
        ├─ 全部成功或全部可跳过 → EXECUTE_JSON_DONE（使用 isSkippedResult 判断）
-       └─ 存在真正的失败 → EXECUTE_JSON_PARTIAL
-       重复执行已成功 → EXECUTE_ALREADY_CONFIRMED
-       重复执行已 sent_unverified → EXECUTE_ALREADY_SENT_UNVERIFIED
+       └─ 存在真正失败 / 未确认 → EXECUTE_JSON_PARTIAL
+          重复执行已成功 → EXECUTE_ALREADY_CONFIRMED
+          重复执行已 sent_unverified → EXECUTE_ALREADY_SENT_UNVERIFIED
 ```
+
+说明：
+
+- 主流程不再使用创作者评论管理页，也不再按 `commentIndex` 点回复。
+- 同作品多条 pending 必须在同一个作品会话里处理，回复成功后不会主动 `Escape` 关闭作品 modal。
+- `comment/list` 只作为旁路数据源辅助确认 / 补全，不负责驱动逐条滚动查找。
+- 当前屏多条 pending 可同时命中时，必须当前屏处理完再滚动下一屏。
 
 ### 2.2 状态码（回评阶段）
 
@@ -331,6 +367,16 @@ comments:execute（执行阶段 — 默认真实执行）
 #### 待回复评论 JSON
 
 采集完成后，从 `work_comments` 查询 `reply_status = 'pending'` 的评论，按 `work_id || modal_id || '__unknown__'` 聚合输出 JSON。字段优先沿用 `work_comments` 现有字段，不做扩表。
+
+执行阶段会优先从以下来源回填目标评论唯一标识：
+
+```text
+targetCommentId / commentTargetId / commentCid / cid
+↓
+comment_key
+↓
+raw_comment_json.comment.comment.cid
+```
 
 ---
 
