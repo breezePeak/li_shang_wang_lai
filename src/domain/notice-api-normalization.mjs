@@ -1,4 +1,4 @@
-function safeJsonStringify(value) {
+export function safeJsonStringify(value) {
   try {
     return JSON.stringify(value);
   } catch {

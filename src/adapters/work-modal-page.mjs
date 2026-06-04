@@ -1259,3 +1259,121 @@ export async function verifyReplyInWorkModal(page, item, replyText, { timeoutMs 
   console.error(`[work-modal] 验证超时`);
   return blocking(RESULT_CODES.COMMENT_SEND_UNCONFIRMED, '回复未出现在评论区', { recoverable: true });
 }
+
+/**
+ * DOM 仅负责滚动评论区触发网络请求，不解析评论内容。
+ * 滚动步长 600px，返回滚动前后状态。
+ */
+export async function scrollCommentAreaOnce(page) {
+  return page.evaluate(() => {
+    const commentArea = document.querySelector('.comment-mainContent');
+    if (!commentArea) return { ok: false, reason: 'comment_area_not_found' };
+
+    const before = commentArea.scrollTop;
+    const step = Math.min(600, commentArea.scrollHeight - commentArea.scrollTop);
+    commentArea.scrollTop += step;
+
+    return {
+      ok: true,
+      before,
+      after: commentArea.scrollTop,
+      atEnd: commentArea.scrollTop === before,
+      scrollHeight: commentArea.scrollHeight,
+      clientHeight: commentArea.clientHeight,
+    };
+  });
+}
+
+/**
+ * 在当前作品弹窗中，通过监听 /aweme/v1/web/comment/list/ 按 cid 精确查找评论。
+ *
+ * 调用时机：必须在 waitForWorkModal() 之后，且 collector 应在打开作品页之前就已创建。
+ * 如果评论已在首页 response 中出现，直接返回；否则滚动评论区触发更多分页，最多滚动 maxScrollPages 次。
+ *
+ * @param {Page} page - Playwright page
+ * @param {Object} opts
+ * @param {string} opts.targetCommentId - 目标 cid
+ * @param {number} [opts.maxScrollPages=5] - 最大滚动页数
+ * @param {number} [opts.waitTimeoutMs=5000] - 首次等待超时
+ * @param {Object} [opts.collector] - 预创建的 collector（必须在 modal 打开前创建）
+ * @returns {Object} { ok, reason, comment?, stats?, scrollCount? }
+ */
+export async function findCommentByCidViaCommentListApi(page, {
+  targetCommentId,
+  maxScrollPages = 5,
+  waitTimeoutMs = 5000,
+  collector = null,
+} = {}) {
+  if (!targetCommentId) {
+    return { ok: false, reason: 'missing_target_comment_id' };
+  }
+
+  const target = String(targetCommentId).trim();
+  console.error(`[comment-list-api] start target cid=${target}`);
+
+  let ownCollector = null;
+  let coll = collector;
+
+  if (!coll) {
+    const { createCommentListApiCollector } = await import('./comment-list-api-listener.mjs');
+    ownCollector = createCommentListApiCollector(page);
+    coll = ownCollector;
+  }
+
+  try {
+    // 先等待一下，看是否已在首次响应中捕获到目标评论
+    let found = await coll.waitForComment(target, { timeoutMs: waitTimeoutMs });
+    if (found) {
+      console.error(`[comment-list-api] found cid=${target} source=comment-list-api text=${found.commentText}`);
+      return { ok: true, reason: 'found_by_comment_list_api', comment: found, stats: coll.getStats() };
+    }
+
+    // 未找到，滚动评论区触发分页
+    for (let i = 0; i < maxScrollPages; i++) {
+      const scrollResult = await scrollCommentAreaOnce(page);
+      if (!scrollResult.ok) {
+        console.error(`[comment-list-api] 评论区不可滚动: ${scrollResult.reason}`);
+        break;
+      }
+
+      // 等待新接口数据
+      found = await coll.waitForComment(target, { timeoutMs: 2500 });
+
+      if (found) {
+        console.error(`[comment-list-api] found cid=${target} source=comment-list-api_after_scroll text=${found.commentText}`);
+        return {
+          ok: true,
+          reason: 'found_by_comment_list_api_after_scroll',
+          comment: found,
+          stats: coll.getStats(),
+          scrollCount: i + 1,
+        };
+      }
+
+      const stats = coll.getStats();
+      // has_more 明确为 0 时不再滚动
+      if (Number(stats.hasMore) === 0) {
+        console.error(`[comment-list-api] has_more=0 停止滚动，已捕获 ${stats.commentCount} 条评论`);
+        break;
+      }
+
+      if (scrollResult.atEnd) {
+        console.error(`[comment-list-api] 评论区已滚动到底部`);
+        break;
+      }
+    }
+
+    const stats = coll.getStats();
+    console.error(`[comment-list-api] not found cid=${target} responses=${stats.responseCount} comments=${stats.commentCount} has_more=${stats.hasMore}`);
+    return {
+      ok: false,
+      reason: 'comment_not_found_in_comment_list_api',
+      stats,
+      sampleComments: coll.getAllComments().slice(0, 5),
+    };
+  } finally {
+    if (ownCollector) {
+      ownCollector.stop();
+    }
+  }
+}

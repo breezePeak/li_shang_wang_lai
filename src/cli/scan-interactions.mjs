@@ -376,12 +376,282 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
     waitForWorkModal,
     extractWorkModalContext,
     findUnrepliedCommentsInModal,
+    findCommentByCidViaCommentListApi,
   } = await import('../adapters/work-modal-page.mjs');
+
+  const { createCommentListApiCollector } = await import('../adapters/comment-list-api-listener.mjs');
+
+  // 在打开作品页之前创建 comment/list collector，确保捕获首屏请求
+  const commentListCollector = createCommentListApiCollector(page);
 
   const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
   if (!modalReady.ok) {
+    commentListCollector.stop();
     return { ok: false, reason: modalReady.message || modalReady.code || 'work-modal-not-ready' };
   }
+
+  const contextResult = await extractWorkModalContext(page);
+  const context = contextResult.ok ? (contextResult.data || {}) : {};
+  console.error(`[scan] 作品标题: ${context.workTitle || '(无标题)'}`);
+  console.error(`[scan] 作品内容: ${context.workText || '(无内容)'}`);
+  const identity = getWorkIdentity(n, context);
+  if (!identity.workId && identity.modalId) identity.workId = identity.modalId;
+
+  if (runtimeCollectedWorkKeys) {
+    const hit = getRuntimeWorkSeenKeys(identity).find(key => runtimeCollectedWorkKeys.has(key));
+    if (hit) {
+      commentListCollector.stop();
+      console.error(`[scan]   作品 ${identity.workId || identity.modalId} 已在本轮采集过评论，跳过重复采集 (${hit})`);
+      return { ok: true, skipped: true, workId: identity.workId, modalId: identity.modalId, total: 0, inWindow: 0, pending: 0, inserted: 0, enriched: 0, duplicate: 0 };
+    }
+  }
+
+  const workResult = upsertWorkContext({
+    workId: identity.workId,
+    modalId: identity.modalId,
+    workUrl: identity.workUrl,
+    workTitle: context.workTitle || n.workTitle || null,
+    workType: context.workType || null,
+    thumbnailKey: n.thumbnailKey || null,
+    thumbnailSrc: context.thumbnailSrc || n.thumbnailSrc || null,
+    authorName: context.authorName || null,
+    authorProfileUrl: context.authorProfileUrl || null,
+    authorProfileKey: context.authorProfileKey || null,
+    publishedAt: context.publishedAtText || null,
+    rawContextJson: JSON.stringify({
+      source: 'notification-comment',
+      notificationItemKey: n.notificationItemKey || null,
+      rawText: n.rawText || null,
+      modalContext: context,
+    }),
+  });
+
+  addWorkKeys(dedupeContext, identity);
+
+  // 优先使用 comment/list API 按 cid 精确定位评论
+  const targetCommentId = n.commentId || n.platformEventId || null;
+
+  if (targetCommentId) {
+    console.error(`[scan] 补采作品评论: workId=${identity.workId} cid=${targetCommentId} strategy=comment-list-api`);
+
+    const apiResult = await findCommentByCidViaCommentListApi(page, {
+      targetCommentId,
+      maxScrollPages: 5,
+      waitTimeoutMs: 5000,
+      collector: commentListCollector,
+    });
+
+    if (apiResult.ok && apiResult.comment) {
+      const c = apiResult.comment;
+      const commentKey = buildCommentKey({
+        workId: identity.workId,
+        modalId: identity.modalId,
+        comment: {
+          actorProfileKey: c.actorProfileKey,
+          actorProfileUrl: c.actorProfileUrl,
+          actorName: c.actorName,
+          commentText: c.commentText,
+          eventTimeText: c.eventTimeText,
+        },
+      });
+      const dedupeKey = `${identity.workId || identity.modalId || '__unknown__'}:${commentKey}`;
+
+      if (!dedupeContext.commentKeys.has(dedupeKey)) {
+        const result = upsertWorkComment({
+          workId: identity.workId,
+          workUrl: identity.workUrl,
+          modalId: identity.modalId,
+          actorName: c.actorName || null,
+          actorProfileUrl: c.actorProfileUrl || null,
+          actorProfileKey: c.actorProfileKey || null,
+          commentText: c.commentText || '',
+          eventTimeText: c.eventTimeText || null,
+          commentKey,
+          sourceEventId,
+          sourceNotificationKey: n.notificationItemKey || null,
+          rawCommentJson: JSON.stringify({
+            source: 'comment-list-api',
+            notificationItemKey: n.notificationItemKey || null,
+            rawNotificationText: n.rawText || null,
+            comment: c,
+            stats: apiResult.stats || null,
+            scrollCount: apiResult.scrollCount || 0,
+          }),
+        });
+
+        dedupeContext.commentKeys.add(dedupeKey);
+
+        console.error(`[scan]   + comment/list api 命中 cid=${targetCommentId} actor=${compactLogValue(c.actorName, 30)} text=${compactLogValue(c.commentText, 40)}`);
+
+        return {
+          ok: true,
+          workResult,
+          total: 1,
+          inWindow: 1,
+          pending: 1,
+          inserted: result.action === 'inserted' ? 1 : 0,
+          enriched: result.action === 'enriched' ? 1 : 0,
+          duplicate: result.action === 'inserted' || result.action === 'enriched' ? 0 : 1,
+          workId: identity.workId,
+          modalId: identity.modalId,
+        };
+      } else {
+        console.error(`[scan]   - comment/list api 命中 cid=${targetCommentId} 但评论已存在`);
+        return {
+          ok: true,
+          workResult,
+          total: 0,
+          inWindow: 0,
+          pending: 0,
+          inserted: 0,
+          enriched: 0,
+          duplicate: 1,
+          workId: identity.workId,
+          modalId: identity.modalId,
+        };
+      }
+    }
+
+    // comment/list API 未命中，检查 notice 是否自带了 commentText
+    const noticeCommentText = n.content || n.commentText || null;
+    if (noticeCommentText) {
+      console.error(`[comment-list-api] fallback source=notice_api_fallback_after_comment_list_miss cid=${targetCommentId}`);
+      const commentKey = n.commentId || stableHash([
+        identity.workId,
+        n.actorProfileKey || n.actorName || '',
+        noticeCommentText,
+        n.timeText || '',
+      ].join('||'));
+
+      const dedupeKey = `${identity.workId || identity.modalId || '__unknown__'}:${commentKey}`;
+      if (!dedupeContext.commentKeys.has(dedupeKey)) {
+        const result = upsertWorkComment({
+          workId: identity.workId,
+          workUrl: identity.workUrl,
+          modalId: identity.modalId,
+          actorName: n.actorName || n.username || null,
+          actorProfileUrl: n.actorProfileUrl || null,
+          actorProfileKey: n.actorProfileKey || null,
+          commentText: noticeCommentText,
+          eventTimeText: n.timeText || n.eventTimeText || null,
+          commentKey,
+          sourceEventId,
+          sourceNotificationKey: n.notificationItemKey || null,
+          rawCommentJson: JSON.stringify({
+            source: 'notice_api_fallback_after_comment_list_miss',
+            notificationItemKey: n.notificationItemKey || null,
+            rawNotificationText: n.rawText || null,
+            targetCommentId,
+            stats: apiResult.stats || null,
+          }),
+        });
+
+        dedupeContext.commentKeys.add(dedupeKey);
+
+        console.error(`[scan]   + notice fallback cid=${targetCommentId} text=${compactLogValue(noticeCommentText, 40)}`);
+
+        return {
+          ok: true,
+          workResult,
+          total: 0,
+          inWindow: 0,
+          pending: 1,
+          inserted: result.action === 'inserted' ? 1 : 0,
+          enriched: result.action === 'enriched' ? 1 : 0,
+          duplicate: 0,
+          workId: identity.workId,
+          modalId: identity.modalId,
+        };
+      }
+    }
+
+    // 都没有命中，日志已由 findCommentByCidViaCommentListApi 输出
+    // 继续 fallback 到 DOM
+    console.error(`[comment-list-api] fallback source=dom reason=comment_not_found_in_api_and_no_notice_text cid=${targetCommentId}`);
+  } else {
+    console.error(`[comment-list-api] fallback source=dom reason=missing_target_comment_id`);
+  }
+
+  // DOM fallback - 保留旧逻辑
+  commentListCollector.stop();
+
+  const alreadyRepliedKeys = new Set(listReplyTrackedCommentKeysForWork({
+    workId: identity.workId,
+    modalId: identity.modalId,
+  }));
+
+  const commentsResult = await findUnrepliedCommentsInModal(page, {
+    maxScrolls: 50,
+    alreadyRepliedKeys,
+    selfNickname: context.authorName || '',
+    maxAgeDays: notificationDays,
+    oldCommentStopCount: 3,
+  });
+  if (!commentsResult.ok) {
+    return { ok: false, reason: commentsResult.message || commentsResult.code || 'find-comments-failed' };
+  }
+
+  const visibleComments = commentsResult.data?.comments || [];
+  const comments = commentsResult.data?.unreplied || [];
+  let inserted = 0;
+  let duplicate = 0;
+  let enriched = 0;
+
+  for (const c of visibleComments) {
+    addCommentWorkHint(dedupeContext, identity, c);
+  }
+
+  for (const c of comments) {
+    const commentKey = buildCommentKey({ workId: identity.workId, modalId: identity.modalId, comment: c });
+    const dedupeKey = `${identity.workId || identity.modalId || '__unknown__'}:${commentKey}`;
+    if (dedupeContext.commentKeys.has(dedupeKey)) {
+      duplicate++;
+      console.error(`[scan]   - 评论重复 actor=${compactLogValue(c.actorName, 30)} comment=${compactLogValue(c.commentText, 40)} reason=in_memory_comment_key`);
+      continue;
+    }
+
+    const result = upsertWorkComment({
+      workId: identity.workId,
+      workUrl: identity.workUrl,
+      modalId: identity.modalId,
+      actorName: c.actorName || null,
+      actorProfileUrl: c.actorProfileUrl || null,
+      actorProfileKey: c.actorProfileKey || null,
+      commentText: c.commentText || '',
+      eventTimeText: c.eventTimeText || null,
+      commentKey,
+      sourceEventId,
+      sourceNotificationKey: n.notificationItemKey || null,
+      rawCommentJson: JSON.stringify({
+        source: 'notification-work-modal',
+        notificationItemKey: n.notificationItemKey || null,
+        rawNotificationText: n.rawText || null,
+        comment: c,
+      }),
+    });
+
+    dedupeContext.commentKeys.add(dedupeKey);
+    if (result.action === 'inserted') inserted++;
+    else if (result.action === 'enriched') enriched++;
+    else {
+      duplicate++;
+      console.error(`[scan]   - 评论重复 actor=${compactLogValue(c.actorName, 30)} comment=${compactLogValue(c.commentText, 40)} reason=db_upsert_duplicate`);
+    }
+  }
+
+  return {
+    ok: true,
+    workResult,
+    total: commentsResult.data?.total || 0,
+    inWindow: commentsResult.data?.comments?.length || 0,
+    pending: comments.length,
+    inserted,
+    enriched,
+    duplicate,
+    workId: identity.workId,
+    modalId: identity.modalId,
+  };
+}
 
   const contextResult = await extractWorkModalContext(page);
   const context = contextResult.ok ? (contextResult.data || {}) : {};
