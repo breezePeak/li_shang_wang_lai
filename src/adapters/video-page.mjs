@@ -919,34 +919,42 @@ export async function clickLike(page, { execute = false } = {}) {
       );
     }
 
-    const targetBtn = page.locator('[data-temp-like-btn="true"]').first();
-    const count = await targetBtn.count();
-    if (count > 0) {
-      try {
-        await targetBtn.click({ timeout: 5000 });
-      } catch {
-        const clicked = await page.evaluate(() => {
-          const marked = document.querySelector('[data-temp-like-btn="true"]');
-          if (!marked) return false;
-          const innerButton = marked.querySelector('button, [role="button"]');
-          (innerButton || marked).click();
-          return true;
-        });
-        if (!clicked) {
-          await targetBtn.click({ force: true, timeout: 5000 });
-        }
-      }
-      console.error(`[video-page] 已点击点赞按钮 (${likeState.data?.signal || 'marked-btn'})`);
-      await page.waitForTimeout(2000);
-      return success({ clicked: true });
-    }
+    const clickExactLikeButton = async () => {
+      const exactLikeSelectors = [
+        '[data-temp-like-btn="true"]',
+        '[data-e2e="video-player-digg"]',
+        '.t5VMknM2 .MinpposV > .AOWKbsTg:first-child',
+      ];
 
-    // 备用兜底
-    const fallbackBtn = page.locator('.t5VMknM2 .MinpposV > .AOWKbsTg').first();
-    if (await fallbackBtn.count() > 0) {
-      await fallbackBtn.click();
-      console.error('[video-page] 已点击点赞按钮 (action bar fallback)');
-      await page.waitForTimeout(2000);
+      for (const selector of exactLikeSelectors) {
+        const targetBtn = page.locator(selector).first();
+        if (await targetBtn.count() === 0) continue;
+        if (!(await targetBtn.isVisible().catch(() => false))) continue;
+
+        try {
+          await targetBtn.click({ timeout: 5000 });
+        } catch {
+          const clicked = await page.evaluate((sel) => {
+            const marked = document.querySelector(sel);
+            if (!marked) return false;
+            const innerButton = marked.querySelector('button, [role="button"]');
+            (innerButton || marked).click();
+            return true;
+          }, selector).catch(() => false);
+          if (!clicked) {
+            await targetBtn.click({ force: true, timeout: 5000 });
+          }
+        }
+
+        console.error(`[video-page] 已点击点赞按钮 (${selector})`);
+        await page.waitForTimeout(2000);
+        return true;
+      }
+
+      return false;
+    };
+
+    if (await clickExactLikeButton()) {
       return success({ clicked: true });
     }
 
@@ -1101,6 +1109,7 @@ async function ensureCommentPanelOpen(page) {
 
     const commentBtns = [
       page.locator('[data-e2e="feed-comment-icon"]'),
+      page.locator('.swmK_9e_.PWegAy8W.LDWpmlY0'),
       page.locator('.t5VMknM2 .MinpposV > .AOWKbsTg').nth(1), // action bar 第二个
       page.locator('[data-e2e="video-comment"]'),
       page.locator('[data-e2e="comment-icon"]'),
