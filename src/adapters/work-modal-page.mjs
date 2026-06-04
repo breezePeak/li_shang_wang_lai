@@ -81,9 +81,79 @@ async function captureReplyBoxDebug(page, phase) {
 }
 
 async function typeIntoReplyDraftEditor(page, replyText) {
-  const editor = page.locator('.comment-input-container [contenteditable="true"], .comment-input-container textarea, .comment-input-container input[type="text"]').last();
+  const editorPrepared = await page.evaluate(() => {
+    const SEARCH_PHRASES = ['搜索', 'search', '查询'];
+    const DIRECT_SELECTORS = [
+      '.comment-input-container [contenteditable="true"]',
+      '.comment-input-container textarea',
+      '.comment-input-container input[type="text"]',
+      '.comment-input-inner-container [contenteditable="true"]',
+      '.comment-input-inner-container textarea',
+      '.comment-input-inner-container input[type="text"]',
+      '[contenteditable="true"][data-placeholder*="评"]',
+      '[contenteditable="true"][placeholder*="评"]',
+      '[contenteditable="true"][data-placeholder*="说点什么"]',
+      '[contenteditable="true"][placeholder*="说点什么"]',
+      'textarea[placeholder*="评"]',
+      'textarea[placeholder*="说点什么"]',
+      'input[placeholder*="评"]',
+      'input[placeholder*="说点什么"]',
+      'input[placeholder*="弹幕"]',
+    ];
+
+    function visible(el) {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 20 || rect.height < 18) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    }
+
+    function isSearchInput(el) {
+      const placeholder = (el.getAttribute('placeholder') || el.getAttribute('data-placeholder') || '').toLowerCase();
+      const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
+      const combined = `${placeholder} ${ariaLabel}`;
+      return SEARCH_PHRASES.some(text => combined.includes(text));
+    }
+
+    document.querySelectorAll('[data-return-visit-editor="true"]').forEach(el => el.removeAttribute('data-return-visit-editor'));
+
+    const candidates = [];
+    for (const selector of DIRECT_SELECTORS) {
+      for (const el of document.querySelectorAll(selector)) {
+        if (!visible(el) || isSearchInput(el)) continue;
+        const rect = el.getBoundingClientRect();
+        candidates.push({ el, rect, score: rect.y + rect.height });
+      }
+    }
+
+    if (!candidates.length) {
+      for (const el of document.querySelectorAll('input, textarea, [contenteditable="true"], [role="textbox"]')) {
+        if (!visible(el) || isSearchInput(el)) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.top < window.innerHeight * 0.45) continue;
+        candidates.push({ el, rect, score: rect.y + rect.height });
+      }
+    }
+
+    candidates.sort((a, b) => b.score - a.score || b.rect.width - a.rect.width);
+    const target = candidates[0]?.el;
+    if (!target) return { ok: false, reason: 'visible_editor_not_found' };
+
+    target.setAttribute('data-return-visit-editor', 'true');
+    target.scrollIntoView({ block: 'center', behavior: 'instant' });
+    target.focus?.();
+    target.click?.();
+    return { ok: true };
+  }).catch(() => ({ ok: false, reason: 'prepare_editor_failed' }));
+
+  if (!editorPrepared.ok) {
+    return { ok: false, reason: editorPrepared.reason || 'prepare_editor_failed' };
+  }
+
+  const editor = page.locator('[data-return-visit-editor="true"]').last();
   await editor.waitFor({ state: 'visible', timeout: 3000 });
-  await editor.click({ timeout: 3000 });
+  await editor.click({ timeout: 3000 }).catch(() => {});
 
   // 逐字输入模拟真人打字效果
   for (const char of replyText) {
@@ -91,9 +161,10 @@ async function typeIntoReplyDraftEditor(page, replyText) {
   }
 
   const typed = await page.evaluate((text) => {
-    const container = document.querySelector('.comment-input-container');
-    const editorEl = container?.querySelector('[contenteditable="true"], textarea, input[type="text"]');
-    const editorText = typeof editorEl?.value === 'string' ? editorEl.value : editorEl?.innerText;
+    const container = document.querySelector('.comment-input-container') || document.querySelector('.comment-input-inner-container');
+    const editorEl = document.querySelector('[data-return-visit-editor="true"]')
+      || container?.querySelector('[contenteditable="true"], textarea, input[type="text"]');
+    const editorText = typeof editorEl?.value === 'string' ? editorEl.value : (editorEl?.innerText || editorEl?.textContent);
     const visibleText = (container?.innerText || editorText || '').trim();
     if (visibleText.includes(text) || visibleText.includes(text.slice(0, Math.min(10, text.length)))) {
       return { ok: true, method: 'keyboard_insertText' };
@@ -136,23 +207,27 @@ async function typeIntoReplyDraftEditor(page, replyText) {
 
 async function clickReplySendControl(page) {
   return await page.evaluate(() => {
-    const container = document.querySelector('.comment-input-container');
-    if (!container) return { ok: false, reason: 'comment input container not found' };
-
     function visible(el) {
       const rect = el.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0;
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
     }
 
-    const candidates = Array.from(container.querySelectorAll('button, [role="button"], div, span'))
+    const container = document.querySelector('.comment-input-container') || document.querySelector('.comment-input-inner-container');
+    const roots = container ? [container, document] : [document];
+    const candidates = roots.flatMap(root => Array.from(root.querySelectorAll('button, [role="button"], div, span')))
       .filter(visible)
       .map(el => {
         const text = (el.innerText || el.textContent || '').trim();
         const aria = el.getAttribute('aria-label') || '';
         const title = el.getAttribute('title') || '';
-        return { el, label: `${text} ${aria} ${title}`.trim() };
+        const rect = el.getBoundingClientRect();
+        return { el, rect, label: `${text} ${aria} ${title}`.trim() };
       })
-      .filter(({ label }) => label === '发送' || label.includes('发送'));
+      .filter(({ label, rect }) => (label === '发送' || label.includes('发送')) && rect.top >= window.innerHeight * 0.45);
+
+    candidates.sort((a, b) => b.rect.y - a.rect.y || b.rect.width - a.rect.width);
 
     for (const { el } of candidates) {
       const target = el.closest('button,[role="button"]') || el;
@@ -1769,6 +1844,15 @@ export async function sendReplyInWorkModal(page, replyText) {
   if (!clicked.ok) return clicked;
 
   return success({ ...filled.data, ...clicked.data });
+}
+
+export async function postWorkModalComment(page, commentText) {
+  if (!commentText || !commentText.trim()) {
+    return blocking(RESULT_CODES.EMPTY_REPLY_TEXT, '评论内容为空', { recoverable: false });
+  }
+
+  console.error(`[work-modal] 发送顶层评论: "${commentText.slice(0, 60)}"`);
+  return sendReplyInWorkModal(page, commentText);
 }
 
 export async function verifyReplyInWorkModal(page, item, replyText, options = {}) {

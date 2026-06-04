@@ -78,6 +78,7 @@ function randomInRange(min, max) {
 export function getReturnVisitTaskExecutionIssue(task) {
   const hasComment = task?.generatedComment && String(task.generatedComment).trim();
   const hasWorkUrl = task?.targetWork?.workUrl && String(task.targetWork.workUrl).trim();
+  const hasWorkId = task?.targetWork?.workId && String(task.targetWork.workId).trim();
 
   const isTargetStatus = [
     RETURN_VISIT_STATUS.PENDING_EXECUTE,
@@ -92,8 +93,8 @@ export function getReturnVisitTaskExecutionIssue(task) {
   if (!hasComment) {
     return 'no_generated_comment';
   }
-  if (!hasWorkUrl) {
-    return 'no_work_url';
+  if (!hasWorkUrl && !hasWorkId) {
+    return 'no_work_target';
   }
   if (task?.commentStatus === 'posted') {
     return 'comment_already_posted';
@@ -202,13 +203,13 @@ async function main() {
         });
         taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT, reason: 'no_generated_comment' });
         failed++;
-      } else if (issue === 'no_work_url') {
-        log(args.json, `[return-visit:execute] task ${task.taskId} skipped due to empty workUrl`);
+      } else if (issue === 'no_work_target') {
+        log(args.json, `[return-visit:execute] task ${task.taskId} skipped due to empty work target`);
         updateReturnVisitTask(task.taskId, {
           status: RETURN_VISIT_STATUS.FAILED_COLLECT,
-          lastError: 'no_work_url'
+          lastError: 'no_work_target'
         });
-        taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.FAILED_COLLECT, reason: 'no_work_url' });
+        taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.FAILED_COLLECT, reason: 'no_work_target' });
         failed++;
       } else {
         log(args.json, `[return-visit:execute] task ${task.taskId} filtered out (${issue}) (status: ${task.status}, commentStatus: ${task.commentStatus})`);

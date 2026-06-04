@@ -165,6 +165,85 @@ async function listProfileWorkUrls(page, maxWorks = 2) {
   return result.map(u => normalizeDouyinUrl(u)).filter(Boolean);
 }
 
+export async function openProfileWorkByAwemeId(page, profileUrl, awemeId, options = {}) {
+  const {
+    pageLoadRetryCount = 1,
+    timeoutMs = 15000,
+  } = options;
+
+  const profile = normalizeDouyinUrl(profileUrl || '') || profileUrl;
+  const targetAwemeId = String(awemeId || '').trim();
+  if (!profile || !targetAwemeId) {
+    return { ok: false, reason: 'missing_profile_or_aweme_id' };
+  }
+
+  const open = await gotoWithRetry(page, profile, { pageLoadRetryCount, timeoutMs });
+  if (!open.ok) {
+    return { ok: false, reason: `profile_navigation_failed:${open.error}` };
+  }
+
+  const isPrivate = await detectPrivateProfile(page);
+  if (isPrivate) {
+    return { ok: false, reason: 'private_profile' };
+  }
+
+  const clicked = await page.evaluate((id) => {
+    function visible(el) {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 20 || rect.height < 20) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    }
+
+    const candidates = [];
+    const links = document.querySelectorAll('a[href]');
+    for (const link of links) {
+      const href = link.getAttribute('href') || '';
+      if (!href.includes(id)) continue;
+      if (!/\/video\/|\/note\/|modal_id=/.test(href)) continue;
+      if (!visible(link)) continue;
+      const rect = link.getBoundingClientRect();
+      candidates.push({
+        href,
+        x: rect.x,
+        y: rect.y,
+        area: rect.width * rect.height,
+      });
+    }
+
+    candidates.sort((a, b) => a.y - b.y || a.x - b.x || b.area - a.area);
+    const first = candidates[0];
+    if (!first) return { ok: false, reason: 'target_work_link_not_found', candidates: 0 };
+
+    const target = Array.from(links).find(link => (link.getAttribute('href') || '') === first.href && visible(link));
+    if (!target) return { ok: false, reason: 'target_work_element_missing', candidates: candidates.length };
+
+    target.scrollIntoView({ block: 'center', behavior: 'instant' });
+    target.click();
+    return { ok: true, href: first.href, candidates: candidates.length };
+  }, targetAwemeId);
+
+  if (!clicked.ok) return clicked;
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const url = page.url();
+    if (url.includes(`/video/${targetAwemeId}`) || url.includes(`/note/${targetAwemeId}`) || url.includes(`modal_id=${targetAwemeId}`)) {
+      await page.waitForTimeout(1200);
+      return { ok: true, url, clickedHref: clicked.href };
+    }
+    await page.waitForTimeout(250);
+  }
+
+  return {
+    ok: false,
+    reason: 'target_work_open_timeout',
+    clickedHref: clicked.href,
+    currentUrl: page.url(),
+  };
+}
+
 function extractPublishTime(text) {
   const src = String(text || '');
   const patterns = [
@@ -276,6 +355,53 @@ export async function collectWorkFromUrl(page, workUrl, options = {}) {
   const work = {
     workId: extractWorkIdFromUrl(workUrl),
     workUrl: normalizeDouyinUrl(workUrl) || workUrl,
+    workTitle: workTitle || context.targetWorkTitle || null,
+    workText: workText || null,
+    contentSummary,
+    publishTime,
+    likeState,
+    referenceComments,
+  };
+
+  const sufficient = isWorkContentSufficient({
+    workTitle: work.workTitle,
+    workText: work.workText,
+    referenceComments: work.referenceComments,
+  });
+
+  return {
+    ok: true,
+    reason: sufficient ? 'ready' : 'content_too_short',
+    sufficient,
+    work,
+  };
+}
+
+export async function collectCurrentOpenedWork(page, options = {}) {
+  const { maxReferenceComments = 5 } = options;
+
+  const [titleResult, contextResult, likeResult, referenceComments] = await Promise.all([
+    getVideoTitle(page),
+    extractVideoCommentContext(page),
+    checkLikeState(page),
+    extractReferenceComments(page, maxReferenceComments),
+  ]);
+
+  const workTitle = titleResult.ok ? (titleResult.data?.title || '') : '';
+  const context = contextResult.data || {};
+  const workText = context.captionText || context.visibleTextSample || '';
+  const contentSummary = buildSummary({ title: workTitle, text: workText });
+  const publishTime = extractPublishTime(`${context.visibleTextSample || ''} ${workText}`);
+
+  let likeState = 'unknown';
+  if (likeResult.ok && likeResult.data?.confidence === 'confirmed') {
+    likeState = likeResult.data.alreadyLiked ? 'already_liked' : 'pending';
+  }
+
+  const currentUrl = page.url();
+  const work = {
+    workId: extractWorkIdFromUrl(currentUrl),
+    workUrl: normalizeDouyinUrl(currentUrl) || currentUrl,
     workTitle: workTitle || context.targetWorkTitle || null,
     workText: workText || null,
     contentSummary,

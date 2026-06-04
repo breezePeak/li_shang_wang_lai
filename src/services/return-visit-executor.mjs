@@ -6,10 +6,16 @@ import {
   confirmLikeSucceeded,
   postVideoComment,
 } from '../adapters/video-page.mjs';
+import {
+  postWorkModalComment,
+  waitForWorkModal,
+} from '../adapters/work-modal-page.mjs';
 import { canMarkDone } from './return-visit-task-service.mjs';
 import {
   collectWorkFromUrl,
+  collectCurrentOpenedWork,
   collectCandidateWorkFromProfile,
+  openProfileWorkByAwemeId,
 } from './return-visit-work-collector.mjs';
 
 async function saveDebugScreenshot(page, taskId, phase) {
@@ -148,9 +154,50 @@ export async function detectWorkPresentationKind(page, resolvedWork = {}) {
   };
 }
 
+export async function postReturnVisitComment(page, text, presentation = {}, { execute = false } = {}) {
+  if (presentation?.isModalPage) {
+    const modalReady = await waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true });
+    if (!modalReady?.ok) {
+      return {
+        ok: false,
+        code: modalReady?.code,
+        message: modalReady?.message || 'work_modal_not_ready',
+        data: modalReady?.data,
+      };
+    }
+    return postWorkModalComment(page, text);
+  }
+
+  return postVideoComment(page, text, { execute });
+}
+
 async function resolveWorkForExecution(page, task, options = {}) {
   const { pageLoadRetryCount = 1, maxWorksToCheck = 3, maxReferenceComments = 5 } = options;
+  const knownWorkId = String(task?.targetWork?.workId || '').trim();
   const knownWorkUrl = task?.targetWork?.workUrl || null;
+
+  if (task?.userProfileUrl && knownWorkId) {
+    const opened = await openProfileWorkByAwemeId(page, task.userProfileUrl, knownWorkId, {
+      pageLoadRetryCount,
+    });
+    if (opened.ok) {
+      const fromCurrent = await collectCurrentOpenedWork(page, { maxReferenceComments });
+      if (fromCurrent.ok) {
+        return {
+          ok: true,
+          work: {
+            ...fromCurrent.work,
+            workId: fromCurrent.work.workId || knownWorkId,
+          },
+          fromFallback: false,
+          openedFromProfile: true,
+        };
+      }
+    } else {
+      console.error(`[return-visit:execute] 主页定向打开作品失败 taskId=${task.taskId}: ${opened.reason || 'unknown'}`);
+    }
+  }
+
   if (knownWorkUrl) {
     const direct = await collectWorkFromUrl(page, knownWorkUrl, { pageLoadRetryCount, maxReferenceComments });
     if (direct.ok) {
@@ -338,7 +385,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
 
   await waitRandom(page, waitBetweenLikeAndCommentMs, 2000, 6000);
 
-  const commentResult = await postVideoComment(page, commentText, { execute: true });
+  const commentResult = await postReturnVisitComment(page, commentText, presentation, { execute: true });
   if (!commentResult.ok) {
     console.error(`[return-visit:execute] 评论失败 taskId=${task.taskId} URL=${page.url()}`);
     console.error(`[return-visit:execute] 评论失败 debug 细节:`, JSON.stringify(commentResult.data || {}));

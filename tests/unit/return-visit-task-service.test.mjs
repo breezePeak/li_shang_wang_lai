@@ -88,6 +88,17 @@ describe('return-visit execute filtering & state flow logic', () => {
     })).toBe(true);
   });
 
+  it('getReturnVisitTaskExecutionIssue 允许只有 workId 没有 workUrl', () => {
+    const issue = getReturnVisitTaskExecutionIssue({
+      status: 'pending_execute',
+      generatedComment: '非常棒！',
+      targetWork: { workId: '7647191897097693115', workUrl: '' },
+      commentStatus: 'pending'
+    });
+
+    expect(issue).toBeNull();
+  });
+
   it('retains likeStatus on failed_comment simulation', () => {
     const simulateStatusUpdate = (task, actionResult) => {
       return {

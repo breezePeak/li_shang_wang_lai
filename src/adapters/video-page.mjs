@@ -1112,7 +1112,27 @@ async function ensureCommentPanelOpen(page) {
     for (let attempt = 1; attempt <= 4; attempt++) {
       for (const btn of commentBtns) {
         if (await btn.count() > 0 && await btn.first().isVisible()) {
-          await btn.first().click();
+          let clicked = false;
+          try {
+            await btn.first().click({ timeout: 3000 });
+            clicked = true;
+          } catch {
+            try {
+              await btn.first().click({ force: true, timeout: 3000 });
+              clicked = true;
+            } catch {
+              try {
+                const handle = await btn.first().elementHandle();
+                if (handle) {
+                  await handle.evaluate((el) => el.click());
+                  clicked = true;
+                }
+              } catch {}
+            }
+          }
+
+          if (!clicked) continue;
+
           console.error(`[video-page] 已点击评论按钮，尝试打开评论面板 (attempt=${attempt})`);
           const deadline = Date.now() + (attempt < 3 ? 2500 : 5000);
           while (Date.now() < deadline) {
