@@ -647,6 +647,20 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
         }
 
         const commentContainer = document.querySelector('[data-e2e="feed-comment-icon"]');
+        if (commentContainer && visible(commentContainer)) {
+          const clickTargets = [commentContainer, commentContainer.parentElement].filter(Boolean);
+          const target = clickTargets[Math.min(Math.max(attempt - 1, 0), clickTargets.length - 1)];
+          if (target && visible(target)) {
+            target.click();
+            return {
+              clicked: true,
+              selector: '[data-e2e="feed-comment-icon"]',
+              tag: target.tagName,
+              className: typeof target.className === 'string' ? target.className.slice(0, 120) : '',
+            };
+          }
+        }
+
         const commentSvg = commentContainer?.querySelector('svg');
         if (commentSvg && visible(commentSvg)) {
           const chain = [];
