@@ -646,7 +646,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
     }
 
     async function clickCommentOpenControl(attempt = 1) {
-      return await page.evaluate(() => {
+      const prepared = await page.evaluate(() => {
         function visible(el) {
           if (!el) return false;
           const rect = el.getBoundingClientRect();
@@ -655,21 +655,44 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
         }
 
+        document.querySelectorAll('[data-return-visit-comment-button="true"]')
+          .forEach(el => el.removeAttribute('data-return-visit-comment-button'));
         const commentContainer = document.querySelector('[data-e2e="feed-comment-icon"]');
         if (commentContainer && visible(commentContainer)) {
-          commentContainer.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-          commentContainer.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-          commentContainer.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-          commentContainer.click?.();
+          const rect = commentContainer.getBoundingClientRect();
+          commentContainer.setAttribute('data-return-visit-comment-button', 'true');
           return {
-            clicked: true,
+            found: true,
             selector: '[data-e2e="feed-comment-icon"]',
             tag: commentContainer.tagName,
             className: typeof commentContainer.className === 'string' ? commentContainer.className.slice(0, 120) : '',
+            x: Math.round(rect.left + rect.width / 2),
+            y: Math.round(rect.top + rect.height / 2),
+            rect: {
+              x: Math.round(rect.x),
+              y: Math.round(rect.y),
+              width: Math.round(rect.width),
+              height: Math.round(rect.height),
+            },
           };
         }
-        return { clicked: false };
+        return { found: false };
       }).catch(() => ({ clicked: false }));
+
+      if (!prepared.found) return { clicked: false };
+
+      await page.mouse.click(prepared.x, prepared.y).catch(async () => {
+        const button = page.locator('[data-return-visit-comment-button="true"]').last();
+        await button.click({ timeout: 2000, force: true });
+      });
+
+      return {
+        clicked: true,
+        selector: prepared.selector,
+        tag: prepared.tag,
+        className: prepared.className,
+        rect: prepared.rect,
+      };
     }
 
     if (!(await isCommentAreaVisible())) {
@@ -680,7 +703,8 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
         if (!clicked.clicked) {
           console.error(`[work-modal] 未找到评论按钮 (attempt=${attempt})`);
         } else {
-          const detail = clicked.tag ? ` tag=${clicked.tag} class="${String(clicked.className || '').slice(0, 60)}"` : '';
+          const rect = clicked.rect ? ` rect=${JSON.stringify(clicked.rect)}` : '';
+          const detail = clicked.tag ? ` tag=${clicked.tag} class="${String(clicked.className || '').slice(0, 60)}"${rect}` : '';
           console.error(`[work-modal] 已点击评论按钮 ${clicked.selector} (attempt=${attempt})${detail}`);
         }
 
