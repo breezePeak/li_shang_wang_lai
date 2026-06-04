@@ -23,17 +23,17 @@ export const DEFAULTS = {
     },
     wheel: {
       defaultDeltaY: 600,
-      deltaYRandomRange: [0, 0],
+      deltaYRandomRange: [0, 500],
       waitMs: 1200,
     },
     notificationPanel: {
       deltaY: 600,
-      deltaYRandomRange: [0, 0],
+      deltaYRandomRange: [0, 500],
       waitMs: 1200,
     },
     commentArea: {
       deltaY: 600,
-      deltaYRandomRange: [0, 0],
+      deltaYRandomRange: [0, 500],
       waitMs: 1200,
     },
   },
