@@ -576,8 +576,108 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
       return false;
     }).catch(() => false);
 
-    async function clickCommentOpenControl() {
+    async function clickTopCommentTab() {
       return await page.evaluate(() => {
+        function visible(el) {
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) return false;
+          const style = window.getComputedStyle(el);
+          return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+        }
+
+        const nodes = Array.from(document.querySelectorAll('button, [role="tab"], [role="button"], div, span, a'));
+        const candidates = [];
+        for (const el of nodes) {
+          const text = (el.innerText || el.textContent || '').trim();
+          if (!text) continue;
+          if (!(text === '评论' || text.startsWith('评论\n') || text.startsWith('评论 ') || text.startsWith('评论\t') || text.startsWith('评论\r') || text.startsWith('评论'))) continue;
+          if (!visible(el)) continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.top > window.innerHeight * 0.45) continue;
+          if (rect.width < 20 || rect.height < 20) continue;
+          if (el.closest('[data-e2e="feed-comment-icon"], [data-e2e="video-comment"], [data-e2e="comment-icon"]')) continue;
+          candidates.push({
+            el,
+            rect,
+            text,
+            className: typeof el.className === 'string' ? el.className : '',
+            tagName: el.tagName,
+          });
+        }
+
+        candidates.sort((a, b) => {
+          const scoreA = (a.text === '评论' ? 0 : 1) + a.rect.top / 1000 + Math.abs(a.rect.left - window.innerWidth * 0.5) / window.innerWidth;
+          const scoreB = (b.text === '评论' ? 0 : 1) + b.rect.top / 1000 + Math.abs(b.rect.left - window.innerWidth * 0.5) / window.innerWidth;
+          return scoreA - scoreB;
+        });
+        const target = candidates[0]?.el;
+        if (!target) {
+          return {
+            clicked: false,
+            candidates: [],
+          };
+        }
+
+        target.click();
+        return {
+          clicked: true,
+          text: (target.innerText || target.textContent || '').trim(),
+          className: typeof target.className === 'string' ? target.className.slice(0, 120) : '',
+          tagName: target.tagName,
+          candidates: candidates.slice(0, 5).map(candidate => ({
+            text: candidate.text.slice(0, 80),
+            className: candidate.className.slice(0, 120),
+            tagName: candidate.tagName,
+            top: Math.round(candidate.rect.top),
+            left: Math.round(candidate.rect.left),
+          })),
+        };
+      }).catch(() => ({ clicked: false }));
+    }
+
+    async function clickCommentOpenControl(attempt = 1) {
+      return await page.evaluate(({ attempt }) => {
+        function visible(el) {
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) return false;
+          const style = window.getComputedStyle(el);
+          return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+        }
+
+        const commentContainer = document.querySelector('[data-e2e="feed-comment-icon"]');
+        const commentSvg = commentContainer?.querySelector('svg');
+        if (commentSvg && visible(commentSvg)) {
+          const chain = [];
+          let current = commentSvg;
+          for (let depth = 0; depth < 6 && current; depth++) {
+            if (visible(current)) {
+              chain.push({
+                el: current,
+                tag: current.tagName,
+                className: typeof current.className === 'string' ? current.className : '',
+              });
+            }
+            current = current.parentElement;
+          }
+
+          if (chain.length > 0) {
+            const target = chain[Math.min(Math.max(attempt - 1, 0), chain.length - 1)];
+            target.el.click();
+            return {
+              clicked: true,
+              selector: '[data-e2e="feed-comment-icon"] svg->parent-chain',
+              tag: target.tag,
+              className: target.className.slice(0, 120),
+              chain: chain.map(item => ({
+                tag: item.tag,
+                className: item.className.slice(0, 80),
+              })),
+            };
+          }
+        }
+
         const selectors = [
           '[data-e2e="feed-comment-icon"]',
           '[data-e2e="video-comment"]',
@@ -589,26 +689,26 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
         ];
         for (const selector of selectors) {
           for (const el of document.querySelectorAll(selector)) {
-            const rect = el.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
+            if (visible(el)) {
               el.click();
               return { clicked: true, selector };
             }
           }
         }
         return { clicked: false };
-      }).catch(() => ({ clicked: false }));
+      }, { attempt }).catch(() => ({ clicked: false }));
     }
 
     if (!(await isCommentAreaVisible())) {
       console.error('[work-modal] 评论区未展开，点击评论按钮...');
       let opened = false;
       for (let attempt = 1; attempt <= 4; attempt++) {
-        const clicked = await clickCommentOpenControl();
+        const clicked = await clickCommentOpenControl(attempt);
         if (!clicked.clicked) {
           console.error(`[work-modal] 未找到评论按钮 (attempt=${attempt})`);
         } else {
-          console.error(`[work-modal] 已点击评论按钮 ${clicked.selector} (attempt=${attempt})`);
+          const detail = clicked.tag ? ` tag=${clicked.tag} class="${String(clicked.className || '').slice(0, 60)}"` : '';
+          console.error(`[work-modal] 已点击评论按钮 ${clicked.selector} (attempt=${attempt})${detail}`);
         }
 
         const deadline = Date.now() + (attempt < 3 ? 2500 : 5000);
@@ -619,6 +719,26 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           }
           await page.waitForTimeout(500);
         }
+
+        if (!opened) {
+          const tabResult = await clickTopCommentTab();
+          if (tabResult.clicked) {
+            console.error(`[work-modal] 已点击顶部评论标签 (attempt=${attempt}) tag=${tabResult.tagName} text="${String(tabResult.text || '').slice(0, 30)}" class="${String(tabResult.className || '').slice(0, 60)}"`);
+            const tabDeadline = Date.now() + 3000;
+            while (Date.now() < tabDeadline) {
+              if (await isCommentAreaVisible()) {
+                opened = true;
+                break;
+              }
+              await page.waitForTimeout(300);
+            }
+          } else if (Array.isArray(tabResult.candidates) && tabResult.candidates.length > 0) {
+            console.error(`[work-modal] 顶部评论标签未点击成功 (attempt=${attempt}) candidates=${JSON.stringify(tabResult.candidates)}`);
+          } else {
+            console.error(`[work-modal] 未找到顶部评论标签 (attempt=${attempt})`);
+          }
+        }
+
         if (opened) break;
         await page.waitForTimeout(700 * attempt);
       }
