@@ -314,6 +314,25 @@ function getCollectorTargetComment(validated, commentListCollector) {
   return commentListCollector.getByCid(validated.targetCommentId) || null;
 }
 
+function shouldBlockViewportMismatch(target, picked) {
+  if (!picked?.reason) return false;
+
+  if (picked.reason === 'not_unique') {
+    return true;
+  }
+
+  if (picked.reason === 'actor_not_verified') {
+    return Boolean(target?.targetCommentId);
+  }
+
+  if (picked.reason === 'time_not_verified') {
+    if (target?.targetCommentId) return true;
+    return Number(picked.total || 0) === 1;
+  }
+
+  return false;
+}
+
 export function planViewportPendingMatches(pendingItems, visibleCandidates, {
   commentListCollector = null,
   buildTarget = buildWorkReplyTarget,
@@ -335,7 +354,7 @@ export function planViewportPendingMatches(pendingItems, visibleCandidates, {
       continue;
     }
 
-    if (picked.reason === 'not_unique' || picked.reason === 'actor_not_verified' || picked.reason === 'time_not_verified') {
+    if (shouldBlockViewportMismatch(target, picked)) {
       blocked.push({ item: pendingItem, target, picked });
     }
   }
@@ -644,37 +663,34 @@ async function executeWorkCommentItems(items, args) {
 
         console.log(`[comments:execute] 打开作品 work="${currentWork.workId || currentWork.modalId || currentWork.workUrl}" comments=${group.length}`);
         const commentListCollector = createCommentListApiCollector(page);
-        const openResult = await openWorkPageForReply(page, currentWork.workUrl, { timeoutMs: 30000 });
-        if (!openResult.ok) {
-          commentListCollector.stop();
-          for (const validated of group) {
-            markCommentBlocked(validated.commentId, openResult.message || openResult.code || 'work_open_failed');
-            results.push({ ...validated, ok: false, status: 'blocked', error: openResult.message || openResult.code });
-          }
-          continue;
-        }
-
-        const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
-        if (!modalReady.ok) {
-          commentListCollector.stop();
-          for (const validated of group) {
-            markCommentBlocked(validated.commentId, modalReady.message || modalReady.code || 'work_modal_not_ready');
-            results.push({ ...validated, ok: false, status: 'blocked', error: modalReady.message || modalReady.code });
-          }
-          continue;
-        }
-
-        const commentAreaReady = await waitForWorkCommentArea(page, { timeoutMs: 10000 });
-        if (!commentAreaReady.ok) {
-          commentListCollector.stop();
-          for (const validated of group) {
-            markCommentBlocked(validated.commentId, commentAreaReady.message || commentAreaReady.code || 'comment_area_not_ready');
-            results.push({ ...validated, ok: false, status: 'blocked', error: commentAreaReady.message || commentAreaReady.code });
-          }
-          continue;
-        }
-
         try {
+          const openResult = await openWorkPageForReply(page, currentWork.workUrl, { timeoutMs: 30000 });
+          if (!openResult.ok) {
+            for (const validated of group) {
+              markCommentBlocked(validated.commentId, openResult.message || openResult.code || 'work_open_failed');
+              results.push({ ...validated, ok: false, status: 'blocked', error: openResult.message || openResult.code });
+            }
+            continue;
+          }
+
+          const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
+          if (!modalReady.ok) {
+            for (const validated of group) {
+              markCommentBlocked(validated.commentId, modalReady.message || modalReady.code || 'work_modal_not_ready');
+              results.push({ ...validated, ok: false, status: 'blocked', error: modalReady.message || modalReady.code });
+            }
+            continue;
+          }
+
+          const commentAreaReady = await waitForWorkCommentArea(page, { timeoutMs: 10000 });
+          if (!commentAreaReady.ok) {
+            for (const validated of group) {
+              markCommentBlocked(validated.commentId, commentAreaReady.message || commentAreaReady.code || 'comment_area_not_ready');
+              results.push({ ...validated, ok: false, status: 'blocked', error: commentAreaReady.message || commentAreaReady.code });
+            }
+            continue;
+          }
+
           const groupResults = await executeSinglePassForWorkGroup(page, group, commentListCollector, {
             onResult(result) {
               results.push(result);

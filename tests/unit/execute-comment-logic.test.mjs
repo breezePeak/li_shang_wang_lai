@@ -392,35 +392,46 @@ describe('comments:execute single-pass per work', () => {
     expect(collectCandidates.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('not_unique / actor_not_verified / time_not_verified 只阻断当前 item，继续处理其他 pending', async () => {
+  it('not_unique 会阻断当前项，但无 cid 的 actor_not_verified 会继续往下找其他 pending', async () => {
     const page = createFakePage();
-    const visibleCandidates = [
-      { domIndex: 0, cid: '', actorName: 'u1', commentText: 'same', timeText: '06-01', hasReplyButton: true },
-      { domIndex: 1, cid: '', actorName: 'u1', commentText: 'same', timeText: '06-01', hasReplyButton: true },
-      { domIndex: 2, cid: '', actorName: 'good', commentText: 'ok', timeText: '06-02', hasReplyButton: true },
-    ];
+    let round = 0;
     const saveBlocked = vi.fn();
 
     const results = await executeSinglePassForWorkGroup(page, [
       { commentId: 1, replyText: 'r1', actorName: 'u1', commentText: 'same', eventTimeText: '06-01' },
       { commentId: 2, replyText: 'r2', actorName: 'bad', commentText: 'ok', eventTimeText: '06-02' },
       { commentId: 3, replyText: 'r3', actorName: 'good', commentText: 'ok', eventTimeText: '06-02' },
-    ], { getByCid: () => null, getStats: () => ({ hasMore: 0 }) }, {
-      collectCandidates: vi.fn(async () => ({ ok: true, candidates: visibleCandidates })),
+    ], { getByCid: () => null, getStats: () => ({ hasMore: round === 0 ? 1 : 0 }) }, {
+      collectCandidates: vi.fn(async () => ({
+        ok: true,
+        candidates: round === 0
+          ? [
+            { domIndex: 0, cid: '', actorName: 'u1', commentText: 'same', timeText: '06-01', hasReplyButton: true },
+            { domIndex: 1, cid: '', actorName: 'u1', commentText: 'same', timeText: '06-01', hasReplyButton: true },
+            { domIndex: 2, cid: '', actorName: 'good', commentText: 'ok', timeText: '06-02', hasReplyButton: true },
+          ]
+          : [
+            { domIndex: 0, cid: '', actorName: 'bad', commentText: 'ok', timeText: '06-02', hasReplyButton: true },
+          ],
+      })),
       openMatchedReplyBox: vi.fn(async () => ({ ok: true })),
       fillReply: vi.fn(async () => ({ ok: true })),
       clickSend: vi.fn(async () => ({ ok: true })),
       verifyReply: vi.fn(async () => ({ ok: true })),
-      scrollOnce: vi.fn(async () => ({ ok: true })),
+      scrollOnce: vi.fn(async () => {
+        round++;
+        return { ok: true };
+      }),
       saveSucceeded: vi.fn(),
       saveBlocked,
       saveSentUnverified: vi.fn(),
       onResult: vi.fn(),
     });
 
-    expect(results.filter(item => item.status === 'blocked')).toHaveLength(2);
-    expect(results.filter(item => item.status === 'succeeded')).toHaveLength(1);
-    expect(saveBlocked).toHaveBeenCalledTimes(2);
+    expect(results.filter(item => item.status === 'blocked')).toHaveLength(1);
+    expect(results.filter(item => item.status === 'succeeded')).toHaveLength(2);
+    expect(saveBlocked).toHaveBeenCalledTimes(1);
+    expect(saveBlocked).toHaveBeenCalledWith(expect.objectContaining({ commentId: 1 }), expect.stringContaining('not_unique'));
   });
 
   it('滚到底仍找不到的 pending 标记 blocked，原因包含 single_pass_not_found', async () => {
@@ -462,10 +473,34 @@ describe('comments:execute single-pass per work', () => {
     expect(plan.actionable[0].item.commentId).toBe(2);
   });
 
+  it('planViewportPendingMatches 对无 cid 的 actor_not_verified 不提前阻断', () => {
+    const plan = planViewportPendingMatches([
+      { commentId: 1, actorName: 'target-user', commentText: 'same', eventTimeText: '06-01' },
+    ], [
+      { domIndex: 0, cid: '', actorName: 'other-user', commentText: 'same', timeText: '06-01', hasReplyButton: true },
+    ]);
+
+    expect(plan.blocked).toHaveLength(0);
+    expect(plan.actionable).toHaveLength(0);
+  });
+
+  it('planViewportPendingMatches 对唯一 text+actor 的 time_not_verified 仍可阻断', () => {
+    const plan = planViewportPendingMatches([
+      { commentId: 1, actorName: 'target-user', commentText: 'same', eventTimeText: '06-09' },
+    ], [
+      { domIndex: 0, cid: '', actorName: 'target-user', commentText: 'same', timeText: '06-01', hasReplyButton: true },
+    ]);
+
+    expect(plan.blocked).toHaveLength(1);
+    expect(plan.blocked[0].picked.reason).toBe('time_not_verified');
+  });
+
   it('源码确保 group 级 finally 中 stop collector，并在打开失败前也 stop', async () => {
     const fs = await import('fs');
     const source = fs.readFileSync(resolve(__dirname, '../../src/cli/execute-comment-replies.mjs'), 'utf8');
     expect(source.includes('commentListCollector.stop();')).toBe(true);
+    expect(source.includes('const commentListCollector = createCommentListApiCollector(page);')).toBe(true);
+    expect(source.includes('try {\n          const openResult = await openWorkPageForReply')).toBe(true);
     expect(source.includes('finally {\n          commentListCollector.stop();')).toBe(true);
   });
 });
