@@ -646,7 +646,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
     }
 
     async function clickCommentOpenControl(attempt = 1) {
-      return await page.evaluate(({ attempt }) => {
+      return await page.evaluate(() => {
         function visible(el) {
           if (!el) return false;
           const rect = el.getBoundingClientRect();
@@ -657,76 +657,26 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
 
         const commentContainer = document.querySelector('[data-e2e="feed-comment-icon"]');
         if (commentContainer && visible(commentContainer)) {
-          const clickTargets = [commentContainer, commentContainer.parentElement].filter(Boolean);
-          const target = clickTargets[Math.min(Math.max(attempt - 1, 0), clickTargets.length - 1)];
-          if (target && visible(target)) {
-            target.click();
-            return {
-              clicked: true,
-              selector: '[data-e2e="feed-comment-icon"]',
-              tag: target.tagName,
-              className: typeof target.className === 'string' ? target.className.slice(0, 120) : '',
-            };
-          }
-        }
-
-        const commentSvg = commentContainer?.querySelector('svg');
-        if (commentSvg && visible(commentSvg)) {
-          const chain = [];
-          let current = commentSvg;
-          for (let depth = 0; depth < 6 && current; depth++) {
-            if (visible(current)) {
-              chain.push({
-                el: current,
-                tag: current.tagName,
-                className: typeof current.className === 'string' ? current.className : '',
-              });
-            }
-            current = current.parentElement;
-          }
-
-          if (chain.length > 0) {
-            const target = chain[Math.min(Math.max(attempt - 1, 0), chain.length - 1)];
-            target.el.click();
-            return {
-              clicked: true,
-              selector: '[data-e2e="feed-comment-icon"] svg->parent-chain',
-              tag: target.tag,
-              className: target.className.slice(0, 120),
-              chain: chain.map(item => ({
-                tag: item.tag,
-                className: item.className.slice(0, 80),
-              })),
-            };
-          }
-        }
-
-        const selectors = [
-          '[data-e2e="feed-comment-icon"]',
-          '[data-e2e="video-comment"]',
-          '[data-e2e="comment-icon"]',
-          '[aria-label*="评论"]',
-          '[title*="评论"]',
-          '[class*="comment-icon"]',
-          '[class*="comment-btn"]',
-        ];
-        for (const selector of selectors) {
-          for (const el of document.querySelectorAll(selector)) {
-            if (visible(el)) {
-              el.click();
-              return { clicked: true, selector };
-            }
-          }
+          commentContainer.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+          commentContainer.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+          commentContainer.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          commentContainer.click?.();
+          return {
+            clicked: true,
+            selector: '[data-e2e="feed-comment-icon"]',
+            tag: commentContainer.tagName,
+            className: typeof commentContainer.className === 'string' ? commentContainer.className.slice(0, 120) : '',
+          };
         }
         return { clicked: false };
-      }, { attempt }).catch(() => ({ clicked: false }));
+      }).catch(() => ({ clicked: false }));
     }
 
     if (!(await isCommentAreaVisible())) {
       console.error('[work-modal] 评论区未展开，点击评论按钮...');
       let opened = false;
       for (let attempt = 1; attempt <= 4; attempt++) {
-        const clicked = await clickCommentOpenControl(attempt);
+        const clicked = await clickCommentOpenControl();
         if (!clicked.clicked) {
           console.error(`[work-modal] 未找到评论按钮 (attempt=${attempt})`);
         } else {
@@ -741,25 +691,6 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
             break;
           }
           await page.waitForTimeout(500);
-        }
-
-        if (!opened) {
-          const tabResult = await clickTopCommentTab();
-          if (tabResult.clicked) {
-            console.error(`[work-modal] 已点击顶部评论标签 (attempt=${attempt}) tag=${tabResult.tagName} text="${String(tabResult.text || '').slice(0, 30)}" class="${String(tabResult.className || '').slice(0, 60)}"`);
-            const tabDeadline = Date.now() + 3000;
-            while (Date.now() < tabDeadline) {
-              if (await isCommentAreaVisible()) {
-                opened = true;
-                break;
-              }
-              await page.waitForTimeout(300);
-            }
-          } else if (Array.isArray(tabResult.candidates) && tabResult.candidates.length > 0) {
-            console.error(`[work-modal] 顶部评论标签未点击成功 (attempt=${attempt}) candidates=${JSON.stringify(tabResult.candidates)}`);
-          } else {
-            console.error(`[work-modal] 未找到顶部评论标签 (attempt=${attempt})`);
-          }
         }
 
         if (opened) break;
