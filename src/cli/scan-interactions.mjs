@@ -698,22 +698,38 @@ function getVisitSourceType(event) {
   return 'other';
 }
 
-function writePendingVisitJson(events, { days = null, maxCount = 100, collectTypes = ['like', 'comment', 'reply', 'follow'] } = {}) {
+export function writePendingVisitJson(events, { days = null, maxCount = 100, collectTypes = ['like', 'comment', 'reply', 'follow'] } = {}) {
   const allowed = new Set((collectTypes || []).map(type => String(type || '').trim()).filter(Boolean));
   const users = [];
-  const seen = new Set();
   const stats = {
+    skipDbDuplicate: 0,
+    skipDbAmbiguous: 0,
+    skipDbFailed: 0,
+    skipSeenIdentity: 0,
     skipRelationUnknown: 0,
     skipNoProfileUrl: 0,
     addedFriend: 0,
     addedMutual: 0,
   };
 
-  const sourceItems = [];
+  const groupedItems = new Map();
+
+  const allowedDbActions = new Set(['inserted', 'enriched']);
+  const normalizeDbAction = (value) => String(value || '').trim().toLowerCase();
+  const shouldSkipByDbAction = (dbAction) => {
+    if (!dbAction) return false;
+    if (allowedDbActions.has(dbAction)) return false;
+    if (dbAction === 'duplicate') stats.skipDbDuplicate++;
+    else if (dbAction === 'ambiguous') stats.skipDbAmbiguous++;
+    else if (dbAction === 'failed') stats.skipDbFailed++;
+    else stats.skipDbFailed++;
+    return true;
+  };
 
   for (const event of events || []) {
     const sourceType = getVisitSourceType(event);
     if (allowed.size > 0 && !allowed.has(sourceType)) continue;
+    if (shouldSkipByDbAction(normalizeDbAction(event.dbAction))) continue;
     if (!event.actorProfileUrl) {
       stats.skipNoProfileUrl++;
       continue;
@@ -724,31 +740,59 @@ function writePendingVisitJson(events, { days = null, maxCount = 100, collectTyp
       continue;
     }
     const identityKey = event.actorProfileKey || event.actorProfileUrl || event.actorName || '';
-    if (!identityKey || seen.has(identityKey)) continue;
-    seen.add(identityKey);
-    if (relation === 'friend') stats.addedFriend++;
-    if (relation === 'mutual') stats.addedMutual++;
-    sourceItems.push({
+    if (!identityKey) continue;
+
+    const sourceItem = {
       source_type: sourceType,
       source_event_id: event.eventId || null,
       actor_name: event.actorName || '',
       actor_profile_key: event.actorProfileKey || null,
       actor_profile_url: event.actorProfileUrl || null,
       relation: event.relation || 'unknown',
+    };
+
+    const existing = groupedItems.get(identityKey);
+    if (existing) {
+      stats.skipSeenIdentity++;
+      existing.items.push(sourceItem);
+      if (!existing.primary.actor_name && sourceItem.actor_name) existing.primary.actor_name = sourceItem.actor_name;
+      if (!existing.primary.actor_profile_key && sourceItem.actor_profile_key) existing.primary.actor_profile_key = sourceItem.actor_profile_key;
+      if (!existing.primary.actor_profile_url && sourceItem.actor_profile_url) existing.primary.actor_profile_url = sourceItem.actor_profile_url;
+      if (
+        String(existing.primary.relation || '').trim().toLowerCase() !== 'mutual' &&
+        relation === 'mutual'
+      ) {
+        existing.primary.relation = 'mutual';
+      }
+      continue;
+    }
+
+    if (groupedItems.size >= maxCount) break;
+
+    groupedItems.set(identityKey, {
+      primary: { ...sourceItem },
+      items: [sourceItem],
     });
-    if (sourceItems.length >= maxCount) break;
+
+    if (relation === 'friend') stats.addedFriend++;
+    if (relation === 'mutual') stats.addedMutual++;
   }
 
   console.error(
-    `[scan] pending_visit_skip_relation_unknown=${stats.skipRelationUnknown} ` +
+    `[scan] pending_visit_skip_db_duplicate=${stats.skipDbDuplicate} ` +
+    `pending_visit_skip_db_ambiguous=${stats.skipDbAmbiguous} ` +
+    `pending_visit_skip_db_failed=${stats.skipDbFailed} ` +
+    `pending_visit_skip_seen_identity=${stats.skipSeenIdentity} ` +
+    `pending_visit_skip_relation_unknown=${stats.skipRelationUnknown} ` +
     `pending_visit_skip_no_profile_url=${stats.skipNoProfileUrl} ` +
     `pending_visit_added_friend=${stats.addedFriend} ` +
     `pending_visit_added_mutual=${stats.addedMutual}`
   );
 
+  const sourceItems = Array.from(groupedItems.values()).flatMap(group => group.items);
   createOrUpdateReturnVisitTasksFromItems(sourceItems);
 
-  for (const item of sourceItems) {
+  for (const { primary: item } of groupedItems.values()) {
     const identityKey = buildIdentityKey({
       userId: item.actor_profile_key || '',
       userProfileUrl: item.actor_profile_url || '',
@@ -1965,7 +2009,14 @@ async function runPhaseWithRecovery(page, run, phaseName, phaseFn, options = {})
   }
 }
 
-main().catch((err) => {
-  console.error('[scan] 未捕获错误:', err.message);
-  process.exit(1);
-});
+const isMain = process.argv[1] && (
+  process.argv[1].endsWith('/scan-interactions.mjs') ||
+  process.argv[1].endsWith('\\scan-interactions.mjs')
+);
+
+if (isMain) {
+  main().catch((err) => {
+    console.error('[scan] 未捕获错误:', err.message);
+    process.exit(1);
+  });
+}
