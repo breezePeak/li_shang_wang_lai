@@ -1,9 +1,18 @@
 // 默认配置常量 — 占位，由 config/local.json 覆盖
 export const DEFAULTS = {
+  self: {
+    profileKey: '',
+    profileUrl: '',
+    nickname: '',
+  },
   browser: {
     headless: false,
     profileDir: '.playwright/douyin-profile',
     slowMo: 150,
+    viewport: {
+      width: 1280,
+      height: 800,
+    },
   },
   comments: {
     enabled: true,
@@ -27,6 +36,9 @@ export const DEFAULTS = {
     maxRetryCount: 2,
     maxConsecutiveFailures: 3,
     pageLoadRetryCount: 1,
+    maxReferenceComments: 5,
+    watchPolicy: 'seconds',
+    watchSeconds: [5, 8],
     waitBetweenUsersMs: [8000, 20000],
     waitBetweenLikeAndCommentMs: [2000, 6000],
     restEveryTasksRange: [8, 12],

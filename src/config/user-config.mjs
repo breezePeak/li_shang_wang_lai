@@ -6,7 +6,6 @@ import { DEFAULTS } from './defaults.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOCAL_CONFIG_PATH = resolve(__dirname, '../../config/local.json');
-const EXAMPLE_CONFIG_PATH = resolve(__dirname, '../../config/example.json');
 
 /**
  * 加载并合并用户配置
@@ -15,14 +14,12 @@ const EXAMPLE_CONFIG_PATH = resolve(__dirname, '../../config/example.json');
 export function loadConfig() {
   let userConfig = {};
 
-  // 优先读取 local.json，回退到 example.json
-  const configPath = existsSync(LOCAL_CONFIG_PATH) ? LOCAL_CONFIG_PATH : EXAMPLE_CONFIG_PATH;
-  if (existsSync(configPath)) {
+  if (existsSync(LOCAL_CONFIG_PATH)) {
     try {
-      const raw = readFileSync(configPath, 'utf8');
+      const raw = readFileSync(LOCAL_CONFIG_PATH, 'utf8');
       userConfig = JSON.parse(raw);
     } catch (err) {
-      console.warn('[config] 配置文件解析失败:', configPath, err.message);
+      console.warn('[config] 配置文件解析失败:', LOCAL_CONFIG_PATH, err.message);
     }
   }
 
@@ -30,6 +27,7 @@ export function loadConfig() {
   return {
     ...DEFAULTS,
     ...userConfig,
+    self: { ...DEFAULTS.self, ...(userConfig.self || {}) },
     browser: { ...DEFAULTS.browser, ...(userConfig.browser || {}) },
     comments: { ...DEFAULTS.comments, ...(userConfig.comments || {}) },
     likes: { ...DEFAULTS.likes, ...(userConfig.likes || {}) },
