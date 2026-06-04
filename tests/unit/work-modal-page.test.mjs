@@ -189,6 +189,20 @@ describe('作品评论区回复定位', () => {
     expect(result.reason).toBe('actor_not_verified');
   });
 
+  it('pickWorkCommentCandidate 对 epoch eventTimeText 不强制做 DOM 时间校验', () => {
+    const result = pickWorkCommentCandidate([
+      { domIndex: 0, cid: '', actorName: '北漂全栈猿（来回）', commentText: '111', timeText: '1天前·北京', hasReplyButton: true },
+    ], {
+      actorName: '北漂全栈猿（来回）',
+      commentText: '111',
+      eventTimeText: '1780399462',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.candidate.domIndex).toBe(0);
+    expect(result.matchedBy).toBe('actor+text');
+  });
+
   it('scrollCommentAreaOnce 使用统一 wheel 滚动评论容器', async () => {
     const page = {
       evaluate: vi.fn(async () => ({

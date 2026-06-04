@@ -18,6 +18,8 @@ import { createRunContext, saveRunSummary, resolveBrowserClose } from '../browse
 import { captureEvidence } from '../browser/failure-evidence.mjs';
 import {
   buildWorkReplyTarget,
+  WORK_COMMENT_CONTAINER_SELECTORS,
+  WORK_COMMENT_ITEM_SELECTORS,
   clickSendWorkReply,
   collectVisibleWorkCommentCandidates,
   fillWorkReplyText,
@@ -31,7 +33,7 @@ import {
   verifyWorkReplyVisible,
 } from '../adapters/work-modal-page.mjs';
 import { createCommentListApiCollector } from '../adapters/comment-list-api-listener.mjs';
-import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -387,6 +389,103 @@ function getCandidateSignature(candidates = []) {
     .join('|');
 }
 
+async function captureSinglePassDebugSnapshot(page, {
+  currentWork = {},
+  viewportRound = 0,
+  visibleCandidates = [],
+  pendingItems = [],
+  commentListCollector = null,
+} = {}) {
+  if (!page || typeof page.evaluate !== 'function') {
+    return null;
+  }
+  try {
+    const dir = resolve('data', 'debug', 'comment-single-pass');
+    mkdirSync(dir, { recursive: true });
+    const workKey = String(currentWork.workId || currentWork.modalId || currentWork.workUrl || 'unknown')
+      .replace(/[^\w.-]+/g, '_')
+      .slice(0, 120);
+    const filePath = resolve(dir, `${workKey}-round${viewportRound}.json`);
+
+    const domSnapshot = await page.evaluate(({ containerSelectors, itemSelectors }) => {
+      function visible(el) {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }
+
+      function findContainer() {
+        for (const selector of containerSelectors) {
+          const el = document.querySelector(selector);
+          if (visible(el)) return el;
+        }
+        return null;
+      }
+
+      const commentArea = findContainer();
+      if (!commentArea) {
+        return { found: false };
+      }
+
+      const itemSet = [];
+      const seen = new Set();
+      for (const selector of itemSelectors) {
+        for (const item of commentArea.querySelectorAll(selector)) {
+          if (!visible(item) || seen.has(item)) continue;
+          seen.add(item);
+          itemSet.push(item);
+        }
+      }
+
+      const items = itemSet.slice(0, 20).map((item, index) => ({
+        index,
+        text: (item.innerText || '').trim(),
+        html: item.outerHTML.slice(0, 4000),
+      }));
+
+      return {
+        found: true,
+        areaText: (commentArea.innerText || '').trim(),
+        areaHtml: commentArea.outerHTML.slice(0, 12000),
+        items,
+      };
+    }, {
+      containerSelectors: WORK_COMMENT_CONTAINER_SELECTORS,
+      itemSelectors: WORK_COMMENT_ITEM_SELECTORS,
+    }).catch(err => ({ found: false, error: err.message }));
+
+    const collectorComments = commentListCollector?.getAllComments?.() || [];
+    const payload = {
+      capturedAt: new Date().toISOString(),
+      url: page.url(),
+      work: {
+        workId: currentWork.workId || '',
+        modalId: currentWork.modalId || '',
+        workUrl: currentWork.workUrl || '',
+      },
+      viewportRound,
+      pendingItems: pendingItems.map(item => ({
+        commentId: item.commentId,
+        targetCommentId: item.targetCommentId || '',
+        actorName: item.actorName || '',
+        commentText: item.commentText || '',
+        eventTimeText: item.eventTimeText || '',
+      })),
+      visibleCandidates,
+      collectorComments: collectorComments.slice(0, 20),
+      collectorStats: commentListCollector?.getStats?.() || null,
+      domSnapshot,
+    };
+
+    writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
+    console.log(`[comments:execute] debug snapshot saved file=${filePath}`);
+    return filePath;
+  } catch (err) {
+    console.error(`[comments:execute] debug snapshot failed: ${err.message}`);
+    return null;
+  }
+}
+
 export async function executeSinglePassForWorkGroup(page, group, commentListCollector, {
   maxViewportRounds = 20,
   maxNoProgressRounds = 3,
@@ -508,10 +607,6 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
         localResults.push(result);
         onResult(result);
         console.log(`[comments:execute] sent_unverified commentId=${nextAction.item.commentId} pending=${pendingMap.size}`);
-        try {
-          await page.keyboard.press('Escape');
-          await page.waitForTimeout(300);
-        } catch {}
         continue;
       }
 
@@ -530,11 +625,6 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       onResult(result);
       console.log(`[comments:execute] replied commentId=${nextAction.item.commentId} matchedBy=${nextAction.picked.matchedBy} pending=${pendingMap.size}`);
 
-      try {
-        await page.keyboard.press('Escape');
-        await page.waitForTimeout(300);
-      } catch {}
-
       break;
     }
 
@@ -544,6 +634,16 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       noProgressRounds = 0;
       lastSignature = '';
       continue;
+    }
+
+    if (viewportRound === 0) {
+      await captureSinglePassDebugSnapshot(page, {
+        currentWork,
+        viewportRound,
+        visibleCandidates,
+        pendingItems: [...pendingMap.values()],
+        commentListCollector,
+      });
     }
 
     const stats = commentListCollector?.getStats?.() || {};

@@ -81,7 +81,7 @@ async function captureReplyBoxDebug(page, phase) {
 }
 
 async function typeIntoReplyDraftEditor(page, replyText) {
-  const editor = page.locator('.comment-input-container [contenteditable="true"]').last();
+  const editor = page.locator('.comment-input-container [contenteditable="true"], .comment-input-container textarea, .comment-input-container input[type="text"]').last();
   await editor.waitFor({ state: 'visible', timeout: 3000 });
   await editor.click({ timeout: 3000 });
 
@@ -92,8 +92,9 @@ async function typeIntoReplyDraftEditor(page, replyText) {
 
   const typed = await page.evaluate((text) => {
     const container = document.querySelector('.comment-input-container');
-    const editorEl = container?.querySelector('[contenteditable="true"]');
-    const visibleText = (container?.innerText || editorEl?.innerText || '').trim();
+    const editorEl = container?.querySelector('[contenteditable="true"], textarea, input[type="text"]');
+    const editorText = typeof editorEl?.value === 'string' ? editorEl.value : editorEl?.innerText;
+    const visibleText = (container?.innerText || editorText || '').trim();
     if (visibleText.includes(text) || visibleText.includes(text.slice(0, Math.min(10, text.length)))) {
       return { ok: true, method: 'keyboard_insertText' };
     }
@@ -103,16 +104,27 @@ async function typeIntoReplyDraftEditor(page, replyText) {
     if (rect.width < 50 || rect.height < 10) return { ok: false, reason: 'editor too small after insertText' };
 
     editorEl.focus();
-    const selection = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(editorEl);
-    range.collapse(false);
-    selection.removeAllRanges();
-    selection.addRange(range);
-    document.execCommand('insertText', false, text);
-    editorEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    if (editorEl.matches('input, textarea')) {
+      const proto = editorEl.tagName === 'TEXTAREA'
+        ? window.HTMLTextAreaElement.prototype
+        : window.HTMLInputElement.prototype;
+      const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      nativeSetter?.call(editorEl, text);
+      editorEl.dispatchEvent(new Event('input', { bubbles: true }));
+      editorEl.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(editorEl);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.execCommand('insertText', false, text);
+      editorEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    }
 
-    const fallbackText = (container?.innerText || editorEl.innerText || '').trim();
+    const fallbackRaw = typeof editorEl?.value === 'string' ? editorEl.value : editorEl.innerText;
+    const fallbackText = (container?.innerText || fallbackRaw || '').trim();
     if (fallbackText.includes(text) || fallbackText.includes(text.slice(0, Math.min(10, text.length)))) {
       return { ok: true, method: 'execCommand_fallback' };
     }
@@ -1026,7 +1038,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
   }
 }
 
-const WORK_COMMENT_CONTAINER_SELECTORS = [
+export const WORK_COMMENT_CONTAINER_SELECTORS = [
   '.comment-mainContent',
   '[class*="comment-main"]',
   '[class*="comment-list"]',
@@ -1034,7 +1046,7 @@ const WORK_COMMENT_CONTAINER_SELECTORS = [
   '[class*="comment"]',
 ];
 
-const WORK_COMMENT_ITEM_SELECTORS = [
+export const WORK_COMMENT_ITEM_SELECTORS = [
   '[data-e2e="comment-item"]',
   '[class*="comment-item"]',
   '[class*="commentItem"]',
@@ -1042,6 +1054,7 @@ const WORK_COMMENT_ITEM_SELECTORS = [
 
 const RELATIVE_TIME_RE = /^(刚刚|\d+秒前|\d+分钟前|\d+小时前|\d+天前)$/;
 const DAY_RELATIVE_RE = /^(昨天|前天)\s*\d{1,2}:\d{2}$/;
+const EPOCH_TIME_RE = /^\d{10,13}$/;
 
 function normalizeInlineText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -1057,6 +1070,7 @@ function normalizeTimeHint(value) {
 
 function isRelativeTimeText(value) {
   const text = normalizeTimeHint(value);
+  if (EPOCH_TIME_RE.test(text)) return true;
   return RELATIVE_TIME_RE.test(text) || DAY_RELATIVE_RE.test(text);
 }
 
@@ -1150,13 +1164,27 @@ export function pickWorkCommentCandidate(candidates = [], target = {}) {
 export async function collectVisibleWorkCommentCandidates(page) {
   return page.evaluate(({ containerSelectors, itemSelectors }) => {
     const TIME_PATTERNS = [
-      /^\d{1,2}:\d{2}$/,
-      /^\d+[秒分时天周月年]前$/,
-      /^\d{2}-\d{2}$/,
-      /^\d+月\d+日$/,
-      /^(昨天|前天)\s*\d{1,2}:\d{2}$/,
-      /^(?:星期|周)[一二三四五六日天]$/,
+      /^\d{1,2}:\d{2}(?:·.*)?$/,
+      /^\d+[秒分时天周月年]前(?:·.*)?$/,
+      /^\d{2}-\d{2}(?:·.*)?$/,
+      /^\d+月\d+日(?:·.*)?$/,
+      /^(昨天|前天)\s*\d{1,2}:\d{2}(?:·.*)?$/,
+      /^(?:星期|周)[一二三四五六日天](?:·.*)?$/,
     ];
+    const IGNORE_LINES = new Set([
+      '互相关注',
+      '作者',
+      '分享',
+      '回复',
+      '点赞',
+      '评论',
+      '置顶',
+      '展开',
+      '收起',
+      '该评论被折叠',
+      '暂时没有更多评论',
+      '...',
+    ]);
 
     function visible(el) {
       if (!el) return false;
@@ -1182,6 +1210,20 @@ export async function collectVisibleWorkCommentCandidates(page) {
         }
       }
       return null;
+    }
+
+    function isTimeLine(line) {
+      return TIME_PATTERNS.some(pattern => pattern.test(line));
+    }
+
+    function isIgnorableLine(line, actorName = '') {
+      const text = String(line || '').trim();
+      if (!text) return true;
+      if (text === actorName) return true;
+      if (IGNORE_LINES.has(text)) return true;
+      if (text === '0') return true;
+      if (text.endsWith('赞过')) return true;
+      return false;
     }
 
     function extractCid(el) {
@@ -1219,33 +1261,33 @@ export async function collectVisibleWorkCommentCandidates(page) {
         '[class*="commentContent"]',
         '[class*="comment-text"]',
         '[class*="commentText"]',
-        '[class*="content"]',
       ];
       let best = '';
       for (const selector of selectors) {
         for (const el of item.querySelectorAll(selector)) {
           const text = (el.innerText || '').trim();
-          if (text && text.length > best.length && text !== actorName && text !== timeText && !text.includes('回复')) {
+          if (text && text.length > best.length && !isIgnorableLine(text, actorName) && text !== timeText && !text.includes('回复')) {
             best = text;
           }
         }
       }
       if (best) return best;
 
-      const filtered = lines.filter(line =>
-        line &&
-        line !== actorName &&
-        line !== timeText &&
-        line !== '回复' &&
-        line !== '点赞' &&
-        line !== '分享'
-      );
-      filtered.sort((a, b) => b.length - a.length);
-      return filtered[0] || '';
+      const timeIndex = lines.findIndex(line => isTimeLine(line));
+      const scanLines = timeIndex >= 0 ? lines.slice(0, timeIndex) : lines;
+      let lastUseful = '';
+      for (const line of scanLines) {
+        if (isIgnorableLine(line, actorName)) continue;
+        lastUseful = line;
+      }
+      if (lastUseful) return lastUseful;
+
+      const fallback = lines.filter(line => !isIgnorableLine(line, actorName) && !isTimeLine(line));
+      return fallback[fallback.length - 1] || '';
     }
 
     function extractTimeText(lines) {
-      return lines.find(line => TIME_PATTERNS.some(pattern => pattern.test(line))) || '';
+      return lines.find(line => isTimeLine(line)) || '';
     }
 
     const commentArea = findContainer();
@@ -1277,7 +1319,7 @@ export async function collectVisibleWorkCommentCandidates(page) {
       }
     }
 
-    const candidates = itemList.map((item, domIndex) => {
+    const rawCandidates = itemList.map((item, domIndex) => {
       const containerText = (item.innerText || '').trim();
       const lines = containerText.split('\n').map(line => line.trim()).filter(Boolean);
       const replyButton = findReplyButton(item);
@@ -1291,11 +1333,26 @@ export async function collectVisibleWorkCommentCandidates(page) {
         commentText,
         timeText,
         containerText,
+        containerTextLength: containerText.length,
         hasReplyButton: !!replyButton,
       };
     }).filter(candidate => candidate.commentText || candidate.cid || candidate.hasReplyButton);
 
-    return { ok: true, candidates };
+    rawCandidates.sort((a, b) => a.containerTextLength - b.containerTextLength);
+    const deduped = [];
+    const seenKeys = new Set();
+    for (const candidate of rawCandidates) {
+      const key = `${candidate.cid || ''}|${candidate.actorName || ''}|${candidate.commentText || ''}|${candidate.timeText || ''}`;
+      if (seenKeys.has(key)) continue;
+      if (!candidate.commentText && !candidate.cid) continue;
+      seenKeys.add(key);
+      deduped.push(candidate);
+    }
+
+    return {
+      ok: true,
+      candidates: deduped.map(({ containerTextLength, ...candidate }) => candidate),
+    };
   }, {
     containerSelectors: WORK_COMMENT_CONTAINER_SELECTORS,
     itemSelectors: WORK_COMMENT_ITEM_SELECTORS,
@@ -1375,7 +1432,6 @@ async function clickReplyButtonForCandidate(page, candidate) {
     if (!replyButton) return { ok: false, reason: 'reply_button_not_found' };
 
     const rect = replyButton.getBoundingClientRect();
-    replyButton.click();
     return {
       ok: true,
       x: Math.round(rect.x + rect.width / 2),
@@ -1384,23 +1440,46 @@ async function clickReplyButtonForCandidate(page, candidate) {
   }, candidate);
 }
 
-async function waitForWorkReplyInput(page, { timeoutMs = 3000 } = {}) {
+async function ensureWorkReplyEditorReady(page, { timeoutMs = 3000 } = {}) {
   const startedAt = Date.now();
+  let activatedContainer = false;
   while (Date.now() - startedAt < timeoutMs) {
-    const inputVisible = await page.evaluate(() => {
-      const draftEditor = document.querySelector('.comment-input-container [contenteditable="true"]');
-      if (draftEditor) {
-        const rect = draftEditor.getBoundingClientRect();
-        if (rect.width > 50 && rect.height > 10) return true;
+    const state = await page.evaluate(() => {
+      function visible(el) {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
       }
+
       const commentInput = document.querySelector('.comment-input-container');
       if (commentInput) {
         const rect = commentInput.getBoundingClientRect();
-        if (rect.width > 100 && rect.height > 30) return true;
+        const editor = commentInput.querySelector('[contenteditable="true"], textarea, input[type="text"]');
+        if (visible(editor)) {
+          const placeholder = editor.getAttribute?.('placeholder') || '';
+          return { ready: true, placeholder, x: 0, y: 0 };
+        }
+        if (rect.width > 100 && rect.height > 30) {
+          return {
+            ready: false,
+            x: Math.round(rect.x + rect.width / 2),
+            y: Math.round(rect.y + rect.height / 2),
+            text: (commentInput.innerText || '').trim(),
+          };
+        }
       }
-      return false;
-    }).catch(() => false);
-    if (inputVisible) return true;
+      return { ready: false, x: 0, y: 0, text: '' };
+    }).catch(() => ({ ready: false, x: 0, y: 0, text: '' }));
+
+    if (state.ready) return true;
+
+    if (!activatedContainer && state.x > 0 && state.y > 0) {
+      await page.mouse.click(state.x, state.y);
+      activatedContainer = true;
+      await page.waitForTimeout(300).catch(() => {});
+      continue;
+    }
+
     await page.waitForTimeout(200);
   }
   return false;
@@ -1457,7 +1536,7 @@ export async function openReplyBoxByIndex(page, commentIndex) {
       return blocking(RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND, clicked.reason, { recoverable: true });
     }
 
-    const inputVisible = await waitForWorkReplyInput(page);
+    const inputVisible = await ensureWorkReplyEditorReady(page);
     if (!inputVisible) {
       await captureReplyBoxDebug(page, 'open-no-input');
       return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '点击回复后输入框未出现', { recoverable: true });
@@ -1530,7 +1609,10 @@ export async function openReplyBoxForMatchedWorkComment(page, target, candidate,
     return blocking(RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND, clicked.reason, { recoverable: true });
   }
 
-  const inputVisible = await waitForWorkReplyInput(page);
+  await page.mouse.click(clicked.x, clicked.y).catch(() => {});
+  await page.waitForTimeout(300).catch(() => {});
+
+  const inputVisible = await ensureWorkReplyEditorReady(page);
   if (!inputVisible) {
     await captureReplyBoxDebug(page, 'open-no-input');
     return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '点击回复后输入框未出现', { recoverable: true });
