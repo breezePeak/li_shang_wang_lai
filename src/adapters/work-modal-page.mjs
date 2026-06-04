@@ -171,6 +171,11 @@ async function typeIntoReplyDraftEditor(page, replyText) {
   await editor.waitFor({ state: 'visible', timeout: 3000 });
   await editor.click({ timeout: 3000 }).catch(() => {});
 
+  await page.keyboard.press('Control+A').catch(() => {});
+  await page.keyboard.press('Backspace').catch(() => {});
+  await page.keyboard.insertText(replyText);
+  await page.waitForTimeout(300).catch(() => {});
+
   const typed = await page.evaluate((text) => {
     const container = document.querySelector('.comment-input-container');
     const editorEl = document.querySelector('[data-return-visit-editor="true"]')
@@ -180,30 +185,15 @@ async function typeIntoReplyDraftEditor(page, replyText) {
     const rect = editorEl.getBoundingClientRect();
     if (rect.width < 50 || rect.height < 10) return { ok: false, reason: 'editor too small after insertText' };
 
-    editorEl.focus();
-    editorEl.click?.();
-    const selection = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(editorEl);
-    range.collapse(true);
-    selection.removeAllRanges();
-    selection.addRange(range);
-    document.execCommand('selectAll', false, null);
-    document.execCommand('delete', false, null);
-    const beforeInput = new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: text });
-    editorEl.dispatchEvent(beforeInput);
-    document.execCommand('insertText', false, text);
-    if ((editorEl.innerText || '').trim() !== text.trim()) {
-      editorEl.textContent = text;
-    }
-    editorEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
-    editorEl.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Process' }));
-    editorEl.dispatchEvent(new Event('change', { bubbles: true }));
-
     const fallbackRaw = editorEl.innerText;
     const fallbackText = (container?.innerText || fallbackRaw || '').trim();
+    const sendButton = container?.querySelector('.commentInput-right-ct .FbVIhLlK');
     if (fallbackText.includes(text) || fallbackText.includes(text.slice(0, Math.min(10, text.length)))) {
-      return { ok: true, method: 'draft_editor_exec_command' };
+      return {
+        ok: true,
+        method: 'keyboard_insert_text',
+        sendButtonVisible: !!sendButton,
+      };
     }
     return { ok: false, reason: 'text not reflected in reply editor' };
   }, replyText);
@@ -226,12 +216,7 @@ async function clickReplySendControl(page) {
     const sendArea = container.querySelector('.commentInput-right-ct');
     if (!visible(sendArea)) return { ok: false, reason: 'comment_send_area_not_found' };
 
-    const iconTargets = [
-      '.FbVIhLlK',
-      '[class*="send"]',
-      'span',
-      'div',
-    ];
+    const iconTargets = ['.FbVIhLlK'];
     for (const selector of iconTargets) {
       const matches = Array.from(sendArea.querySelectorAll(selector)).filter(visible);
       for (const el of matches) {
