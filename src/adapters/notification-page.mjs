@@ -10,6 +10,7 @@
  */
 
 import { normalizeDouyinUrl as _norm } from '../utils/douyin-url.mjs';
+import { moveMouseIntoBox, wheelInBox } from './scroll-container.mjs';
 export const normalizeDouyinUrl = _norm;
 
 const SELF_URL = 'https://www.douyin.com/user/self';
@@ -375,12 +376,13 @@ export async function waitForNotificationPanelStable(page, { timeoutMs = NETWORK
 }
 
 export async function moveMouseIntoPanel(page, panelBox) {
-  if (!panelBox) return;
-  const x = panelBox.x + panelBox.width / 2;
-  const y = panelBox.y + Math.min(80, panelBox.height / 2);
-  console.error(`[notify-page] 鼠标移动到面板内部 x=${x.toFixed(0)}, y=${y.toFixed(0)}`);
-  await page.mouse.move(x, y, { steps: 5 });
-  await page.waitForTimeout(300);
+  if (!panelBox) return { ok: false, reason: 'missing_panel_box' };
+
+  return moveMouseIntoBox(page, panelBox, {
+    yOffset: Math.min(80, panelBox.height / 2) / panelBox.height,
+    xOffset: 0.5,
+    logPrefix: '[notify-page]',
+  });
 }
 
 export async function getPanelBoundingBox(page) {
@@ -408,19 +410,18 @@ export async function getPanelBoundingBox(page) {
 
 export async function scrollPanelDown(page, { deltaY = 600 } = {}) {
   const panelBox = await getPanelBoundingBox(page);
-  if (!panelBox) return { scrolled: false };
+  if (!panelBox) return { scrolled: false, reason: 'panel_box_not_found' };
 
-  const centerX = panelBox.x + panelBox.width / 2;
-  const centerY = panelBox.y + panelBox.height / 2;
+  const result = await wheelInBox(page, panelBox, {
+    deltaY,
+    waitMs: 1200,
+    logPrefix: '[notify-page]',
+  });
 
-  await page.mouse.move(centerX, centerY, { steps: 3 });
-  await page.waitForTimeout(100);
-
-  console.error(`[notify-page] wheel 滚动通知面板 delta=${deltaY}`);
-  await page.mouse.wheel(0, deltaY);
-  await page.waitForTimeout(1200);
-
-  return { scrolled: true };
+  return {
+    scrolled: !!result.ok,
+    ...result,
+  };
 }
 
 export async function extractVisibleNotifications(page) {

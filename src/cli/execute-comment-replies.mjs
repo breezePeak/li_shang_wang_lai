@@ -17,14 +17,20 @@ import { createBrowserContext } from '../browser/browser-context.mjs';
 import { createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
 import { captureEvidence } from '../browser/failure-evidence.mjs';
 import {
+  buildWorkReplyTarget,
+  clickSendWorkReply,
+  fillWorkReplyText,
+  findCommentByCidViaCommentListApi,
+  openReplyBoxForWorkComment,
+  openWorkPageForReply,
+  waitForWorkCommentArea,
   waitForWorkModal,
-  findUnrepliedCommentsInModal,
-  openReplyBoxByIndex,
-  sendReplyInWorkModal,
-  verifyReplyInWorkModal,
+  verifyWorkReplyVisible,
 } from '../adapters/work-modal-page.mjs';
+import { createCommentListApiCollector } from '../adapters/comment-list-api-listener.mjs';
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'fs';
 import { resolve } from 'path';
+import { pathToFileURL } from 'url';
 
 function parseArgs(argv) {
   const args = {
@@ -40,7 +46,7 @@ function parseArgs(argv) {
   return args;
 }
 
-function loadWorkCommentItemsFromFile(itemsFile) {
+export function loadWorkCommentItemsFromFile(itemsFile) {
   const raw = readFileSync(resolve(itemsFile), 'utf8');
   const parsed = JSON.parse(raw);
   const items = [];
@@ -68,18 +74,33 @@ function loadWorkCommentItemsFromFile(itemsFile) {
     throw new Error('--items-file 必须是 interactions:scan 生成的作品数组、works[].comments[]、comments 数组或评论数组');
   }
 
+  function findWorkMetaByIndex(itemIndex) {
+    let currentIndex = -1;
+    let foundMeta = null;
+    visitJsonComments(parsed, (_comment, work) => {
+      currentIndex++;
+      if (currentIndex !== itemIndex) return;
+      foundMeta = work || null;
+    });
+    return foundMeta;
+  }
+
   return {
     parsed,
     items: items.map((item, index) => ({
+      ...item,
       itemIndex: index,
       commentId: Number(item.id ?? item.commentId ?? item.comment_id ?? item.workCommentId ?? item.work_comment_id),
       replyText: String(item.replyText ?? item.reply_text ?? ''),
       workUrl: item.workUrl ?? item.work_url ?? '',
+      awemeUrl: item.awemeUrl ?? item.aweme_url ?? '',
       workId: item.workId ?? item.work_id ?? '',
       modalId: item.modalId ?? item.modal_id ?? '',
       actorName: item.actorName ?? item.actor_name ?? '',
       commentText: item.commentText ?? item.comment_text ?? '',
       eventTimeText: item.eventTimeText ?? item.event_time_text ?? '',
+      targetCommentId: String(item.targetCommentId ?? item.commentTargetId ?? item.commentCid ?? item.cid ?? item.comment_id ?? '').trim(),
+      workMeta: findWorkMetaByIndex(index),
     })),
   };
 }
@@ -118,31 +139,48 @@ function groupExecutableItemsByWork(items) {
   return [...groups.values()];
 }
 
-function normalizeTimeHint(value) {
-  return String(value || '').split('·')[0].trim();
+export function resolveWorkUrlFromItem(item = {}, row = {}) {
+  const directUrl = item.workUrl || item.work_url || row.work_url || '';
+  if (directUrl) return directUrl;
+
+  const awemeUrl = item.awemeUrl || item.aweme_url || row.aweme_url || '';
+  if (awemeUrl) return awemeUrl;
+
+  const workId = item.workId || item.work_id || row.work_id || '';
+  if (workId) return `https://www.douyin.com/video/${workId}`;
+
+  const modalId = item.modalId || item.modal_id || row.modal_id || '';
+  if (modalId) return `https://www.douyin.com/video/${modalId}`;
+
+  return '';
 }
 
-function findMatchingCommentIndex(scannedComments, target, usedIndexes = new Set()) {
-  const targetTime = normalizeTimeHint(target.eventTimeText);
-  const exact = scannedComments.find(comment =>
-    !usedIndexes.has(comment.commentIndex) &&
-    comment.actorName === target.actorName &&
-    comment.commentText === target.commentText &&
-    (!targetTime || !normalizeTimeHint(comment.eventTimeText) || normalizeTimeHint(comment.eventTimeText) === targetTime)
-  );
-  if (exact) return exact;
+export function extractTargetCommentId(item = {}, row = {}) {
+  const direct = String(
+    item.targetCommentId ??
+    item.commentTargetId ??
+    item.commentCid ??
+    item.cid ??
+    item.comment_id ??
+    row.target_comment_id ??
+    ''
+  ).trim();
+  if (direct) return direct;
 
-  const sameActorAndText = scannedComments.find(comment =>
-    !usedIndexes.has(comment.commentIndex) &&
-    comment.actorName === target.actorName &&
-    comment.commentText === target.commentText
-  );
-  if (sameActorAndText) return sameActorAndText;
+  const rawCommentJson = row.raw_comment_json || item.raw_comment_json || '';
+  if (!rawCommentJson) return '';
 
-  return scannedComments.find(comment =>
-    !usedIndexes.has(comment.commentIndex) &&
-    comment.commentText === target.commentText
-  ) || null;
+  try {
+    const parsed = JSON.parse(rawCommentJson);
+    return String(
+      parsed?.comment?.commentId ??
+      parsed?.comment?.cid ??
+      parsed?.targetCommentId ??
+      ''
+    ).trim();
+  } catch {
+    return '';
+  }
 }
 
 function updateExecuteJsonFile(itemsFile, parsed, results) {
@@ -200,7 +238,7 @@ function updateExecuteJsonFile(itemsFile, parsed, results) {
   writeFileSync(resolve(itemsFile), JSON.stringify(parsed, null, 2), 'utf8');
 }
 
-function validateWorkCommentItem(item) {
+export function validateWorkCommentItem(item) {
   if (!item.commentId) {
     return { itemIndex: item.itemIndex, ok: false, error: '缺少 work_comments.id；请使用 interactions:scan 生成的 JSON' };
   }
@@ -235,22 +273,26 @@ function validateWorkCommentItem(item) {
     return { itemIndex: item.itemIndex, commentId: item.commentId, ok: false, status: 'sent_unverified', fromAlready: true };
   }
 
-  const workUrl = item.workUrl || row.work_url || '';
+  const workUrl = resolveWorkUrlFromItem(item, row);
   if (!workUrl) {
     return { itemIndex: item.itemIndex, commentId: item.commentId, ok: false, error: 'work_url 为空，无法打开作品' };
   }
 
   return {
+    ...item,
     itemIndex: item.itemIndex,
     commentId: item.commentId,
     ok: true,
     status: row.reply_status,
+    rowId: row.id,
+    rawCommentJson: row.raw_comment_json || '',
     workUrl,
     workId: item.workId || row.work_id || '',
     modalId: item.modalId || row.modal_id || '',
     actorName: item.actorName || row.actor_name || '',
     commentText: item.commentText || row.comment_text || '',
     eventTimeText: item.eventTimeText || row.event_time_text || '',
+    targetCommentId: extractTargetCommentId(item, row),
     replyText,
   };
 }
@@ -332,11 +374,20 @@ async function executeWorkCommentItems(items, args) {
         }
 
         console.log(`[comments:execute] 打开作品 work="${currentWork.workId || currentWork.modalId || currentWork.workUrl}" comments=${group.length}`);
-        await page.goto(currentWork.workUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.waitForTimeout(1500);
+        const commentListCollector = createCommentListApiCollector(page);
+        const openResult = await openWorkPageForReply(page, currentWork.workUrl, { timeoutMs: 30000 });
+        if (!openResult.ok) {
+          commentListCollector.stop();
+          for (const validated of group) {
+            markCommentBlocked(validated.commentId, openResult.message || openResult.code || 'work_open_failed');
+            results.push({ ...validated, ok: false, status: 'blocked', error: openResult.message || openResult.code });
+          }
+          continue;
+        }
 
         const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
         if (!modalReady.ok) {
+          commentListCollector.stop();
           for (const validated of group) {
             markCommentBlocked(validated.commentId, modalReady.message || modalReady.code || 'work_modal_not_ready');
             results.push({ ...validated, ok: false, status: 'blocked', error: modalReady.message || modalReady.code });
@@ -344,66 +395,79 @@ async function executeWorkCommentItems(items, args) {
           continue;
         }
 
-        const usedCommentKeys = new Set();
-
-        for (const validated of group) {
-          const scanned = await findUnrepliedCommentsInModal(page, {
-            maxScrolls: 30,
-            alreadyRepliedKeys: new Set(),
-            selfNickname: '',
-            maxAgeDays: null,
-            oldCommentStopCount: 0,
-          });
-          if (!scanned.ok) {
-            markCommentBlocked(validated.commentId, scanned.message || scanned.code || 'comment_scan_failed');
-            results.push({ ...validated, ok: false, status: 'blocked', error: scanned.message || scanned.code });
-            continue;
+        const commentAreaReady = await waitForWorkCommentArea(page, { timeoutMs: 10000 });
+        if (!commentAreaReady.ok) {
+          commentListCollector.stop();
+          for (const validated of group) {
+            markCommentBlocked(validated.commentId, commentAreaReady.message || commentAreaReady.code || 'comment_area_not_ready');
+            results.push({ ...validated, ok: false, status: 'blocked', error: commentAreaReady.message || commentAreaReady.code });
           }
+          continue;
+        }
 
-          const scannedComments = (scanned.data?.comments || []).filter(comment => !usedCommentKeys.has(comment.commentKey));
-          console.log(`[comments:execute] 匹配评论 commentId=${validated.commentId} actor="${validated.actorName}" comment="${validated.commentText.slice(0, 40)}"`);
-          const matched = findMatchingCommentIndex(scannedComments, validated);
-          if (!matched) {
-            console.log(`[comments:execute] 未找到评论 commentId=${validated.commentId} reason=no_matching_comment_in_scanned_work`);
-            markCommentBlocked(validated.commentId, 'no_matching_comment_in_scanned_work');
-            results.push({ ...validated, ok: false, status: 'blocked', error: 'no_matching_comment_in_scanned_work' });
-            continue;
+        try {
+          for (const validated of group) {
+            let apiComment = null;
+            if (validated.targetCommentId) {
+              const apiResult = await findCommentByCidViaCommentListApi(page, {
+                targetCommentId: validated.targetCommentId,
+                maxScrollPages: 5,
+                waitTimeoutMs: 5000,
+                collector: commentListCollector,
+              });
+              if (apiResult.ok && apiResult.comment) {
+                apiComment = apiResult.comment;
+                console.log(`[comments:execute] comment/list 命中 cid=${validated.targetCommentId} actor="${apiComment.actorName || ''}" comment="${String(apiComment.commentText || '').slice(0, 40)}"`);
+              } else {
+                console.log(`[comments:execute] comment/list 未命中 cid=${validated.targetCommentId}，回退 DOM 匹配`);
+              }
+            }
+
+            const replyTarget = buildWorkReplyTarget(validated, apiComment);
+            console.log(`[comments:execute] 匹配评论 commentId=${validated.commentId} actor="${replyTarget.actorName}" comment="${replyTarget.commentText.slice(0, 40)}" cid=${replyTarget.targetCommentId || '-'}`);
+
+            const opened = await openReplyBoxForWorkComment(page, replyTarget, { maxScrollRounds: 12 });
+            if (!opened.ok) {
+              markCommentBlocked(validated.commentId, opened.message || opened.code || 'reply_box_not_opened');
+              results.push({ ...validated, ok: false, status: 'blocked', error: opened.message || opened.code });
+              continue;
+            }
+
+            const filled = await fillWorkReplyText(page, validated.replyText);
+            if (!filled.ok) {
+              markCommentBlocked(validated.commentId, filled.message || filled.code || 'fill_failed');
+              results.push({ ...validated, ok: false, status: 'blocked', error: filled.message || filled.code });
+              continue;
+            }
+
+            const sent = await clickSendWorkReply(page);
+            if (!sent.ok) {
+              markCommentBlocked(validated.commentId, sent.message || sent.code || 'send_failed');
+              results.push({ ...validated, ok: false, status: 'blocked', error: sent.message || sent.code });
+              continue;
+            }
+
+            const verified = await verifyWorkReplyVisible(page, {
+              commentText: replyTarget.commentText,
+              actorName: replyTarget.actorName,
+            }, validated.replyText, { timeoutMs: 7000 });
+            if (!verified.ok) {
+              markCommentSentUnverified(validated.commentId, verified.message || verified.code || 'send_unverified');
+              results.push({ ...validated, ok: false, status: 'sent_unverified', error: verified.message || verified.code });
+              continue;
+            }
+
+            markCommentReplied(validated.commentId);
+            saveReplyText(validated.commentId, validated.replyText);
+            results.push({ ...validated, ok: true, status: 'succeeded', mode: 'execute' });
+
+            try {
+              await page.keyboard.press('Escape');
+              await page.waitForTimeout(300);
+            } catch {}
           }
-          usedCommentKeys.add(matched.commentKey);
-          console.log(`[comments:execute] 已定位评论 commentId=${validated.commentId} index=${matched.commentIndex}`);
-
-          const opened = await openReplyBoxByIndex(page, matched.commentIndex);
-          if (!opened.ok) {
-            markCommentBlocked(validated.commentId, opened.message || opened.code || 'reply_box_not_opened');
-            results.push({ ...validated, ok: false, status: 'blocked', error: opened.message || opened.code });
-            continue;
-          }
-
-          const sent = await sendReplyInWorkModal(page, validated.replyText);
-          if (!sent.ok) {
-            markCommentBlocked(validated.commentId, sent.message || sent.code || 'send_failed');
-            results.push({ ...validated, ok: false, status: 'blocked', error: sent.message || sent.code });
-            continue;
-          }
-
-          const verified = await verifyReplyInWorkModal(page, {
-            commentText: validated.commentText,
-            actorName: validated.actorName,
-          }, validated.replyText, { timeoutMs: 7000 });
-          if (!verified.ok) {
-            markCommentSentUnverified(validated.commentId, verified.message || verified.code || 'send_unverified');
-            results.push({ ...validated, ok: false, status: 'sent_unverified', error: verified.message || verified.code });
-            continue;
-          }
-
-          markCommentReplied(validated.commentId);
-          saveReplyText(validated.commentId, validated.replyText);
-          results.push({ ...validated, ok: true, status: 'succeeded', mode: 'execute' });
-
-          try {
-            await page.keyboard.press('Escape');
-            await page.waitForTimeout(300);
-          } catch {}
+        } finally {
+          commentListCollector.stop();
         }
       } catch (err) {
         run.hadBlocked = true;
@@ -501,7 +565,11 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  printJsonError('comments:execute', RESULT_CODES.UNKNOWN_ERROR, err.message, { recoverable: false });
-  process.exit(1);
-});
+const isDirectRun = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  main().catch(err => {
+    printJsonError('comments:execute', RESULT_CODES.UNKNOWN_ERROR, err.message, { recoverable: false });
+    process.exit(1);
+  });
+}

@@ -167,7 +167,7 @@ npm run comments:execute -- --items-file data/pending-replies/pending-comments-x
 
 源文件：`src/cli/execute-comment-replies.mjs`
 
-读取同一个待回复评论 JSON，逐条处理已填写 `reply_text` 的评论。`reply_text` 由 Agent 根据评论内容、作品上下文和安全规则生成并填写。每条发送后必须确认成功，再更新 `work_comments.reply_status` 和 `interaction_events.status`，并回写 JSON 状态码。
+读取同一个待回复评论 JSON，按作品分组打开对应抖音作品页，在作品评论区中查找目标评论。`reply_text` 由 Agent 根据评论内容、作品上下文和安全规则生成并填写。执行时优先结合 `cid/comment_id` 和 `/aweme/v1/web/comment/list/` 辅助确认目标评论，再在评论区 DOM 中唯一定位后点击“回复”、填写 `reply_text`、发送并校验；成功后更新 `work_comments.reply_status` 和 `interaction_events.status`，并回写 JSON 状态码。
 
 命令默认真实执行，不再需要 `--execute`。
 
@@ -182,6 +182,7 @@ reply_text 为空的评论会打印日志跳过。已经 succeeded / sent_unveri
 
 - 只处理 `reply_text` 非空的评论。
 - 执行前检查原评论、回复文本和作品 URL。
+- 不再进入 `creator.douyin.com` 评论管理页，也不做全量评论加载/提取。
 - 发送失败、页面定位失败或状态不确定会进入 `blocked` 或 `sent_unverified`。
 - 重复执行已成功评论回写 `EXECUTE_ALREADY_CONFIRMED`，不算失败。
 

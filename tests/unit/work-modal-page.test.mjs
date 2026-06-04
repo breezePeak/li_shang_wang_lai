@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { extractModalIdFromUrl, parseDouyinTimeText } from '../../src/adapters/work-modal-page.mjs';
+import {
+  buildWorkReplyTarget,
+  extractModalIdFromUrl,
+  parseDouyinTimeText,
+  pickWorkCommentCandidate,
+  scrollCommentAreaOnce,
+} from '../../src/adapters/work-modal-page.mjs';
 import { checkWorkOwner } from '../../src/adapters/work-context-page.mjs';
 
 describe('extractModalIdFromUrl', () => {
@@ -126,5 +132,79 @@ describe('ownerCheck 分支', () => {
     const result = checkWorkOwner({ authorProfileKey: 'OTHER_KEY', authorProfileUrl: '', authorName: '' }, self);
     expect(result.isOwnWork).toBe(false);
     expect(result.ownerCheckConfidence).toBe('high');
+  });
+});
+
+describe('作品评论区回复定位', () => {
+  it('buildWorkReplyTarget 优先合并 cid 与 API 评论信息', () => {
+    const target = buildWorkReplyTarget(
+      { actor_name: '张三', comment_text: '求更新', event_time_text: '06-01', cid: 'c1' },
+      { actorName: '张三', commentText: '求更新' }
+    );
+
+    expect(target.targetCommentId).toBe('c1');
+    expect(target.actorName).toBe('张三');
+    expect(target.commentText).toBe('求更新');
+  });
+
+  it('pickWorkCommentCandidate 优先按 cid 精确命中', () => {
+    const result = pickWorkCommentCandidate([
+      { domIndex: 0, cid: 'c1', actorName: '张三', commentText: 'A', timeText: '', hasReplyButton: true },
+      { domIndex: 1, cid: 'c2', actorName: '李四', commentText: 'B', timeText: '', hasReplyButton: true },
+    ], {
+      targetCommentId: 'c2',
+      actorName: '李四',
+      commentText: 'B',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.candidate.domIndex).toBe(1);
+    expect(result.matchedBy).toBe('cid');
+  });
+
+  it('pickWorkCommentCandidate 多候选时阻断', () => {
+    const result = pickWorkCommentCandidate([
+      { domIndex: 0, cid: '', actorName: '张三', commentText: '求更新', timeText: '06-01', hasReplyButton: true },
+      { domIndex: 1, cid: '', actorName: '张三', commentText: '求更新', timeText: '06-01', hasReplyButton: true },
+    ], {
+      actorName: '张三',
+      commentText: '求更新',
+      eventTimeText: '06-01',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('not_unique');
+  });
+
+  it('pickWorkCommentCandidate actor 不匹配时阻断', () => {
+    const result = pickWorkCommentCandidate([
+      { domIndex: 0, cid: '', actorName: '李四', commentText: '求更新', timeText: '06-01', hasReplyButton: true },
+    ], {
+      actorName: '张三',
+      commentText: '求更新',
+      eventTimeText: '06-01',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('actor_not_verified');
+  });
+
+  it('scrollCommentAreaOnce 使用统一 wheel 滚动评论容器', async () => {
+    const page = {
+      evaluate: vi.fn(async () => ({
+        ok: true,
+        count: 1,
+        box: { x: 0, y: 0, width: 320, height: 300, selector: '.comment-mainContent' },
+      })),
+      mouse: {
+        move: vi.fn(async () => {}),
+        wheel: vi.fn(async () => {}),
+      },
+      waitForTimeout: vi.fn(async () => {}),
+    };
+
+    const result = await scrollCommentAreaOnce(page);
+    expect(result.ok).toBe(true);
+    expect(page.mouse.wheel).toHaveBeenCalledWith(0, 600);
   });
 });

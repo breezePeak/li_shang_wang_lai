@@ -56,6 +56,8 @@ prepare_status_code: PREPARE_READY
 npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
 ```
 
+执行阶段会直接打开待回复评论所属的抖音作品页，在作品评论区定位目标评论；优先结合 `cid/comment_id` 与 `/aweme/v1/web/comment/list/` 做确认，唯一命中后点击“回复”、填写 `reply_text`、发送并校验，不再进入创作者评论管理页。
+
 ## 回访流程
 
 先扫描并生成最小待回访 JSON：

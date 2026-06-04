@@ -1,6 +1,7 @@
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 import { normalizeDouyinUrl } from '../utils/douyin-url.mjs';
 import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
+import { findScrollableContainerBox, scrollContainerByWheel } from './scroll-container.mjs';
 import path from 'path';
 
 async function captureReplyBoxDebug(page, phase) {
@@ -1025,105 +1026,367 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
   }
 }
 
-export async function openReplyBoxByIndex(page, commentIndex) {
-  console.error(`[work-modal] 按索引打开回复框: commentIndex=${commentIndex}`);
+const WORK_COMMENT_CONTAINER_SELECTORS = [
+  '.comment-mainContent',
+  '[class*="comment-main"]',
+  '[class*="comment-list"]',
+  '[class*="commentList"]',
+  '[class*="comment"]',
+];
 
-  try {
-    const clicked = await page.evaluate((commentIndex) => {
-      const commentArea = document.querySelector('.comment-mainContent');
-      if (!commentArea) return { ok: false, reason: 'comment-mainContent not found' };
+const WORK_COMMENT_ITEM_SELECTORS = [
+  '[data-e2e="comment-item"]',
+  '[class*="comment-item"]',
+  '[class*="commentItem"]',
+];
 
-      const commentItems = commentArea.querySelectorAll('[data-e2e="comment-item"]');
-      if (commentIndex < 0 || commentIndex >= commentItems.length) return { ok: false, reason: `index ${commentIndex} out of range (0-${commentItems.length - 1})` };
+const RELATIVE_TIME_RE = /^(刚刚|\d+秒前|\d+分钟前|\d+小时前|\d+天前)$/;
+const DAY_RELATIVE_RE = /^(昨天|前天)\s*\d{1,2}:\d{2}$/;
 
-      const commentItem = commentItems[commentIndex];
-      const targetInfoWrap = commentItem.querySelector('.comment-item-info-wrap') || commentItem;
+function normalizeInlineText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
 
-      if (commentItem) {
-        const statsContainer = commentItem.querySelector('.comment-item-stats-container');
-        if (statsContainer) {
-          const spans = statsContainer.querySelectorAll('span');
-          for (const span of spans) {
-            if ((span.innerText || '').trim() === '回复') {
-              const rect = span.getBoundingClientRect();
-              if (rect.width > 0 && rect.height > 0) {
-                if (rect.y < 0 || rect.y > window.innerHeight) {
-                  commentItem.scrollIntoView({ block: 'center', behavior: 'instant' });
-                }
-                span.click();
-                const newRect = span.getBoundingClientRect();
-                return { ok: true, x: Math.round(newRect.x + newRect.width / 2), y: Math.round(newRect.y + newRect.height / 2), scope: 'stats-container' };
-              }
-            }
-          }
-        }
+function normalizeActorName(value) {
+  return normalizeInlineText(value).replace(/^@+/, '');
+}
 
-        const allSpans = commentItem.querySelectorAll('span');
-        for (const span of allSpans) {
-          if ((span.innerText || '').trim() === '回复') {
-            const rect = span.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-              if (rect.y < 0 || rect.y > window.innerHeight) {
-                commentItem.scrollIntoView({ block: 'center', behavior: 'instant' });
-              }
-              span.click();
-              const newRect = span.getBoundingClientRect();
-              return { ok: true, x: Math.round(newRect.x + newRect.width / 2), y: Math.round(newRect.y + newRect.height / 2), scope: 'comment-item' };
-            }
-          }
-        }
+function normalizeTimeHint(value) {
+  return normalizeInlineText(String(value || '').split('·')[0]);
+}
+
+function isRelativeTimeText(value) {
+  const text = normalizeTimeHint(value);
+  return RELATIVE_TIME_RE.test(text) || DAY_RELATIVE_RE.test(text);
+}
+
+function sameTextMatch(actual, expected) {
+  const left = normalizeInlineText(actual);
+  const right = normalizeInlineText(expected);
+  if (!left || !right) return false;
+  return left === right || left.includes(right) || right.includes(left);
+}
+
+function sameTimeHint(actual, expected) {
+  const left = normalizeTimeHint(actual);
+  const right = normalizeTimeHint(expected);
+  if (!left || !right) return false;
+  return left === right || left.includes(right) || right.includes(left);
+}
+
+export function buildWorkReplyTarget(item = {}, apiComment = null) {
+  const api = apiComment || {};
+  return {
+    targetCommentId: String(
+      item.targetCommentId ??
+      item.commentTargetId ??
+      item.commentCid ??
+      item.cid ??
+      item.comment_id ??
+      item.platformEventId ??
+      api.commentId ??
+      api.cid ??
+      ''
+    ).trim(),
+    actorName: normalizeActorName(item.actorName ?? item.actor_name ?? api.actorName ?? ''),
+    commentText: normalizeInlineText(item.commentText ?? item.comment_text ?? api.commentText ?? ''),
+    eventTimeText: normalizeInlineText(item.eventTimeText ?? item.event_time_text ?? ''),
+  };
+}
+
+export function pickWorkCommentCandidate(candidates = [], target = {}) {
+  const targetCommentId = String(target.targetCommentId || '').trim();
+  const actorName = normalizeActorName(target.actorName);
+  const commentText = normalizeInlineText(target.commentText);
+  const eventTimeText = normalizeInlineText(target.eventTimeText);
+  const strictTime = eventTimeText && !isRelativeTimeText(eventTimeText);
+
+  const visibleCandidates = (candidates || []).filter(candidate => candidate && candidate.hasReplyButton);
+  if (visibleCandidates.length === 0) {
+    return { ok: false, reason: 'not_found' };
+  }
+
+  if (targetCommentId) {
+    const cidMatches = visibleCandidates.filter(candidate => String(candidate.cid || '').trim() === targetCommentId);
+    if (cidMatches.length === 1) {
+      return { ok: true, candidate: cidMatches[0], matchedBy: 'cid' };
+    }
+    if (cidMatches.length > 1) {
+      return { ok: false, reason: 'not_unique', total: cidMatches.length, matchedBy: 'cid' };
+    }
+  }
+
+  let matched = visibleCandidates.filter(candidate => sameTextMatch(candidate.commentText, commentText));
+  if (matched.length === 0) {
+    return { ok: false, reason: 'not_found' };
+  }
+
+  if (actorName) {
+    const actorMatched = matched.filter(candidate => sameTextMatch(candidate.actorName, actorName));
+    if (actorMatched.length === 0) {
+      return { ok: false, reason: 'actor_not_verified', total: matched.length };
+    }
+    matched = actorMatched;
+  }
+
+  if (strictTime) {
+    const candidatesWithTime = matched.filter(candidate => normalizeTimeHint(candidate.timeText));
+    if (candidatesWithTime.length > 0) {
+      const timeMatched = candidatesWithTime.filter(candidate => sameTimeHint(candidate.timeText, eventTimeText));
+      if (timeMatched.length === 0) {
+        return { ok: false, reason: 'time_not_verified', total: matched.length };
       }
+      matched = timeMatched;
+    }
+  }
 
-      const searchScopes = [
-        targetInfoWrap.parentElement,
-        targetInfoWrap.parentElement?.parentElement,
-        targetInfoWrap.parentElement?.parentElement?.parentElement,
-      ].filter(Boolean);
+  if (matched.length > 1) {
+    return { ok: false, reason: 'not_unique', total: matched.length, matchedBy: actorName ? 'actor+text' : 'text' };
+  }
 
-      for (const scope of searchScopes) {
-        const spans = scope.querySelectorAll('span');
-        for (const span of spans) {
-          if ((span.innerText || '').trim() === '回复') {
-            const rect = span.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-              span.click();
-              return { ok: true, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2), scope: 'ancestor' };
-            }
-          }
-        }
-      }
+  return { ok: true, candidate: matched[0], matchedBy: actorName ? 'actor+text' : 'text' };
+}
 
-      const allReplySpans = commentArea.querySelectorAll('span');
-      const itemRect = targetInfoWrap.getBoundingClientRect();
-      let closestReply = null;
-      let closestDist = Infinity;
-      for (const span of allReplySpans) {
-        if ((span.innerText || '').trim() !== '回复') continue;
-        const rect = span.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) continue;
-        const dy = Math.abs(rect.y - itemRect.y);
-        if (dy < 120 && dy < closestDist) {
-          closestDist = dy;
-          closestReply = span;
-        }
-      }
-      if (closestReply) {
-        const rect = closestReply.getBoundingClientRect();
-        closestReply.click();
-        return { ok: true, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2), scope: 'proximity' };
-      }
+async function collectVisibleWorkCommentCandidates(page) {
+  return page.evaluate(({ containerSelectors, itemSelectors }) => {
+    const TIME_PATTERNS = [
+      /^\d{1,2}:\d{2}$/,
+      /^\d+[秒分时天周月年]前$/,
+      /^\d{2}-\d{2}$/,
+      /^\d+月\d+日$/,
+      /^(昨天|前天)\s*\d{1,2}:\d{2}$/,
+      /^(?:星期|周)[一二三四五六日天]$/,
+    ];
 
-      return { ok: false, reason: '回复 span not found in comment item or nearby' };
-    }, commentIndex);
-
-    if (!clicked.ok) {
-      return blocking(RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND, clicked.reason, { recoverable: true });
+    function visible(el) {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
     }
 
-    console.error(`[work-modal] 已点击回复 span at (${clicked.x}, ${clicked.y})`);
+    function findContainer() {
+      for (const selector of containerSelectors) {
+        const el = document.querySelector(selector);
+        if (visible(el)) return el;
+      }
+      return null;
+    }
 
-    await page.waitForTimeout(1000);
+    function findReplyButton(root) {
+      const nodes = root.querySelectorAll('button, [role="button"], span, div');
+      for (const node of nodes) {
+        if (!visible(node)) continue;
+        const text = (node.innerText || node.textContent || '').trim();
+        if (text === '回复' || text.startsWith('回复')) {
+          return node.closest('button,[role="button"]') || node;
+        }
+      }
+      return null;
+    }
 
+    function extractCid(el) {
+      const attrs = ['data-comment-id', 'data-commentid', 'data-id', 'data-cid', 'id'];
+      let current = el;
+      for (let depth = 0; depth < 4 && current && current !== document.body; depth++) {
+        for (const attr of attrs) {
+          const value = current.getAttribute?.(attr);
+          if (value && String(value).trim()) return String(value).trim();
+        }
+        current = current.parentElement;
+      }
+      return '';
+    }
+
+    function extractActorName(item, lines) {
+      const selectors = [
+        '[data-e2e*="nickname"]',
+        '[class*="nickname"]',
+        '[class*="user-name"]',
+        '[class*="userName"]',
+        '[class*="author"]',
+      ];
+      for (const selector of selectors) {
+        const el = item.querySelector(selector);
+        const text = (el?.innerText || '').trim().replace(/^@+/, '');
+        if (text) return text;
+      }
+      return (lines[0] || '').replace(/^@+/, '');
+    }
+
+    function extractCommentText(item, actorName, timeText, lines) {
+      const selectors = [
+        '[class*="comment-content"]',
+        '[class*="commentContent"]',
+        '[class*="comment-text"]',
+        '[class*="commentText"]',
+        '[class*="content"]',
+      ];
+      let best = '';
+      for (const selector of selectors) {
+        for (const el of item.querySelectorAll(selector)) {
+          const text = (el.innerText || '').trim();
+          if (text && text.length > best.length && text !== actorName && text !== timeText && !text.includes('回复')) {
+            best = text;
+          }
+        }
+      }
+      if (best) return best;
+
+      const filtered = lines.filter(line =>
+        line &&
+        line !== actorName &&
+        line !== timeText &&
+        line !== '回复' &&
+        line !== '点赞' &&
+        line !== '分享'
+      );
+      filtered.sort((a, b) => b.length - a.length);
+      return filtered[0] || '';
+    }
+
+    function extractTimeText(lines) {
+      return lines.find(line => TIME_PATTERNS.some(pattern => pattern.test(line))) || '';
+    }
+
+    const commentArea = findContainer();
+    if (!commentArea) return { ok: false, reason: 'comment_area_not_found', candidates: [] };
+
+    const itemList = [];
+    const seen = new Set();
+    for (const selector of itemSelectors) {
+      for (const item of commentArea.querySelectorAll(selector)) {
+        if (!visible(item) || seen.has(item)) continue;
+        seen.add(item);
+        itemList.push(item);
+      }
+    }
+
+    if (itemList.length === 0) {
+      for (const replyButton of commentArea.querySelectorAll('button, [role="button"], span, div')) {
+        const text = (replyButton.innerText || replyButton.textContent || '').trim();
+        if (text !== '回复' && !text.startsWith('回复')) continue;
+        let current = replyButton.parentElement;
+        for (let depth = 0; depth < 4 && current && current !== commentArea; depth++) {
+          if (!seen.has(current) && visible(current)) {
+            seen.add(current);
+            itemList.push(current);
+            break;
+          }
+          current = current.parentElement;
+        }
+      }
+    }
+
+    const candidates = itemList.map((item, domIndex) => {
+      const containerText = (item.innerText || '').trim();
+      const lines = containerText.split('\n').map(line => line.trim()).filter(Boolean);
+      const replyButton = findReplyButton(item);
+      const actorName = extractActorName(item, lines);
+      const timeText = extractTimeText(lines);
+      const commentText = extractCommentText(item, actorName, timeText, lines);
+      return {
+        domIndex,
+        cid: extractCid(item),
+        actorName,
+        commentText,
+        timeText,
+        containerText,
+        hasReplyButton: !!replyButton,
+      };
+    }).filter(candidate => candidate.commentText || candidate.cid || candidate.hasReplyButton);
+
+    return { ok: true, candidates };
+  }, {
+    containerSelectors: WORK_COMMENT_CONTAINER_SELECTORS,
+    itemSelectors: WORK_COMMENT_ITEM_SELECTORS,
+  });
+}
+
+async function clickReplyButtonForCandidate(page, candidate) {
+  return page.evaluate(({ domIndex, cid, actorName, commentText }) => {
+    function visible(el) {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }
+
+    function getItems() {
+      const selectors = [
+        '[data-e2e="comment-item"]',
+        '[class*="comment-item"]',
+        '[class*="commentItem"]',
+      ];
+      const area = document.querySelector('.comment-mainContent')
+        || document.querySelector('[class*="comment-main"]')
+        || document.querySelector('[class*="comment-list"]')
+        || document.querySelector('[class*="commentList"]');
+      const items = [];
+      const seen = new Set();
+      if (!area) return items;
+      for (const selector of selectors) {
+        for (const item of area.querySelectorAll(selector)) {
+          if (!visible(item) || seen.has(item)) continue;
+          seen.add(item);
+          items.push(item);
+        }
+      }
+      return items;
+    }
+
+    function findReplyButton(root) {
+      const nodes = root.querySelectorAll('button, [role="button"], span, div');
+      for (const node of nodes) {
+        if (!visible(node)) continue;
+        const text = (node.innerText || node.textContent || '').trim();
+        if (text === '回复' || text.startsWith('回复')) {
+          return node.closest('button,[role="button"]') || node;
+        }
+      }
+      return null;
+    }
+
+    const items = getItems();
+    const item = items[domIndex];
+    if (!item) return { ok: false, reason: 'candidate_dom_missing' };
+
+    const text = (item.innerText || '').trim();
+    if (commentText && !text.includes(commentText)) return { ok: false, reason: 'candidate_text_changed' };
+    if (actorName && !text.includes(actorName)) return { ok: false, reason: 'candidate_actor_changed' };
+    if (cid) {
+      const attrs = ['data-comment-id', 'data-commentid', 'data-id', 'data-cid', 'id'];
+      let foundCid = '';
+      let current = item;
+      for (let depth = 0; depth < 4 && current && current !== document.body; depth++) {
+        for (const attr of attrs) {
+          const value = current.getAttribute?.(attr);
+          if (value && String(value).trim()) {
+            foundCid = String(value).trim();
+            break;
+          }
+        }
+        if (foundCid) break;
+        current = current.parentElement;
+      }
+      if (foundCid && foundCid !== cid) return { ok: false, reason: 'candidate_cid_changed' };
+    }
+
+    item.scrollIntoView({ block: 'center', behavior: 'instant' });
+    const replyButton = findReplyButton(item);
+    if (!replyButton) return { ok: false, reason: 'reply_button_not_found' };
+
+    const rect = replyButton.getBoundingClientRect();
+    replyButton.click();
+    return {
+      ok: true,
+      x: Math.round(rect.x + rect.width / 2),
+      y: Math.round(rect.y + rect.height / 2),
+    };
+  }, candidate);
+}
+
+async function waitForWorkReplyInput(page, { timeoutMs = 3000 } = {}) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
     const inputVisible = await page.evaluate(() => {
       const draftEditor = document.querySelector('.comment-input-container [contenteditable="true"]');
       if (draftEditor) {
@@ -1136,8 +1399,65 @@ export async function openReplyBoxByIndex(page, commentIndex) {
         if (rect.width > 100 && rect.height > 30) return true;
       }
       return false;
-    });
+    }).catch(() => false);
+    if (inputVisible) return true;
+    await page.waitForTimeout(200);
+  }
+  return false;
+}
 
+export async function waitForWorkCommentArea(page, { timeoutMs = 8000 } = {}) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const found = await getWorkCommentContainerBox(page);
+    if (found.ok && found.box) return success({ box: found.box });
+    await page.waitForTimeout(300);
+  }
+  return blocking(RESULT_CODES.COMMENT_LIST_NOT_FOUND, '未找到作品评论区', { recoverable: true });
+}
+
+export async function getWorkCommentContainerBox(page) {
+  return findScrollableContainerBox(page, {
+    selectors: WORK_COMMENT_CONTAINER_SELECTORS,
+    requiredText: ['回复'],
+    minWidth: 300,
+    minHeight: 250,
+    logPrefix: '[work-modal]',
+  });
+}
+
+/**
+ * @deprecated 旧流程按 commentIndex 点击回复，仅兼容保留。评论回复主流程已改为作品评论区唯一定位后点击回复。
+ */
+export async function openReplyBoxByIndex(page, commentIndex) {
+  console.error(`[work-modal] 按索引打开回复框: commentIndex=${commentIndex}`);
+
+  try {
+    const clicked = await page.evaluate((commentIndex) => {
+      const commentArea = document.querySelector('.comment-mainContent');
+      if (!commentArea) return { ok: false, reason: 'comment-mainContent not found' };
+
+      const commentItems = commentArea.querySelectorAll('[data-e2e="comment-item"]');
+      if (commentIndex < 0 || commentIndex >= commentItems.length) return { ok: false, reason: `index ${commentIndex} out of range (0-${commentItems.length - 1})` };
+
+      const commentItem = commentItems[commentIndex];
+      const spans = commentItem.querySelectorAll('span');
+      for (const span of spans) {
+        if ((span.innerText || '').trim() !== '回复') continue;
+        const rect = span.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        commentItem.scrollIntoView({ block: 'center', behavior: 'instant' });
+        span.click();
+        return { ok: true, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
+      }
+      return { ok: false, reason: 'reply_button_not_found' };
+    }, commentIndex);
+
+    if (!clicked.ok) {
+      return blocking(RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND, clicked.reason, { recoverable: true });
+    }
+
+    const inputVisible = await waitForWorkReplyInput(page);
     if (!inputVisible) {
       await captureReplyBoxDebug(page, 'open-no-input');
       return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '点击回复后输入框未出现', { recoverable: true });
@@ -1151,7 +1471,73 @@ export async function openReplyBoxByIndex(page, commentIndex) {
   }
 }
 
-export async function fillReplyInWorkModal(page, replyText) {
+export async function openReplyBoxForWorkComment(page, target, { maxScrollRounds = 12 } = {}) {
+  const replyTarget = buildWorkReplyTarget(target);
+  const preview = replyTarget.commentText.slice(0, 40);
+  console.error(`[work-modal] 定位作品评论并打开回复框 actor="${replyTarget.actorName}" comment="${preview}" cid=${replyTarget.targetCommentId || '-'}`);
+
+  for (let round = 0; round <= maxScrollRounds; round++) {
+    const collected = await collectVisibleWorkCommentCandidates(page);
+    if (collected.ok) {
+      const picked = pickWorkCommentCandidate(collected.candidates, replyTarget);
+      if (picked.ok && picked.candidate) {
+        const clicked = await clickReplyButtonForCandidate(page, picked.candidate);
+        if (!clicked.ok) {
+          return blocking(RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND, clicked.reason, { recoverable: true });
+        }
+
+        const inputVisible = await waitForWorkReplyInput(page);
+        if (!inputVisible) {
+          await captureReplyBoxDebug(page, 'open-no-input');
+          return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '点击回复后输入框未出现', { recoverable: true });
+        }
+
+        await captureReplyBoxDebug(page, 'open-success');
+        console.error(`[work-modal] 已唯一定位评论并打开回复框 matchedBy=${picked.matchedBy}`);
+        return success({ replyBoxOpened: true, matchedBy: picked.matchedBy, candidate: picked.candidate });
+      }
+
+      if (picked.reason === 'not_unique') {
+        return blocking(
+          RESULT_CODES.COMMENT_MATCH_NOT_UNIQUE,
+          `评论 "${preview}" 匹配到 ${picked.total} 条候选，无法唯一定位。`,
+          { recoverable: true, data: { matchCount: picked.total, target: preview } }
+        );
+      }
+
+      if (picked.reason === 'actor_not_verified') {
+        return blocking(
+          RESULT_CODES.ACTOR_NAME_NOT_VERIFIED,
+          `评论 "${preview}" 的候选均不匹配用户 "${replyTarget.actorName}"。`,
+          { recoverable: true, data: { target: preview, actorName: replyTarget.actorName } }
+        );
+      }
+
+      if (picked.reason === 'time_not_verified') {
+        return blocking(
+          RESULT_CODES.COMMENT_MATCH_NOT_UNIQUE,
+          `已找到评论 "${preview}"，但时间 "${replyTarget.eventTimeText}" 无法确认。`,
+          { recoverable: true, data: { target: preview, eventTimeText: replyTarget.eventTimeText } }
+        );
+      }
+    }
+
+    if (round === maxScrollRounds) break;
+
+    const scrollResult = await scrollCommentAreaOnce(page);
+    if (!scrollResult.ok || scrollResult.atEnd) {
+      break;
+    }
+  }
+
+  return blocking(
+    RESULT_CODES.COMMENT_REPLY_BUTTON_NOT_FOUND,
+    `滚动评论区 ${maxScrollRounds} 轮后仍未找到目标评论 "${preview}"`,
+    { recoverable: true, data: { target: preview, actorName: replyTarget.actorName } }
+  );
+}
+
+export async function fillWorkReplyText(page, replyText) {
   if (!replyText || !replyText.trim()) {
     return blocking(RESULT_CODES.EMPTY_REPLY_TEXT, '回复内容为空', { recoverable: false });
   }
@@ -1197,39 +1583,26 @@ export async function fillReplyInWorkModal(page, replyText) {
   }
 }
 
-export async function sendReplyInWorkModal(page, replyText) {
-  if (!replyText || !replyText.trim()) {
-    return blocking(RESULT_CODES.EMPTY_REPLY_TEXT, '回复内容为空', { recoverable: false });
-  }
-
-  console.error(`[work-modal] 发送回复: "${replyText.slice(0, 60)}"`);
-
+export async function clickSendWorkReply(page) {
   try {
-    const filled = await typeIntoReplyDraftEditor(page, replyText);
-
-    if (!filled.ok) {
-      await captureReplyBoxDebug(page, 'send-no-input');
-      return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '找不到回复输入框', { recoverable: true });
-    }
-
     const clicked = await clickReplySendControl(page);
     if (clicked.ok) {
       console.error(`[work-modal] 点击发送控件 method=${clicked.method}`);
       await page.waitForTimeout(2000);
-      return success({ sent: true, method: clicked.method, fillMethod: filled.method });
+      return success({ sent: true, method: clicked.method });
     }
 
     await page.keyboard.press('Enter');
     console.error(`[work-modal] 未找到发送控件，按 Enter 发送`);
     await page.waitForTimeout(2000);
 
-    return success({ sent: true, method: 'enter_key', fillMethod: filled.method, sendControlReason: clicked.reason });
+    return success({ sent: true, method: 'enter_key', sendControlReason: clicked.reason });
   } catch (err) {
     return blocking(RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND, `发送回复异常: ${err.message}`, { recoverable: true });
   }
 }
 
-export async function verifyReplyInWorkModal(page, item, replyText, { timeoutMs = 5000 } = {}) {
+export async function verifyWorkReplyVisible(page, item, replyText, { timeoutMs = 5000 } = {}) {
   const commentText = (item?.commentText || '').trim();
   const replyNeedle = replyText.trim();
   const replyPrefix = replyNeedle.slice(0, 20);
@@ -1262,26 +1635,57 @@ export async function verifyReplyInWorkModal(page, item, replyText, { timeoutMs 
 
 /**
  * DOM 仅负责滚动评论区触发网络请求，不解析评论内容。
- * 滚动步长 600px，返回滚动前后状态。
+ * 滚动统一复用 bounding box -> 鼠标移入 -> wheel 的真实滚动。
  */
 export async function scrollCommentAreaOnce(page) {
-  return page.evaluate(() => {
-    const commentArea = document.querySelector('.comment-mainContent');
-    if (!commentArea) return { ok: false, reason: 'comment_area_not_found' };
-
-    const before = commentArea.scrollTop;
-    const step = Math.min(600, commentArea.scrollHeight - commentArea.scrollTop);
-    commentArea.scrollTop += step;
-
+  const found = await getWorkCommentContainerBox(page);
+  if (!found.ok || !found.box) {
     return {
-      ok: true,
-      before,
-      after: commentArea.scrollTop,
-      atEnd: commentArea.scrollTop === before,
-      scrollHeight: commentArea.scrollHeight,
-      clientHeight: commentArea.clientHeight,
+      ok: false,
+      reason: found.reason || 'comment_container_not_found',
     };
+  }
+
+  return scrollContainerByWheel(page, {
+    box: found.box,
+    deltaY: 600,
+    waitMs: 1200,
+    logPrefix: '[work-modal]',
   });
+}
+
+export async function openWorkPageForReply(page, workUrl, { timeoutMs = 30000 } = {}) {
+  if (!workUrl) {
+    return blocking(RESULT_CODES.WRONG_PAGE, 'work_url 为空，无法打开作品页', { recoverable: false });
+  }
+
+  await page.goto(workUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+  await page.waitForTimeout(1500);
+  return success({ workUrl });
+}
+
+export async function fillReplyInWorkModal(page, replyText) {
+  return fillWorkReplyText(page, replyText);
+}
+
+export async function sendReplyInWorkModal(page, replyText) {
+  if (!replyText || !replyText.trim()) {
+    return blocking(RESULT_CODES.EMPTY_REPLY_TEXT, '回复内容为空', { recoverable: false });
+  }
+
+  console.error(`[work-modal] 发送回复: "${replyText.slice(0, 60)}"`);
+
+  const filled = await fillWorkReplyText(page, replyText);
+  if (!filled.ok) return filled;
+
+  const clicked = await clickSendWorkReply(page);
+  if (!clicked.ok) return clicked;
+
+  return success({ ...filled.data, ...clicked.data });
+}
+
+export async function verifyReplyInWorkModal(page, item, replyText, options = {}) {
+  return verifyWorkReplyVisible(page, item, replyText, options);
 }
 
 /**

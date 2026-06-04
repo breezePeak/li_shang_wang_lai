@@ -1,11 +1,13 @@
-// Test the refactored comments:execute logic
-// Focus: parse args, JSON loading without maxItems, JSON update for repeat execution
-
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { resolve, join } from 'path';
 import { writeFileSync } from 'fs';
+import {
+  extractTargetCommentId,
+  loadWorkCommentItemsFromFile,
+  resolveWorkUrlFromItem,
+} from '../../src/cli/execute-comment-replies.mjs';
 
 // ============================================================
 // Test helpers — run CLI and capture stdout
@@ -172,6 +174,46 @@ describe('comments:execute refactored logic', () => {
     expect(Array.isArray(parsed)).toBe(true);
     expect(Array.isArray(parsed[0].comments)).toBe(true);
     expect(parsed[0].comments[0].comment_text).toBe('test2');
+  });
+
+  it('loadWorkCommentItemsFromFile 保留作品级元信息并兼容 cid 字段', () => {
+    const filePath = join(testDir, 'pending-with-cid.json');
+    writeFileSync(filePath, JSON.stringify([{
+      workKey: 'work-1',
+      work_url: 'https://www.douyin.com/video/123',
+      comments: [
+        { id: 1, cid: 'cid-1', reply_text: 'ok', actor_name: 'user1', comment_text: 'hello' },
+      ],
+    }]));
+
+    const loaded = loadWorkCommentItemsFromFile(filePath);
+    expect(loaded.items).toHaveLength(1);
+    expect(loaded.items[0].targetCommentId).toBe('cid-1');
+    expect(loaded.items[0].workMeta.work_url).toBe('https://www.douyin.com/video/123');
+  });
+
+  it('resolveWorkUrlFromItem 优先使用现有字段并回退到 workId/modalId', () => {
+    expect(resolveWorkUrlFromItem({ workUrl: 'https://a' }, {})).toBe('https://a');
+    expect(resolveWorkUrlFromItem({ awemeUrl: 'https://b' }, {})).toBe('https://b');
+    expect(resolveWorkUrlFromItem({ workId: '123' }, {})).toBe('https://www.douyin.com/video/123');
+    expect(resolveWorkUrlFromItem({ modalId: '456' }, {})).toBe('https://www.douyin.com/video/456');
+  });
+
+  it('extractTargetCommentId 能从 raw_comment_json 回推 cid', () => {
+    const cid = extractTargetCommentId({}, {
+      raw_comment_json: JSON.stringify({
+        source: 'comment-list-api',
+        comment: { cid: 'cid-from-raw' },
+      }),
+    });
+    expect(cid).toBe('cid-from-raw');
+  });
+
+  it('主流程源码不再引用 creator 评论管理页或 ensureCommentPageReady', async () => {
+    const fs = await import('fs');
+    const source = fs.readFileSync(resolve(__dirname, '../../src/cli/execute-comment-replies.mjs'), 'utf8');
+    expect(source.includes('creator-micro/interactive/comment')).toBe(false);
+    expect(source.includes('ensureCommentPageReady')).toBe(false);
   });
 
   // 3. EXECUTE_SKIPPED_EMPTY for empty reply_text

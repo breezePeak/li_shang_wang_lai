@@ -3,6 +3,9 @@ import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 
 const COMMENT_PAGE_URL = 'https://creator.douyin.com/creator-micro/interactive/comment';
 
+/**
+ * @deprecated 当前评论回复主流程不再使用创作者评论管理页。
+ */
 export async function ensureCommentPageReady(page, options = {}) {
   const { timeoutMs = 30000 } = options;
 
@@ -102,6 +105,9 @@ export async function waitForCommentsArea(page, timeoutMs = 15000) {
   );
 }
 
+/**
+ * @deprecated 当前评论回复主流程不再全量滚动加载创作者评论管理页评论。
+ */
 export async function scrollToLoadAllComments(page, { maxRound = 50, loadTimeout = 5000 } = {}) {
   console.error('[comment-page] 滚动加载所有评论...');
 
@@ -211,6 +217,9 @@ export async function scrollToLoadAllComments(page, { maxRound = 50, loadTimeout
   return success({ loadedCount: finalCount });
 }
 
+/**
+ * @deprecated 当前评论回复主流程不再全量提取创作者评论管理页评论。
+ */
 export async function extractComments(page) {
   // Scroll to load all comments first
   await scrollToLoadAllComments(page);
