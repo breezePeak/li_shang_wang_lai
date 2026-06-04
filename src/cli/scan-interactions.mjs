@@ -26,6 +26,7 @@ import {
   createOrUpdateReturnVisitTasksFromItems,
   buildIdentityKey,
   buildTaskId,
+  listReturnVisitPendingPrepareTasksByIds,
 } from '../services/return-visit-task-service.mjs';
 
 async function runCommentScan(page, run) {
@@ -653,7 +654,7 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
   }
 }
 
-function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
+export function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
   const groups = listPendingCommentsGroupedByWork({ limit: maxCount, days });
   const works = [];
   let totalComments = 0;
@@ -710,6 +711,10 @@ export function writePendingVisitJson(events, { days = null, maxCount = 100, col
     skipNoProfileUrl: 0,
     addedFriend: 0,
     addedMutual: 0,
+    dbCandidate: 0,
+    dbSelected: 0,
+    dbFilteredStatus: 0,
+    dbFilteredDays: 0,
   };
 
   const groupedItems = new Map();
@@ -767,8 +772,6 @@ export function writePendingVisitJson(events, { days = null, maxCount = 100, col
       continue;
     }
 
-    if (groupedItems.size >= maxCount) break;
-
     groupedItems.set(identityKey, {
       primary: { ...sourceItem },
       items: [sourceItem],
@@ -778,6 +781,40 @@ export function writePendingVisitJson(events, { days = null, maxCount = 100, col
     if (relation === 'mutual') stats.addedMutual++;
   }
 
+  const sourceItems = Array.from(groupedItems.values()).flatMap(group => group.items);
+  createOrUpdateReturnVisitTasksFromItems(sourceItems);
+  const taskIds = Array.from(groupedItems.values()).map(({ primary: item }) => {
+    const identityKey = buildIdentityKey({
+      userId: item.actor_profile_key || '',
+      userProfileUrl: item.actor_profile_url || '',
+      userName: item.actor_name || '',
+    });
+    return identityKey ? buildTaskId(identityKey) : '';
+  }).filter(Boolean);
+
+  const dbResult = listReturnVisitPendingPrepareTasksByIds(taskIds, {
+    days,
+    limit: maxCount,
+  });
+  stats.dbCandidate = dbResult.candidateCount;
+  stats.dbFilteredStatus = dbResult.filteredStatusCount;
+  stats.dbFilteredDays = dbResult.filteredDaysCount;
+
+  for (const task of dbResult.tasks || []) {
+    const sourceTypes = Array.isArray(task.sourceTypes) && task.sourceTypes.length > 0
+      ? task.sourceTypes
+      : [task.sourceType || 'other'];
+    if (allowed.size > 0 && !sourceTypes.some(type => allowed.has(type))) continue;
+    users.push({
+      id: task.taskId,
+      homepage_url: task.userProfileUrl || '',
+    });
+  }
+  stats.dbSelected = users.length;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const filePath = resolve('data', 'pending-visits', `pending-visits-${ts}.json`);
+  writeJSON(filePath, users);
   console.error(
     `[scan] pending_visit_skip_db_duplicate=${stats.skipDbDuplicate} ` +
     `pending_visit_skip_db_ambiguous=${stats.skipDbAmbiguous} ` +
@@ -786,28 +823,12 @@ export function writePendingVisitJson(events, { days = null, maxCount = 100, col
     `pending_visit_skip_relation_unknown=${stats.skipRelationUnknown} ` +
     `pending_visit_skip_no_profile_url=${stats.skipNoProfileUrl} ` +
     `pending_visit_added_friend=${stats.addedFriend} ` +
-    `pending_visit_added_mutual=${stats.addedMutual}`
+    `pending_visit_added_mutual=${stats.addedMutual} ` +
+    `pending_visit_db_candidate=${stats.dbCandidate} ` +
+    `pending_visit_db_selected=${stats.dbSelected} ` +
+    `pending_visit_db_filtered_status=${stats.dbFilteredStatus} ` +
+    `pending_visit_db_filtered_days=${stats.dbFilteredDays}`
   );
-
-  const sourceItems = Array.from(groupedItems.values()).flatMap(group => group.items);
-  createOrUpdateReturnVisitTasksFromItems(sourceItems);
-
-  for (const { primary: item } of groupedItems.values()) {
-    const identityKey = buildIdentityKey({
-      userId: item.actor_profile_key || '',
-      userProfileUrl: item.actor_profile_url || '',
-      userName: item.actor_name || '',
-    });
-    const taskId = buildTaskId(identityKey);
-    users.push({
-      id: taskId,
-      homepage_url: item.actor_profile_url || '',
-    });
-  }
-
-  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const filePath = resolve('data', 'pending-visits', `pending-visits-${ts}.json`);
-  writeJSON(filePath, users);
   return { filePath, totalUsers: users.length };
 }
 

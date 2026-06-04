@@ -44,6 +44,11 @@ export const RETURN_VISIT_EXECUTE_RETRY_STATUS = [
   RETURN_VISIT_STATUS.FAILED_COMMENT,
 ];
 
+export const RETURN_VISIT_SCAN_JSON_STATUS = [
+  RETURN_VISIT_STATUS.PENDING_VISIT,
+  RETURN_VISIT_STATUS.FAILED_COLLECT,
+];
+
 const SOURCE_PRIORITY = {
   other: 1,
   follow: 2,
@@ -460,7 +465,7 @@ function listTasksByStatuses(statuses, { maxRetryCount = 2 } = {}) {
     SELECT * FROM return_visit_tasks
     WHERE status IN (${placeholders})
       AND retry_count <= ?
-    ORDER BY updated_at ASC
+    ORDER BY updated_at ASC, id ASC
   `;
   const rows = db.prepare(sql).all(...params);
   return rows.map(mapRowToTask);
@@ -488,6 +493,66 @@ export function listReturnVisitTasksByIds(taskIds = []) {
   return rows
     .map(mapRowToTask)
     .sort((a, b) => (order.get(a.taskId) ?? 0) - (order.get(b.taskId) ?? 0));
+}
+
+export function listReturnVisitPendingPrepareTasksByIds(taskIds = [], {
+  days = null,
+  limit = 100,
+  maxRetryCount = 2,
+} = {}) {
+  const ids = Array.from(new Set((taskIds || []).map(id => String(id || '').trim()).filter(Boolean)));
+  if (ids.length === 0) {
+    return {
+      tasks: [],
+      candidateCount: 0,
+      filteredStatusCount: 0,
+      filteredDaysCount: 0,
+    };
+  }
+
+  const db = getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT *
+    FROM return_visit_tasks
+    WHERE task_id IN (${placeholders})
+      AND retry_count <= ?
+      AND user_profile_url IS NOT NULL
+      AND TRIM(user_profile_url) != ''
+    ORDER BY updated_at ASC, id ASC
+  `).all(...ids, maxRetryCount);
+
+  const statusSet = new Set(RETURN_VISIT_SCAN_JSON_STATUS);
+  const nowMs = Date.now();
+  const minUpdatedAtMs = Number(days || 0) > 0 ? nowMs - Number(days) * 86400000 : null;
+  let filteredStatusCount = 0;
+  let filteredDaysCount = 0;
+  const tasks = [];
+
+  for (const row of rows) {
+    if (!statusSet.has(row.status)) {
+      filteredStatusCount++;
+      continue;
+    }
+
+    if (minUpdatedAtMs !== null) {
+      const updatedAtMs = Date.parse(row.updated_at || '');
+      if (!Number.isFinite(updatedAtMs) || updatedAtMs < minUpdatedAtMs) {
+        filteredDaysCount++;
+        continue;
+      }
+    }
+
+    tasks.push(mapRowToTask(row));
+    if (tasks.length >= limit) break;
+  }
+
+  return {
+    tasks,
+    candidateCount: rows.length,
+    filteredStatusCount,
+    filteredDaysCount,
+  };
 }
 
 export function updateReturnVisitTask(taskId, patch = {}) {
