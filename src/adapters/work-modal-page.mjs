@@ -644,6 +644,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           .forEach(el => el.removeAttribute('data-return-visit-comment-button'));
         const commentContainer = document.querySelector('[data-e2e="feed-comment-icon"]');
         if (commentContainer && visible(commentContainer)) {
+          commentContainer.scrollIntoView({ block: 'center', behavior: 'instant' });
           const rect = commentContainer.getBoundingClientRect();
           commentContainer.setAttribute('data-return-visit-comment-button', 'true');
           return {
@@ -666,10 +667,18 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
 
       if (!prepared.found) return { clicked: false };
 
-      await page.mouse.click(prepared.x, prepared.y).catch(async () => {
+      // 坐标可能在 viewport 外，用 locator click 兜底
+      if (prepared.y < 0 || prepared.y > 800 || prepared.x < 0 || prepared.x > 1280) {
         const button = page.locator('[data-return-visit-comment-button="true"]').last();
-        await button.click({ timeout: 2000, force: true });
-      });
+        await button.scrollIntoViewIfNeeded().catch(() => {});
+        await button.click({ timeout: 3000, force: true }).catch(() => {});
+      } else {
+        await page.mouse.click(prepared.x, prepared.y).catch(async () => {
+          const button = page.locator('[data-return-visit-comment-button="true"]').last();
+          await button.scrollIntoViewIfNeeded().catch(() => {});
+          await button.click({ timeout: 3000, force: true });
+        });
+      }
 
       return {
         clicked: true,
