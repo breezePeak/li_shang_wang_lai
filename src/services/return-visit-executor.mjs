@@ -124,6 +124,30 @@ export async function handleVideoWatch(page, watchPolicy = 'seconds', watchSecon
   }
 }
 
+export async function detectWorkPresentationKind(page, resolvedWork = {}) {
+  const currentUrl = typeof page?.url === 'function' ? page.url() : '';
+  const awemeType = String(resolvedWork?.awemeType || '').trim();
+
+  let runtimeState = { hasVideoElement: false };
+  try {
+    runtimeState = await page.evaluate(() => ({
+      hasVideoElement: !!document.querySelector('video'),
+    }));
+  } catch {}
+
+  const isModalPage = /[?&]modal_id=/.test(currentUrl);
+  const isNotePage = currentUrl.includes('/note/')
+    || awemeType === '68'
+    || (isModalPage && !runtimeState.hasVideoElement);
+
+  return {
+    currentUrl,
+    isModalPage,
+    isNotePage,
+    hasVideoElement: Boolean(runtimeState.hasVideoElement),
+  };
+}
+
 async function resolveWorkForExecution(page, task, options = {}) {
   const { pageLoadRetryCount = 1, maxWorksToCheck = 3, maxReferenceComments = 5 } = options;
   const knownWorkUrl = task?.targetWork?.workUrl || null;
@@ -201,8 +225,9 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   const resolvedWork = resolved.work;
 
   // 检测是否是图文/note 页面（非视频），跳过视频专属操作
-  const currentUrl = page.url();
-  const isNotePage = currentUrl.includes('/note/') || String(resolvedWork?.awemeType || '') === '68';
+  const presentation = await detectWorkPresentationKind(page, resolvedWork);
+  const currentUrl = presentation.currentUrl;
+  const isNotePage = presentation.isNotePage;
 
   // 频率与时长调控防线: 点赞评论动作下发前强行进行观看拦截
   if (!isNotePage) {

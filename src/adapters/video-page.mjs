@@ -97,11 +97,13 @@ export async function navigateToVideo(page, videoUrl, options = {}) {
       return {
         isVideoPage: url.includes('/video/'),
         isNotePage: url.includes('/note/'),
+        isModalPage: /[?&]modal_id=/.test(url),
+        hasVideoElement: !!document.querySelector('video'),
         hasContent: text.length > 100,
       };
     });
 
-    if (!pageState.isVideoPage && !pageState.isNotePage) {
+    if (!pageState.isVideoPage && !pageState.isNotePage && !pageState.isModalPage) {
       return blocking(
         RESULT_CODES.BLOCKED,
         '未能导航到视频页面',
@@ -111,9 +113,17 @@ export async function navigateToVideo(page, videoUrl, options = {}) {
 
     if (pageState.isNotePage) {
       console.error(`[video-page] 页面重定向到 note: ${page.url()}`);
+    } else if (pageState.isModalPage) {
+      console.error(`[video-page] 页面打开为 modal_id 作品页: ${page.url()}`);
     }
 
-    return success({ url: page.url(), isVideoPage: pageState.isVideoPage, isNotePage: pageState.isNotePage });
+    return success({
+      url: page.url(),
+      isVideoPage: pageState.isVideoPage,
+      isNotePage: pageState.isNotePage,
+      isModalPage: pageState.isModalPage,
+      hasVideoElement: pageState.hasVideoElement,
+    });
   } catch (err) {
     return blocking(
       RESULT_CODES.BLOCKED,

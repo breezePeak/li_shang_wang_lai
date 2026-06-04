@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { clickLike, confirmLikeSucceeded, postVideoComment, checkLikeState } from '../../src/adapters/video-page.mjs';
+import { clickLike, confirmLikeSucceeded, postVideoComment, checkLikeState, navigateToVideo } from '../../src/adapters/video-page.mjs';
 
 function createMockLocator(selector, matchedSelectors = []) {
   const isMatch = matchedSelectors.some(sel => {
@@ -81,5 +81,24 @@ describe('video-page adapters mock testing', () => {
     const res = await postVideoComment(mockPage, '精彩视频，点赞！', { execute: true });
     expect(res.ok).toBe(true);
     expect(res.data.text).toBe('精彩视频，点赞！');
+  });
+
+  it('navigateToVideo 接受 jingxuan modal_id 作品页', async () => {
+    const mockPage = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      evaluate: vi.fn().mockResolvedValue({
+        isVideoPage: false,
+        isNotePage: false,
+        isModalPage: true,
+        hasVideoElement: false,
+        hasContent: true,
+      }),
+      url: vi.fn().mockReturnValue('https://www.douyin.com/jingxuan?modal_id=7636032429409601465'),
+    };
+
+    const res = await navigateToVideo(mockPage, 'https://www.douyin.com/jingxuan?modal_id=7636032429409601465');
+    expect(res.ok).toBe(true);
+    expect(res.data.isModalPage).toBe(true);
   });
 });
