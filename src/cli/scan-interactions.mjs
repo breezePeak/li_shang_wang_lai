@@ -1209,7 +1209,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       }
 
       const beforeCount = apiCollector.getItems().length;
-      const scrollResult = await scrollPanelDown(page, { deltaY: 600 });
+      const scrollResult = await scrollPanelDown(page);
       if (!scrollResult.scrolled) {
         console.error('[scan] 无法滚动通知面板，停止采集');
         scrollRounds = round + 1;
@@ -1761,7 +1761,7 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
       break;
     }
 
-    const scrollResult = await scrollPanelDown(page, { deltaY: 600 });
+    const scrollResult = await scrollPanelDown(page);
     if (!scrollResult.scrolled) {
       console.error('[scan] 无法滚动通知面板');
       break;

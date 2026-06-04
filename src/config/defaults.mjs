@@ -14,6 +14,29 @@ export const DEFAULTS = {
       height: 800,
     },
   },
+  scroll: {
+    mouseMove: {
+      xOffset: 0.5,
+      yOffset: 0.5,
+      steps: 5,
+      waitMs: 100,
+    },
+    wheel: {
+      defaultDeltaY: 600,
+      deltaYRandomRange: [0, 0],
+      waitMs: 1200,
+    },
+    notificationPanel: {
+      deltaY: 600,
+      deltaYRandomRange: [0, 0],
+      waitMs: 1200,
+    },
+    commentArea: {
+      deltaY: 600,
+      deltaYRandomRange: [0, 0],
+      waitMs: 1200,
+    },
+  },
   comments: {
     enabled: true,
     mode: 'manual',

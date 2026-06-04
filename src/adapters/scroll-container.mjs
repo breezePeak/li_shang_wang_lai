@@ -1,34 +1,105 @@
+import { loadConfig } from '../config/user-config.mjs';
+
+function toFiniteNumber(value, fallback) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+export function normalizeScrollRange(range, fallbackMin = 0, fallbackMax = 0) {
+  if (Array.isArray(range) && range.length >= 2) {
+    const a = toFiniteNumber(range[0], fallbackMin);
+    const b = toFiniteNumber(range[1], fallbackMax);
+    return a <= b ? [a, b] : [b, a];
+  }
+  return [fallbackMin, fallbackMax];
+}
+
+function randomInRange(min, max) {
+  if (max <= min) return min;
+  return min + Math.random() * (max - min);
+}
+
+function getScrollConfig() {
+  return loadConfig().scroll || {};
+}
+
+export function buildWheelScrollPlan(options = {}, wheelConfig = {}) {
+  const {
+    deltaY = null,
+    deltaYRandomRange = null,
+    waitMs = null,
+  } = options;
+  const hasExplicitDeltaY = deltaY !== null && deltaY !== undefined;
+
+  const baseDeltaY = Math.round(toFiniteNumber(
+    deltaY ?? wheelConfig.deltaY ?? wheelConfig.defaultDeltaY,
+    600
+  ));
+  const [jitterMin, jitterMax] = normalizeScrollRange(
+    deltaYRandomRange ?? (hasExplicitDeltaY ? [0, 0] : wheelConfig.deltaYRandomRange),
+    0,
+    0
+  );
+  const jitter = Math.round(randomInRange(jitterMin, jitterMax));
+  const resolvedDeltaY = Math.max(1, baseDeltaY + jitter);
+  const resolvedWaitMs = Math.max(0, Math.round(toFiniteNumber(waitMs ?? wheelConfig.waitMs, 1200)));
+
+  return {
+    deltaY: resolvedDeltaY,
+    waitMs: resolvedWaitMs,
+    jitter,
+    baseDeltaY,
+  };
+}
+
 export async function moveMouseIntoBox(page, box, {
-  yOffset = 0.5,
-  xOffset = 0.5,
+  yOffset = null,
+  xOffset = null,
+  steps = null,
+  waitMs = null,
   logPrefix = '[scroll]',
 } = {}) {
   if (!box) return { ok: false, reason: 'missing_box' };
 
-  const x = box.x + box.width * xOffset;
-  const y = box.y + box.height * yOffset;
+  const mouseMoveConfig = getScrollConfig().mouseMove || {};
+  const resolvedXOffset = toFiniteNumber(xOffset ?? mouseMoveConfig.xOffset, 0.5);
+  const resolvedYOffset = toFiniteNumber(yOffset ?? mouseMoveConfig.yOffset, 0.5);
+  const resolvedSteps = Math.max(1, Math.round(toFiniteNumber(steps ?? mouseMoveConfig.steps, 5)));
+  const resolvedWaitMs = Math.max(0, Math.round(toFiniteNumber(waitMs ?? mouseMoveConfig.waitMs, 100)));
+
+  const x = box.x + box.width * resolvedXOffset;
+  const y = box.y + box.height * resolvedYOffset;
 
   console.error(`${logPrefix} 鼠标移动到容器内部 x=${x.toFixed(0)}, y=${y.toFixed(0)}`);
 
-  await page.mouse.move(x, y, { steps: 5 });
-  await page.waitForTimeout(100);
+  await page.mouse.move(x, y, { steps: resolvedSteps });
+  await page.waitForTimeout(resolvedWaitMs);
 
   return { ok: true, x, y };
 }
 
 export async function wheelInBox(page, box, {
-  deltaY = 600,
-  waitMs = 1200,
+  deltaY = null,
+  deltaYRandomRange = null,
+  waitMs = null,
+  profile = '',
   logPrefix = '[scroll]',
 } = {}) {
   const moved = await moveMouseIntoBox(page, box, { logPrefix });
   if (!moved.ok) return moved;
 
-  console.error(`${logPrefix} wheel 滚动容器 delta=${deltaY}`);
-  await page.mouse.wheel(0, deltaY);
-  await page.waitForTimeout(waitMs);
+  const scrollConfig = getScrollConfig();
+  const wheelConfig = {
+    ...(scrollConfig.wheel || {}),
+    ...(profile && scrollConfig[profile] ? scrollConfig[profile] : {}),
+  };
+  const plan = buildWheelScrollPlan({ deltaY, deltaYRandomRange, waitMs }, wheelConfig);
 
-  return { ok: true, scrolled: true, deltaY };
+  console.error(`${logPrefix} wheel 滚动容器 delta=${plan.deltaY}${plan.jitter ? ` jitter=${plan.jitter}` : ''}`);
+  await page.mouse.wheel(0, plan.deltaY);
+  await page.waitForTimeout(plan.waitMs);
+
+  return { ok: true, scrolled: true, deltaY: plan.deltaY, jitter: plan.jitter };
 }
 
 export async function findScrollableContainerBox(page, {
@@ -107,10 +178,12 @@ export async function scrollContainerByWheel(page, {
   box = null,
   selectors = [],
   requiredText = [],
-  deltaY = 600,
-  waitMs = 1200,
+  deltaY = null,
+  deltaYRandomRange = null,
+  waitMs = null,
   minWidth = 250,
   minHeight = 250,
+  profile = '',
   logPrefix = '[scroll]',
 } = {}) {
   let targetBox = box;
@@ -129,7 +202,9 @@ export async function scrollContainerByWheel(page, {
 
   return wheelInBox(page, targetBox, {
     deltaY,
+    deltaYRandomRange,
     waitMs,
+    profile,
     logPrefix,
   });
 }

@@ -204,6 +204,7 @@ describe('作品评论区回复定位', () => {
   });
 
   it('scrollCommentAreaOnce 使用统一 wheel 滚动评论容器', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const page = {
       evaluate: vi.fn(async () => ({
         ok: true,
@@ -217,8 +218,14 @@ describe('作品评论区回复定位', () => {
       waitForTimeout: vi.fn(async () => {}),
     };
 
-    const result = await scrollCommentAreaOnce(page);
-    expect(result.ok).toBe(true);
-    expect(page.mouse.wheel).toHaveBeenCalledWith(0, 600);
+    try {
+      const result = await scrollCommentAreaOnce(page);
+      expect(result.ok).toBe(true);
+      const [, deltaY] = page.mouse.wheel.mock.calls[0];
+      expect(deltaY).toBeGreaterThanOrEqual(600);
+      expect(deltaY).toBeLessThanOrEqual(680);
+    } finally {
+      randomSpy.mockRestore();
+    }
   });
 });

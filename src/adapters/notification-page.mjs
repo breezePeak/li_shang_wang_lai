@@ -408,13 +408,15 @@ export async function getPanelBoundingBox(page) {
   });
 }
 
-export async function scrollPanelDown(page, { deltaY = 600 } = {}) {
+export async function scrollPanelDown(page, { deltaY = null, deltaYRandomRange = null, waitMs = null } = {}) {
   const panelBox = await getPanelBoundingBox(page);
   if (!panelBox) return { scrolled: false, reason: 'panel_box_not_found' };
 
   const result = await wheelInBox(page, panelBox, {
     deltaY,
-    waitMs: 1200,
+    deltaYRandomRange,
+    waitMs,
+    profile: 'notificationPanel',
     logPrefix: '[notify-page]',
   });
 

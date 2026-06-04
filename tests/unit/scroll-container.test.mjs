@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  buildWheelScrollPlan,
   moveMouseIntoBox,
   wheelInBox,
   findScrollableContainerBox,
@@ -33,6 +34,24 @@ describe('scroll-container', () => {
     expect(page.mouse.move).toHaveBeenCalledOnce();
     expect(page.mouse.wheel).toHaveBeenCalledWith(0, 480);
     expect(page.waitForTimeout).toHaveBeenLastCalledWith(50);
+  });
+
+  it('buildWheelScrollPlan 支持基础滚动量和随机抖动配置', () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      const plan = buildWheelScrollPlan({}, {
+        deltaY: 600,
+        deltaYRandomRange: [0, 120],
+        waitMs: 1200,
+      });
+
+      expect(plan.baseDeltaY).toBe(600);
+      expect(plan.jitter).toBe(60);
+      expect(plan.deltaY).toBe(660);
+      expect(plan.waitMs).toBe(1200);
+    } finally {
+      randomSpy.mockRestore();
+    }
   });
 
   it('findScrollableContainerBox 能返回 evaluate 命中的容器', async () => {

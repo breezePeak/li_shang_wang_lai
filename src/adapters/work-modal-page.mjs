@@ -1736,8 +1736,7 @@ export async function scrollCommentAreaOnce(page) {
 
   return scrollContainerByWheel(page, {
     box: found.box,
-    deltaY: 600,
-    waitMs: 1200,
+    profile: 'commentArea',
     logPrefix: '[work-modal]',
   });
 }
