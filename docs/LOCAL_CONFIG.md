@@ -1,12 +1,25 @@
-# local.json 配置说明
+# local.json / example.json 配置说明
 
-本文说明 `config/local.json` 的用途、加载规则、字段含义，以及推荐的调整方式。
+本文说明 `config/local.json` 与 `config/example.json` 的用途、加载规则、字段含义，以及推荐的调整方式。
 
 ## 1. 加载规则
 
-- 程序统一从 `config/local.json` 读取本地配置。
+- 程序优先读取 `config/local.json`。
+- 如果 `local.json` 不存在，则回退到 `config/example.json`。
+- 如果两个文件都不存在，则回退到代码内置默认值。
+- `example.json` 是仓库内可提交的基础配置模板。
 - `local.json` 属于本机运行配置，已被 `.gitignore` 忽略，不会提交到仓库。
-- 如果 `local.json` 不存在，程序会回退到代码内置默认值。
+
+推荐用法：
+
+- 把“项目默认建议值”写进 `config/example.json`
+- 把“你自己机器、账号、调试习惯的覆盖值”写进 `config/local.json`
+
+适合放进 `example.json` 的内容：
+
+- 项目推荐默认值
+- 团队共识的滚动/等待参数
+- 基础浏览器尺寸和慢速参数
 
 适合放进 `local.json` 的内容：
 
@@ -21,7 +34,36 @@
 - 临时排障参数
 - 只在单次命令中生效的临时 CLI 参数
 
-## 2. 完整示例
+## 2. 文件分工
+
+### 2.1 `config/example.json`
+
+用途：
+
+- 作为仓库内的默认模板
+- 让新同事或新环境可以直接复制参考
+- 承载团队认可的基础配置
+
+特点：
+
+- 需要提交到仓库
+- 不应该放私密信息
+- 不应该放过于个人化的机器参数
+
+### 2.2 `config/local.json`
+
+用途：
+
+- 覆盖 `example.json`
+- 保存你自己的本地运行参数
+- 保存账号相关信息和个性化滚动策略
+
+特点：
+
+- 不提交
+- 优先级高于 `example.json`
+
+## 3. 完整示例
 
 ```json
 {
@@ -100,9 +142,9 @@
 }
 ```
 
-## 3. 字段说明
+## 4. 字段说明
 
-### 3.1 `self`
+### 4.1 `self`
 
 用于识别“这是不是自己的作品/主页”。
 
@@ -121,7 +163,7 @@
 - 优先填写 `profileKey`
 - `profileUrl` 和 `nickname` 作为补充
 
-### 3.2 `browser`
+### 4.2 `browser`
 
 控制 Playwright 浏览器启动参数。
 
@@ -142,7 +184,7 @@
 - 页面元素定位不稳定时，优先固定窗口尺寸
 - 机器性能一般时，可以把 `slowMo` 提高到 `200` 到 `300`
 
-### 3.3 `scroll`
+### 4.3 `scroll`
 
 控制“鼠标移入 DOM 后再滚动”的公共策略。通知面板滚动、评论区滚动都依赖这里。
 
@@ -218,7 +260,7 @@
 - 评论区更容易错过目标，通常随机量应比通知面板更保守
 - 推荐从 `600 + [0,80]` 开始试
 
-## 4. `comments`
+## 5. `comments`
 
 评论相关配置。
 
@@ -231,7 +273,7 @@
 - `maxReplyLength`
   - 回复文本最大长度
 
-## 5. `likes`
+## 6. `likes`
 
 点赞相关配置。
 
@@ -248,7 +290,7 @@
 - `requireLatestWorkConfirmed`
   - 是否要求确认最新作品后再执行
 
-## 6. `returnVisit`
+## 7. `returnVisit`
 
 回访执行相关配置。
 
@@ -280,7 +322,7 @@
 - `restDurationMs`
   - 每次休息多久
 
-## 7. `safety`
+## 8. `safety`
 
 安全与证据保留相关配置。
 
@@ -293,7 +335,7 @@
 - `captureScreenshotOnFailure`
   - 失败时是否截图
 
-## 8. 推荐调参顺序
+## 9. 推荐调参顺序
 
 如果你遇到“滚不动、滚过头、目标加载太慢”这类问题，建议按下面顺序调：
 
@@ -307,8 +349,8 @@
 2. `scroll.mouseMove.yOffset`
 3. `scroll.mouseMove.waitMs`
 
-## 9. 变更生效方式
+## 10. 变更生效方式
 
-- 修改 `config/local.json` 后，重新执行命令即可生效
+- 修改 `config/local.json` 或 `config/example.json` 后，重新执行命令即可生效
 - 不需要重新安装依赖
 - 不需要重新初始化数据库
