@@ -11,6 +11,12 @@
  *   /video/12345?tab=like                     → https://www.douyin.com/video/12345
  */
 
+export function buildDouyinWorkUrl(awemeId) {
+  const value = String(awemeId || '').trim();
+  if (!value) return '';
+  return `https://www.douyin.com/jingxuan?modal_id=${value}`;
+}
+
 export function normalizeDouyinUrl(href) {
   if (!href) return '';
   let s = href.trim();
@@ -35,15 +41,29 @@ export function normalizeDouyinUrl(href) {
   // Phase 2: strip leading slash (already handled by phase 1 for //www.douyin.com)
   if (s.startsWith('/')) s = s.slice(1);
 
-  // Phase 3: strip query params
-  const qIdx = s.indexOf('?');
-  if (qIdx > 0) s = s.slice(0, qIdx);
-
-  // Phase 4: strip hash
+  // Phase 3: strip hash
   const hIdx = s.indexOf('#');
-  if (hIdx > 0) s = s.slice(0, hIdx);
+  if (hIdx >= 0) s = s.slice(0, hIdx);
+
+  let preservedQuery = '';
+
+  // Preserve modal_id for jingxuan URLs while removing all other query params.
+  const qIdx = s.indexOf('?');
+  if (qIdx >= 0) {
+    const path = s.slice(0, qIdx);
+    const query = s.slice(qIdx + 1);
+    s = path;
+
+    if (path === 'jingxuan' && query) {
+      const params = new URLSearchParams(query);
+      const modalId = String(params.get('modal_id') || '').trim();
+      if (modalId) {
+        preservedQuery = `?modal_id=${modalId}`;
+      }
+    }
+  }
 
   if (!s) return '';
 
-  return 'https://www.douyin.com/' + s;
+  return 'https://www.douyin.com/' + s + preservedQuery;
 }

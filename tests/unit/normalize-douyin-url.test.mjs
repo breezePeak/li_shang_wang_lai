@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeDouyinUrl } from '../../src/utils/douyin-url.mjs';
+import { buildDouyinWorkUrl, normalizeDouyinUrl } from '../../src/utils/douyin-url.mjs';
 
 describe('normalizeDouyinUrl', () => {
+  it('buildDouyinWorkUrl 统一生成 jingxuan modal_id 地址', () => {
+    expect(buildDouyinWorkUrl('7647191897097693115')).toBe('https://www.douyin.com/jingxuan?modal_id=7647191897097693115');
+    expect(buildDouyinWorkUrl('')).toBe('');
+  });
+
   // --- basic normalization ---
   it('absolute https URL normalizes cleanly', () => {
     expect(normalizeDouyinUrl('https://www.douyin.com/user/abc')).toBe('https://www.douyin.com/user/abc');
@@ -77,6 +82,16 @@ describe('normalizeDouyinUrl', () => {
   it('strips both query and hash', () => {
     expect(normalizeDouyinUrl('https://www.douyin.com/user/abc?tab=main#section'))
       .toBe('https://www.douyin.com/user/abc');
+  });
+
+  it('jingxuan URL 保留 modal_id 并移除其他 query/hash', () => {
+    expect(normalizeDouyinUrl('https://www.douyin.com/jingxuan?modal_id=123456&from=feed#comment'))
+      .toBe('https://www.douyin.com/jingxuan?modal_id=123456');
+  });
+
+  it('双域名 jingxuan URL 归一化时保留 modal_id', () => {
+    expect(normalizeDouyinUrl('https://www.douyin.com//www.douyin.com/jingxuan?modal_id=654321&foo=bar'))
+      .toBe('https://www.douyin.com/jingxuan?modal_id=654321');
   });
 
   // --- edge cases ---

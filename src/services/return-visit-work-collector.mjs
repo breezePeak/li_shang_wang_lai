@@ -1,16 +1,10 @@
-import { normalizeDouyinUrl } from '../utils/douyin-url.mjs';
+import { buildDouyinWorkUrl, normalizeDouyinUrl } from '../utils/douyin-url.mjs';
 import {
   navigateToVideo,
   checkLikeState,
   getVideoTitle,
   extractVideoCommentContext,
 } from '../adapters/video-page.mjs';
-
-function buildAwemeUrl(awemeId, awemeType) {
-  if (!awemeId) return '';
-  if (Number(awemeType) === 68) return `https://www.douyin.com/note/${awemeId}`;
-  return `https://www.douyin.com/jingxuan?modal_id=${awemeId}`;
-}
 
 function createProfilePostApiCollector(page) {
   const awemes = [];
@@ -75,7 +69,7 @@ function createProfilePostApiCollector(page) {
   };
 }
 
-function normalizeAwemeForVisit(aweme = {}) {
+export function normalizeAwemeForVisit(aweme = {}) {
   const awemeId = String(aweme?.aweme_id || '').trim();
   const desc = String(aweme?.desc || '').trim();
   const itemTitle = String(aweme?.item_title || '').trim();
@@ -87,7 +81,7 @@ function normalizeAwemeForVisit(aweme = {}) {
   return {
     awemeId,
     workId: awemeId,
-    workUrl: buildAwemeUrl(awemeId, aweme?.aweme_type),
+    workUrl: buildDouyinWorkUrl(awemeId),
     shareUrl,
     desc,
     itemTitle,
@@ -106,12 +100,14 @@ function normalizeAwemeForVisit(aweme = {}) {
   };
 }
 
-function extractWorkIdFromUrl(workUrl) {
+export function extractWorkIdFromUrl(workUrl) {
   const url = String(workUrl || '');
-  let m = url.match(/\/video\/(\d+)/);
-  if (m) return `video-${m[1]}`;
+  let m = url.match(/[?&]modal_id=(\d+)/);
+  if (m) return m[1];
+  m = url.match(/\/video\/(\d+)/);
+  if (m) return m[1];
   m = url.match(/\/note\/(\d+)/);
-  if (m) return `note-${m[1]}`;
+  if (m) return m[1];
   return null;
 }
 

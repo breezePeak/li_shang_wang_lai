@@ -1,3 +1,5 @@
+import { buildDouyinWorkUrl } from '../utils/douyin-url.mjs';
+
 export function safeJsonStringify(value) {
   try {
     return JSON.stringify(value);
@@ -31,7 +33,7 @@ export function getNoticeWorkIdentity(item) {
 
   return {
     workId: awemeId || '',
-    workUrl: awemeId ? `https://www.douyin.com/jingxuan?modal_id=${awemeId}` : '',
+    workUrl: buildDouyinWorkUrl(awemeId),
     workTitle: aweme?.desc || '',
     workType: aweme?.aweme_type != null ? String(aweme.aweme_type) : null,
     workCreateTime: aweme?.create_time || null,
