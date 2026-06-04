@@ -384,11 +384,11 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
   // 在打开作品页之前创建 comment/list collector，确保捕获首屏请求
   const commentListCollector = createCommentListApiCollector(page);
 
-  const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
-  if (!modalReady.ok) {
-    commentListCollector.stop();
-    return { ok: false, reason: modalReady.message || modalReady.code || 'work-modal-not-ready' };
-  }
+  try {
+    const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
+    if (!modalReady.ok) {
+      return { ok: false, reason: modalReady.message || modalReady.code || 'work-modal-not-ready' };
+    }
 
   const contextResult = await extractWorkModalContext(page);
   const context = contextResult.ok ? (contextResult.data || {}) : {};
@@ -400,7 +400,6 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
   if (runtimeCollectedWorkKeys) {
     const hit = getRuntimeWorkSeenKeys(identity).find(key => runtimeCollectedWorkKeys.has(key));
     if (hit) {
-      commentListCollector.stop();
       console.error(`[scan]   作品 ${identity.workId || identity.modalId} 已在本轮采集过评论，跳过重复采集 (${hit})`);
       return { ok: true, skipped: true, workId: identity.workId, modalId: identity.modalId, total: 0, inWindow: 0, pending: 0, inserted: 0, enriched: 0, duplicate: 0 };
     }
@@ -573,8 +572,6 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
   }
 
   // DOM fallback - 保留旧逻辑
-  commentListCollector.stop();
-
   const alreadyRepliedKeys = new Set(listReplyTrackedCommentKeysForWork({
     workId: identity.workId,
     modalId: identity.modalId,
@@ -651,121 +648,9 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
     workId: identity.workId,
     modalId: identity.modalId,
   };
-}
-
-  const contextResult = await extractWorkModalContext(page);
-  const context = contextResult.ok ? (contextResult.data || {}) : {};
-  console.error(`[scan] 作品标题: ${context.workTitle || '(无标题)'}`);
-  console.error(`[scan] 作品内容: ${context.workText || '(无内容)'}`);
-  const identity = getWorkIdentity(n, context);
-  if (!identity.workId && identity.modalId) identity.workId = identity.modalId;
-
-  if (runtimeCollectedWorkKeys) {
-    const hit = getRuntimeWorkSeenKeys(identity).find(key => runtimeCollectedWorkKeys.has(key));
-    if (hit) {
-      console.error(`[scan]   作品 ${identity.workId || identity.modalId} 已在本轮采集过评论，跳过重复采集 (${hit})`);
-      return { ok: true, skipped: true, workId: identity.workId, modalId: identity.modalId, total: 0, inWindow: 0, pending: 0, inserted: 0, enriched: 0, duplicate: 0 };
-    }
+  } finally {
+    commentListCollector.stop();
   }
-
-  const workResult = upsertWorkContext({
-    workId: identity.workId,
-    modalId: identity.modalId,
-    workUrl: identity.workUrl,
-    workTitle: context.workTitle || n.workTitle || null,
-    workType: context.workType || null,
-    thumbnailKey: n.thumbnailKey || null,
-    thumbnailSrc: context.thumbnailSrc || n.thumbnailSrc || null,
-    authorName: context.authorName || null,
-    authorProfileUrl: context.authorProfileUrl || null,
-    authorProfileKey: context.authorProfileKey || null,
-    publishedAt: context.publishedAtText || null,
-    rawContextJson: JSON.stringify({
-      source: 'notification-comment',
-      notificationItemKey: n.notificationItemKey || null,
-      rawText: n.rawText || null,
-      modalContext: context,
-    }),
-  });
-
-  addWorkKeys(dedupeContext, identity);
-
-  const alreadyRepliedKeys = new Set(listReplyTrackedCommentKeysForWork({
-    workId: identity.workId,
-    modalId: identity.modalId,
-  }));
-
-  const commentsResult = await findUnrepliedCommentsInModal(page, {
-    maxScrolls: 50,
-    alreadyRepliedKeys,
-    selfNickname: context.authorName || '',
-    maxAgeDays: notificationDays,
-    oldCommentStopCount: 3,
-  });
-  if (!commentsResult.ok) {
-    return { ok: false, reason: commentsResult.message || commentsResult.code || 'comment-collect-failed', workResult };
-  }
-
-  const visibleComments = commentsResult.data?.comments || [];
-  const comments = commentsResult.data?.unreplied || [];
-  let inserted = 0;
-  let duplicate = 0;
-  let enriched = 0;
-
-  for (const c of visibleComments) {
-    addCommentWorkHint(dedupeContext, identity, c);
-  }
-
-  for (const c of comments) {
-    const commentKey = buildCommentKey({ workId: identity.workId, modalId: identity.modalId, comment: c });
-    const dedupeKey = `${identity.workId || identity.modalId || '__unknown__'}:${commentKey}`;
-    if (dedupeContext.commentKeys.has(dedupeKey)) {
-      duplicate++;
-      console.error(`[scan]   - 评论重复 actor=${compactLogValue(c.actorName, 30)} comment=${compactLogValue(c.commentText, 40)} reason=in_memory_comment_key`);
-      continue;
-    }
-
-    const result = upsertWorkComment({
-      workId: identity.workId,
-      workUrl: identity.workUrl,
-      modalId: identity.modalId,
-      actorName: c.actorName || null,
-      actorProfileUrl: c.actorProfileUrl || null,
-      actorProfileKey: c.actorProfileKey || null,
-      commentText: c.commentText || '',
-      eventTimeText: c.eventTimeText || null,
-      commentKey,
-      sourceEventId,
-      sourceNotificationKey: n.notificationItemKey || null,
-      rawCommentJson: JSON.stringify({
-        source: 'notification-work-modal',
-        notificationItemKey: n.notificationItemKey || null,
-        rawNotificationText: n.rawText || null,
-        comment: c,
-      }),
-    });
-
-    dedupeContext.commentKeys.add(dedupeKey);
-    if (result.action === 'inserted') inserted++;
-    else if (result.action === 'enriched') enriched++;
-    else {
-      duplicate++;
-      console.error(`[scan]   - 评论重复 actor=${compactLogValue(c.actorName, 30)} comment=${compactLogValue(c.commentText, 40)} reason=db_upsert_duplicate`);
-    }
-  }
-
-  return {
-    ok: true,
-    workResult,
-    total: commentsResult.data?.total || 0,
-    inWindow: commentsResult.data?.comments?.length || 0,
-    pending: comments.length,
-    inserted,
-    enriched,
-    duplicate,
-    workId: identity.workId,
-    modalId: identity.modalId,
-  };
 }
 
 function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
