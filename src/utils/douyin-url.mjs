@@ -22,6 +22,11 @@ export function buildPreferredDouyinWorkUrl(awemeId, options = {}) {
   if (!value) return '';
 
   const shareUrl = normalizeDouyinUrl(options.shareUrl || '');
+  if (shareUrl.includes('/share/video/')) {
+    // 提取 awemeId 构建标准 modal 链接
+    const match = shareUrl.match(/\/share\/video\/(\d+)/);
+    if (match) return buildDouyinWorkUrl(match[1]);
+  }
   if (shareUrl.includes('/video/')) return shareUrl;
   if (shareUrl.includes('/note/')) return shareUrl;
 
@@ -59,6 +64,21 @@ export function normalizeDouyinUrl(href) {
     if (s.startsWith('//'))                     { s = s.slice(2);  changed = true; continue; }
     if (s.startsWith('www.douyin.com'))         { s = s.slice(14); changed = true; continue; }
     if (s.startsWith('douyin.com'))             { s = s.slice(10); changed = true; continue; }
+  }
+
+  // Phase 1b: detect external douyin-owned domains (www.iesdouyin.com, v.douyin.com, etc.)
+  // These should be treated as-is after removing protocol prefix
+  const externalDomains = ['www.iesdouyin.com', 'v.douyin.com', 'iesdouyin.com'];
+  for (const domain of externalDomains) {
+    const prefixLen = domain.length + 1; // domain + leading /
+    if (s.startsWith(domain + '/') || s === domain) {
+      s = 'https://' + (s === domain ? domain + '/' : s);
+      return s;
+    }
+    if (s.startsWith('/' + domain + '/') || s === '/' + domain) {
+      s = 'https:/' + (s === '/' + domain ? '/' + domain + '/' : s);
+      return s;
+    }
   }
 
   // Phase 2: strip leading slash (already handled by phase 1 for //www.douyin.com)
