@@ -4,12 +4,6 @@
 
 项目用于辅助创作者扫描互动、准备评论回复、准备回访任务，并在显式执行模式下完成评论回复或回访点赞 + 评论。评论回复默认真实执行；回访需 `--execute`。
 
-## 文档边界
-
-- `README.md`：项目介绍、安装方式、环境要求、首次初始化、常用入口命令。
-- `SKILL.md`：Hermes / OpenClaw 主 Skill，直接描述完整互动主流程。
-- `references/comment-safety-rules.md`：评论回复与回访评论共用的生成规则和安全边界。
-- `docs/COMMANDS.md`：命令参考手册，和 `package.json` scripts、实际 CLI 参数保持一致。
 
 ## 环境要求
 
@@ -116,6 +110,14 @@ npm run auth
 完整命令参数见 `docs/COMMANDS.md`。
 
 `comments:execute` 会直接打开待回复评论所属的抖音作品页，在作品评论区里定位目标评论；优先结合 `cid/comment_id` 与 `comment/list` 接口做精确确认，再在 DOM 中唯一定位后点击“回复”、填写 `reply_text`、发送并校验结果，不再进入创作者评论管理页。
+
+
+## 文档边界
+
+- `README.md`：项目介绍、安装方式、环境要求、首次初始化、常用入口命令。
+- `SKILL.md`：Hermes / OpenClaw 主 Skill，直接描述完整互动主流程。
+- `references/comment-safety-rules.md`：评论回复与回访评论共用的生成规则和安全边界。
+- `docs/COMMANDS.md`：命令参考手册，和 `package.json` scripts、实际 CLI 参数保持一致。
 
 ## 免责声明
 
