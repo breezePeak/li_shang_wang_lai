@@ -282,10 +282,13 @@ export function extractModalIdFromUrl(url) {
 
 async function isWorkModalVisible(page) {
   return await page.evaluate(() => {
-    const modal = document.querySelector('[data-e2e="modal-video-container"], .modal-video-container');
-    if (!modal) return false;
-    const rect = modal.getBoundingClientRect();
-    return rect.width > 100 && rect.height > 100;
+    const modals = document.querySelectorAll('[data-e2e="modal-video-container"], .modal-video-container');
+    for (const modal of modals) {
+      const rect = modal.getBoundingClientRect();
+      const inViewport = rect.bottom > 80 && rect.right > 80 && rect.top < window.innerHeight - 80 && rect.left < window.innerWidth - 80;
+      if (rect.width > 100 && rect.height > 100 && inViewport) return true;
+    }
+    return false;
   });
 }
 
@@ -562,10 +565,11 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
     }
 
     const isCommentAreaVisible = async () => await page.evaluate(() => {
-      const commentArea = document.querySelector('.comment-mainContent');
-      if (commentArea) {
+      const commentAreas = document.querySelectorAll('.comment-mainContent');
+      for (const commentArea of commentAreas) {
         const rect = commentArea.getBoundingClientRect();
-        if (rect.width > 50 && rect.height > 50) return true;
+        const inViewport = rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+        if (rect.width > 50 && rect.height > 50 && inViewport) return true;
       }
       return false;
     }).catch(() => false);
@@ -577,7 +581,8 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           const rect = el.getBoundingClientRect();
           if (rect.width <= 0 || rect.height <= 0) return false;
           const style = window.getComputedStyle(el);
-          return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+          return rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
         }
 
         const nodes = Array.from(document.querySelectorAll('button, [role="tab"], [role="button"], div, span, a'));
@@ -637,14 +642,44 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           const rect = el.getBoundingClientRect();
           if (rect.width <= 0 || rect.height <= 0) return false;
           const style = window.getComputedStyle(el);
-          return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+          return rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+        }
+
+        function pickActionBar() {
+          const candidates = Array.from(document.querySelectorAll('.hOcDRkbZ.WcVcXqQb'));
+          if (candidates.length === 0) return null;
+
+          const viewportCenterY = window.innerHeight / 2;
+          const scored = candidates
+            .map(el => {
+              const rect = el.getBoundingClientRect();
+              const style = window.getComputedStyle(el);
+              const intersectsViewport = rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+              const isVisible = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+              const centerY = rect.top + rect.height / 2;
+              return {
+                el,
+                rect,
+                intersectsViewport,
+                isVisible,
+                distanceToViewportCenter: Math.abs(centerY - viewportCenterY),
+              };
+            })
+            .filter(item => item.isVisible);
+
+          scored.sort((a, b) => {
+            if (a.intersectsViewport !== b.intersectsViewport) return a.intersectsViewport ? -1 : 1;
+            return a.distanceToViewportCenter - b.distanceToViewportCenter;
+          });
+          return scored[0]?.el || null;
         }
 
         document.querySelectorAll('[data-return-visit-comment-button="true"]')
           .forEach(el => el.removeAttribute('data-return-visit-comment-button'));
 
         // 限定在右侧 action bar 容器内查找，避免误点其他元素（如问问AI）
-        const actionBar = document.querySelector('.hOcDRkbZ.WcVcXqQb');
+        const actionBar = pickActionBar();
         const searchScope = actionBar || document;
 
         // 诊断：打印 action bar 内的所有 data-e2e 元素
