@@ -108,6 +108,7 @@ describe('writePendingReplyJson', () => {
       commentKey: 'recent-key',
       sourceEventId: 1,
       sourceNotificationKey: 'recent-notice',
+      rawCommentJson: JSON.stringify({ comment: { comment: { cid: 'cid-recent-1' } } }),
     });
     upsertWorkComment({
       workId: 'work-recent',
@@ -186,6 +187,9 @@ describe('writePendingReplyJson', () => {
     expect(users[0].works[0].author_profile_key).toBe('author-a');
     expect(users[0].works[0].published_at).toBe('2026-06-01T10:00:00.000Z');
     expect(users[0].works[0].comments).toHaveLength(2);
+    expect(users[0].works[0].comments[0].target_comment_id).toBe('cid-recent-1');
+    expect(users[0].works[0].comments[0].targetCommentId).toBe('cid-recent-1');
+    expect(users[0].works[0].comments[0].cid).toBe('cid-recent-1');
     expect(users[0].works[1].work_id).toBe('work-recent-2');
     expect(users[0].works[1].work_title).toBe('最近作品二');
     expect(users[0].works[1].comments).toHaveLength(1);

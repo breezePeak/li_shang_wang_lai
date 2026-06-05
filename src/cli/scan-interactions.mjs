@@ -726,8 +726,13 @@ export function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
       workCount++;
     }
 
+    const targetCommentId = extractPendingReplyTargetCommentId(row);
+
     workEntry.comments.push({
       id: row.id,
+      target_comment_id: targetCommentId,
+      targetCommentId,
+      cid: targetCommentId,
       actor_name: row.actor_name,
       actor_profile_url: row.actor_profile_url,
       actor_profile_key: row.actor_profile_key,
@@ -761,7 +766,6 @@ export function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
   console.error(`[scan] pending_reply_homepage_count=${users.length} pending_reply_work_count=${workCount} pending_reply_comment_count=${totalComments} skip_missing_author_profile_url=${skippedMissingHomepageWorkCount}`);
   console.error(`[scan] Agent 提示: 回评 JSON 路径=${filePath}`);
   console.error('[scan] Agent 提示: 回复依据字段=comments[].comment_text(对方评论内容), work_desc(你的作品文案), work_title(作品标题), actor_name(评论者昵称)');
-  console.error('[scan] Agent 提示: 请为每条评论填写 reply_text 字段，并将 prepare_status_code 改为 PREPARE_READY');
   return {
     filePath,
     totalComments,
@@ -772,7 +776,7 @@ export function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
       action: 'reply',
       jsonPath: filePath,
       replyFields: ['comments[].comment_text', 'work_desc', 'work_title', 'actor_name'],
-      requiredOutput: ['reply_text', 'prepare_status_code: PREPARE_READY'],
+      fillField: 'reply_text',
     },
   };
 }
@@ -783,6 +787,29 @@ function getVisitSourceType(event) {
   if (event.notificationAction === 'like_received' || event.eventType === 'like') return 'like';
   if (event.notificationAction === 'follow_received') return 'follow';
   return 'other';
+}
+
+function extractPendingReplyTargetCommentId(row = {}) {
+  const direct = String(row.target_comment_id || '').trim();
+  if (direct) return direct;
+
+  const rawCommentJson = row.raw_comment_json || '';
+  if (rawCommentJson) {
+    try {
+      const parsed = JSON.parse(rawCommentJson);
+      const fromRaw = String(
+        parsed?.comment?.comment?.commentId ??
+        parsed?.comment?.comment?.cid ??
+        parsed?.comment?.commentId ??
+        parsed?.comment?.cid ??
+        parsed?.targetCommentId ??
+        ''
+      ).trim();
+      if (fromRaw) return fromRaw;
+    } catch {}
+  }
+
+  return String(row.comment_key || '').trim();
 }
 
 export function writePendingVisitJson(events, { days = null, maxCount = 100, collectTypes = ['like', 'comment', 'reply', 'follow'] } = {}) {
