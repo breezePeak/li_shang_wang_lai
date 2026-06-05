@@ -758,6 +758,17 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           console.error(`[work-modal] 已点击评论按钮 ${clicked.selector} (attempt=${attempt})${detail}`);
         }
 
+        // 新版抖音点击评论图标默认打开"问问AI"，需要再点"评论"tab切换到真实评论区
+        if (clicked.clicked) {
+          await page.waitForTimeout(800);
+          const tabClicked = await clickTopCommentTab();
+          if (tabClicked.clicked) {
+            console.error(`[work-modal] 已点击评论Tab text="${tabClicked.text}" tag=${tabClicked.tagName} class="${tabClicked.className}" (attempt=${attempt})`);
+          } else {
+            console.error(`[work-modal] 未找到评论Tab按钮 (attempt=${attempt}), candidates=`, JSON.stringify(tabClicked.candidates || []));
+          }
+        }
+
         const deadline = Date.now() + (attempt < 3 ? 2500 : 5000);
         while (Date.now() < deadline) {
           if (await isCommentAreaVisible()) {
