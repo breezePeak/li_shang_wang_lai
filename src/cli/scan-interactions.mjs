@@ -759,12 +759,21 @@ export function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
   const filePath = resolve('data', 'pending-replies', `pending-comments-${ts}.json`);
   writeJSON(filePath, users);
   console.error(`[scan] pending_reply_homepage_count=${users.length} pending_reply_work_count=${workCount} pending_reply_comment_count=${totalComments} skip_missing_author_profile_url=${skippedMissingHomepageWorkCount}`);
+  console.error(`[scan] Agent 提示: 回评 JSON 路径=${filePath}`);
+  console.error('[scan] Agent 提示: 回复依据字段=comments[].comment_text(对方评论内容), work_desc(你的作品文案), work_title(作品标题), actor_name(评论者昵称)');
+  console.error('[scan] Agent 提示: 请为每条评论填写 reply_text 字段，并将 prepare_status_code 改为 PREPARE_READY');
   return {
     filePath,
     totalComments,
     workCount,
     homepageCount: users.length,
     skippedMissingHomepageWorkCount,
+    agentInstructions: {
+      action: 'reply',
+      jsonPath: filePath,
+      replyFields: ['comments[].comment_text', 'work_desc', 'work_title', 'actor_name'],
+      requiredOutput: ['reply_text', 'prepare_status_code: PREPARE_READY'],
+    },
   };
 }
 
@@ -899,7 +908,18 @@ export function writePendingVisitJson(events, { days = null, maxCount = 100, col
     `pending_visit_db_filtered_status=${stats.dbFilteredStatus} ` +
     `pending_visit_db_filtered_days=${stats.dbFilteredDays}`
   );
-  return { filePath, totalUsers: users.length };
+  console.error(`[scan] Agent 提示: 回访 JSON 路径=${filePath}`);
+  console.error('[scan] Agent 提示: 回访流程=先 return-visit:prepare 采集作品，再填写 comment 字段，最后 return-visit:execute --execute 执行');
+  return {
+    filePath,
+    totalUsers: users.length,
+    agentInstructions: {
+      action: 'visit',
+      jsonPath: filePath,
+      nextStep: 'return-visit:prepare --items-file <此文件>',
+      afterPrepare: '填写 comment 字段 → return-visit:execute --execute --items-file <prepare 输出文件>',
+    },
+  };
 }
 
 async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNotificationDom = false, scanPlan = {}) {
