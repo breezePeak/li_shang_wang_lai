@@ -259,6 +259,9 @@ async function main() {
 
   log(args.json, `[return-visit:prepare] summary prepared=${prepared} skipped=${skipped} failed=${failed}`);
   log(args.json, `[return-visit:prepare] 待填写评论 JSON: ${pendingCommentFile.filePath} (${pendingCommentFile.totalItems} 条)`);
+  console.error(`[return-visit:prepare] Agent 提示: 回访评论 JSON 路径=${pendingCommentFile.filePath}`);
+  console.error('[return-visit:prepare] Agent 提示: 填写字段=comment，参考依据=desc(作品文案), item_title(作品标题), homepage_url(对方主页)');
+  console.error('[return-visit:prepare] Agent 提示: 下一步=填写 comment 字段后，执行 return-visit:execute --execute --items-file 这个 JSON');
   if (args.json) {
     printJsonResult('return-visit:prepare', { tasks: taskResults, pendingCommentFile }, summary);
   }

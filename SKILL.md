@@ -43,12 +43,7 @@ npm run interactions:scan -- --type comment --generate-reply-json
 data/pending-replies/pending-comments-xxx.json
 ```
 
-Agent 读取 JSON，根据评论内容、作品上下文和共享规则填写：
-
-```text
-reply_text
-prepare_status_code: PREPARE_READY
-```
+Agent 读取 JSON，根据评论内容、作品上下文和共享规则填写 `reply_text` 字段。
 
 然后执行：
 
