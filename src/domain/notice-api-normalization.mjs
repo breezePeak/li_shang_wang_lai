@@ -37,6 +37,7 @@ export function getNoticeWorkIdentity(item) {
     workId: awemeId || '',
     workUrl: buildDouyinWorkUrl(awemeId),
     workTitle: aweme?.desc || '',
+    workDesc: aweme?.desc || '',
     workType: aweme?.aweme_type != null ? String(aweme.aweme_type) : null,
     workCreateTime: aweme?.create_time || null,
     thumbnailKey: aweme?.video?.cover?.uri || aweme?.images?.[0]?.uri || '',

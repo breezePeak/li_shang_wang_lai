@@ -5,7 +5,7 @@ export function upsertWorkContext(workContext) {
   const now = new Date().toISOString();
 
   const {
-    workId, modalId, workUrl, workTitle, workType,
+    workId, modalId, workUrl, workTitle, workDesc, workType,
     thumbnailKey, thumbnailSrc,
     authorName, authorProfileUrl, authorProfileKey,
     publishedAt,
@@ -19,12 +19,12 @@ export function upsertWorkContext(workContext) {
   }
 
   const stmt = db.prepare(`
-    INSERT INTO works (work_id, modal_id, work_url, work_title, work_type, thumbnail_key, thumbnail_src,
+    INSERT INTO works (work_id, modal_id, work_url, work_title, work_desc, work_type, thumbnail_key, thumbnail_src,
       author_name, author_profile_url, author_profile_key, published_at, raw_context_json, first_seen_at, last_seen_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
-    workId || null, modalId || null, workUrl || null, workTitle || null, workType || null,
+    workId || null, modalId || null, workUrl || null, workTitle || null, workDesc || null, workType || null,
     thumbnailKey || null, thumbnailSrc || null,
     authorName || null, authorProfileUrl || null, authorProfileKey || null,
     publishedAt || null, rawContextJson || null, now, now,
@@ -56,6 +56,7 @@ function _updateWork(db, existing, ctx, now) {
   if (ctx.modalId && !existing.modal_id) { updates.push('modal_id = ?'); params.push(ctx.modalId); }
   if (ctx.thumbnailKey && !existing.thumbnail_key) { updates.push('thumbnail_key = ?'); params.push(ctx.thumbnailKey); }
   if (ctx.workTitle && ctx.workTitle.length > 0) { updates.push('work_title = ?'); params.push(ctx.workTitle); }
+  if (ctx.workDesc && ctx.workDesc.length > 0) { updates.push('work_desc = ?'); params.push(ctx.workDesc); }
   if (ctx.workUrl && ctx.workUrl.length > 0) { updates.push('work_url = ?'); params.push(ctx.workUrl); }
   if (ctx.workType && ctx.workType.length > 0) { updates.push('work_type = ?'); params.push(ctx.workType); }
   if (ctx.authorName && ctx.authorName.length > 0) { updates.push('author_name = ?'); params.push(ctx.authorName); }

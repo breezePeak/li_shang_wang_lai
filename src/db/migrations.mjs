@@ -294,6 +294,13 @@ export function runMigrations(dbPath = DB_PATH) {
     console.error('[db:init] published_at 列已添加');
   }
 
+  // Migrate: add work_desc column to works
+  if (worksSql && !worksSql.includes('work_desc')) {
+    console.error('[db:init] 旧版 works 缺少 work_desc 列，迁移中...');
+    db.exec('ALTER TABLE works ADD COLUMN work_desc TEXT');
+    console.error('[db:init] work_desc 列已添加');
+  }
+
   // Migrate: rebuild interaction_events to add reply/follow to event_type CHECK constraint
   const checkEventsConstraint = db.prepare(
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='interaction_events'"

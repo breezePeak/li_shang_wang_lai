@@ -84,6 +84,7 @@ export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
       COALESCE(w_by_work.modal_id, w_by_modal.modal_id, wc.modal_id) AS joined_modal_id,
       COALESCE(w_by_work.work_url, w_by_modal.work_url, wc.work_url) AS joined_work_url,
       COALESCE(w_by_work.work_title, w_by_modal.work_title) AS joined_work_title,
+      COALESCE(w_by_work.work_desc, w_by_modal.work_desc) AS joined_work_desc,
       COALESCE(w_by_work.work_type, w_by_modal.work_type) AS joined_work_type,
       COALESCE(w_by_work.thumbnail_key, w_by_modal.thumbnail_key) AS joined_thumbnail_key,
       COALESCE(w_by_work.thumbnail_src, w_by_modal.thumbnail_src) AS joined_thumbnail_src,
