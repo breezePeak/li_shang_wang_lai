@@ -1379,6 +1379,7 @@ export function buildWorkReplyTarget(item = {}, apiComment = null) {
       item.commentCid ??
       item.cid ??
       item.comment_id ??
+      item.comment_key ??
       item.platformEventId ??
       api.commentId ??
       api.cid ??

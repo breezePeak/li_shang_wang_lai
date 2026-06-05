@@ -697,7 +697,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       const verified = await verifyReply(page, {
         commentText: nextAction.target.commentText,
         actorName: nextAction.target.actorName,
-      }, nextAction.item.replyText, { timeoutMs: 7000 });
+      }, nextAction.item.replyText, { timeoutMs: 12000 });
       if (!verified.ok) {
         const reason = verified.message || verified.code || 'send_unverified';
         saveSentUnverified(nextAction.item, reason);
