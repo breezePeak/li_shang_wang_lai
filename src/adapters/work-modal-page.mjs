@@ -784,6 +784,9 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
     }
 
     await page.waitForSelector('.comment-mainContent', { state: 'visible', timeout: 10000 }).catch(() => {});
+    if (!(await isCommentAreaVisible())) {
+      return blocking(RESULT_CODES.BLOCKED, '评论区始终未展开', { recoverable: true });
+    }
     return success({ modalVisible: true });
   } catch (err) {
     const removed = await detectVideoRemoved(page).catch(() => '');

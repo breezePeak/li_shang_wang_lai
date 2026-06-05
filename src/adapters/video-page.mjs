@@ -1167,6 +1167,36 @@ async function ensureCommentPanelOpen(page) {
           if (!clicked) continue;
 
           console.error(`[video-page] 已点击评论按钮，尝试打开评论面板 (attempt=${attempt})`);
+
+          // 新版抖音点击评论图标默认打开"问问AI"，需要再点"评论"tab切换到真实评论区
+          await page.waitForTimeout(800);
+          const tabResult = await page.evaluate(() => {
+            function visible(el) {
+              if (!el) return false;
+              const r = el.getBoundingClientRect();
+              if (r.width <= 0 || r.height <= 0) return false;
+              const s = window.getComputedStyle(el);
+              return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+            }
+            const nodes = Array.from(document.querySelectorAll('button, [role="tab"], [role="button"], div, span, a'));
+            for (const el of nodes) {
+              const text = (el.innerText || el.textContent || '').trim();
+              if (text === '评论' && visible(el)) {
+                const r = el.getBoundingClientRect();
+                if (r.top <= window.innerHeight * 0.5) {
+                  el.click();
+                  return { clicked: true, text, tag: el.tagName, cls: (typeof el.className === 'string' ? el.className : '').slice(0, 60) };
+                }
+              }
+            }
+            return { clicked: false };
+          }).catch(() => ({ clicked: false }));
+          if (tabResult.clicked) {
+            console.error(`[video-page] 已点击评论Tab text="${tabResult.text}" tag=${tabResult.tag} class="${tabResult.cls}"`);
+          } else {
+            console.error(`[video-page] 未找到评论Tab按钮 (attempt=${attempt})`);
+          }
+
           const deadline = Date.now() + (attempt < 3 ? 2500 : 5000);
           while (Date.now() < deadline) {
             if (await isOpen()) return true;
