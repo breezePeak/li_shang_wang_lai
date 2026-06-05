@@ -929,12 +929,34 @@ export async function clickLike(page, { execute = false } = {}) {
 
       for (const selector of exactLikeSelectors) {
         const targetBtn = page.locator(selector).first();
-        if (await targetBtn.count() === 0) continue;
-        if (!(await targetBtn.isVisible().catch(() => false))) continue;
+        const count = await targetBtn.count();
+        console.error(`[like-click] 尝试选择器: ${selector} count=${count}`);
+        if (count === 0) continue;
+        const vis = await targetBtn.isVisible().catch(() => false);
+        if (!vis) {
+          console.error(`[like-click] ${selector} 不可见, 跳过`);
+          continue;
+        }
+
+        // 诊断打印
+        try {
+          const diag = await targetBtn.evaluate(el => ({
+            tag: el.tagName.toLowerCase(),
+            cls: (typeof el.className === 'string' ? el.className : '').slice(0, 80),
+            e2e: el.getAttribute('data-e2e') || '',
+            e2eState: el.getAttribute('data-e2e-state') || '',
+            text: (el.innerText || '').trim().slice(0, 20),
+            rect: (() => { const r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; })(),
+          }));
+          console.error(`[like-click] 目标元素:`, JSON.stringify(diag));
+        } catch {}
 
         try {
+          console.error(`[like-click] 执行 locator.click...`);
           await targetBtn.click({ timeout: 5000 });
-        } catch {
+          console.error(`[like-click] locator.click 完成`);
+        } catch (err) {
+          console.error(`[like-click] locator.click 失败: ${err.message}, 尝试 evaluate.click`);
           const clicked = await page.evaluate((sel) => {
             const marked = document.querySelector(sel);
             if (!marked) return false;
@@ -942,12 +964,14 @@ export async function clickLike(page, { execute = false } = {}) {
             (innerButton || marked).click();
             return true;
           }, selector).catch(() => false);
+          console.error(`[like-click] evaluate.click: ${clicked}`);
           if (!clicked) {
+            console.error(`[like-click] 尝试 force click...`);
             await targetBtn.click({ force: true, timeout: 5000 });
           }
         }
 
-        console.error(`[video-page] 已点击点赞按钮 (${selector})`);
+        console.error(`[like-click] 已点击点赞按钮 (${selector})`);
         await page.waitForTimeout(2000);
         return true;
       }

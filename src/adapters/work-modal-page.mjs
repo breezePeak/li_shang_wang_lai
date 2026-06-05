@@ -642,14 +642,42 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
 
         document.querySelectorAll('[data-return-visit-comment-button="true"]')
           .forEach(el => el.removeAttribute('data-return-visit-comment-button'));
+
         // 限定在右侧 action bar 容器内查找，避免误点其他元素（如问问AI）
         const actionBar = document.querySelector('.hOcDRkbZ.WcVcXqQb');
         const searchScope = actionBar || document;
+
+        // 诊断：打印 action bar 内的所有 data-e2e 元素
+        const diagAll = [];
+        if (actionBar) {
+          actionBar.querySelectorAll('[data-e2e]').forEach(el => {
+            diagAll.push({
+              e2e: el.getAttribute('data-e2e') || '',
+              e2eState: el.getAttribute('data-e2e-state') || '',
+              tag: el.tagName.toLowerCase(),
+              cls: (typeof el.className === 'string' ? el.className : '').slice(0, 80),
+              rect: (() => { const r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; })(),
+              text: (el.innerText || '').trim().slice(0, 20),
+            });
+          });
+        }
+
         const commentContainer = searchScope.querySelector('[data-e2e="feed-comment-icon"]');
         if (commentContainer && visible(commentContainer)) {
           commentContainer.scrollIntoView({ block: 'center', behavior: 'instant' });
           const rect = commentContainer.getBoundingClientRect();
           commentContainer.setAttribute('data-return-visit-comment-button', 'true');
+
+          // 诊断：该元素下方的子元素
+          const children = [];
+          commentContainer.querySelectorAll('*').forEach(child => {
+            children.push({
+              tag: child.tagName.toLowerCase(),
+              cls: (typeof child.className === 'string' ? child.className : '').slice(0, 60),
+              text: (child.innerText || '').trim().slice(0, 30),
+            });
+          });
+
           return {
             found: true,
             selector: '[data-e2e="feed-comment-icon"]',
@@ -657,31 +685,56 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
             className: typeof commentContainer.className === 'string' ? commentContainer.className.slice(0, 120) : '',
             x: Math.round(rect.left + rect.width / 2),
             y: Math.round(rect.top + rect.height / 2),
-            rect: {
-              x: Math.round(rect.x),
-              y: Math.round(rect.y),
-              width: Math.round(rect.width),
-              height: Math.round(rect.height),
-            },
+            rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+            searchScopeSelector: actionBar ? '.hOcDRkbZ.WcVcXqQb' : 'document',
+            diagActionBarElements: diagAll.slice(0, 10),
+            diagChildren: children.slice(0, 8),
           };
         }
-        return { found: false };
-      }).catch(() => ({ clicked: false }));
+        return {
+          found: false,
+          searchScopeSelector: actionBar ? '.hOcDRkbZ.WcVcXqQb' : 'document',
+          diagActionBarElements: diagAll.slice(0, 10),
+          diagReason: commentContainer ? 'not_visible' : 'element_not_found',
+        };
+      }).catch((err) => {
+        console.error(`[click-comment] 查找评论按钮异常: ${err.message}`);
+        return { found: false, diagReason: 'evaluate_exception' };
+      });
 
-      if (!prepared.found) return { clicked: false };
+      if (!prepared.found) {
+        console.error(`[click-comment] 未找到评论按钮 attempt=${attempt} reason=${prepared.diagReason}`);
+        if (prepared.diagActionBarElements?.length > 0) {
+          console.error(`[click-comment] action bar 内 data-e2e 元素:`, JSON.stringify(prepared.diagActionBarElements));
+        }
+        return { clicked: false };
+      }
 
-      // 坐标可能在 viewport 外，用 locator click 兜底
+      console.error(`[click-comment] 找到评论按钮 attempt=${attempt} tag=${prepared.tag} class="${prepared.className}"` +
+        ` rect=${JSON.stringify(prepared.rect)} scope=${prepared.searchScopeSelector}`);
+      console.error(`[click-comment] 按钮内部子元素:`, JSON.stringify(prepared.diagChildren));
+      console.error(`[click-comment] action bar 元素列表:`, JSON.stringify(prepared.diagActionBarElements));
+
+      let clickMethod = '';
       if (prepared.y < 0 || prepared.y > 800 || prepared.x < 0 || prepared.x > 1280) {
+        console.error(`[click-comment] 坐标异常 (${prepared.x},${prepared.y})，使用 locator.click 兜底`);
+        clickMethod = 'locator';
         const button = page.locator('[data-return-visit-comment-button="true"]').last();
         await button.scrollIntoViewIfNeeded().catch(() => {});
         await button.click({ timeout: 3000, force: true }).catch(() => {});
       } else {
-        await page.mouse.click(prepared.x, prepared.y).catch(async () => {
+        console.error(`[click-comment] 使用 mouse.click 坐标 (${prepared.x},${prepared.y})`);
+        clickMethod = 'mouse';
+        await page.mouse.click(prepared.x, prepared.y).catch(async (err) => {
+          console.error(`[click-comment] mouse.click 失败: ${err.message}，改用 locator.click`);
+          clickMethod = 'locator_fallback';
           const button = page.locator('[data-return-visit-comment-button="true"]').last();
           await button.scrollIntoViewIfNeeded().catch(() => {});
           await button.click({ timeout: 3000, force: true });
         });
       }
+
+      console.error(`[click-comment] 点击完成 method=${clickMethod}`);
 
       return {
         clicked: true,
