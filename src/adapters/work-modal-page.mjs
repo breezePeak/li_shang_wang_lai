@@ -4,7 +4,15 @@ import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
 import { findScrollableContainerBox, scrollContainerByWheel } from './scroll-container.mjs';
 import path from 'path';
 
-async function captureReplyBoxDebug(page, phase) {
+function isTruthyEnv(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+async function captureReplyBoxDebug(page, phase, { success = false } = {}) {
+  if (success && !isTruthyEnv(process.env.LISHANGWANGLAI_REPLY_DEBUG_SUCCESS)) {
+    return null;
+  }
+
   try {
     const dir = path.resolve('data', 'debug', 'reply-box');
     ensureDir(dir);
@@ -69,9 +77,11 @@ async function captureReplyBoxDebug(page, phase) {
     });
 
     writeJSON(`${base}.json`, data);
-    try {
-      await page.screenshot({ path: `${base}.png`, fullPage: false });
-    } catch {}
+    if (isTruthyEnv(process.env.LISHANGWANGLAI_REPLY_DEBUG_SCREENSHOT)) {
+      try {
+        await page.screenshot({ path: `${base}.png`, fullPage: false });
+      } catch {}
+    }
     console.error(`[work-modal] 回复框诊断已保存: ${base}.json`);
     return `${base}.json`;
   } catch (err) {
@@ -1814,7 +1824,7 @@ export async function openReplyBoxByIndex(page, commentIndex) {
       return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '点击回复后输入框未出现', { recoverable: true });
     }
 
-    await captureReplyBoxDebug(page, 'open-success');
+    await captureReplyBoxDebug(page, 'open-success', { success: true });
     console.error(`[work-modal] 回复输入框已出现`);
     return success({ replyBoxOpened: true });
   } catch (err) {
@@ -1890,7 +1900,7 @@ export async function openReplyBoxForMatchedWorkComment(page, target, candidate,
     return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, '点击回复后输入框未出现', { recoverable: true });
   }
 
-  await captureReplyBoxDebug(page, 'open-success');
+  await captureReplyBoxDebug(page, 'open-success', { success: true });
   console.error(
     `[work-modal] 已唯一定位评论并打开回复框 matchedBy=${matchedBy} actor="${target?.actorName || ''}" comment="${String(target?.commentText || '').slice(0, 40)}"`
   );
@@ -1912,7 +1922,7 @@ export async function fillWorkReplyText(page, replyText) {
       return blocking(RESULT_CODES.COMMENT_INPUT_NOT_FOUND, `找不到严格评论输入框: ${filled.reason || 'unknown'}`, { recoverable: true });
     }
 
-    await captureReplyBoxDebug(page, 'fill-success');
+    await captureReplyBoxDebug(page, 'fill-success', { success: true });
     console.error(`[work-modal] 已填入回复，未点击发送 method=${filled.method}`);
     return success({ filled: true, sent: false, method: filled.method });
   } catch (err) {
@@ -1925,7 +1935,7 @@ export async function clickSendWorkReply(page) {
     const clicked = await clickReplySendControl(page);
     if (clicked.ok) {
       console.error(`[work-modal] 点击发送控件 method=${clicked.method}`);
-      await captureReplyBoxDebug(page, 'send-clicked');
+      await captureReplyBoxDebug(page, 'send-clicked', { success: true });
       await page.waitForTimeout(2000);
       return success({ sent: true, method: clicked.method });
     }
