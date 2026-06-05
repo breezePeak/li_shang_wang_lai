@@ -85,6 +85,23 @@ export function extractAwemeIdFromHref(href = '') {
   return match?.[1] || match?.[2] || '';
 }
 
+export function findCardIndexByAwemeId(cards = [], targetAwemeId = '') {
+  const normalizedTarget = normalizeAwemeIdForMatching(targetAwemeId);
+  if (!normalizedTarget) return -1;
+  return cards.findIndex(card => normalizeAwemeIdForMatching(extractAwemeIdFromHref(card?.href || '')) === normalizedTarget);
+}
+
+function normalizeProfileBase(profileUrl = '') {
+  const normalized = normalizeDouyinUrl(profileUrl || '') || String(profileUrl || '').trim();
+  return normalized.split('?')[0];
+}
+
+export function isSameProfileUrl(currentUrl = '', profileUrl = '') {
+  const currentBase = normalizeProfileBase(currentUrl);
+  const profileBase = normalizeProfileBase(profileUrl);
+  return Boolean(currentBase && profileBase && currentBase === profileBase);
+}
+
 async function readProfileWorkCards(page) {
   return page.evaluate(() => {
     function visible(el) {
@@ -152,6 +169,90 @@ async function clickProfileCardByIndex(page, index) {
 async function scrollProfileOnce(page) {
   await page.mouse.wheel(0, 1200);
   await page.waitForTimeout(1000);
+}
+
+export async function closeCurrentWorkModalToProfile(page, profileUrl, options = {}) {
+  const { timeoutMs = 8000 } = options;
+  const profileBase = normalizeProfileBase(profileUrl);
+  if (!profileBase) {
+    return { ok: false, reason: 'missing_profile_url' };
+  }
+
+  async function onProfileWithoutModal() {
+    const currentUrl = String(page.url?.() || '');
+    return isSameProfileUrl(currentUrl, profileBase) && !currentUrl.includes('modal_id=');
+  }
+
+  if (await onProfileWithoutModal()) {
+    return { ok: true, method: 'already_on_profile', url: page.url() };
+  }
+
+  async function tryCloseButton() {
+    return page.evaluate(() => {
+      function visible(el) {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        return rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+      }
+
+      const nodes = Array.from(document.querySelectorAll('button, [role="button"], div, span'));
+      const candidates = [];
+      for (const el of nodes) {
+        if (!visible(el)) continue;
+        const text = (el.innerText || el.textContent || '').trim();
+        const aria = (el.getAttribute('aria-label') || '').trim();
+        const cls = String(el.getAttribute('class') || '');
+        const rect = el.getBoundingClientRect();
+        const inTopLeft = rect.left < 140 && rect.top < 140;
+        const closeLike = text === '关闭'
+          || aria.includes('关闭')
+          || cls.includes('close')
+          || cls.includes('Close')
+          || cls.includes('xgplayer-playswitch-next')
+          || cls.includes('semi-icon-close');
+        if (!inTopLeft || !closeLike) continue;
+        candidates.push({
+          el,
+          rect,
+          text,
+          aria,
+          cls,
+        });
+      }
+
+      candidates.sort((a, b) => (a.rect.top - b.rect.top) || (a.rect.left - b.rect.left));
+      const target = candidates[0]?.el;
+      if (!target) return { ok: false };
+
+      target.click?.();
+      target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      return { ok: true };
+    }).catch(() => ({ ok: false }));
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.waitForTimeout(500);
+    if (await onProfileWithoutModal()) {
+      return { ok: true, method: 'escape', url: page.url() };
+    }
+
+    const clicked = await tryCloseButton();
+    if (clicked.ok) {
+      await page.waitForTimeout(700);
+      if (await onProfileWithoutModal()) {
+        return { ok: true, method: 'close_button', url: page.url() };
+      }
+    }
+  }
+
+  return { ok: false, reason: 'close_modal_to_profile_timeout', currentUrl: page.url() };
 }
 
 export function normalizeAwemeForVisit(aweme = {}) {
@@ -265,6 +366,7 @@ export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awem
     listCards = readProfileWorkCards,
     clickCard = clickProfileCardByIndex,
     scrollProfile = scrollProfileOnce,
+    reuseCurrentProfile = true,
   } = options;
 
   const profile = normalizeDouyinUrl(profileUrl || '') || profileUrl;
@@ -275,9 +377,14 @@ export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awem
 
   const collector = collectorFactory(page);
   try {
-    const open = await gotoProfile(page, profile, { pageLoadRetryCount, timeoutMs });
-    if (!open.ok) {
-      return { ok: false, reason: 'profile_navigation_failed', error: open.error || '' };
+    const currentUrl = String(page.url?.() || '');
+    const canReuseCurrentProfile = reuseCurrentProfile && isSameProfileUrl(currentUrl, profile) && !currentUrl.includes('modal_id=');
+
+    if (!canReuseCurrentProfile) {
+      const open = await gotoProfile(page, profile, { pageLoadRetryCount, timeoutMs });
+      if (!open.ok) {
+        return { ok: false, reason: 'profile_navigation_failed', error: open.error || '' };
+      }
     }
 
     const isPrivate = await detectPrivate(page);
@@ -289,14 +396,18 @@ export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awem
     const beforeCount = collector.getAwemes().length;
     await collector.waitForAwemes({ beforeCount, timeoutMs: 3000 });
 
+    let cards = await listCards(page);
     let foundIndex = findAwemeIndexInList(collector.getAwemes(), targetAwemeId);
+    let domFoundIndex = findCardIndexByAwemeId(cards, targetAwemeId);
     let scrollCount = 0;
-    while (foundIndex < 0 && scrollCount < maxScrollCount) {
+    while (foundIndex < 0 && domFoundIndex < 0 && scrollCount < maxScrollCount) {
       await scrollProfile(page);
       scrollCount++;
       const currentCount = collector.getAwemes().length;
       await collector.waitForAwemes({ beforeCount: currentCount, timeoutMs: 3000 });
       foundIndex = findAwemeIndexInList(collector.getAwemes(), targetAwemeId);
+      cards = await listCards(page);
+      domFoundIndex = findCardIndexByAwemeId(cards, targetAwemeId);
     }
 
     const stats = {
@@ -304,23 +415,26 @@ export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awem
       scrollCount,
       foundTargetWork: foundIndex >= 0,
       targetIndex: foundIndex,
+      domFoundTargetWork: domFoundIndex >= 0,
+      domTargetIndex: domFoundIndex,
+      reusedCurrentProfile: canReuseCurrentProfile,
     };
-    console.error(`[comments:execute] profile_post_api_response_count=${stats.responseCount || 0} profile_post_api_aweme_count=${stats.awemeCount || 0} target_work_found=${stats.foundTargetWork} target_index=${foundIndex}`);
+    console.error(`[comments:execute] profile_post_api_response_count=${stats.responseCount || 0} profile_post_api_aweme_count=${stats.awemeCount || 0} target_work_found=${stats.foundTargetWork} target_index=${foundIndex} dom_target_found=${stats.domFoundTargetWork} dom_target_index=${domFoundIndex} reused_current_profile=${stats.reusedCurrentProfile}`);
 
-    if ((stats.responseCount || 0) === 0 || (stats.awemeCount || 0) === 0) {
+    if (foundIndex < 0 && domFoundIndex < 0 && ((stats.responseCount || 0) === 0 || (stats.awemeCount || 0) === 0)) {
       return { ok: false, reason: 'profile_post_api_empty', stats };
     }
-    if (foundIndex < 0) {
+    if (foundIndex < 0 && domFoundIndex < 0) {
       return { ok: false, reason: 'target_work_not_found_in_profile_post_api', stats };
     }
 
-    const cards = await listCards(page);
-    console.error(`[comments:execute] profile_dom_card_count=${cards.length} click_card_index=${foundIndex}`);
-    if (cards.length <= foundIndex) {
+    const targetIndex = foundIndex >= 0 ? foundIndex : domFoundIndex;
+    console.error(`[comments:execute] profile_dom_card_count=${cards.length} click_card_index=${targetIndex}`);
+    if (cards.length <= targetIndex) {
       return { ok: false, reason: 'profile_card_index_out_of_range', stats: { ...stats, domCardCount: cards.length } };
     }
 
-    const candidateCard = cards[foundIndex];
+    const candidateCard = cards[targetIndex];
     const cardAwemeId = normalizeAwemeIdForMatching(extractAwemeIdFromHref(candidateCard?.href || ''));
     if (cardAwemeId && cardAwemeId !== targetAwemeId) {
       return {
@@ -332,7 +446,7 @@ export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awem
       };
     }
 
-    const clicked = await clickCard(page, foundIndex);
+    const clicked = await clickCard(page, targetIndex);
     if (!clicked?.ok) {
       return { ok: false, reason: 'profile_card_index_out_of_range', stats: { ...stats, domCardCount: cards.length } };
     }
@@ -343,7 +457,7 @@ export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awem
       const url = page.url();
       if (url.includes(`/video/${targetAwemeId}`) || url.includes(`/note/${targetAwemeId}`) || url.includes(`modal_id=${targetAwemeId}`)) {
         await page.waitForTimeout(1200);
-        return { ok: true, url, awemeId: targetAwemeId, index: foundIndex, stats };
+        return { ok: true, url, awemeId: targetAwemeId, index: targetIndex, stats };
       }
       await page.waitForTimeout(250);
     }

@@ -32,7 +32,7 @@ import {
   verifyWorkReplyVisible,
 } from '../adapters/work-modal-page.mjs';
 import { createCommentListApiCollector } from '../adapters/comment-list-api-listener.mjs';
-import { openProfileWorkByAwemeIdFromPostApi } from '../services/return-visit-work-collector.mjs';
+import { closeCurrentWorkModalToProfile, openProfileWorkByAwemeIdFromPostApi } from '../services/return-visit-work-collector.mjs';
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
 import { pathToFileURL } from 'url';
@@ -831,6 +831,7 @@ async function executeWorkCommentItems(items, args) {
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
 
     const workGroups = groupExecutableItemsByWork(executable);
+    let activeHomepageUrl = '';
     for (const group of workGroups) {
       const currentWork = group[0];
       try {
@@ -839,13 +840,15 @@ async function executeWorkCommentItems(items, args) {
         }
 
         console.log(`[comments:execute] current_homepage_url=${currentWork.homepageUrl || currentWork.authorProfileUrl || ''} current_work_id=${currentWork.workId || ''} current_modal_id=${currentWork.modalId || ''} group_comment_count=${group.length}`);
+        const targetHomepageUrl = currentWork.authorProfileUrl || currentWork.homepageUrl || '';
+        const reuseCurrentProfile = Boolean(activeHomepageUrl && targetHomepageUrl && activeHomepageUrl === targetHomepageUrl);
         const commentListCollector = createCommentListApiCollector(page);
         try {
           const openResult = await openProfileWorkByAwemeIdFromPostApi(
             page,
-            currentWork.authorProfileUrl || currentWork.homepageUrl,
+            targetHomepageUrl,
             currentWork.workId || currentWork.modalId,
-            { timeoutMs: 30000 }
+            { timeoutMs: 30000, reuseCurrentProfile }
           );
           if (!openResult.ok) {
             console.log(`[comments:execute] open_profile_failed reason=${openResult.reason || openResult.message || openResult.code || 'work_open_failed'}`);
@@ -856,6 +859,7 @@ async function executeWorkCommentItems(items, args) {
             continue;
           }
           console.log(`[comments:execute] open_profile_success opened_work_url=${openResult.url || ''}`);
+          activeHomepageUrl = targetHomepageUrl;
 
           const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
           if (!modalReady.ok) {
@@ -882,6 +886,17 @@ async function executeWorkCommentItems(items, args) {
           });
           if (groupResults.some(result => !result.ok && result.status === 'blocked')) {
             run.hadBlocked = true;
+          }
+
+          const nextGroup = workGroups[workGroups.indexOf(group) + 1] || null;
+          const shouldReturnToProfile = Boolean(nextGroup && (nextGroup[0]?.authorProfileUrl || nextGroup[0]?.homepageUrl) === targetHomepageUrl);
+          if (shouldReturnToProfile) {
+            const closeResult = await closeCurrentWorkModalToProfile(page, targetHomepageUrl, { timeoutMs: 10000 });
+            if (closeResult.ok) {
+              console.log(`[comments:execute] return_to_profile_success method=${closeResult.method} url=${closeResult.url || ''}`);
+            } else {
+              console.log(`[comments:execute] return_to_profile_failed reason=${closeResult.reason || 'close_modal_to_profile_failed'}`);
+            }
           }
         } finally {
           commentListCollector.stop();
