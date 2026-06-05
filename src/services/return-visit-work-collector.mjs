@@ -69,6 +69,91 @@ function createProfilePostApiCollector(page) {
   };
 }
 
+export function normalizeAwemeIdForMatching(value) {
+  return String(value || '').trim().replace(/^(video|note|modal)-/, '');
+}
+
+export function findAwemeIndexInList(awemeList = [], targetAwemeId = '') {
+  const normalizedTarget = normalizeAwemeIdForMatching(targetAwemeId);
+  if (!normalizedTarget) return -1;
+  return awemeList.findIndex(aweme => normalizeAwemeIdForMatching(aweme?.aweme_id) === normalizedTarget);
+}
+
+export function extractAwemeIdFromHref(href = '') {
+  const text = String(href || '');
+  const match = text.match(/\/(?:video|note)\/(\d+)|[?&]modal_id=(\d+)/);
+  return match?.[1] || match?.[2] || '';
+}
+
+async function readProfileWorkCards(page) {
+  return page.evaluate(() => {
+    function visible(el) {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 20 || rect.height < 20) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    }
+
+    const cards = [];
+    const seen = new Set();
+    const links = document.querySelectorAll('a[href*="/video/"], a[href*="/note/"], a[href*="modal_id="]');
+    for (const link of links) {
+      if (!visible(link)) continue;
+      const href = link.getAttribute('href') || '';
+      if (!href || seen.has(href)) continue;
+      const rect = link.getBoundingClientRect();
+      seen.add(href);
+      cards.push({
+        href: href.startsWith('http') ? href : `https://www.douyin.com${href}`,
+        x: rect.x,
+        y: rect.y,
+      });
+    }
+
+    cards.sort((a, b) => a.y - b.y || a.x - b.x);
+    return cards;
+  });
+}
+
+async function clickProfileCardByIndex(page, index) {
+  return page.evaluate((targetIndex) => {
+    function visible(el) {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 20 || rect.height < 20) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    }
+
+    const cards = [];
+    const seen = new Set();
+    const links = document.querySelectorAll('a[href*="/video/"], a[href*="/note/"], a[href*="modal_id="]');
+    for (const link of links) {
+      const href = link.getAttribute('href') || '';
+      if (!href || seen.has(href) || !visible(link)) continue;
+      seen.add(href);
+      const rect = link.getBoundingClientRect();
+      cards.push({ href, x: rect.x, y: rect.y });
+    }
+
+    cards.sort((a, b) => a.y - b.y || a.x - b.x);
+    const target = cards[targetIndex];
+    if (!target) return { ok: false };
+
+    const candidate = Array.from(links).find(link => (link.getAttribute('href') || '') === target.href && visible(link));
+    if (!candidate) return { ok: false };
+    candidate.scrollIntoView({ block: 'center', behavior: 'instant' });
+    candidate.click();
+    return { ok: true, href: target.href };
+  }, index);
+}
+
+async function scrollProfileOnce(page) {
+  await page.mouse.wheel(0, 1200);
+  await page.waitForTimeout(1000);
+}
+
 export function normalizeAwemeForVisit(aweme = {}) {
   const awemeId = String(aweme?.aweme_id || '').trim();
   const desc = String(aweme?.desc || '').trim();
@@ -166,82 +251,112 @@ async function listProfileWorkUrls(page, maxWorks = 2) {
 }
 
 export async function openProfileWorkByAwemeId(page, profileUrl, awemeId, options = {}) {
+  return openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awemeId, options);
+}
+
+export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awemeId, options = {}) {
   const {
     pageLoadRetryCount = 1,
     timeoutMs = 15000,
+    maxScrollCount = 20,
+    collectorFactory = createProfilePostApiCollector,
+    gotoProfile = gotoWithRetry,
+    detectPrivate = detectPrivateProfile,
+    listCards = readProfileWorkCards,
+    clickCard = clickProfileCardByIndex,
+    scrollProfile = scrollProfileOnce,
   } = options;
 
   const profile = normalizeDouyinUrl(profileUrl || '') || profileUrl;
-  const targetAwemeId = String(awemeId || '').trim();
+  const targetAwemeId = normalizeAwemeIdForMatching(awemeId);
   if (!profile || !targetAwemeId) {
     return { ok: false, reason: 'missing_profile_or_aweme_id' };
   }
 
-  const open = await gotoWithRetry(page, profile, { pageLoadRetryCount, timeoutMs });
-  if (!open.ok) {
-    return { ok: false, reason: `profile_navigation_failed:${open.error}` };
-  }
-
-  const isPrivate = await detectPrivateProfile(page);
-  if (isPrivate) {
-    return { ok: false, reason: 'private_profile' };
-  }
-
-  const clicked = await page.evaluate((id) => {
-    function visible(el) {
-      if (!el) return false;
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 20 || rect.height < 20) return false;
-      const style = window.getComputedStyle(el);
-      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+  const collector = collectorFactory(page);
+  try {
+    const open = await gotoProfile(page, profile, { pageLoadRetryCount, timeoutMs });
+    if (!open.ok) {
+      return { ok: false, reason: 'profile_navigation_failed', error: open.error || '' };
     }
 
-    const candidates = [];
-    const links = document.querySelectorAll('a[href]');
-    for (const link of links) {
-      const href = link.getAttribute('href') || '';
-      if (!href.includes(id)) continue;
-      if (!/\/video\/|\/note\/|modal_id=/.test(href)) continue;
-      if (!visible(link)) continue;
-      const rect = link.getBoundingClientRect();
-      candidates.push({
-        href,
-        x: rect.x,
-        y: rect.y,
-        area: rect.width * rect.height,
-      });
+    const isPrivate = await detectPrivate(page);
+    if (isPrivate) {
+      return { ok: false, reason: 'private_profile', stats: collector.getStats?.() || null };
     }
 
-    candidates.sort((a, b) => a.y - b.y || a.x - b.x || b.area - a.area);
-    const first = candidates[0];
-    if (!first) return { ok: false, reason: 'target_work_link_not_found', candidates: 0 };
+    await page.waitForTimeout(1200);
+    const beforeCount = collector.getAwemes().length;
+    await collector.waitForAwemes({ beforeCount, timeoutMs: 3000 });
 
-    const target = Array.from(links).find(link => (link.getAttribute('href') || '') === first.href && visible(link));
-    if (!target) return { ok: false, reason: 'target_work_element_missing', candidates: candidates.length };
-
-    target.scrollIntoView({ block: 'center', behavior: 'instant' });
-    target.click();
-    return { ok: true, href: first.href, candidates: candidates.length };
-  }, targetAwemeId);
-
-  if (!clicked.ok) return clicked;
-
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const url = page.url();
-    if (url.includes(`/video/${targetAwemeId}`) || url.includes(`/note/${targetAwemeId}`) || url.includes(`modal_id=${targetAwemeId}`)) {
-      await page.waitForTimeout(1200);
-      return { ok: true, url, clickedHref: clicked.href };
+    let foundIndex = findAwemeIndexInList(collector.getAwemes(), targetAwemeId);
+    let scrollCount = 0;
+    while (foundIndex < 0 && scrollCount < maxScrollCount) {
+      await scrollProfile(page);
+      scrollCount++;
+      const currentCount = collector.getAwemes().length;
+      await collector.waitForAwemes({ beforeCount: currentCount, timeoutMs: 3000 });
+      foundIndex = findAwemeIndexInList(collector.getAwemes(), targetAwemeId);
     }
-    await page.waitForTimeout(250);
+
+    const stats = {
+      ...(collector.getStats?.() || {}),
+      scrollCount,
+      foundTargetWork: foundIndex >= 0,
+      targetIndex: foundIndex,
+    };
+    console.error(`[comments:execute] profile_post_api_response_count=${stats.responseCount || 0} profile_post_api_aweme_count=${stats.awemeCount || 0} target_work_found=${stats.foundTargetWork} target_index=${foundIndex}`);
+
+    if ((stats.responseCount || 0) === 0 || (stats.awemeCount || 0) === 0) {
+      return { ok: false, reason: 'profile_post_api_empty', stats };
+    }
+    if (foundIndex < 0) {
+      return { ok: false, reason: 'target_work_not_found_in_profile_post_api', stats };
+    }
+
+    const cards = await listCards(page);
+    console.error(`[comments:execute] profile_dom_card_count=${cards.length} click_card_index=${foundIndex}`);
+    if (cards.length <= foundIndex) {
+      return { ok: false, reason: 'profile_card_index_out_of_range', stats: { ...stats, domCardCount: cards.length } };
+    }
+
+    const candidateCard = cards[foundIndex];
+    const cardAwemeId = normalizeAwemeIdForMatching(extractAwemeIdFromHref(candidateCard?.href || ''));
+    if (cardAwemeId && cardAwemeId !== targetAwemeId) {
+      return {
+        ok: false,
+        reason: 'profile_card_id_mismatch',
+        stats: { ...stats, domCardCount: cards.length },
+        cardHref: candidateCard?.href || '',
+        cardAwemeId,
+      };
+    }
+
+    const clicked = await clickCard(page, foundIndex);
+    if (!clicked?.ok) {
+      return { ok: false, reason: 'profile_card_index_out_of_range', stats: { ...stats, domCardCount: cards.length } };
+    }
+    console.error(`[comments:execute] opened_profile_card_href=${clicked.href || candidateCard?.href || ''}`);
+
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const url = page.url();
+      if (url.includes(`/video/${targetAwemeId}`) || url.includes(`/note/${targetAwemeId}`) || url.includes(`modal_id=${targetAwemeId}`)) {
+        await page.waitForTimeout(1200);
+        return { ok: true, url, awemeId: targetAwemeId, index: foundIndex, stats };
+      }
+      await page.waitForTimeout(250);
+    }
+
+    return {
+      ok: false,
+      reason: 'target_work_open_timeout',
+      currentUrl: page.url(),
+      stats,
+    };
+  } finally {
+    collector.stop();
   }
-
-  return {
-    ok: false,
-    reason: 'target_work_open_timeout',
-    clickedHref: clicked.href,
-    currentUrl: page.url(),
-  };
 }
 
 function extractPublishTime(text) {

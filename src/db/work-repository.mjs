@@ -86,6 +86,18 @@ export function findWorkByWorkId(workId) {
   return db.prepare('SELECT * FROM works WHERE work_id = ?').get(workId);
 }
 
+export function findWorkByIdentity({ workId, modalId } = {}) {
+  if (workId) {
+    const byWorkId = findWorkByWorkId(workId);
+    if (byWorkId) return byWorkId;
+  }
+  if (modalId) {
+    const byModalId = findWorkByModalId(modalId);
+    if (byModalId) return byModalId;
+  }
+  return null;
+}
+
 export function listRecentlySeenWorks(limit = 20) {
   const db = getDb();
   return db.prepare('SELECT * FROM works ORDER BY last_seen_at DESC LIMIT ?').all(limit);

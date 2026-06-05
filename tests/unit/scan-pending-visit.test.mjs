@@ -4,6 +4,7 @@ import { resolve } from 'path';
 import { getDb, resetDb } from '../../src/db/database.mjs';
 import { runMigrations } from '../../src/db/migrations.mjs';
 import { upsertWorkComment } from '../../src/db/work-comment-repository.mjs';
+import { upsertWorkContext } from '../../src/db/work-repository.mjs';
 import {
   buildIdentityKey,
   buildTaskId,
@@ -55,7 +56,40 @@ describe('writePendingReplyJson', () => {
     if (existsSync(TEST_DB)) rmSync(TEST_DB, { force: true });
   });
 
-  it('loads pending replies from db and respects days/maxCount', () => {
+  it('按主页 -> 作品 -> 评论输出待回评 JSON，并过滤缺少 author_profile_url 的作品', () => {
+    upsertWorkContext({
+      workId: 'work-recent',
+      modalId: 'work-recent',
+      workUrl: 'https://www.douyin.com/jingxuan?modal_id=work-recent',
+      authorName: '作者A',
+      authorProfileUrl: 'https://www.douyin.com/user/author-a',
+      authorProfileKey: 'author-a',
+    });
+    upsertWorkContext({
+      workId: 'work-recent-2',
+      modalId: 'work-recent-2',
+      workUrl: 'https://www.douyin.com/jingxuan?modal_id=work-recent-2',
+      authorName: '作者A',
+      authorProfileUrl: 'https://www.douyin.com/user/author-a',
+      authorProfileKey: 'author-a',
+    });
+    upsertWorkContext({
+      workId: 'work-old',
+      modalId: 'work-old',
+      workUrl: 'https://www.douyin.com/jingxuan?modal_id=work-old',
+      authorName: '作者B',
+      authorProfileUrl: '',
+      authorProfileKey: '',
+    });
+    upsertWorkContext({
+      workId: 'work-missing-homepage',
+      modalId: 'work-missing-homepage',
+      workUrl: 'https://www.douyin.com/jingxuan?modal_id=work-missing-homepage',
+      authorName: '作者C',
+      authorProfileUrl: '',
+      authorProfileKey: '',
+    });
+
     const recent = upsertWorkComment({
       workId: 'work-recent',
       workUrl: 'https://www.douyin.com/jingxuan?modal_id=work-recent',
@@ -68,6 +102,32 @@ describe('writePendingReplyJson', () => {
       commentKey: 'recent-key',
       sourceEventId: 1,
       sourceNotificationKey: 'recent-notice',
+    });
+    upsertWorkComment({
+      workId: 'work-recent',
+      workUrl: 'https://www.douyin.com/jingxuan?modal_id=work-recent',
+      modalId: 'work-recent',
+      actorName: '最近评论2',
+      actorProfileUrl: 'https://www.douyin.com/user/recent-2',
+      actorProfileKey: 'recent-2',
+      commentText: '最近评论内容2',
+      eventTimeText: '2小时前',
+      commentKey: 'recent-key-2',
+      sourceEventId: 3,
+      sourceNotificationKey: 'recent-notice-2',
+    });
+    upsertWorkComment({
+      workId: 'work-recent-2',
+      workUrl: 'https://www.douyin.com/jingxuan?modal_id=work-recent-2',
+      modalId: 'work-recent-2',
+      actorName: '另一作品评论',
+      actorProfileUrl: 'https://www.douyin.com/user/recent-3',
+      actorProfileKey: 'recent-3',
+      commentText: '另一作品评论内容',
+      eventTimeText: '3小时前',
+      commentKey: 'recent-key-3',
+      sourceEventId: 4,
+      sourceNotificationKey: 'recent-notice-3',
     });
     const old = upsertWorkComment({
       workId: 'work-old',
@@ -82,18 +142,40 @@ describe('writePendingReplyJson', () => {
       sourceEventId: 2,
       sourceNotificationKey: 'old-notice',
     });
+    upsertWorkComment({
+      workId: 'work-missing-homepage',
+      workUrl: 'https://www.douyin.com/jingxuan?modal_id=work-missing-homepage',
+      modalId: 'work-missing-homepage',
+      actorName: '缺主页评论',
+      actorProfileUrl: 'https://www.douyin.com/user/missing-homepage-comment',
+      actorProfileKey: 'missing-homepage-comment',
+      commentText: '不应该进 JSON',
+      eventTimeText: '刚刚',
+      commentKey: 'missing-homepage-key',
+      sourceEventId: 5,
+      sourceNotificationKey: 'missing-homepage-notice',
+    });
 
     const db = getDb();
     const oldSeenAt = new Date(Date.now() - 3 * 86400000).toISOString();
     db.prepare('UPDATE work_comments SET last_seen_at = ? WHERE id = ?').run(oldSeenAt, old.id);
 
-    const file = writePendingReplyJson({ days: 1, maxCount: 1 });
-    const works = readJson(file.filePath);
+    const file = writePendingReplyJson({ days: 1, maxCount: 10 });
+    const users = readJson(file.filePath);
 
-    expect(works).toHaveLength(1);
-    expect(works[0].workKey).toBe('work-recent');
-    expect(works[0].comments).toHaveLength(1);
-    expect(works[0].comments[0].actor_name).toBe('最近评论');
+    expect(users).toHaveLength(1);
+    expect(users[0].id).toBe('author-a');
+    expect(users[0].homepage_url).toBe('https://www.douyin.com/user/author-a');
+    expect(users[0].works).toHaveLength(2);
+    expect(users[0].works[0].work_id).toBe('work-recent');
+    expect(users[0].works[0].comments).toHaveLength(2);
+    expect(users[0].works[1].work_id).toBe('work-recent-2');
+    expect(users[0].works[1].comments).toHaveLength(1);
+    expect(users[0].works[0].comments[0].actor_name).toBe('最近评论');
+    expect(file.homepageCount).toBe(1);
+    expect(file.workCount).toBe(2);
+    expect(file.totalComments).toBe(3);
+    expect(file.skippedMissingHomepageWorkCount).toBe(1);
 
     cleanupJson(file.filePath);
     expect(recent.action).toBe('inserted');

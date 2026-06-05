@@ -73,6 +73,43 @@ export function listPendingCommentsGroupedByWork(options = {}) {
   return groups;
 }
 
+export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
+  const db = getDb();
+  const { limit = 100, days = null } = options;
+  const params = [];
+  let sql = `
+    SELECT
+      wc.*,
+      COALESCE(w_by_work.work_id, w_by_modal.work_id, wc.work_id) AS joined_work_id,
+      COALESCE(w_by_work.modal_id, w_by_modal.modal_id, wc.modal_id) AS joined_modal_id,
+      COALESCE(w_by_work.author_name, w_by_modal.author_name) AS joined_author_name,
+      COALESCE(w_by_work.author_profile_url, w_by_modal.author_profile_url) AS joined_author_profile_url,
+      COALESCE(w_by_work.author_profile_key, w_by_modal.author_profile_key) AS joined_author_profile_key
+    FROM work_comments wc
+    LEFT JOIN works w_by_work
+      ON wc.work_id IS NOT NULL
+      AND wc.work_id != ''
+      AND w_by_work.work_id = wc.work_id
+    LEFT JOIN works w_by_modal
+      ON (wc.work_id IS NULL OR wc.work_id = '' OR w_by_work.id IS NULL)
+      AND wc.modal_id IS NOT NULL
+      AND wc.modal_id != ''
+      AND w_by_modal.modal_id = wc.modal_id
+    WHERE wc.reply_status = 'pending'
+      AND (wc.reply_text IS NULL OR wc.reply_text = '')
+  `;
+
+  if (Number(days) > 0) {
+    const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
+    sql += ' AND wc.last_seen_at >= ?';
+    params.push(since);
+  }
+
+  sql += ' ORDER BY wc.first_seen_at ASC LIMIT ?';
+  params.push(limit);
+  return db.prepare(sql).all(...params);
+}
+
 export function saveReplyText(commentId, replyText) {
   const db = getDb();
   db.prepare(

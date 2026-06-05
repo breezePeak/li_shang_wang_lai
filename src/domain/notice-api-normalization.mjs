@@ -30,6 +30,8 @@ export function getNoticeWorkIdentity(item) {
   const diggAweme = item?.digg?.aweme || {};
   const aweme = Object.keys(commentAweme).length > 0 ? commentAweme : diggAweme;
   const awemeId = String(item?.aweme_id || item?.comment?.comment?.aweme_id || item?.digg?.forward_id || aweme?.aweme_id || '');
+  const author = aweme?.author || aweme?.author_user || aweme?.mix_info?.author || {};
+  const authorProfileKey = author?.sec_uid || author?.uid || '';
 
   return {
     workId: awemeId || '',
@@ -39,6 +41,9 @@ export function getNoticeWorkIdentity(item) {
     workCreateTime: aweme?.create_time || null,
     thumbnailKey: aweme?.video?.cover?.uri || aweme?.images?.[0]?.uri || '',
     thumbnailSrc: aweme?.video?.cover?.url_list?.[0] || aweme?.images?.[0]?.url_list?.[0] || '',
+    authorName: author?.nickname || '',
+    authorProfileKey,
+    authorProfileUrl: author?.sec_uid ? `https://www.douyin.com/user/${author.sec_uid}` : '',
   };
 }
 

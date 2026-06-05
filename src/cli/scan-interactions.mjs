@@ -11,7 +11,7 @@ import { normalizeCommentEvent, buildRawPayloadJson } from '../domain/comment-ev
 import { classifyNotificationAction } from '../domain/notification-action-router.mjs';
 import { insertEvent, getEventCounts, findUnstableEvent, promoteUnstableEvent, enrichEvent, upsertNotificationEvent, listEventsForDedupe } from '../db/interaction-repository.mjs';
 import { upsertWorkContext, listWorksForDedupe, findWorkByThumbnailKey, findWorkByWorkId } from '../db/work-repository.mjs';
-import { upsertWorkComment, listPendingCommentsGroupedByWork, listReplyTrackedCommentKeysForWork, listCommentsForDedupe, findCollectedCommentForWork } from '../db/work-comment-repository.mjs';
+import { upsertWorkComment, listPendingCommentsGroupedByHomepageAndWork, listReplyTrackedCommentKeysForWork, listCommentsForDedupe, findCollectedCommentForWork } from '../db/work-comment-repository.mjs';
 import logger from '../utils/logger.mjs';
 import { runMigrations } from '../db/migrations.mjs';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
@@ -655,40 +655,100 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
 }
 
 export function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
-  const groups = listPendingCommentsGroupedByWork({ limit: maxCount, days });
-  const works = [];
+  const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: maxCount, days });
+  const homepageMap = new Map();
+  const missingHomepageWorkMap = new Map();
   let totalComments = 0;
+  let workCount = 0;
+  let skippedMissingHomepageWorkCount = 0;
 
-  for (const [workKey, rows] of groups.entries()) {
-    totalComments += rows.length;
-    works.push({
-      workKey,
-      comments: rows.map(row => ({
-        id: row.id,
-        work_id: row.work_id,
-        work_url: row.work_url,
-        modal_id: row.modal_id,
-        actor_name: row.actor_name,
-        actor_profile_url: row.actor_profile_url,
-        actor_profile_key: row.actor_profile_key,
-        comment_text: row.comment_text,
-        event_time_text: row.event_time_text,
-        comment_key: row.comment_key,
-        source_event_id: row.source_event_id,
-        source_notification_key: row.source_notification_key,
-        reply_status: row.reply_status,
-        reply_text: row.reply_text || '',
-        collect_status_code: 'COLLECT_PENDING_REPLY',
-        prepare_status_code: (row.reply_text && row.reply_text.trim()) ? 'PREPARE_READY' : 'PREPARE_WAIT_REPLY_TEXT',
-        execute_status_code: row.reply_status === 'succeeded' ? 'EXECUTE_CONFIRMED' : 'EXECUTE_WAIT_PREPARE',
-      })),
+  for (const row of rows) {
+    const homepageUrl = row.joined_author_profile_url || '';
+    const workId = row.joined_work_id || row.work_id || '';
+    const modalId = row.joined_modal_id || row.modal_id || '';
+    const workKey = workId || modalId || '';
+
+    if (!homepageUrl) {
+      const missingKey = workKey || `missing:${row.id}`;
+      if (!missingHomepageWorkMap.has(missingKey)) {
+        missingHomepageWorkMap.set(missingKey, {
+          workId,
+          modalId,
+          count: 0,
+        });
+      }
+      missingHomepageWorkMap.get(missingKey).count++;
+      continue;
+    }
+
+    if (!workKey) continue;
+
+    let homepageEntry = homepageMap.get(homepageUrl);
+    if (!homepageEntry) {
+      homepageEntry = {
+        id: row.joined_author_profile_key || stableHash(homepageUrl),
+        homepage_url: homepageUrl,
+        works: [],
+        _works: new Map(),
+      };
+      homepageMap.set(homepageUrl, homepageEntry);
+    } else if (!homepageEntry.id && row.joined_author_profile_key) {
+      homepageEntry.id = row.joined_author_profile_key;
+    }
+
+    let workEntry = homepageEntry._works.get(workKey);
+    if (!workEntry) {
+      workEntry = {
+        work_id: workId || null,
+        modal_id: modalId || null,
+        work_key: workKey,
+        comments: [],
+      };
+      homepageEntry._works.set(workKey, workEntry);
+      homepageEntry.works.push(workEntry);
+      workCount++;
+    }
+
+    workEntry.comments.push({
+      id: row.id,
+      actor_name: row.actor_name,
+      actor_profile_url: row.actor_profile_url,
+      actor_profile_key: row.actor_profile_key,
+      comment_text: row.comment_text,
+      event_time_text: row.event_time_text,
+      comment_key: row.comment_key,
+      source_event_id: row.source_event_id,
+      source_notification_key: row.source_notification_key,
+      reply_status: row.reply_status,
+      reply_text: row.reply_text || '',
+      collect_status_code: 'COLLECT_PENDING_REPLY',
+      prepare_status_code: (row.reply_text && row.reply_text.trim()) ? 'PREPARE_READY' : 'PREPARE_WAIT_REPLY_TEXT',
+      execute_status_code: row.reply_status === 'succeeded' ? 'EXECUTE_CONFIRMED' : 'EXECUTE_WAIT_PREPARE',
     });
+    totalComments++;
   }
+
+  for (const missing of missingHomepageWorkMap.values()) {
+    skippedMissingHomepageWorkCount++;
+    console.error(`[scan] skip_missing_author_profile_url work_id=${missing.workId || ''} modal_id=${missing.modalId || ''} comments=${missing.count}`);
+  }
+
+  const users = [...homepageMap.values()].map(item => {
+    delete item._works;
+    return item;
+  });
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const filePath = resolve('data', 'pending-replies', `pending-comments-${ts}.json`);
-  writeJSON(filePath, works);
-  return { filePath, totalComments, workCount: works.length };
+  writeJSON(filePath, users);
+  console.error(`[scan] pending_reply_homepage_count=${users.length} pending_reply_work_count=${workCount} pending_reply_comment_count=${totalComments} skip_missing_author_profile_url=${skippedMissingHomepageWorkCount}`);
+  return {
+    filePath,
+    totalComments,
+    workCount,
+    homepageCount: users.length,
+    skippedMissingHomepageWorkCount,
+  };
 }
 
 function getVisitSourceType(event) {
@@ -977,9 +1037,9 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       workType: normalized.workType || null,
       thumbnailKey: normalized.thumbnailKey || null,
       thumbnailSrc: normalized.thumbnailSrc || null,
-      authorName: null,
-      authorProfileUrl: null,
-      authorProfileKey: null,
+      authorName: normalized.authorName || null,
+      authorProfileUrl: normalized.authorProfileUrl || null,
+      authorProfileKey: normalized.authorProfileKey || null,
       publishedAt: normalized.workCreateTime ? String(normalized.workCreateTime) : null,
       rawContextJson: normalized.rawPayloadJson,
     });
@@ -1251,7 +1311,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       ? writePendingReplyJson({ days: notificationDays, maxCount: maxCount || 500 })
       : null;
     if (pendingReplyFile) {
-      console.error(`[scan] 待回复评论 JSON: ${pendingReplyFile.filePath} (${pendingReplyFile.totalComments} 条, ${pendingReplyFile.workCount} 个作品)`);
+      console.error(`[scan] 待回复评论 JSON: ${pendingReplyFile.filePath} (${pendingReplyFile.homepageCount} 个主页, ${pendingReplyFile.workCount} 个作品, ${pendingReplyFile.totalComments} 条评论)`);
     } else {
       console.error('[scan] 本次计划不生成待回复评论 JSON');
     }
@@ -1790,7 +1850,7 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
     ? writePendingReplyJson({ days: notificationDays, maxCount: maxCount || 500 })
     : null;
   if (pendingReplyFile) {
-    console.error(`[scan] 待回复评论 JSON: ${pendingReplyFile.filePath} (${pendingReplyFile.totalComments} 条, ${pendingReplyFile.workCount} 个作品)`);
+    console.error(`[scan] 待回复评论 JSON: ${pendingReplyFile.filePath} (${pendingReplyFile.homepageCount} 个主页, ${pendingReplyFile.workCount} 个作品, ${pendingReplyFile.totalComments} 条评论)`);
   } else {
     console.error('[scan] 本次计划不生成待回复评论 JSON');
   }

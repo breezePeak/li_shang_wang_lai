@@ -7,6 +7,7 @@ import { getDb, resetDb } from '../../src/db/database.mjs';
 import {
   executeSinglePassForWorkGroup,
   extractTargetCommentId,
+  groupExecutableItemsByWork,
   isDoneWithoutRetryResult,
   loadWorkCommentItemsFromFile,
   planViewportPendingMatches,
@@ -70,11 +71,29 @@ function setup() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS works (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      work_id TEXT,
+      modal_id TEXT,
+      work_url TEXT,
+      work_title TEXT,
+      work_type TEXT,
+      thumbnail_key TEXT,
+      thumbnail_src TEXT,
+      author_name TEXT,
+      author_profile_url TEXT,
+      author_profile_key TEXT,
+      published_at TEXT,
+      raw_context_json TEXT,
+      first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   db.exec(`
     DELETE FROM work_comments;
     DELETE FROM interaction_events;
+    DELETE FROM works;
   `);
 
   // Insert test data
@@ -84,6 +103,8 @@ function setup() {
   db.prepare("INSERT INTO work_comments (id, work_url, actor_name, comment_text, comment_key, reply_text, reply_status) VALUES (4, 'https://douyin.com/video/4', 'user4', 'test comment 4', 'key4', 'Unverified', 'sent_unverified')").run();
   db.prepare("INSERT INTO interaction_events (id, event_type, actor_name, fingerprint, status, scanned_at) VALUES (1, 'comment', 'user1', 'fp1', 'new', CURRENT_TIMESTAMP)").run();
   db.prepare("INSERT INTO interaction_events (id, event_type, actor_name, fingerprint, status, scanned_at) VALUES (3, 'comment', 'user3', 'fp3', 'new', CURRENT_TIMESTAMP)").run();
+  db.prepare("INSERT INTO works (work_id, modal_id, work_url, author_name, author_profile_url, author_profile_key, first_seen_at, last_seen_at) VALUES ('7639733344284064741', '7639733344284064741', 'https://www.douyin.com/video/7639733344284064741', '作者A', 'https://www.douyin.com/user/author-a', 'author-a', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").run();
+  db.prepare("INSERT INTO works (work_id, modal_id, work_url, author_name, author_profile_url, author_profile_key, first_seen_at, last_seen_at) VALUES ('1', '1', 'https://www.douyin.com/video/1', '作者1', 'https://www.douyin.com/user/author-1', 'author-1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").run();
 
   db.close();
   resetDb();
@@ -206,11 +227,50 @@ describe('comments:execute refactored logic', () => {
     expect(loaded.items[0].workMeta.work_url).toBe('https://www.douyin.com/video/123');
   });
 
+  it('loadWorkCommentItemsFromFile 支持新主页结构，并保留 homepage_url 与评论人主页分离', () => {
+    const filePath = join(testDir, 'pending-homepage-works.json');
+    writeFileSync(filePath, JSON.stringify([{
+      id: 'author-a',
+      homepage_url: 'https://www.douyin.com/user/author-a',
+      works: [{
+        work_id: '7639733344284064741',
+        modal_id: '7639733344284064741',
+        work_key: '7639733344284064741',
+        comments: [{
+          id: 10,
+          actor_name: '评论人A',
+          actor_profile_url: 'https://www.douyin.com/user/commenter-a',
+          comment_text: '你好',
+          reply_text: '回复你好',
+        }],
+      }],
+    }], null, 2));
+
+    const loaded = loadWorkCommentItemsFromFile(filePath);
+    expect(loaded.items).toHaveLength(1);
+    expect(loaded.items[0].homepageUrl).toBe('https://www.douyin.com/user/author-a');
+    expect(loaded.items[0].authorProfileUrl).toBe('https://www.douyin.com/user/author-a');
+    expect(loaded.items[0].actorProfileUrl).toBe('https://www.douyin.com/user/commenter-a');
+    expect(loaded.items[0].workId).toBe('7639733344284064741');
+  });
+
   it('resolveWorkUrlFromItem 优先使用现有字段并回退到 workId/modalId', () => {
     expect(resolveWorkUrlFromItem({ workUrl: 'https://a' }, {})).toBe('https://a');
     expect(resolveWorkUrlFromItem({ awemeUrl: 'https://b' }, {})).toBe('https://b');
     expect(resolveWorkUrlFromItem({ workId: '123' }, {})).toBe('https://www.douyin.com/video/123');
     expect(resolveWorkUrlFromItem({ modalId: '456' }, {})).toBe('https://www.douyin.com/video/456');
+  });
+
+  it('groupExecutableItemsByWork 使用 homepageUrl + workId 分组', () => {
+    const groups = groupExecutableItemsByWork([
+      { commentId: 1, homepageUrl: 'https://www.douyin.com/user/a', workId: 'w1' },
+      { commentId: 2, homepageUrl: 'https://www.douyin.com/user/a', workId: 'w1' },
+      { commentId: 3, homepageUrl: 'https://www.douyin.com/user/a', workId: 'w2' },
+      { commentId: 4, homepageUrl: 'https://www.douyin.com/user/b', workId: 'w1' },
+    ]);
+
+    expect(groups).toHaveLength(3);
+    expect(groups.find(group => group.length === 2)?.map(item => item.commentId)).toEqual([1, 2]);
   });
 
   it('extractTargetCommentId 能从 raw_comment_json 回推 cid', () => {
@@ -272,6 +332,95 @@ describe('comments:execute refactored logic', () => {
     expect(validated.inputCommentId).toBe(999);
     expect(validated.commentId).toBe(10);
     expect(validated.rowId).toBe(10);
+  });
+
+  it('validateWorkCommentItem 在有 homepageUrl + workId + replyText 时通过，且不要求 workUrl', () => {
+    const db = new Database(testDb);
+    db.prepare(`
+      INSERT INTO work_comments (
+        id, work_id, modal_id, actor_name, comment_text, comment_key, reply_text, reply_status
+      ) VALUES (
+        11, '7639733344284064741', '7639733344284064741', '验证用户', '验证评论', 'cid-11', '验证回复', 'pending'
+      )
+    `).run();
+    db.close();
+
+    const validated = validateWorkCommentItem({
+      itemIndex: 0,
+      commentId: 11,
+      replyText: '验证回复',
+      homepageUrl: 'https://www.douyin.com/user/author-a',
+      workId: '7639733344284064741',
+    });
+
+    expect(validated.ok).toBe(true);
+    expect(validated.authorProfileUrl).toBe('https://www.douyin.com/user/author-a');
+    expect(validated.workId).toBe('7639733344284064741');
+  });
+
+  it('validateWorkCommentItem 缺 homepageUrl 时尝试从 works 补齐，仍缺失则失败', () => {
+    const db = new Database(testDb);
+    db.prepare(`
+      INSERT INTO work_comments (
+        id, work_id, modal_id, actor_name, comment_text, comment_key, reply_text, reply_status
+      ) VALUES (
+        12, 'no-homepage-work', 'no-homepage-work', '验证用户2', '验证评论2', 'cid-12', '验证回复2', 'pending'
+      )
+    `).run();
+    db.prepare(`
+      INSERT INTO works (
+        work_id, modal_id, author_name, author_profile_url, author_profile_key, first_seen_at, last_seen_at
+      ) VALUES (
+        'fallback-homepage-work', 'fallback-homepage-work', '作者Fallback', 'https://www.douyin.com/user/fallback-author', 'fallback-author', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      )
+    `).run();
+    db.prepare(`
+      INSERT INTO work_comments (
+        id, work_id, modal_id, actor_name, comment_text, comment_key, reply_text, reply_status
+      ) VALUES (
+        13, 'fallback-homepage-work', 'fallback-homepage-work', '验证用户3', '验证评论3', 'cid-13', '验证回复3', 'pending'
+      )
+    `).run();
+    db.close();
+
+    const failed = validateWorkCommentItem({
+      itemIndex: 0,
+      commentId: 12,
+      replyText: '验证回复2',
+      workId: 'no-homepage-work',
+    });
+    expect(failed.ok).toBe(false);
+    expect(failed.error).toContain('homepage_url 为空');
+
+    const fallback = validateWorkCommentItem({
+      itemIndex: 1,
+      commentId: 13,
+      replyText: '验证回复3',
+      workId: 'fallback-homepage-work',
+    });
+    expect(fallback.ok).toBe(true);
+    expect(fallback.authorProfileUrl).toBe('https://www.douyin.com/user/fallback-author');
+  });
+
+  it('validateWorkCommentItem 缺 workId/modalId 时失败', () => {
+    const db = new Database(testDb);
+    db.prepare(`
+      INSERT INTO work_comments (
+        id, actor_name, comment_text, comment_key, reply_text, reply_status
+      ) VALUES (
+        14, '验证用户4', '验证评论4', 'cid-14', '验证回复4', 'pending'
+      )
+    `).run();
+    db.close();
+
+    const failed = validateWorkCommentItem({
+      itemIndex: 0,
+      commentId: 14,
+      replyText: '验证回复4',
+      homepageUrl: 'https://www.douyin.com/user/author-a',
+    });
+    expect(failed.ok).toBe(false);
+    expect(failed.error).toContain('work_id/modal_id 为空');
   });
 
   it('updateExecuteJsonFile 优先按 itemIndex 回写原 JSON 条目，并允许结果 commentId 改成新 row.id', () => {
@@ -592,7 +741,7 @@ describe('comments:execute single-pass per work', () => {
     const source = fs.readFileSync(resolve(__dirname, '../../src/cli/execute-comment-replies.mjs'), 'utf8');
     expect(source.includes('commentListCollector.stop();')).toBe(true);
     expect(source.includes('const commentListCollector = createCommentListApiCollector(page);')).toBe(true);
-    expect(source.includes('try {\n          const openResult = await openWorkPageForReply')).toBe(true);
+    expect(source.includes('try {\n          const openResult = await openProfileWorkByAwemeIdFromPostApi')).toBe(true);
     expect(source.includes('finally {\n          commentListCollector.stop();')).toBe(true);
   });
 });

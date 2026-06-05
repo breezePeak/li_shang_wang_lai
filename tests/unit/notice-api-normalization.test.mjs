@@ -30,6 +30,11 @@ describe('notice api normalization', () => {
         aweme: {
           aweme_id: '7647191897097693115',
           desc: '测试作品',
+          author: {
+            nickname: '作品作者',
+            sec_uid: 'author_sec_xxx',
+            uid: 'author_uid_xxx',
+          },
         },
         label_text: '朋友',
       },
@@ -47,6 +52,9 @@ describe('notice api normalization', () => {
     expect(result.actorName).toBe('张张张');
     expect(result.workId).toBe('7647191897097693115');
     expect(result.workUrl).toBe('https://www.douyin.com/jingxuan?modal_id=7647191897097693115');
+    expect(result.authorName).toBe('作品作者');
+    expect(result.authorProfileKey).toBe('author_sec_xxx');
+    expect(result.authorProfileUrl).toBe('https://www.douyin.com/user/author_sec_xxx');
   });
 
   // 2. 回复了你的评论
@@ -237,6 +245,7 @@ describe('notice api normalization', () => {
           desc: '作品标题',
           aweme_type: 0,
           create_time: 1700000000,
+          author: { uid: 'owner1', sec_uid: 'owner-sec-1', nickname: '作者甲' },
           video: { cover: { uri: 'cover-uri', url_list: ['https://img.example.com/1.jpg'] } },
         },
       },
@@ -254,6 +263,9 @@ describe('notice api normalization', () => {
     expect(result.workId).toBe('123456');
     expect(result.workUrl).toBe('https://www.douyin.com/jingxuan?modal_id=123456');
     expect(result.thumbnailKey).toBe('cover-uri');
+    expect(result.authorName).toBe('作者甲');
+    expect(result.authorProfileKey).toBe('owner-sec-1');
+    expect(result.authorProfileUrl).toBe('https://www.douyin.com/user/owner-sec-1');
   });
 
   it('normalizes digg notice (legacy)', () => {

@@ -11,6 +11,7 @@
 
 import { runMigrations } from '../db/migrations.mjs';
 import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentSentUnverified, findCommentByWorkActorAndText } from '../db/work-comment-repository.mjs';
+import { findWorkByIdentity } from '../db/work-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 import { createBrowserContext } from '../browser/browser-context.mjs';
@@ -24,8 +25,6 @@ import {
   collectVisibleWorkCommentCandidates,
   fillWorkReplyText,
   openReplyBoxForMatchedWorkComment,
-  openReplyBoxForWorkComment,
-  openWorkPageForReply,
   pickWorkCommentCandidate,
   scrollCommentAreaOnce,
   waitForWorkCommentArea,
@@ -33,6 +32,7 @@ import {
   verifyWorkReplyVisible,
 } from '../adapters/work-modal-page.mjs';
 import { createCommentListApiCollector } from '../adapters/comment-list-api-listener.mjs';
+import { openProfileWorkByAwemeIdFromPostApi } from '../services/return-visit-work-collector.mjs';
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
 import { pathToFileURL } from 'url';
@@ -56,7 +56,25 @@ export function loadWorkCommentItemsFromFile(itemsFile) {
   const parsed = JSON.parse(raw);
   const items = [];
 
-  if (Array.isArray(parsed) && parsed.every(item => item && typeof item === 'object' && Array.isArray(item.comments))) {
+  if (Array.isArray(parsed) && parsed.every(item => item && typeof item === 'object' && item.homepage_url && Array.isArray(item.works))) {
+    for (const user of parsed) {
+      for (const work of user.works) {
+        const comments = Array.isArray(work.comments) ? work.comments : [];
+        for (const comment of comments) {
+          items.push({
+            ...comment,
+            homepage_url: user.homepage_url,
+            homepageUrl: user.homepage_url,
+            authorProfileUrl: user.homepage_url,
+            authorProfileKey: user.id || work.author_profile_key || '',
+            workId: work.work_id ?? comment.work_id ?? '',
+            modalId: work.modal_id ?? comment.modal_id ?? '',
+            workKey: work.work_key ?? work.workKey ?? work.workId ?? work.modalId ?? '',
+          });
+        }
+      }
+    }
+  } else if (Array.isArray(parsed) && parsed.every(item => item && typeof item === 'object' && Array.isArray(item.comments))) {
     for (const work of parsed) {
       const comments = Array.isArray(work.comments) ? work.comments : [];
       for (const comment of comments) {
@@ -97,11 +115,17 @@ export function loadWorkCommentItemsFromFile(itemsFile) {
       itemIndex: index,
       commentId: Number(item.id ?? item.commentId ?? item.comment_id ?? item.workCommentId ?? item.work_comment_id),
       replyText: String(item.replyText ?? item.reply_text ?? ''),
+      homepageUrl: item.homepageUrl ?? item.homepage_url ?? item.authorProfileUrl ?? item.author_profile_url ?? '',
+      homepage_url: item.homepage_url ?? item.homepageUrl ?? item.authorProfileUrl ?? item.author_profile_url ?? '',
+      authorProfileUrl: item.authorProfileUrl ?? item.author_profile_url ?? item.homepageUrl ?? item.homepage_url ?? '',
+      authorProfileKey: item.authorProfileKey ?? item.author_profile_key ?? '',
       workUrl: item.workUrl ?? item.work_url ?? '',
       awemeUrl: item.awemeUrl ?? item.aweme_url ?? '',
       workId: item.workId ?? item.work_id ?? '',
       modalId: item.modalId ?? item.modal_id ?? '',
+      workKey: item.workKey ?? item.work_key ?? item.workId ?? item.work_id ?? item.modalId ?? item.modal_id ?? '',
       actorName: item.actorName ?? item.actor_name ?? '',
+      actorProfileUrl: item.actorProfileUrl ?? item.actor_profile_url ?? '',
       commentText: item.commentText ?? item.comment_text ?? '',
       eventTimeText: item.eventTimeText ?? item.event_time_text ?? '',
       targetCommentId: String(item.targetCommentId ?? item.commentTargetId ?? item.commentCid ?? item.cid ?? item.comment_id ?? '').trim(),
@@ -111,33 +135,44 @@ export function loadWorkCommentItemsFromFile(itemsFile) {
 }
 
 function visitJsonComments(parsed, visitor) {
+  if (Array.isArray(parsed) && parsed.every(item => item && typeof item === 'object' && item.homepage_url && Array.isArray(item.works))) {
+    for (const user of parsed) {
+      for (const work of user.works) {
+        const comments = Array.isArray(work.comments) ? work.comments : [];
+        for (const comment of comments) visitor(comment, work, user);
+      }
+    }
+    return;
+  }
   if (Array.isArray(parsed) && parsed.every(item => item && typeof item === 'object' && Array.isArray(item.comments))) {
     for (const work of parsed) {
       const comments = Array.isArray(work.comments) ? work.comments : [];
-      for (const comment of comments) visitor(comment, work);
+      for (const comment of comments) visitor(comment, work, null);
     }
     return;
   }
   if (Array.isArray(parsed?.works)) {
     for (const work of parsed.works) {
       const comments = Array.isArray(work.comments) ? work.comments : [];
-      for (const comment of comments) visitor(comment, work);
+      for (const comment of comments) visitor(comment, work, parsed);
     }
     return;
   }
   if (Array.isArray(parsed?.comments)) {
-    for (const comment of parsed.comments) visitor(comment, parsed);
+    for (const comment of parsed.comments) visitor(comment, parsed, null);
     return;
   }
   if (Array.isArray(parsed)) {
-    for (const comment of parsed) visitor(comment, null);
+    for (const comment of parsed) visitor(comment, null, null);
   }
 }
 
-function groupExecutableItemsByWork(items) {
+export function groupExecutableItemsByWork(items) {
   const groups = new Map();
   for (const item of items) {
-    const key = item.workUrl || item.workId || item.modalId || `comment:${item.commentId}`;
+    const homepageKey = item.homepageUrl || item.authorProfileUrl || item.homepage_url || '';
+    const workKey = item.workId || item.modalId || `comment:${item.commentId}`;
+    const key = `${homepageKey}::${workKey}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
   }
@@ -297,9 +332,26 @@ export function validateWorkCommentItem(item) {
     return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, status: 'sent_unverified', fromAlready: true };
   }
 
-  const workUrl = resolveWorkUrlFromItem(item, row);
-  if (!workUrl) {
-    return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, error: 'work_url 为空，无法打开作品' };
+  const workId = item.workId || row.work_id || '';
+  const modalId = item.modalId || row.modal_id || '';
+  if (!workId && !modalId) {
+    return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, error: 'work_id/modal_id 为空，无法在主页作品列表匹配作品' };
+  }
+
+  const knownWork = findWorkByIdentity({ workId, modalId });
+  const homepageUrl = item.homepageUrl
+    || item.homepage_url
+    || item.authorProfileUrl
+    || item.author_profile_url
+    || knownWork?.author_profile_url
+    || '';
+  const authorProfileKey = item.authorProfileKey
+    || item.author_profile_key
+    || knownWork?.author_profile_key
+    || '';
+
+  if (!homepageUrl) {
+    return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, error: 'homepage_url 为空，无法通过主页定位作品' };
   }
 
   return {
@@ -311,10 +363,15 @@ export function validateWorkCommentItem(item) {
     status: row.reply_status,
     rowId: row.id,
     rawCommentJson: row.raw_comment_json || '',
-    workUrl,
-    workId: item.workId || row.work_id || '',
-    modalId: item.modalId || row.modal_id || '',
+    homepageUrl,
+    homepage_url: homepageUrl,
+    authorProfileUrl: homepageUrl,
+    authorProfileKey,
+    workId,
+    modalId,
+    workKey: item.workKey || workId || modalId || '',
     actorName: item.actorName || row.actor_name || '',
+    actorProfileUrl: item.actorProfileUrl || row.actor_profile_url || '',
     commentText: item.commentText || row.comment_text || '',
     eventTimeText: item.eventTimeText || row.event_time_text || '',
     targetCommentId: extractTargetCommentId(item, row),
@@ -781,17 +838,24 @@ async function executeWorkCommentItems(items, args) {
           throw new Error('Target page, context or browser has been closed');
         }
 
-        console.log(`[comments:execute] 打开作品 work="${currentWork.workId || currentWork.modalId || currentWork.workUrl}" comments=${group.length}`);
+        console.log(`[comments:execute] current_homepage_url=${currentWork.homepageUrl || currentWork.authorProfileUrl || ''} current_work_id=${currentWork.workId || ''} current_modal_id=${currentWork.modalId || ''} group_comment_count=${group.length}`);
         const commentListCollector = createCommentListApiCollector(page);
         try {
-          const openResult = await openWorkPageForReply(page, currentWork.workUrl, { timeoutMs: 30000 });
+          const openResult = await openProfileWorkByAwemeIdFromPostApi(
+            page,
+            currentWork.authorProfileUrl || currentWork.homepageUrl,
+            currentWork.workId || currentWork.modalId,
+            { timeoutMs: 30000 }
+          );
           if (!openResult.ok) {
+            console.log(`[comments:execute] open_profile_failed reason=${openResult.reason || openResult.message || openResult.code || 'work_open_failed'}`);
             for (const validated of group) {
-              markCommentBlocked(validated.commentId, openResult.message || openResult.code || 'work_open_failed');
-              results.push({ ...validated, ok: false, status: 'blocked', error: openResult.message || openResult.code });
+              markCommentBlocked(validated.commentId, openResult.reason || openResult.message || openResult.code || 'work_open_failed');
+              results.push({ ...validated, ok: false, status: 'blocked', error: openResult.reason || openResult.message || openResult.code });
             }
             continue;
           }
+          console.log(`[comments:execute] open_profile_success opened_work_url=${openResult.url || ''}`);
 
           const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
           if (!modalReady.ok) {
