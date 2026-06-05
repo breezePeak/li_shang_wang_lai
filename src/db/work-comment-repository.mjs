@@ -82,9 +82,15 @@ export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
       wc.*,
       COALESCE(w_by_work.work_id, w_by_modal.work_id, wc.work_id) AS joined_work_id,
       COALESCE(w_by_work.modal_id, w_by_modal.modal_id, wc.modal_id) AS joined_modal_id,
+      COALESCE(w_by_work.work_url, w_by_modal.work_url, wc.work_url) AS joined_work_url,
+      COALESCE(w_by_work.work_title, w_by_modal.work_title) AS joined_work_title,
+      COALESCE(w_by_work.work_type, w_by_modal.work_type) AS joined_work_type,
+      COALESCE(w_by_work.thumbnail_key, w_by_modal.thumbnail_key) AS joined_thumbnail_key,
+      COALESCE(w_by_work.thumbnail_src, w_by_modal.thumbnail_src) AS joined_thumbnail_src,
       COALESCE(w_by_work.author_name, w_by_modal.author_name) AS joined_author_name,
       COALESCE(w_by_work.author_profile_url, w_by_modal.author_profile_url) AS joined_author_profile_url,
-      COALESCE(w_by_work.author_profile_key, w_by_modal.author_profile_key) AS joined_author_profile_key
+      COALESCE(w_by_work.author_profile_key, w_by_modal.author_profile_key) AS joined_author_profile_key,
+      COALESCE(w_by_work.published_at, w_by_modal.published_at) AS joined_published_at
     FROM work_comments wc
     LEFT JOIN works w_by_work
       ON wc.work_id IS NOT NULL

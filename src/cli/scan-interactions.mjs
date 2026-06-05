@@ -687,6 +687,7 @@ export function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
     if (!homepageEntry) {
       homepageEntry = {
         id: row.joined_author_profile_key || stableHash(homepageUrl),
+        author_name: row.joined_author_name || '',
         homepage_url: homepageUrl,
         works: [],
         _works: new Map(),
@@ -696,12 +697,26 @@ export function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
       homepageEntry.id = row.joined_author_profile_key;
     }
 
+    if (!homepageEntry.author_name && row.joined_author_name) {
+      homepageEntry.author_name = row.joined_author_name;
+    }
+
     let workEntry = homepageEntry._works.get(workKey);
     if (!workEntry) {
       workEntry = {
         work_id: workId || null,
         modal_id: modalId || null,
         work_key: workKey,
+        work_url: row.joined_work_url || row.work_url || '',
+        aweme_url: row.joined_work_url || row.work_url || '',
+        work_title: row.joined_work_title || '',
+        work_type: row.joined_work_type || '',
+        thumbnail_key: row.joined_thumbnail_key || '',
+        thumbnail_src: row.joined_thumbnail_src || '',
+        author_name: row.joined_author_name || '',
+        author_profile_url: homepageUrl,
+        author_profile_key: row.joined_author_profile_key || homepageEntry.id || '',
+        published_at: row.joined_published_at || null,
         comments: [],
       };
       homepageEntry._works.set(workKey, workEntry);

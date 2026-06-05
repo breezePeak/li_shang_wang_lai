@@ -61,14 +61,20 @@ describe('writePendingReplyJson', () => {
       workId: 'work-recent',
       modalId: 'work-recent',
       workUrl: 'https://www.douyin.com/jingxuan?modal_id=work-recent',
+      workTitle: '最近作品一',
+      workType: 'video',
+      thumbnailKey: 'thumb-recent',
+      thumbnailSrc: 'https://p3.douyinpic.com/thumb-recent.jpeg',
       authorName: '作者A',
       authorProfileUrl: 'https://www.douyin.com/user/author-a',
       authorProfileKey: 'author-a',
+      publishedAt: '2026-06-01T10:00:00.000Z',
     });
     upsertWorkContext({
       workId: 'work-recent-2',
       modalId: 'work-recent-2',
       workUrl: 'https://www.douyin.com/jingxuan?modal_id=work-recent-2',
+      workTitle: '最近作品二',
       authorName: '作者A',
       authorProfileUrl: 'https://www.douyin.com/user/author-a',
       authorProfileKey: 'author-a',
@@ -165,11 +171,23 @@ describe('writePendingReplyJson', () => {
 
     expect(users).toHaveLength(1);
     expect(users[0].id).toBe('author-a');
+    expect(users[0].author_name).toBe('作者A');
     expect(users[0].homepage_url).toBe('https://www.douyin.com/user/author-a');
     expect(users[0].works).toHaveLength(2);
     expect(users[0].works[0].work_id).toBe('work-recent');
+    expect(users[0].works[0].work_url).toBe('https://www.douyin.com/jingxuan?modal_id=work-recent');
+    expect(users[0].works[0].aweme_url).toBe('https://www.douyin.com/jingxuan?modal_id=work-recent');
+    expect(users[0].works[0].work_title).toBe('最近作品一');
+    expect(users[0].works[0].work_type).toBe('video');
+    expect(users[0].works[0].thumbnail_key).toBe('thumb-recent');
+    expect(users[0].works[0].thumbnail_src).toBe('https://p3.douyinpic.com/thumb-recent.jpeg');
+    expect(users[0].works[0].author_name).toBe('作者A');
+    expect(users[0].works[0].author_profile_url).toBe('https://www.douyin.com/user/author-a');
+    expect(users[0].works[0].author_profile_key).toBe('author-a');
+    expect(users[0].works[0].published_at).toBe('2026-06-01T10:00:00.000Z');
     expect(users[0].works[0].comments).toHaveLength(2);
     expect(users[0].works[1].work_id).toBe('work-recent-2');
+    expect(users[0].works[1].work_title).toBe('最近作品二');
     expect(users[0].works[1].comments).toHaveLength(1);
     expect(users[0].works[0].comments[0].actor_name).toBe('最近评论');
     expect(file.homepageCount).toBe(1);

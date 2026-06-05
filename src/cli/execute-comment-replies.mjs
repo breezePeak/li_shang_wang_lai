@@ -62,6 +62,13 @@ export function loadWorkCommentItemsFromFile(itemsFile) {
         const comments = Array.isArray(work.comments) ? work.comments : [];
         for (const comment of comments) {
           items.push({
+            work_url: work.work_url,
+            aweme_url: work.aweme_url,
+            work_title: work.work_title,
+            work_type: work.work_type,
+            thumbnail_key: work.thumbnail_key,
+            thumbnail_src: work.thumbnail_src,
+            published_at: work.published_at,
             ...comment,
             homepage_url: user.homepage_url,
             homepageUrl: user.homepage_url,
@@ -78,7 +85,17 @@ export function loadWorkCommentItemsFromFile(itemsFile) {
     for (const work of parsed) {
       const comments = Array.isArray(work.comments) ? work.comments : [];
       for (const comment of comments) {
-        items.push({ ...comment, workKey: work.workKey || work.work_key || '' });
+        items.push({
+          work_url: work.work_url,
+          aweme_url: work.aweme_url,
+          work_title: work.work_title,
+          work_type: work.work_type,
+          thumbnail_key: work.thumbnail_key,
+          thumbnail_src: work.thumbnail_src,
+          published_at: work.published_at,
+          ...comment,
+          workKey: work.workKey || work.work_key || '',
+        });
       }
     }
   } else
@@ -86,7 +103,17 @@ export function loadWorkCommentItemsFromFile(itemsFile) {
     for (const work of parsed.works) {
       const comments = Array.isArray(work.comments) ? work.comments : [];
       for (const comment of comments) {
-        items.push({ ...comment, workKey: work.workKey || work.work_key || '' });
+        items.push({
+          work_url: work.work_url,
+          aweme_url: work.aweme_url,
+          work_title: work.work_title,
+          work_type: work.work_type,
+          thumbnail_key: work.thumbnail_key,
+          thumbnail_src: work.thumbnail_src,
+          published_at: work.published_at,
+          ...comment,
+          workKey: work.workKey || work.work_key || '',
+        });
       }
     }
   } else if (Array.isArray(parsed?.comments)) {

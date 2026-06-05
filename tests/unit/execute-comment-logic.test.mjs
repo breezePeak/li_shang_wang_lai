@@ -236,6 +236,9 @@ describe('comments:execute refactored logic', () => {
         work_id: '7639733344284064741',
         modal_id: '7639733344284064741',
         work_key: '7639733344284064741',
+        work_url: 'https://www.douyin.com/video/7639733344284064741',
+        aweme_url: 'https://www.douyin.com/video/7639733344284064741',
+        work_title: '主页结构作品',
         comments: [{
           id: 10,
           actor_name: '评论人A',
@@ -252,6 +255,9 @@ describe('comments:execute refactored logic', () => {
     expect(loaded.items[0].authorProfileUrl).toBe('https://www.douyin.com/user/author-a');
     expect(loaded.items[0].actorProfileUrl).toBe('https://www.douyin.com/user/commenter-a');
     expect(loaded.items[0].workId).toBe('7639733344284064741');
+    expect(loaded.items[0].workUrl).toBe('https://www.douyin.com/video/7639733344284064741');
+    expect(loaded.items[0].awemeUrl).toBe('https://www.douyin.com/video/7639733344284064741');
+    expect(loaded.items[0].workMeta.work_title).toBe('主页结构作品');
   });
 
   it('resolveWorkUrlFromItem 优先使用现有字段并回退到 workId/modalId', () => {
