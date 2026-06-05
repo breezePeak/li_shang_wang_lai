@@ -5,6 +5,8 @@ export const DOUYIN_PLAYER_ACTION_SELECTORS = Object.freeze({
   comment: '[data-e2e="feed-comment-icon"]',
   collect: '[data-e2e="video-player-collect"]',
   share: '[data-e2e="video-player-share"]',
+  // 右侧 action bar 容器（点赞、评论、收藏、分享都在这下面）
+  actionBar: '.hOcDRkbZ.WcVcXqQb',
 });
 
 export const DOUYIN_PLAYER_ACTION_STATES = Object.freeze({
@@ -923,7 +925,6 @@ export async function clickLike(page, { execute = false } = {}) {
       const exactLikeSelectors = [
         '[data-temp-like-btn="true"]',
         '[data-e2e="video-player-digg"]',
-        '.t5VMknM2 .MinpposV > .AOWKbsTg:first-child',
       ];
 
       for (const selector of exactLikeSelectors) {
@@ -1108,14 +1109,13 @@ async function ensureCommentPanelOpen(page) {
     if (await isOpen()) return true;
 
     const commentBtns = [
+      page.locator('.hOcDRkbZ.WcVcXqQb [data-e2e="feed-comment-icon"]'),
       page.locator('[data-e2e="feed-comment-icon"]'),
       page.locator('.swmK_9e_.PWegAy8W.LDWpmlY0'),
-      page.locator('.t5VMknM2 .MinpposV > .AOWKbsTg').nth(1), // action bar 第二个
       page.locator('[data-e2e="video-comment"]'),
       page.locator('[data-e2e="comment-icon"]'),
       page.locator('[aria-label*="评论"]'),
       page.locator('[title*="评论"]'),
-      page.locator('svg').filter({ has: page.locator('path[d*="comment"]') }).locator('..')
     ];
 
     for (let attempt = 1; attempt <= 4; attempt++) {

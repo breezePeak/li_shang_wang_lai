@@ -642,7 +642,10 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
 
         document.querySelectorAll('[data-return-visit-comment-button="true"]')
           .forEach(el => el.removeAttribute('data-return-visit-comment-button'));
-        const commentContainer = document.querySelector('[data-e2e="feed-comment-icon"]');
+        // 限定在右侧 action bar 容器内查找，避免误点其他元素（如问问AI）
+        const actionBar = document.querySelector('.hOcDRkbZ.WcVcXqQb');
+        const searchScope = actionBar || document;
+        const commentContainer = searchScope.querySelector('[data-e2e="feed-comment-icon"]');
         if (commentContainer && visible(commentContainer)) {
           commentContainer.scrollIntoView({ block: 'center', behavior: 'instant' });
           const rect = commentContainer.getBoundingClientRect();
