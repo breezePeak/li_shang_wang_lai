@@ -125,7 +125,7 @@ function renderRiverTimeline() {
         <span class="origin-icon"><i class="fa-solid fa-database"></i></span>
         <span class="origin-copy">
           <strong>扫描入库</strong>
-          <small>点赞 ${statsData.collectedLikes || 0} · 评论 ${statsData.collectedComments || 0} · 回复 ${statsData.collectedReplies || 0} · 关注 ${statsData.collectedFollows || 0}</small>
+          <small>通知先入库，再分成回评 / 回访两条线</small>
         </span>
         <span class="origin-count">${statsData.collectedTotal || 0}</span>
       </button>
@@ -278,8 +278,8 @@ function buildStageDetailData() {
   return {
     collect: {
       kicker: '起点',
-      title: '扫描互动并写入数据库',
-      description: '当前主流程从通知中心扫描互动，数据只写入 SQLite。后续回评和回访都直接从数据库读取，不再依赖中间 JSON。',
+      title: '扫描后分成两条线',
+      description: '先从通知中心把互动写入数据库，然后分流：评论进入回评线；点赞、评论、回复、关注进入回访线。这里主要看入库是否正常、有没有未处理、有没有异常。',
       metrics: [
         { label: '总通知', value: statsData.collectedTotal || 0 },
         { label: '点赞通知', value: statsData.collectedLikes || 0 },
@@ -287,16 +287,16 @@ function buildStageDetailData() {
         { label: '回复/关注', value: (statsData.collectedReplies || 0) + (statsData.collectedFollows || 0) },
       ],
       branches: [
-        buildBranchCard('回评时间线', `comments:execute --days N --limit M 会处理 ${statsData.pendingReplies || 0} 条 pending 回评。`, statsData.pendingReplies || 0),
-        buildBranchCard('回访时间线', `点赞/评论/回复/关注线索并列沉淀为回访任务。当前 ${unhandledEventCount} 条通知仍是 new。`, unhandledEventCount),
+        buildBranchCard('回评线', `${statsData.pendingReplies || 0} 条待回评，${statsData.replyExceptions || 0} 条异常。`, (statsData.pendingReplies || 0) + (statsData.replyExceptions || 0)),
+        buildBranchCard('回访线', `${unhandledEventCount} 条通知仍未处理，${visitRetryTasks.length + executeErrorTasks.length} 条任务异常/待重试。`, unhandledEventCount + visitRetryTasks.length + executeErrorTasks.length),
       ],
-      workspaceTitle: '通知源概览',
-      workspaceSubtitle: '建议先确认扫描入库是否正常，再分别处理回评和回访。',
+      workspaceTitle: '先看三件事',
+      workspaceSubtitle: '入库量、待处理、异常。正常就分别点回评线和回访线处理。',
       workspaceType: 'overview',
       workspaceContent: renderOverviewContent([
-        ['推荐命令', 'npm run interactions:scan -- --days N --max-count M --prepare-replies --prepare-visits'],
-        ['数据边界', '扫描只负责入库和准备 DB 任务，不生成 pending JSON。'],
-        ['下一步', '评论进入回评线；点赞、评论、回复、关注进入回访线，两条线并列推进。'],
+        ['看入库', `当前入库 ${statsData.collectedTotal || 0} 条：点赞 ${statsData.collectedLikes || 0}，评论 ${statsData.collectedComments || 0}，回复 ${statsData.collectedReplies || 0}，关注 ${statsData.collectedFollows || 0}。`],
+        ['看待处理', `回评待处理 ${statsData.pendingReplies || 0} 条；回访未处理线索 ${unhandledEventCount} 条。`],
+        ['看异常', `回评异常 ${statsData.replyExceptions || 0} 条；回访异常/待重试 ${visitRetryTasks.length + executeErrorTasks.length} 条。`],
       ]),
     },
     fallback: {
