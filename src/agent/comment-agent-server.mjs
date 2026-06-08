@@ -112,10 +112,8 @@ export function extractJson(text = '') {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('Hermes 返回格式错误: JSON 不是对象');
   }
-  if (typeof parsed.comment !== 'string') {
-    throw new Error('Hermes 返回格式错误: comment 必须是 string');
-  }
-  parsed.comment = parsed.comment.trim();
+  if (typeof parsed.comment === 'string') parsed.comment = parsed.comment.trim();
+  if (typeof parsed.reply === 'string') parsed.reply = parsed.reply.trim();
   return parsed;
 }
 
@@ -207,6 +205,9 @@ export async function generateCommentWithHermes(context, options = {}) {
     try {
       const output = await callAgentCli(`${basePrompt}${retryHint}`, options);
       const parsed = extractJson(output);
+      if (typeof parsed.comment !== 'string') {
+        throw new Error('Agent 返回格式错误: comment 必须是 string');
+      }
       return validateComment(parsed.comment, { maxLength });
     } catch (err) {
       lastError = err;

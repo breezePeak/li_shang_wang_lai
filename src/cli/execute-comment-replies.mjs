@@ -1,5 +1,5 @@
 // 评论回复执行命令
-// 默认从数据库查询 pending 回评，调用 agent-server 生成 reply_text 后执行回复。
+// 默认从数据库查询 pending 回评，直接调用 Hermes/OpenClaw 生成 reply_text 后执行回复。
 //
 // 用法：
 //   npm run comments:execute -- --days 7 --limit 50
@@ -37,7 +37,7 @@ import { closeCurrentWorkModalToProfile, openProfileWorkByAwemeIdFromPostApi } f
 import { writeFileSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
 import { pathToFileURL } from 'url';
-import { HttpAgentProvider } from '../agent/http-agent-provider.mjs';
+import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
 
 function parseArgs(argv) {
   const args = {
@@ -115,7 +115,7 @@ export function buildReplyContext(item = {}) {
   };
 }
 
-export async function generateMissingReplies(items = [], { agentProvider = new HttpAgentProvider() } = {}) {
+export async function generateMissingReplies(items = [], { agentProvider = new LocalAgentProvider() } = {}) {
   const results = [];
   for (const item of items) {
     const commentId = Number(item.commentId || 0);

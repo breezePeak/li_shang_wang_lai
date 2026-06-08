@@ -18,15 +18,15 @@ Agent 生成或填写评论时，必须遵守 `references/comment-safety-rules.m
 - 命令失败后停止后续真实动作，先读取错误并诊断。
 - 评论回复由 `comments:execute --days N --limit M` 从数据库读取并执行。
 - 回访必须带 `--execute` 才真实点赞和评论。
-- Agent / agent-server 只生成 `reply_text` 或回访评论文本，不控制浏览器，不编辑中间文件。
+- CLI 在进程内调用 Hermes/OpenClaw 生成 `reply_text` 或回访评论文本，不控制浏览器之外的额外服务，不编辑中间文件。
 
 ## 用户意图映射
 
 | 用户意图 | 采集命令 | 后续动作 |
 |---|---|---|
 | 只看互动 | `npm run interactions:scan -- --type all --days N --max-count M --display-only` | 只展示互动数据 |
-| 评论回复 | `npm run interactions:scan -- --type comment --days N --max-count M --prepare-replies` | 启动 `agent-server`，然后 `comments:execute --days N --limit M` |
-| 明确回访 | `npm run interactions:scan -- --type all --days N --max-count M --prepare-visits` | 启动 `agent-server`，然后 `visit:run --execute` |
+| 评论回复 | `npm run interactions:scan -- --type comment --days N --max-count M --prepare-replies` | `comments:execute --days N --limit M` |
+| 明确回访 | `npm run interactions:scan -- --type all --days N --max-count M --prepare-visits` | `visit:run --execute` |
 | 评论回复并回访 | `npm run interactions:scan -- --type all --days N --max-count M` | 先回评，再按用户明确要求回访 |
 
 ## 评论回复流程
@@ -37,19 +37,13 @@ Agent 生成或填写评论时，必须遵守 `references/comment-safety-rules.m
 npm run interactions:scan -- --type comment --days N --max-count M --prepare-replies
 ```
 
-启动生成服务：
-
-```bash
-npm run agent-server
-```
-
 然后执行：
 
 ```bash
 npm run comments:execute -- --days N --limit M
 ```
 
-`comments:execute` 会从 `work_comments` 查询待回评评论，调用 `agent-server` 生成并写回 `reply_text`，然后打开待回复评论所属的抖音作品页，在作品评论区定位目标评论；优先结合 `cid/comment_id` 与 `/aweme/v1/web/comment/list/` 做确认，唯一命中后点击“回复”、填写、发送并校验，不再进入创作者评论管理页。
+`comments:execute` 会从 `work_comments` 查询待回评评论，在当前进程内调用 Hermes/OpenClaw 生成并写回 `reply_text`，然后打开待回复评论所属的抖音作品页，在作品评论区定位目标评论；优先结合 `cid/comment_id` 与 `/aweme/v1/web/comment/list/` 做确认，唯一命中后点击“回复”、填写、发送并校验，不再进入创作者评论管理页。
 
 ## 回访流程
 
@@ -59,19 +53,13 @@ npm run comments:execute -- --days N --limit M
 npm run interactions:scan -- --days N --max-count M --prepare-visits
 ```
 
-启动生成服务：
-
-```bash
-npm run agent-server
-```
-
 然后执行回访：
 
 ```bash
 npm run visit:run -- --execute
 ```
 
-执行阶段会从 `return_visit_tasks` 读取任务，打开目标用户主页一次，监听 `/aweme/v1/web/aweme/post/` 主页作品列表 API，根据 `workId` 匹配并点击目标作品，进入作品页后调用 `agent-server` 生成回访评论，再由 CLI 填写并提交。
+执行阶段会从 `return_visit_tasks` 读取任务，打开目标用户主页一次，监听 `/aweme/v1/web/aweme/post/` 主页作品列表 API，根据 `workId` 匹配并点击目标作品，进入作品页后在当前进程内调用 Hermes/OpenClaw 生成回访评论，再由 CLI 填写并提交。
 
 不带 `--execute` 时只能 dry-run，不得真实点赞或评论。
 

@@ -97,7 +97,7 @@ async function main() {
   };
 
   log(args.json, `[return-visit:prepare] 已准备 DB 回访任务: ${tasks.length} 条，不生成 JSON 文件`);
-  console.error('[return-visit:prepare] Agent 提示: 启动 agent-server 后直接执行 visit:run/return-visit:execute');
+  console.error('[return-visit:prepare] Agent 提示: 直接执行 visit:run/return-visit:execute，执行阶段会调用 Hermes/OpenClaw 生成评论');
   if (args.json) {
     printJsonResult('return-visit:prepare', { tasks }, summary);
   }

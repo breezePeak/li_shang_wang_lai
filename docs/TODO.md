@@ -42,20 +42,16 @@
       └─ 不能识别: UNKNOWN_LOGGED，打印未知类型日志
 
 2. 回评主流程（无中间 JSON）
-   npm run agent-server
-   ↓
    comments:execute --days N --limit M
    ├─ 从 work_comments 查询待回评
-   ├─ 调用 agent-server /generate-reply 写回 reply_text
+   ├─ 进程内调用 Hermes/OpenClaw 写回 reply_text
    └─ CLI 打开作品、定位评论、填写并提交回复
 
 3. 回访主流程（无二次主页访问）
-   npm run agent-server
-   ↓
    visit:run --execute
    ├─ 打开用户主页并监听作品列表 API
    ├─ 根据 workId 点击目标作品
-   ├─ 调用 agent-server /generate-comment
+   ├─ 进程内调用 Hermes/OpenClaw 生成评论
    └─ CLI 填写并提交评论
 ```
 
@@ -269,7 +265,7 @@ profile_resolution_status  status  scanned_at
 | 状态码 | 位置 | 含义 |
 |---|---|---|
 | `SCAN_JSON_READY` | JSON `workflow_status_code` | 采集完成（主路径 notice API + 降级 DOM），JSON 可编辑 |
-| `COLLECT_PENDING_REPLY` | `works[].comments[].collect_status_code` / DB | 评论已入库，等待 `comments:execute` 调 agent-server 生成回复 |
+| `COLLECT_PENDING_REPLY` | `works[].comments[].collect_status_code` / DB | 评论已入库，等待 `comments:execute` 调 Hermes/OpenClaw 生成回复 |
 | `SKIP_DUPLICATE_NOTIFICATION` | 日志 | 通知重复，跳过 |
 | `SKIP_WORK_COLLECTED` | 日志 | 作品评论已采集，跳过 |
 | `LIKE_EVENT_STORED` | `interaction_events` | 点赞通知已入库 |
@@ -282,23 +278,23 @@ profile_resolution_status  status  scanned_at
 
 ### 2.1 评论回复内部流程
 
-`comments:execute` 只从数据库查询待回评评论，先通过本地 `agent-server` 生成 `reply_text` 并写回 `work_comments`，再按作品分组执行“单作品单遍向下扫描”。不再读取、写回或生成中间 JSON 文件。
+`comments:execute` 只从数据库查询待回评评论，先在当前进程内通过 Hermes/OpenClaw 生成 `reply_text` 并写回 `work_comments`，再按作品分组执行“单作品单遍向下扫描”。不再读取、写回或生成中间 JSON 文件。
 
 ```text
 work_comments
  WHERE reply_status='pending'
    AND reply_text IS NULL/空
  ↓
-comments:execute（默认 DB + agent-server + 执行）
+comments:execute（默认 DB + 本地 AgentProvider + 执行）
   ├─ listPendingCommentsGroupedByHomepageAndWork(limit/days)
   ├─ buildWorkCommentItemsFromDbRows()
   │
   ├─ generateMissingReplies()
  │  ├─ 已有 reply_text → 跳过生成
  │  ├─ 构造 ReplyContext（作品标题/描述 + 对方评论 + 作者/评论者）
- │  ├─ HttpAgentProvider.generateReply()
- │  │  └─ POST agent-server /generate-reply
-  │  │     └─ Hermes/OpenClaw 返回 {"reply":"回复内容"}
+  │  ├─ LocalAgentProvider.generateReply()
+  │  │  └─ generateReplyWithHermes → Hermes/OpenClaw CLI
+  │  │     └─ 返回 {"reply":"回复内容"}
  │  ├─ 成功 → saveReplyText(commentId, reply)
  │  └─ 失败 → markCommentBlocked(agent_generate_failed:reason)
  │
@@ -380,8 +376,8 @@ comments:execute（默认 DB + agent-server + 执行）
 
 | 状态码 | 位置 | 含义 |
 |---|---|---|
-| `AGENT_REPLY_GENERATED` | 日志 / DB `reply_text` | agent-server 已生成回复并写回 DB |
-| `AGENT_REPLY_FAILED` | 日志 / DB `reply_reason` | agent-server 生成失败，当前评论阻断 |
+| `AGENT_REPLY_GENERATED` | 日志 / DB `reply_text` | Hermes/OpenClaw 已生成回复并写回 DB |
+| `AGENT_REPLY_FAILED` | 日志 / DB `reply_reason` | Hermes/OpenClaw 生成失败，当前评论阻断 |
 | `EXECUTE_CONFIRMED` | 日志 / DB | 已确认回复成功，同时更新 interaction_events.status=replied |
 | `EXECUTE_SENT_UNVERIFIED` | 日志 / DB `reply_status` | 已发送但未确认 |
 | `EXECUTE_BLOCKED` | 日志 / DB `reply_status` | 定位/输入/发送失败 |
@@ -392,7 +388,7 @@ comments:execute（默认 DB + agent-server + 执行）
 
 #### 目标评论定位来源
 
-采集完成后，主流程直接从 `work_comments` 查询 `reply_status = 'pending'` 的评论并调用 agent-server。
+采集完成后，主流程直接从 `work_comments` 查询 `reply_status = 'pending'` 的评论并调用 Hermes/OpenClaw。
 
 执行阶段会优先从以下来源回填目标评论唯一标识：
 
@@ -425,7 +421,7 @@ return-visit:prepare（辅助）
   └─ listReturnVisitPrepareTasks
 ```
 
-> 注意：主流程不需要运行 `return-visit:prepare`。采集入库后，直接启动 `agent-server` 并运行 `visit:run` / `return-visit:execute`。
+> 注意：主流程不需要运行 `return-visit:prepare`。采集入库后，直接运行 `visit:run` / `return-visit:execute`。
 
 ### 3.2 执行阶段（`return-visit:execute`）
 
@@ -480,9 +476,9 @@ listReturnVisitExecuteTasks
 │  │
 │  ├─ WAIT_AGENT_COMMENT:
 │  │  ├─ buildCommentContext(task, resolvedWork)
-│  │  ├─ HttpAgentProvider.generateComment()
-│  │  │  └─ POST agent-server /generate-comment
-│  │  │     └─ Hermes/OpenClaw 返回 {"comment":"评论内容"}
+│  │  ├─ LocalAgentProvider.generateComment()
+│  │  │  └─ generateCommentWithHermes → Hermes/OpenClaw CLI
+│  │  │     └─ 返回 {"comment":"评论内容"}
 │  │  └─ fail → failed_generate_comment
 │  │
 │  ├─ [5/5] postReturnVisitComment(page, comment, presentation):
@@ -515,7 +511,7 @@ pending_visit → executing → done
 失败路径: failed_collect / failed_generate_comment / failed_like / failed_comment / failed
 ```
 
-> 注意：新流程在执行阶段实时调用 agent-server 生成评论，`comment_generated` / `pending_execute` 只作为状态机过渡状态保留。
+> 注意：新流程在执行阶段实时调用 Hermes/OpenClaw 生成评论，`comment_generated` / `pending_execute` 只作为状态机过渡状态保留。
 
 ### 3.4 状态码（回访阶段）
 
@@ -529,9 +525,10 @@ pending_visit → executing → done
 
 ```text
 采集模块 (interactions:scan) — 通知面板唯一入口，负责入库；查询待处理范围时必须显式输入 --days 与 --max-count；不生成中间 JSON
-agent-server — 只负责调用 Hermes/OpenClaw 生成 comment/reply 文本，可通过 AGENT_PROVIDER=hermes|openclaw 切换
-回评模块 (comments:execute) — 默认从 DB 查询待回评，必须显式输入 --days 与 --limit/--max-count，调用 agent-server 生成 reply_text，再由 CLI 执行浏览器动作
-回访模块 (visit:run / return-visit:execute) — 打开主页监听作品列表 API，匹配 workId，进入作品页后调用 agent-server 生成 comment，再由 CLI 填写提交
+LocalAgentProvider — 进程内调用 Hermes/OpenClaw 生成 comment/reply 文本，可通过 AGENT_PROVIDER=hermes|openclaw 切换
+agent-server — 可选 HTTP 调试/外部集成入口，不属于主流程
+回评模块 (comments:execute) — 默认从 DB 查询待回评，必须显式输入 --days 与 --limit/--max-count，调用 LocalAgentProvider 生成 reply_text，再由 CLI 执行浏览器动作
+回访模块 (visit:run / return-visit:execute) — 打开主页监听作品列表 API，匹配 workId，进入作品页后调用 LocalAgentProvider 生成 comment，再由 CLI 填写提交
 
 actions:pending 不属于主流程；第一步已把评论和回访任务写入 DB。
 return-visit:prepare 不属于推荐主流程。
@@ -543,13 +540,10 @@ return-visit:prepare 不属于推荐主流程。
 ```text
 只看互动:   interactions:scan --display-only
 评论回复:   interactions:scan --days N --max-count M
-           → npm run agent-server
            → comments:execute --days N --limit M
 明确回访:   interactions:scan --days N --max-count M --prepare-visits
-           → npm run agent-server
            → visit:run --execute
 评论+回访:  interactions:scan --days N --max-count M
-           → npm run agent-server
            → comments:execute --days N --limit M
            → visit:run --execute
 ```
@@ -561,7 +555,7 @@ return-visit:prepare 不属于推荐主流程。
    - `reply` / `follow` 只入库并进入分类统计，暂不触发后续回评/回访执行
 2. 新互动采集入口以通知中心为准，主路径使用 notice API（拦截 /aweme/v1/web/notice/），DOM 解析为降级路径
 3. 采集业务数据通过 `upsertNotificationEvent()` 写入 `interaction_events`
-4. 评论回复由 `comments:execute --days N --limit M` 调用 agent-server 写入 `reply_text` 到 `work_comments` 并执行
+4. 评论回复由 `comments:execute --days N --limit M` 调用 LocalAgentProvider 写入 `reply_text` 到 `work_comments` 并执行
 5. 回访任务由 `interactions:scan --prepare-visits` 或 `return-visit:prepare` 创建/更新，默认执行入口是 `visit:run`
 6. `return-visit:prepare` 仅从 DB 事件创建/查询任务，默认读取 `new`，可通过 `--event-status` 覆盖
 7. 日志里 `newInBatch` 不是"新入库数量"，是"本次扫描内未见过且通过过滤"

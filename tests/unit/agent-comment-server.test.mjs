@@ -7,6 +7,7 @@ import {
   loadCommentSafetyRules,
   resolveAgentCliConfig,
 } from '../../src/agent/comment-agent-server.mjs';
+import { LocalAgentProvider } from '../../src/agent/local-agent-provider.mjs';
 
 describe('agent comment server helpers', () => {
   it('extractJson parses fenced json and trims comment', () => {
@@ -63,5 +64,16 @@ describe('agent comment server helpers', () => {
       bin: 'openclaw',
       argsTemplate: ['chat', '-Q', '-q', '{prompt}'],
     });
+  });
+
+  it('LocalAgentProvider calls in-process agent generators', async () => {
+    const provider = new LocalAgentProvider({
+      provider: 'hermes',
+      bin: process.execPath,
+      argsTemplate: ['-e', 'const prompt = process.argv[1]; console.log(prompt.includes("{\\"reply\\":\\"回复内容\\"}") ? JSON.stringify({ reply: "收到啦" }) : JSON.stringify({ comment: "挺真实" }))', '{prompt}'],
+    });
+
+    await expect(provider.generateComment({ taskId: 'visit_1' })).resolves.toBe('挺真实');
+    await expect(provider.generateReply({ taskId: 'reply_1' })).resolves.toBe('收到啦');
   });
 });

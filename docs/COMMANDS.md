@@ -6,7 +6,8 @@
 
 | 分类 | 命令 |
 |---|---|
-| 主流程 | `auth`、`db:init`、`interactions:scan`、`agent-server`、`comments:execute`、`visit:run` / `return-visit:execute` |
+| 主流程 | `auth`、`db:init`、`interactions:scan`、`comments:execute`、`visit:run` / `return-visit:execute` |
+| 可选 HTTP 调试 | `agent-server` |
 | 只读/辅助入口 | `actions:pending`、`comments:classify`、`return-visit:comment` |
 | 调试/开发入口 | `notify:inspect`、`interactions:inspect`、`debug:like-dom`、`debug:like-state`、`debug:open`、`dev:inspect-page`、`server` |
 
@@ -20,19 +21,17 @@
 
 ## 主流程
 
-评论回复（DB 查询 + agent-server 生成 + CLI 执行）：
+评论回复（DB 查询 + 进程内 Hermes/OpenClaw 生成 + CLI 执行）：
 
 ```bash
 npm run interactions:scan -- --type comment --days 7 --max-count 50 --prepare-replies
-npm run agent-server
 npm run comments:execute -- --days 7 --limit 50
 ```
 
-回访（DB 任务 + agent-server 生成 + CLI 执行）：
+回访（DB 任务 + 进程内 Hermes/OpenClaw 生成 + CLI 执行）：
 
 ```bash
 npm run interactions:scan -- --days 7 --max-count 50 --prepare-visits
-npm run agent-server
 npm run visit:run -- --execute
 ```
 
@@ -120,7 +119,7 @@ npm run comments:execute -- --days 7 --limit 50 --agent-only
 
 源文件：`src/cli/execute-comment-replies.mjs`
 
-从数据库查询待回评评论，先调用本地 `agent-server` 生成缺失的 `reply_text` 并写回 `work_comments`，再按作品分组打开对应抖音作品页，在作品评论区中查找目标评论。执行时优先结合 `cid/comment_id` 和 `/aweme/v1/web/comment/list/` 辅助确认目标评论，再在评论区 DOM 中唯一定位后点击“回复”、填写、发送并校验；成功后更新 `work_comments.reply_status` 和 `interaction_events.status`。
+从数据库查询待回评评论，先在当前进程内调用 Hermes/OpenClaw 生成缺失的 `reply_text` 并写回 `work_comments`，再按作品分组打开对应抖音作品页，在作品评论区中查找目标评论。执行时优先结合 `cid/comment_id` 和 `/aweme/v1/web/comment/list/` 辅助确认目标评论，再在评论区 DOM 中唯一定位后点击“回复”、填写、发送并校验；成功后更新 `work_comments.reply_status` 和 `interaction_events.status`。
 
 命令默认真实执行，不再需要 `--execute`。
 
@@ -167,7 +166,7 @@ npm run return-visit:comment -- --task-id <taskId> --comment "<评论内容>" --
 
 源文件：`src/cli/set-return-visit-comment.mjs`
 
-**可选单任务辅助入口，不属于推荐主流程。** 推荐主流程由 `visit:run` 在执行阶段实时调用 `agent-server` 生成回访评论。
+**可选单任务辅助入口，不属于推荐主流程。** 推荐主流程由 `visit:run` 在执行阶段实时调用 Hermes/OpenClaw 生成回访评论。
 
 本命令用于单条写入：将生成的回访评论写入指定任务，校验评论是否符合小猿人格规范，校验通过后任务状态变为 `pending_execute`。
 
@@ -186,7 +185,7 @@ npm run return-visit:execute -- --dry-run
 
 源文件：`src/cli/execute-return-visit.mjs`
 
-读取数据库中可执行回访任务。打开目标用户主页，监听主页作品列表 API，按 `workId` 匹配并点击目标作品；进入作品页后调用 `agent-server` 生成回访评论，再在 `--execute` 模式下执行点赞 + 评论。不带 `--execute` 时为 dry-run，不真实点赞或评论。
+读取数据库中可执行回访任务。打开目标用户主页，监听主页作品列表 API，按 `workId` 匹配并点击目标作品；进入作品页后在当前进程内调用 Hermes/OpenClaw 生成回访评论，再在 `--execute` 模式下执行点赞 + 评论。不带 `--execute` 时为 dry-run，不真实点赞或评论。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
@@ -325,4 +324,3 @@ npm run debug:open https://www.douyin.com/user/self
 源文件：`src/cli/open-page.mjs`
 
 打开指定页面，浏览器保持打开不做任何操作，用于手动排查页面 DOM 或调试问题。
-

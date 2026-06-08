@@ -690,13 +690,13 @@ export function summarizePendingReplies({ days = null, maxCount = 500 } = {}) {
   }
 
   console.error(`[scan] pending_reply_homepage_count=${homepageKeys.size} pending_reply_work_count=${workKeys.size} pending_reply_comment_count=${totalComments} skip_missing_author_profile_url=${skippedMissingHomepageWorkCount}`);
-  console.error('[scan] 待回评数据已入库；启动 agent-server 后执行 comments:execute --days N --limit M');
+  console.error('[scan] 待回评数据已入库；直接执行 comments:execute --days N --limit M');
   return {
     totalComments,
     workCount: workKeys.size,
     homepageCount: homepageKeys.size,
     skippedMissingHomepageWorkCount,
-    nextStep: 'npm run agent-server，然后 npm run comments:execute -- --days N --limit M',
+    nextStep: 'npm run comments:execute -- --days N --limit M',
   };
 }
 
@@ -826,13 +826,13 @@ export function preparePendingVisitTasks(events, { days = null, maxCount = 100, 
       `pending_visit_db_filtered_days=${stats.dbFilteredDays}`
   );
   console.error(`[scan] 待回访 DB 任务: ${tasks.length} 个`);
-  console.error('[scan] Agent 提示: 回访流程=启动 agent-server 后直接执行 visit:run/return-visit:execute，执行阶段会实时匹配作品并生成评论');
+  console.error('[scan] Agent 提示: 回访流程=直接执行 visit:run/return-visit:execute，执行阶段会实时匹配作品并生成评论');
   return {
     totalTasks: tasks.length,
     tasks,
     sourceSummary,
     stats,
-    nextStep: 'npm run agent-server，然后 npm run visit:run -- --execute',
+    nextStep: 'npm run visit:run -- --execute',
   };
 }
 

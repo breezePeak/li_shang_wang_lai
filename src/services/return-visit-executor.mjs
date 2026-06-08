@@ -19,7 +19,7 @@ import {
   collectCurrentOpenedWork,
   openProfileWorkByAwemeId,
 } from './return-visit-work-collector.mjs';
-import { HttpAgentProvider } from '../agent/http-agent-provider.mjs';
+import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
 
 async function saveDebugScreenshot(page, taskId, phase) {
   try {
@@ -273,7 +273,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     waitBetweenLikeAndCommentMs = [2000, 6000],
     watchPolicy = 'seconds',
     watchSeconds = [5, 8],
-    agentProvider = new HttpAgentProvider(),
+    agentProvider = new LocalAgentProvider(),
   } = options;
 
   const taskId = task.taskId;
@@ -404,7 +404,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     commentText = await agentProvider.generateComment(commentContext);
     console.error(`[agent] task=${taskId} 评论生成成功 comment=${commentText}`);
   } catch (err) {
-    console.error(`[visit] task=${taskId} failed reason=agent-server 请求失败: ${err.message}`);
+    console.error(`[visit] task=${taskId} failed reason=Agent 生成评论失败: ${err.message}`);
     return { ok: false, status: 'failed_generate_comment', error: err.message || 'agent_comment_failed', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork };
   }
 
