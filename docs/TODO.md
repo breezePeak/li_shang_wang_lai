@@ -291,8 +291,10 @@ comments:execute（执行阶段 — 默认真实执行）
     ├─ 创建 commentListCollector（监听 /aweme/v1/web/comment/list/）
     │  └─ group 级 finally 统一 stop()
     │
-    ├─ page.goto(workUrl) → waitForWorkModal → waitForWorkCommentArea
-    │  └─ 失败 → 当前 group 全部 markCommentBlocked
+    ├─ openProfileWorkByAwemeIdFromPostApi(homepageUrl, workId/modalId)
+    │  ├─ 打开/复用作者主页，拦截 /aweme/v1/web/aweme/post/ 定位作品卡片
+    │  ├─ 点击目标作品卡片 → waitForWorkModal → waitForWorkCommentArea
+    │  └─ 打开作品 / modal / 评论区失败 → 当前 group 全部 markCommentBlocked
     │
     ├─ 建立 pendingMap（当前作品全部待回复评论）
     │
@@ -363,6 +365,11 @@ comments:execute（执行阶段 — 默认真实执行）
 | `EXECUTE_CONFIRMED` | `works[].comments[].execute_status_code` | 已确认回复成功，同时更新 interaction_events.status=replied |
 | `EXECUTE_SENT_UNVERIFIED` | `works[].comments[].execute_status_code` | 已发送但未确认 |
 | `EXECUTE_BLOCKED` | `works[].comments[].execute_status_code` | 定位/输入/发送失败 |
+| `EXECUTE_ALREADY_CONFIRMED` | `works[].comments[].execute_status_code` | DB 中已是 succeeded，本轮跳过重复执行 |
+| `EXECUTE_ALREADY_SENT_UNVERIFIED` | `works[].comments[].execute_status_code` | DB 中已是 sent_unverified，本轮跳过重复执行 |
+| `EXECUTE_SKIPPED_EMPTY` | `works[].comments[].execute_status_code` | `reply_text` 为空，跳过执行 |
+| `EXECUTE_VALIDATED` | `works[].comments[].execute_status_code` | 执行校验通过但未进入确认成功分支 |
+| `EXECUTE_FAILED` | `works[].comments[].execute_status_code` | 执行失败 |
 
 #### 待回复评论 JSON
 
@@ -395,7 +402,9 @@ raw_comment_json.comment.comment.cid
    筛选 relation=friend/mutual → identity_key 去重 → insert/enrich
    跳过其他 relation 的通知
    ↓
-listReturnVisitPrepareTasks (状态: pending_visit, failed_collect; retry 次数限制)
+listReturnVisitPrepareTasks
+(状态: pending_visit, collecting_content, comment_generated,
+ failed_collect, failed_generate_comment; retry 次数限制)
    ↓
 启动浏览器
    ↓
@@ -443,7 +452,8 @@ listReturnVisitPrepareTasks (状态: pending_visit, failed_collect; retry 次数
 │  ├─ 有 generatedComment → PENDING_EXECUTE, commentStatus=generated
 │  └─ 无 generatedComment → FAILED_GENERATE_COMMENT
 └─ 无文件 → listReturnVisitExecuteTasks
-   (状态: pending_execute, executing, failed_like, failed_comment; retry 次数限制)
+   (状态: pending_execute, executing, failed_collect,
+    failed_like, failed_comment; retry 次数限制)
    ↓
 过滤脏任务 (getReturnVisitTaskExecutionIssue):
 ├─ 非可执行状态 → 跳过
@@ -550,7 +560,9 @@ return-visit:prepare 不属于评论回复默认流程。
 
 ### B. 开发约束
 
-1. 采集类型只有 `all` / `comment` / `like`，暂无 `follow`
+1. `interactions:scan --type` 支持 `all` / `comment` / `like` / `reply` / `follow`
+   - 默认 `--collect-types` 为 `like,comment,reply,follow`
+   - `reply` / `follow` 只入库并进入分类统计，暂不触发后续回评/回访执行
 2. 新互动采集入口以通知中心为准，主路径使用 notice API（拦截 /aweme/v1/web/notice/），DOM 解析为降级路径
 3. 采集业务数据通过 `upsertNotificationEvent()` 写入 `interaction_events`
 4. 评论回复由 `comments:execute` 写入 `reply_text` 到 `work_comments` 并执行
