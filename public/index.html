@@ -12,42 +12,41 @@
   <div class="page-orb orb-a"></div>
   <div class="page-orb orb-b"></div>
 
+  <header class="app-header">
+    <div class="river-brand">
+      <div class="river-brand-mark"><i class="fa-solid fa-timeline"></i></div>
+      <div class="river-brand-text">
+        <h1>礼尚往来</h1>
+        <p>PARALLEL TIMELINE COCKPIT</p>
+      </div>
+    </div>
+
+    <div class="river-meta-container">
+      <div class="meta-frosted-chip">
+        <span class="chip-dot"></span>
+        <span>SQLite WAL</span>
+      </div>
+      <div class="meta-frosted-chip">
+        <span class="chip-label">入库</span>
+        <strong class="chip-value" id="hero-collected-total">0</strong>
+      </div>
+      <div class="meta-frosted-chip">
+        <span class="chip-label">待处理</span>
+        <strong class="chip-value" id="hero-total-tasks">0</strong>
+      </div>
+      <div class="meta-frosted-chip">
+        <span class="chip-label">异常</span>
+        <strong class="chip-value" id="hero-completed-tasks">0</strong>
+      </div>
+      <button class="frosted-refresh-btn" id="btn-refresh">
+        <i class="fa-solid fa-rotate-right"></i>
+        <span>刷新</span>
+      </button>
+    </div>
+  </header>
+
   <div class="app-shell">
     <section class="river-board">
-      <!-- 融入式顶栏：左侧品牌，右侧悬浮毛玻璃数据卡与刷新 -->
-      <div class="river-header-full">
-        <div class="river-brand">
-          <div class="river-brand-mark"><i class="fa-solid fa-timeline"></i></div>
-          <div class="river-brand-text">
-            <h1>礼尚往来</h1>
-            <p>PARALLEL TIMELINE COCKPIT</p>
-          </div>
-        </div>
-
-        <div class="river-meta-container">
-          <div class="meta-frosted-chip">
-            <span class="chip-dot"></span>
-            <span>SQLite WAL</span>
-          </div>
-          <div class="meta-frosted-chip">
-            <span class="chip-label">入库</span>
-            <strong class="chip-value" id="hero-collected-total">0</strong>
-          </div>
-          <div class="meta-frosted-chip">
-            <span class="chip-label">待处理</span>
-            <strong class="chip-value" id="hero-total-tasks">0</strong>
-          </div>
-          <div class="meta-frosted-chip">
-            <span class="chip-label">异常</span>
-            <strong class="chip-value" id="hero-completed-tasks">0</strong>
-          </div>
-          <button class="frosted-refresh-btn" id="btn-refresh">
-            <i class="fa-solid fa-rotate-right"></i>
-            <span>刷新</span>
-          </button>
-        </div>
-      </div>
-
       <div class="river-scroll">
         <div class="river-stage-strip" id="river-stage-strip">
           <!-- 并列时间线：回评和回访同级展示 -->
