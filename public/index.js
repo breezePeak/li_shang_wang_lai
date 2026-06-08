@@ -88,9 +88,11 @@ async function fetchPendingComments() {
 }
 
 function renderHeroStats() {
+  const waitingCount = (statsData.pendingReplies || 0) + getUnhandledEventCount();
+  const errorCount = (statsData.replyExceptions || 0) + getVisitStatusCount('failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment', 'failed');
   setText('hero-collected-total', statsData.collectedTotal || 0);
-  setText('hero-total-tasks', statsData.totalTasks || 0);
-  setText('hero-completed-tasks', statsData.completedTasks || 0);
+  setText('hero-total-tasks', waitingCount);
+  setText('hero-completed-tasks', errorCount);
 }
 
 function renderRiverTimeline() {
@@ -144,7 +146,7 @@ function renderTimelineLane({ id, title, subtitle, icon, points, activeStageId }
     : VISIT_STAGE_IDS.has(activeStageId);
   return `
     <section class="timeline-lane ${isLaneActive ? 'is-active' : ''}">
-      <div class="lane-title">
+        <div class="lane-title">
         <span><i class="fa-solid ${icon}"></i></span>
         <div>
           <strong>${title}</strong>
@@ -161,8 +163,9 @@ function renderTimelineLane({ id, title, subtitle, icon, points, activeStageId }
 function renderTimelinePoint(point, activeStageId) {
   const activeClass = activeStageId === point.id ? 'is-active' : '';
   const countClass = Number(point.count || 0) > 0 ? 'has-count' : '';
+  const focusClass = Number(point.count || 0) > 0 && (point.tone === 'warning' || point.tone === 'danger' || point.id === 'replyPending' || point.id === 'visitUnhandled') ? 'is-focus' : '';
   return `
-    <button class="timeline-point ${point.tone} ${activeClass} ${countClass}" onclick="selectStage('${point.id}')" title="${escapeAttribute(point.helper || point.label)}">
+    <button class="timeline-point ${point.tone} ${activeClass} ${countClass} ${focusClass}" onclick="selectStage('${point.id}')" title="${escapeAttribute(point.helper || point.label)}">
       <span class="point-dot"><i class="fa-solid ${point.icon}"></i></span>
       <span class="point-copy">
         <strong>${point.label}</strong>
