@@ -1779,17 +1779,10 @@ async function clickReplyButtonForCandidate(page, candidate) {
       return null;
     }
 
-    const items = getItems();
-    const item = items[domIndex];
-    if (!item) return { ok: false, reason: 'candidate_dom_missing' };
-
-    const text = (item.innerText || '').trim();
-    if (commentText && !text.includes(commentText)) return { ok: false, reason: 'candidate_text_changed' };
-    if (actorName && !text.includes(actorName)) return { ok: false, reason: 'candidate_actor_changed' };
-    if (cid) {
+    function extractCidFromItem(el) {
       const attrs = ['data-comment-id', 'data-commentid', 'data-id', 'data-cid', 'id'];
       let foundCid = '';
-      let current = item;
+      let current = el;
       for (let depth = 0; depth < 4 && current && current !== document.body; depth++) {
         for (const attr of attrs) {
           const value = current.getAttribute?.(attr);
@@ -1801,23 +1794,73 @@ async function clickReplyButtonForCandidate(page, candidate) {
         if (foundCid) break;
         current = current.parentElement;
       }
-      if (foundCid && foundCid !== cid) return { ok: false, reason: 'candidate_cid_changed' };
+      return foundCid;
     }
 
-    item.scrollIntoView({ block: 'center', behavior: 'instant' });
-    const replyButton = findReplyButton(item);
-    if (!replyButton) return { ok: false, reason: 'reply_button_not_found' };
+    function tryClickReplyOnItem(item) {
+      if (!item) return null;
+      item.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const replyButton = findReplyButton(item);
+      if (!replyButton) return null;
+      const rect = replyButton.getBoundingClientRect();
+      return {
+        x: Math.round(rect.x + rect.width / 2),
+        y: Math.round(rect.y + rect.height / 2),
+      };
+    }
 
-    const rect = replyButton.getBoundingClientRect();
-    return {
-      ok: true,
-      x: Math.round(rect.x + rect.width / 2),
-      y: Math.round(rect.y + rect.height / 2),
-    };
+    const items = getItems();
+
+    let item = items[domIndex];
+    if (item) {
+      const text = (item.innerText || '').trim();
+      const textMatch = !commentText || text.includes(commentText);
+      const actorMatch = !actorName || text.includes(actorName);
+      let cidMatch = true;
+      if (cid) {
+        const foundCid = extractCidFromItem(item);
+        if (foundCid && foundCid !== cid) cidMatch = false;
+      }
+      if (textMatch && actorMatch && cidMatch) {
+        const result = tryClickReplyOnItem(item);
+        if (result) return { ok: true, x: result.x, y: result.y, method: 'domIndex' };
+      }
+    }
+
+    if (cid) {
+      for (const candidateItem of items) {
+        const foundCid = extractCidFromItem(candidateItem);
+        if (foundCid && foundCid === cid) {
+          const result = tryClickReplyOnItem(candidateItem);
+          if (result) return { ok: true, x: result.x, y: result.y, method: 'cid_fallback' };
+        }
+      }
+    }
+
+    for (const candidateItem of items) {
+      const text = (candidateItem.innerText || '').trim();
+      const textMatch = commentText && text.includes(commentText);
+      const actorMatch = actorName && text.includes(actorName);
+      if (textMatch && actorMatch) {
+        const result = tryClickReplyOnItem(candidateItem);
+        if (result) return { ok: true, x: result.x, y: result.y, method: 'actor_text_fallback' };
+      }
+    }
+
+    for (const candidateItem of items) {
+      const text = (candidateItem.innerText || '').trim();
+      if (commentText && text.includes(commentText)) {
+        const result = tryClickReplyOnItem(candidateItem);
+        if (result) return { ok: true, x: result.x, y: result.y, method: 'text_fallback' };
+      }
+    }
+
+    if (items.length === 0) return { ok: false, reason: 'no_visible_comment_items' };
+    return { ok: false, reason: 'reply_button_not_found' };
   }, candidate);
 }
 
-async function ensureWorkReplyEditorReady(page, { timeoutMs = 3000 } = {}) {
+async function ensureWorkReplyEditorReady(page, { timeoutMs = 5000 } = {}) {
   const startedAt = Date.now();
   let activatedContainer = false;
   while (Date.now() - startedAt < timeoutMs) {
@@ -1828,13 +1871,33 @@ async function ensureWorkReplyEditorReady(page, { timeoutMs = 3000 } = {}) {
         return rect.width > 0 && rect.height > 0;
       }
 
-      const commentInput = document.querySelector('.comment-input-container');
+      const containerSelectors = [
+        '.comment-input-container',
+        '[class*="comment-input-container"]',
+        '[class*="commentInputContainer"]',
+      ];
+      let commentInput = null;
+      for (const selector of containerSelectors) {
+        const el = document.querySelector(selector);
+        if (el) { commentInput = el; break; }
+      }
+
       if (commentInput) {
         const rect = commentInput.getBoundingClientRect();
-        const editor = commentInput.querySelector('[contenteditable="true"], textarea, input[type="text"]');
-        if (visible(editor)) {
-          const placeholder = editor.getAttribute?.('placeholder') || '';
-          return { ready: true, placeholder, x: 0, y: 0 };
+        const editorSelectors = [
+          '[contenteditable="true"]',
+          'textarea',
+          'input[type="text"]',
+          '.public-DraftEditor-content',
+          '[role="combobox"][contenteditable="true"]',
+          '[role="textbox"]',
+        ];
+        for (const selector of editorSelectors) {
+          const editor = commentInput.querySelector(selector);
+          if (visible(editor)) {
+            const placeholder = editor.getAttribute?.('placeholder') || '';
+            return { ready: true, placeholder, x: 0, y: 0 };
+          }
         }
         if (rect.width > 100 && rect.height > 30) {
           return {
@@ -1845,6 +1908,20 @@ async function ensureWorkReplyEditorReady(page, { timeoutMs = 3000 } = {}) {
           };
         }
       }
+
+      const directEditorSelectors = [
+        '.public-DraftEditor-content[contenteditable="true"]',
+        '.notranslate.public-DraftEditor-content',
+        '[role="combobox"][contenteditable="true"]',
+        '[contenteditable="true"][role="combobox"]',
+      ];
+      for (const selector of directEditorSelectors) {
+        const editor = document.querySelector(selector);
+        if (visible(editor)) {
+          return { ready: true, placeholder: '', x: 0, y: 0, method: 'direct_editor' };
+        }
+      }
+
       return { ready: false, x: 0, y: 0, text: '' };
     }).catch(() => ({ ready: false, x: 0, y: 0, text: '' }));
 
@@ -1857,7 +1934,19 @@ async function ensureWorkReplyEditorReady(page, { timeoutMs = 3000 } = {}) {
       continue;
     }
 
-    await page.waitForTimeout(200);
+    if (!activatedContainer) {
+      const commentArea = await getWorkCommentContainerBox(page).catch(() => ({}));
+      if (commentArea.ok && commentArea.box) {
+        const x = commentArea.box.x + commentArea.box.width / 2;
+        const y = commentArea.box.y + commentArea.box.height - 20;
+        await page.mouse.click(x, y).catch(() => {});
+        activatedContainer = true;
+        await page.waitForTimeout(500).catch(() => {});
+        continue;
+      }
+    }
+
+    await page.waitForTimeout(300);
   }
   return false;
 }
