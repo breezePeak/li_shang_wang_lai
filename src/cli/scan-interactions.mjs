@@ -1156,8 +1156,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     console.error('[scan] 开始使用 notice api 数据采集');
 
     for (let round = 0; round < maxScrollRounds; round++) {
-      const domBatch = await extractVisibleNotifications(page).catch(() => null);
-      const currentItems = apiCollector.getItems();
+      const currentItems = apiCollector.drainItems();
       let roundProcessed = 0;
 
       for (const item of currentItems) {
@@ -1230,19 +1229,13 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
         break;
       }
 
-      if (domBatch?.ok && domBatch.data?.noMoreData) {
-        console.error('[scan] 面板显示"暂无更多数据"，停止采集');
-        scrollRounds = round;
-        break;
-      }
-
       if (round >= maxScrollRounds - 1) {
         scrollRounds = maxScrollRounds;
         console.error(`[scan] 达到最大滚动轮次 ${maxScrollRounds}，停止采集，防止死循环`);
         break;
       }
 
-      const beforeCount = apiCollector.getItems().length;
+      const beforeCount = apiCollector.getStats().itemCount;
       const scrollResult = await scrollPanelDown(page);
       if (!scrollResult.scrolled) {
         console.error('[scan] 无法滚动通知面板，停止采集');
@@ -1255,6 +1248,11 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
 
       const stats = apiCollector.getStats();
       if (scrollRounds >= 2 && stats.itemCount === 0 && stats.responseCount === 0) {
+        const domBatch = await extractVisibleNotifications(page).catch(() => null);
+        if (domBatch?.ok && domBatch.data?.noMoreData) {
+          console.error('[scan] 面板显示"暂无更多数据"，停止采集');
+          break;
+        }
         console.error('[scan] 未捕获 notice api 数据，退回 DOM 解析兜底');
         if (!run.options?.keepOpen) {
           await closeNotificationPanel(page).catch(() => {});

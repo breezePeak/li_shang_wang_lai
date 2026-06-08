@@ -1,5 +1,5 @@
 export function createNoticeApiCollector(page) {
-  const items = [];
+  const pendingItems = [];
   const seenResponseUrls = new Set();
   const seenNoticeIds = new Set();
 
@@ -12,7 +12,15 @@ export function createNoticeApiCollector(page) {
     lastResponseAt: 0,
     responseCount: 0,
     parseFailed: 0,
+    totalItemCount: 0,
   };
+
+  function rememberResponseUrl(url) {
+    seenResponseUrls.add(url);
+    if (seenResponseUrls.size <= 500) return;
+    const oldest = seenResponseUrls.values().next().value;
+    seenResponseUrls.delete(oldest);
+  }
 
   async function onResponse(response) {
     const url = typeof response.url === 'function' ? response.url() : '';
@@ -20,7 +28,7 @@ export function createNoticeApiCollector(page) {
     if (typeof response.status === 'function' && response.status() !== 200) return;
     if (seenResponseUrls.has(url)) return;
 
-    seenResponseUrls.add(url);
+    rememberResponseUrl(url);
 
     let json;
     try {
@@ -39,7 +47,8 @@ export function createNoticeApiCollector(page) {
       if (!noticeId) continue;
       if (seenNoticeIds.has(noticeId)) continue;
       seenNoticeIds.add(noticeId);
-      items.push(item);
+      pendingItems.push(item);
+      meta.totalItemCount++;
       added++;
     }
 
@@ -52,7 +61,7 @@ export function createNoticeApiCollector(page) {
     meta.responseCount++;
 
     console.error(
-      `[notice-api] 捕获 notice 接口: response=${meta.responseCount}, added=${added}, total=${items.length}, has_more=${meta.hasMore}, max_time=${meta.maxTime}`
+      `[notice-api] 捕获 notice 接口: response=${meta.responseCount}, added=${added}, pending=${pendingItems.length}, total=${meta.totalItemCount}, has_more=${meta.hasMore}, max_time=${meta.maxTime}`
     );
   }
 
@@ -60,14 +69,19 @@ export function createNoticeApiCollector(page) {
 
   return {
     getItems() {
-      return items.slice();
+      return pendingItems.slice();
+    },
+    drainItems() {
+      if (pendingItems.length === 0) return [];
+      return pendingItems.splice(0, pendingItems.length);
     },
     getMeta() {
       return { ...meta };
     },
     getStats() {
       return {
-        itemCount: items.length,
+        itemCount: pendingItems.length,
+        totalItemCount: meta.totalItemCount,
         responseCount: meta.responseCount,
         parseFailed: meta.parseFailed,
         hasMore: meta.hasMore,
@@ -80,10 +94,10 @@ export function createNoticeApiCollector(page) {
     async waitForNewItems({ beforeCount = 0, timeoutMs = 3000 } = {}) {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
-        if (items.length > beforeCount) return true;
+        if (pendingItems.length > beforeCount) return true;
         await page.waitForTimeout(200);
       }
-      return items.length > beforeCount;
+      return pendingItems.length > beforeCount;
     },
     stop() {
       page.off('response', onResponse);

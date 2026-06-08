@@ -45,4 +45,29 @@ describe('notice api collector', () => {
     expect(collector.getItems()).toHaveLength(2);
     collector.stop();
   });
+
+  it('drains pending items without losing total stats', async () => {
+    const page = createMockPage();
+    const collector = createNoticeApiCollector(page);
+
+    page.emit('response', {
+      url: () => 'https://www.douyin.com/aweme/v1/web/notice/?cursor=2',
+      status: () => 200,
+      json: async () => ({
+        notice_list_v2: [{ nid_str: '10' }, { nid_str: '11' }],
+        has_more: 1,
+      }),
+    });
+
+    await collector.waitForNewItems({ beforeCount: 0, timeoutMs: 50 });
+    expect(collector.getStats().itemCount).toBe(2);
+    expect(collector.getStats().totalItemCount).toBe(2);
+
+    expect(collector.drainItems()).toHaveLength(2);
+    expect(collector.getItems()).toHaveLength(0);
+    expect(collector.getStats().itemCount).toBe(0);
+    expect(collector.getStats().totalItemCount).toBe(2);
+
+    collector.stop();
+  });
 });
