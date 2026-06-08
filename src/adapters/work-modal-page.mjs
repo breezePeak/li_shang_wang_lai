@@ -1360,7 +1360,13 @@ function sameTextMatch(actual, expected) {
   const left = normalizeInlineText(actual);
   const right = normalizeInlineText(expected);
   if (!left || !right) return false;
-  return left === right || left.includes(right) || right.includes(left);
+  if (left === right) return true;
+
+  // 短评论/昵称信息量太低，不能用 includes 做宽松匹配。
+  // 例如目标评论 "2222" 不能误命中页面上的 "22222"，否则会变成 not_unique。
+  if (Math.min(left.length, right.length) <= 6) return false;
+
+  return left.includes(right) || right.includes(left);
 }
 
 function sameTimeHint(actual, expected) {

@@ -203,6 +203,35 @@ describe('作品评论区回复定位', () => {
     expect(result.matchedBy).toBe('actor+text');
   });
 
+  it('pickWorkCommentCandidate 短文本必须精确匹配，2222 不误命中 22222', () => {
+    const result = pickWorkCommentCandidate([
+      { domIndex: 0, cid: '', actorName: '北漂全栈猿（来回）', commentText: '22222', timeText: '1周前·北京', hasReplyButton: true },
+      { domIndex: 1, cid: '', actorName: '北漂全栈猿（来回）', commentText: '2222', timeText: '5天前·北京', hasReplyButton: true },
+    ], {
+      actorName: '北漂全栈猿（来回）',
+      commentText: '2222',
+      eventTimeText: '1780404999',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.candidate.domIndex).toBe(1);
+    expect(result.matchedBy).toBe('actor+text');
+  });
+
+  it('pickWorkCommentCandidate 长文本仍允许包含匹配', () => {
+    const result = pickWorkCommentCandidate([
+      { domIndex: 0, cid: '', actorName: '张三', commentText: '这个内容写得很真实，想继续看后续', timeText: '06-01', hasReplyButton: true },
+    ], {
+      actorName: '张三',
+      commentText: '内容写得很真实',
+      eventTimeText: '1780404999',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.candidate.domIndex).toBe(0);
+    expect(result.matchedBy).toBe('actor+text');
+  });
+
   it('scrollCommentAreaOnce 使用统一 wheel 滚动评论容器', async () => {
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const page = {
