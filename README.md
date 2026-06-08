@@ -103,19 +103,17 @@ npm run auth
 | 启动 agent-server | `npm run agent-server` |
 | 生成并执行评论回复 | `npm run comments:execute -- --days 7 --limit 50` |
 | 只生成评论回复不执行 | `npm run comments:execute -- --days 7 --limit 50 --agent-only` |
-| 扫描并生成待回访任务 | `npm run interactions:scan -- --days 7 --max-count 50 --generate-visit-json` |
+| 扫描并准备待回访任务 | `npm run interactions:scan -- --days 7 --max-count 50 --prepare-visits` |
 | 执行回访 | `npm run visit:run -- --execute` |
 | 运行默认测试 | `npm test` |
 
 完整命令参数见 `docs/COMMANDS.md`。
 
-`interactions:scan` 生成/查询待回评或待回访范围时必须手动输入 `--days` 和 `--max-count`，例如 `--days 7 --max-count 50`。
+`interactions:scan` 查询待回评或待回访范围时必须手动输入 `--days` 和 `--max-count`，例如 `--days 7 --max-count 50`。扫描结果只写入数据库，不生成中间 JSON 文件。
 
 `comments:execute` 默认从数据库查询待回评评论，必须手动输入 `--days` 和 `--limit`，调用 `agent-server` 生成 `reply_text` 并写回 DB，然后打开待回复评论所属的抖音作品页，在作品评论区里定位目标评论；优先结合 `cid/comment_id` 与 `comment/list` 接口做精确确认，再在 DOM 中唯一定位后点击“回复”、填写、发送并校验结果，不再进入创作者评论管理页。
 
 `visit:run` 会打开目标用户主页，监听主页作品列表 API，按 `workId` 匹配并点击目标作品，进入作品页后调用 `agent-server` 生成回访评论，再由 CLI 填写并提交。Agent 不控制浏览器、不点击、不提交评论。
-
-旧 JSON 文件路径仍保留兼容能力，但不再作为常用入口：`comments:execute --items-file <JSON>`、`return-visit:prepare --items-file <JSON>`。
 
 ## agent-server Provider
 

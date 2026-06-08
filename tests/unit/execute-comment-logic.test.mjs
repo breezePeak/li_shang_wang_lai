@@ -2,17 +2,15 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { resolve, join } from 'path';
-import { readFileSync, writeFileSync } from 'fs';
 import { getDb, resetDb } from '../../src/db/database.mjs';
 import {
+  buildWorkCommentItemsFromDbRows,
   executeSinglePassForWorkGroup,
   extractTargetCommentId,
   groupExecutableItemsByWork,
   isDoneWithoutRetryResult,
-  loadWorkCommentItemsFromFile,
   planViewportPendingMatches,
   resolveWorkUrlFromItem,
-  updateExecuteJsonFile,
   validateWorkCommentItem,
 } from '../../src/cli/execute-comment-replies.mjs';
 
@@ -130,34 +128,6 @@ async function runCli(fileName, extraArgs = []) {
 }
 
 // ============================================================
-// Test helper — load JSON
-// ============================================================
-function makeJsonFile(comments) {
-  const filePath = join(testDir, 'test-pending.json');
-  const json = {
-    workflow_status_code: 'PREPARE_JSON_UPDATED',
-    works: [{
-      workKey: 'work1',
-      workUrl: 'https://douyin.com/video/1',
-      comments,
-    }],
-  };
-  writeFileSync(filePath, JSON.stringify(json));
-  return filePath;
-}
-
-function makeWorkArrayJsonFile(comments) {
-  const filePath = join(testDir, 'test-pending-array.json');
-  const json = [{
-    workKey: 'work1',
-    work_url: 'https://douyin.com/video/1',
-    comments,
-  }];
-  writeFileSync(filePath, JSON.stringify(json));
-  return filePath;
-}
-
-// ============================================================
 // Tests
 // ============================================================
 describe('comments:execute refactored logic', () => {
@@ -165,99 +135,51 @@ describe('comments:execute refactored logic', () => {
     setup();
   });
 
-  // 1. No --execute needed, default real execution — missing itemsFile exits with error
-  it('exits with error when missing --items-file (no --execute flag required)', async () => {
+  it('exits with error when missing DB range arguments', async () => {
     const result = await runCli('execute-comment-replies.mjs', ['--json']);
     const parsed = parseStdout(result);
     expect(parsed).not.toBeNull();
     expect(parsed.ok).toBe(false);
-    // Should error because --items-file is missing, NOT because --execute is missing
+    expect(parsed.message).toContain('--days 7 --limit 50');
   });
 
-  // 2. JSON loaded without maxItems limit
-  it('loads all comments from JSON without maxItems restriction', async () => {
-    const json = makeJsonFile([
-      { id: 1, reply_text: 'Reply 1', work_url: 'https://douyin.com/video/1', actor_name: 'user1', comment_text: 'test' },
-      { id: 2, reply_text: 'Reply 2', work_url: 'https://douyin.com/video/2', actor_name: 'user2', comment_text: 'test2' },
-      { id: 5, reply_text: '', work_url: 'https://douyin.com/video/5', actor_name: 'user5', comment_text: 'test5' }, // empty reply
-      { id: 3, reply_text: 'Already', work_url: 'https://douyin.com/video/3', actor_name: 'user3', comment_text: 'test3' }, // succeeded
-      { id: 4, reply_text: 'Sent', work_url: 'https://douyin.com/video/4', actor_name: 'user4', comment_text: 'test4' }, // sent_unverified
-      { id: 99, reply_text: 'Unknown', work_url: '', actor_name: 'unknown', comment_text: 'no_work' }, // missing work_url
-    ]);
-
-    // This test verifies the file was created — browser execution will be tested separately
-    const fs = await import('fs');
-    const content = fs.readFileSync(json, 'utf8');
-    const parsed = JSON.parse(content);
-    const allComments = [];
-    for (const work of parsed.works) {
-      for (const c of work.comments) allComments.push(c);
-    }
-    // All 6 comments should be loaded (no slice/maxItems)
-    expect(allComments.length).toBe(6);
-    // Including the empty reply and the already-succeeded one
-    const emptyReplies = allComments.filter(c => !c.reply_text);
-    expect(emptyReplies.length).toBe(1);
+  it('rejects --items-file because comments:execute is DB-only', async () => {
+    const result = await runCli('execute-comment-replies.mjs', ['--json', '--items-file', 'data/pending-replies/old.json']);
+    const parsed = parseStdout(result);
+    expect(parsed).not.toBeNull();
+    expect(parsed.ok).toBe(false);
+    expect(parsed.message).toContain('不再支持 --items-file');
   });
 
-  it('supports top-level work array JSON format', async () => {
-    const json = makeWorkArrayJsonFile([
-      { id: 2, reply_text: '', work_url: 'https://douyin.com/video/2', actor_name: 'user2', comment_text: 'test2' },
-    ]);
-    const fs = await import('fs');
-    const parsed = JSON.parse(fs.readFileSync(json, 'utf8'));
-    expect(Array.isArray(parsed)).toBe(true);
-    expect(Array.isArray(parsed[0].comments)).toBe(true);
-    expect(parsed[0].comments[0].comment_text).toBe('test2');
-  });
+  it('buildWorkCommentItemsFromDbRows maps DB rows into executable items', () => {
+    const items = buildWorkCommentItemsFromDbRows([{
+      id: 10,
+      reply_text: '回复你好',
+      joined_author_profile_url: 'https://www.douyin.com/user/author-a',
+      joined_author_profile_key: 'author-a',
+      joined_work_url: 'https://www.douyin.com/video/7639733344284064741',
+      joined_work_id: '7639733344284064741',
+      joined_modal_id: '7639733344284064741',
+      joined_work_title: '主页结构作品',
+      joined_work_desc: '作品描述',
+      joined_work_type: 'video',
+      joined_author_name: '作者A',
+      actor_name: '评论人A',
+      actor_profile_url: 'https://www.douyin.com/user/commenter-a',
+      actor_profile_key: 'commenter-a',
+      comment_text: '你好',
+      event_time_text: '1小时前',
+      raw_comment_json: JSON.stringify({ comment: { comment: { cid: 'cid-10' } } }),
+    }]);
 
-  it('loadWorkCommentItemsFromFile 保留作品级元信息并兼容 cid 字段', () => {
-    const filePath = join(testDir, 'pending-with-cid.json');
-    writeFileSync(filePath, JSON.stringify([{
-      workKey: 'work-1',
-      work_url: 'https://www.douyin.com/video/123',
-      comments: [
-        { id: 1, cid: 'cid-1', reply_text: 'ok', actor_name: 'user1', comment_text: 'hello' },
-      ],
-    }]));
-
-    const loaded = loadWorkCommentItemsFromFile(filePath);
-    expect(loaded.items).toHaveLength(1);
-    expect(loaded.items[0].targetCommentId).toBe('cid-1');
-    expect(loaded.items[0].workMeta.work_url).toBe('https://www.douyin.com/video/123');
-  });
-
-  it('loadWorkCommentItemsFromFile 支持新主页结构，并保留 homepage_url 与评论人主页分离', () => {
-    const filePath = join(testDir, 'pending-homepage-works.json');
-    writeFileSync(filePath, JSON.stringify([{
-      id: 'author-a',
-      homepage_url: 'https://www.douyin.com/user/author-a',
-      works: [{
-        work_id: '7639733344284064741',
-        modal_id: '7639733344284064741',
-        work_key: '7639733344284064741',
-        work_url: 'https://www.douyin.com/video/7639733344284064741',
-        aweme_url: 'https://www.douyin.com/video/7639733344284064741',
-        work_title: '主页结构作品',
-        comments: [{
-          id: 10,
-          actor_name: '评论人A',
-          actor_profile_url: 'https://www.douyin.com/user/commenter-a',
-          comment_text: '你好',
-          reply_text: '回复你好',
-        }],
-      }],
-    }], null, 2));
-
-    const loaded = loadWorkCommentItemsFromFile(filePath);
-    expect(loaded.items).toHaveLength(1);
-    expect(loaded.items[0].homepageUrl).toBe('https://www.douyin.com/user/author-a');
-    expect(loaded.items[0].authorProfileUrl).toBe('https://www.douyin.com/user/author-a');
-    expect(loaded.items[0].actorProfileUrl).toBe('https://www.douyin.com/user/commenter-a');
-    expect(loaded.items[0].workId).toBe('7639733344284064741');
-    expect(loaded.items[0].workUrl).toBe('https://www.douyin.com/video/7639733344284064741');
-    expect(loaded.items[0].awemeUrl).toBe('https://www.douyin.com/video/7639733344284064741');
-    expect(loaded.items[0].workMeta.work_title).toBe('主页结构作品');
+    expect(items).toHaveLength(1);
+    expect(items[0].commentId).toBe(10);
+    expect(items[0].homepageUrl).toBe('https://www.douyin.com/user/author-a');
+    expect(items[0].authorProfileUrl).toBe('https://www.douyin.com/user/author-a');
+    expect(items[0].actorProfileUrl).toBe('https://www.douyin.com/user/commenter-a');
+    expect(items[0].workId).toBe('7639733344284064741');
+    expect(items[0].workUrl).toBe('https://www.douyin.com/video/7639733344284064741');
+    expect(items[0].targetCommentId).toBe('cid-10');
   });
 
   it('resolveWorkUrlFromItem 优先使用现有字段并回退到 workId/modalId', () => {
@@ -327,7 +249,7 @@ describe('comments:execute refactored logic', () => {
     const validated = validateWorkCommentItem({
       itemIndex: 0,
       commentId: 999,
-      replyText: 'json reply',
+      replyText: 'db reply',
       workId: '7639733344284064741',
       modalId: '7639733344284064741',
       actorName: 'fallback-user',
@@ -429,32 +351,6 @@ describe('comments:execute refactored logic', () => {
     expect(failed.error).toContain('work_id/modal_id 为空');
   });
 
-  it('updateExecuteJsonFile 优先按 itemIndex 回写原 JSON 条目，并允许结果 commentId 改成新 row.id', () => {
-    const filePath = join(testDir, 'pending-fallback-update.json');
-    const parsed = {
-      workflow_status_code: 'PREPARE_JSON_UPDATED',
-      works: [{
-        workKey: 'work-fallback',
-        comments: [
-          { id: 999, reply_text: 'reply one', actor_name: 'fallback-user', comment_text: 'fallback comment' },
-          { id: 1000, reply_text: '', actor_name: 'empty-user', comment_text: 'empty comment' },
-        ],
-      }],
-    };
-    writeFileSync(filePath, JSON.stringify(parsed, null, 2));
-
-    updateExecuteJsonFile(filePath, parsed, [
-      { itemIndex: 0, inputCommentId: 999, commentId: 10, ok: true, status: 'succeeded' },
-      { itemIndex: 1, inputCommentId: 1000, commentId: 11, ok: false, status: 'skipped_empty_reply' },
-    ]);
-
-    const updated = JSON.parse(readFileSync(filePath, 'utf8'));
-    expect(updated.works[0].comments[0].reply_status).toBe('succeeded');
-    expect(updated.works[0].comments[0].execute_status_code).toBe('EXECUTE_CONFIRMED');
-    expect(updated.works[0].comments[1].execute_status_code).toBe('EXECUTE_SKIPPED_EMPTY');
-    expect(updated.workflow_status_code).toBe('EXECUTE_JSON_PARTIAL');
-  });
-
   it('isDoneWithoutRetryResult 只把成功或已处理项视为完成，不把空回复跳过当完成', () => {
     expect(isDoneWithoutRetryResult({ ok: true, status: 'succeeded' })).toBe(true);
     expect(isDoneWithoutRetryResult({ ok: false, status: 'succeeded' })).toBe(true);
@@ -468,23 +364,8 @@ describe('comments:execute refactored logic', () => {
     const source = fs.readFileSync(resolve(__dirname, '../../src/cli/execute-comment-replies.mjs'), 'utf8');
     expect(source.includes('creator-micro/interactive/comment')).toBe(false);
     expect(source.includes('ensureCommentPageReady')).toBe(false);
-  });
-
-  // 3. EXECUTE_SKIPPED_EMPTY for empty reply_text
-  it('marks empty reply_text comments as EXECUTE_SKIPPED_EMPTY in JSON update', () => {
-    // Test the updateExecuteJsonFile logic directly by importing it
-    // Since the function is not exported, we test via the JSON file update path
-    const json = makeJsonFile([
-      { id: 1, reply_text: 'Reply 1', work_url: 'https://douyin.com/video/1', actor_name: 'user1', comment_text: 'test' },
-      { id: 2, reply_text: '', work_url: 'https://douyin.com/video/2', actor_name: 'user2', comment_text: 'test2' },
-    ]);
-    // The JSON update happens inside main(), which requires browser
-    // For now, verify the JSON was created correctly
-    const fs = require('fs');
-    const content = fs.readFileSync(json, 'utf8');
-    const parsed = JSON.parse(content);
-    expect(parsed.works[0].comments.length).toBe(2);
-    expect(parsed.works[0].comments[1].reply_text).toBe('');
+    expect(source.includes('export function loadWorkCommentItemsFromFile')).toBe(false);
+    expect(source.includes('export function updateExecuteJsonFile')).toBe(false);
   });
 
   // 4. Already succeeded → EXECUTE_ALREADY_CONFIRMED (not EXECUTE_FAILED)
@@ -492,8 +373,7 @@ describe('comments:execute refactored logic', () => {
     // This is tested via the validateWorkCommentItem logic:
     // commentId=3 has reply_status='succeeded' and reply_text='Already done'
     // validateWorkCommentItem should return { ok: false, status: 'succeeded' }
-    // and updateExecuteJsonFile should map it to EXECUTE_ALREADY_CONFIRMED
-    // Since validateWorkCommentItem is not exported, this is covered by browser integration
+    // validateWorkCommentItem should return { ok: false, status: 'succeeded' }
 
     // Verify the DB state is correct for this scenario
     const db = new Database(testDb);

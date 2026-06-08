@@ -112,7 +112,7 @@
 │                                                                   │
 └───────────────────────────────────────────────────────────────────┘
  ↓
-生成待回复评论 JSON / 生成待回访 JSON
+查询待回评摘要 / 创建或更新待回访 DB 任务
 ```
 
 #### DOM 降级路径 (runNotificationScanDomFallback)
@@ -160,7 +160,7 @@
 |---|---|---|---|
 | 评论了你的作品 / 视频 | `comment_on_my_work` | `comment` | API 路径直接 upsert work_comments；DOM 降级路径点击缩略图采集作品评论 |
 | 回复了你的评论 / 赞了你的评论 | `reply_to_my_comment` | `reply` | 归入回复分类，暂不后续处理 |
-| 赞了你的作品 / 视频 / 点赞了你的作品 | `like_received` | `like` | 入库记录，进入待回访 JSON |
+| 赞了你的作品 / 视频 / 点赞了你的作品 | `like_received` | `like` | 入库记录，进入待回访 DB 任务 |
 | 关注了你 / 回关了你 | `follow_received` | `follow` | 归入粉丝管理分类，暂不后续处理 |
 | 无法识别 | `unknown` | `unknown` | 打印日志 |
 
@@ -282,7 +282,7 @@ profile_resolution_status  status  scanned_at
 
 ### 2.1 评论回复内部流程
 
-`comments:execute` 默认从数据库查询待回评评论，先通过本地 `agent-server` 生成 `reply_text` 并写回 `work_comments`，再按作品分组执行“单作品单遍向下扫描”。JSON 中间文件仅作为兼容旧流程保留。
+`comments:execute` 只从数据库查询待回评评论，先通过本地 `agent-server` 生成 `reply_text` 并写回 `work_comments`，再按作品分组执行“单作品单遍向下扫描”。不再读取、写回或生成中间 JSON 文件。
 
 ```text
 work_comments
@@ -290,19 +290,15 @@ work_comments
    AND reply_text IS NULL/空
  ↓
 comments:execute（默认 DB + agent-server + 执行）
-  ├─ 无 --items-file:
- │  ├─ listPendingCommentsGroupedByHomepageAndWork(limit/days)
- │  └─ buildWorkCommentItemsFromDbRows()
- │
- ├─ 有 --items-file（兼容旧流程）:
- │  └─ 加载 JSON，提取全部评论（兼容 works[].comments[] / 顶层数组）
- │
- ├─ generateMissingReplies()
+  ├─ listPendingCommentsGroupedByHomepageAndWork(limit/days)
+  ├─ buildWorkCommentItemsFromDbRows()
+  │
+  ├─ generateMissingReplies()
  │  ├─ 已有 reply_text → 跳过生成
  │  ├─ 构造 ReplyContext（作品标题/描述 + 对方评论 + 作者/评论者）
  │  ├─ HttpAgentProvider.generateReply()
  │  │  └─ POST agent-server /generate-reply
- │  │     └─ Hermes 返回 {"reply":"回复内容"}
+  │  │     └─ Hermes/OpenClaw 返回 {"reply":"回复内容"}
  │  ├─ 成功 → saveReplyText(commentId, reply)
  │  └─ 失败 → markCommentBlocked(agent_generate_failed:reason)
  │
@@ -336,7 +332,7 @@ comments:execute（默认 DB + agent-server + 执行）
     │  │                                                               │
     │  │  planViewportPendingMatches()                                 │
     │  │  ├─ buildWorkReplyTarget()                                    │
-    │  │  │  目标评论优先使用 JSON / DB / raw_comment_json / comment_key │
+    │  │  │  目标评论优先使用 DB / raw_comment_json / comment_key       │
     │  │  ├─ comment/list 旁路补全 actor/comment/cid                   │
     │  │  └─ pickWorkCommentCandidate()                                │
     │  │     匹配优先级: cid → text+actor → text                       │
@@ -368,18 +364,14 @@ comments:execute（默认 DB + agent-server + 执行）
     │
     ├─ 剩余 pending → markCommentBlocked(single_pass_not_found)
     │
-    └─ 执行结果处理
-       ├─ DB 默认模式 → 不生成/写回中间 JSON
-       └─ JSON 兼容模式 → 回写 JSON 状态码
-          ├─ 全部成功或全部可跳过 → EXECUTE_JSON_DONE
-          └─ 存在真正失败 / 未确认 → EXECUTE_JSON_PARTIAL
+    └─ 执行结果处理 → 更新 work_comments / interaction_events，不写中间 JSON
 ```
 
 说明：
 
 - 主流程不再使用创作者评论管理页，也不再按 `commentIndex` 点回复。
 - Agent 只负责生成 `reply_text`；浏览器打开主页、点击作品、定位评论、填写和提交都由 CLI 执行。
-- 默认流程不需要 `interactions:scan --generate-reply-json` 产物，采集入库后运行 `comments:execute --days N --limit M`。
+- 默认流程不生成待回评文件，采集入库后运行 `comments:execute --days N --limit M`。
 - 同作品多条 pending 必须在同一个作品会话里处理，回复成功后不会主动 `Escape` 关闭作品 modal。
 - `comment/list` 只作为旁路数据源辅助确认 / 补全，不负责驱动逐条滚动查找。
 - 当前屏多条 pending 可同时命中时，必须当前屏处理完再滚动下一屏。
@@ -390,24 +382,17 @@ comments:execute（默认 DB + agent-server + 执行）
 |---|---|---|
 | `AGENT_REPLY_GENERATED` | 日志 / DB `reply_text` | agent-server 已生成回复并写回 DB |
 | `AGENT_REPLY_FAILED` | 日志 / DB `reply_reason` | agent-server 生成失败，当前评论阻断 |
-| `PREPARE_WAIT_REPLY_TEXT` | JSON / 评论字段 | 等待 agent-server 生成 `reply_text` |
-| `PREPARE_JSON_UPDATED` | JSON `workflow_status_code` | 准备完成，JSON 已回写 |
-| `PREPARE_READY` | `works[].comments[].prepare_status_code` | 已写入 `reply_text`，等待执行 |
-| `PREPARE_FAILED` | `works[].comments[].prepare_status_code` | 准备失败，查看 `prepare_error` |
-| `EXECUTE_JSON_DONE` | JSON `workflow_status_code` | 全部成功或全部可跳过（空回复/已回复/已发送） |
-| `EXECUTE_JSON_PARTIAL` | JSON `workflow_status_code` | 有失败或未确认 |
-| `EXECUTE_CONFIRMED` | `works[].comments[].execute_status_code` | 已确认回复成功，同时更新 interaction_events.status=replied |
-| `EXECUTE_SENT_UNVERIFIED` | `works[].comments[].execute_status_code` | 已发送但未确认 |
-| `EXECUTE_BLOCKED` | `works[].comments[].execute_status_code` | 定位/输入/发送失败 |
-| `EXECUTE_ALREADY_CONFIRMED` | `works[].comments[].execute_status_code` | DB 中已是 succeeded，本轮跳过重复执行 |
-| `EXECUTE_ALREADY_SENT_UNVERIFIED` | `works[].comments[].execute_status_code` | DB 中已是 sent_unverified，本轮跳过重复执行 |
-| `EXECUTE_SKIPPED_EMPTY` | `works[].comments[].execute_status_code` | `reply_text` 为空，跳过执行 |
-| `EXECUTE_VALIDATED` | `works[].comments[].execute_status_code` | 执行校验通过但未进入确认成功分支 |
-| `EXECUTE_FAILED` | `works[].comments[].execute_status_code` | 执行失败 |
+| `EXECUTE_CONFIRMED` | 日志 / DB | 已确认回复成功，同时更新 interaction_events.status=replied |
+| `EXECUTE_SENT_UNVERIFIED` | 日志 / DB `reply_status` | 已发送但未确认 |
+| `EXECUTE_BLOCKED` | 日志 / DB `reply_status` | 定位/输入/发送失败 |
+| `EXECUTE_ALREADY_CONFIRMED` | 日志 | DB 中已是 succeeded，本轮跳过重复执行 |
+| `EXECUTE_ALREADY_SENT_UNVERIFIED` | 日志 | DB 中已是 sent_unverified，本轮跳过重复执行 |
+| `EXECUTE_SKIPPED_EMPTY` | 日志 | `reply_text` 为空，跳过执行 |
+| `EXECUTE_FAILED` | 日志 / DB | 执行失败 |
 
-#### 待回复评论 JSON
+#### 目标评论定位来源
 
-采集完成后，主流程直接从 `work_comments` 查询 `reply_status = 'pending'` 且 `reply_text` 为空的评论并调用 agent-server。`writePendingReplyJson()` 仍可生成兼容旧流程的 JSON，字段优先沿用 `work_comments` 现有字段，不做扩表。
+采集完成后，主流程直接从 `work_comments` 查询 `reply_status = 'pending'` 的评论并调用 agent-server。
 
 执行阶段会优先从以下来源回填目标评论唯一标识：
 
@@ -423,38 +408,32 @@ raw_comment_json.comment.comment.cid
 
 ## 三、回访模块（`visit:run` / `return-visit:execute`）
 
-### 3.1 准备阶段（`return-visit:prepare`）
+### 3.1 准备阶段（扫描 / `return-visit:prepare` 辅助入口）
 
-当前准备阶段只生成最小待回访 JSON 以兼容旧命令，不再打开用户主页、不再采集主页作品列表、不再扩展巨大 JSON。
+当前准备阶段只创建或更新 `return_visit_tasks`，不打开用户主页、不采集主页作品列表、不读写 JSON 文件。推荐主流程由 `interactions:scan --prepare-visits` 完成；`return-visit:prepare` 仅作为从 `interaction_events` 补建任务的辅助入口。
 
 ```text
 加载数据源
-├─ --items-file → loadVisitItems → listReturnVisitTasksByIds
-│  从 JSON 中提取用户列表，按 task_id 匹配已有任务
-└─ 无文件 → createOrUpdateReturnVisitTasksFromEvents
-   从 interaction_events (status=new, event_type=like/comment)
-   筛选 relation=friend/mutual → identity_key 去重 → insert/enrich
-   跳过其他 relation 的通知
-   ↓
-listReturnVisitPrepareTasks
- ↓
-输出最小 JSON 文件:
-   data/pending-visits/pending-visit-comments-<timestamp>.json
-   每条记录包含 interactionId / id / task_id / targetUserId
-   / profileUrl / homepage_url / workId / interactionType
+interactions:scan --prepare-visits
+  ├─ 当前扫描事件按用户 identity_key 去重
+  ├─ 筛选 relation=friend/mutual
+  ├─ createOrUpdateReturnVisitTasksFromItems
+  └─ listReturnVisitScanTasks(days/maxCount) 输出摘要
+
+return-visit:prepare（辅助）
+  ├─ createOrUpdateReturnVisitTasksFromEvents(status)
+  └─ listReturnVisitPrepareTasks
 ```
 
-> 注意：新主流程不需要运行 `return-visit:prepare`。采集入库后，直接启动 `agent-server` 并运行 `visit:run` / `return-visit:execute`。
+> 注意：主流程不需要运行 `return-visit:prepare`。采集入库后，直接启动 `agent-server` 并运行 `visit:run` / `return-visit:execute`。
 
 ### 3.2 执行阶段（`return-visit:execute`）
 
 ```text
 加载任务
-├─ --items-file（兼容旧最小 JSON） → createOrUpdateReturnVisitTasksFromItems → listReturnVisitTasksByIds
-│  只同步 task/profile/workId 等最小字段；不要求 comment
-└─ 无文件 → listReturnVisitExecuteTasks
-   (状态: pending_visit, pending_execute, executing, failed_collect,
-    failed_generate_comment, failed_like, failed_comment; retry 次数限制)
+listReturnVisitExecuteTasks
+  (状态: pending_visit, pending_execute, executing, failed_collect,
+   failed_generate_comment, failed_like, failed_comment; retry 次数限制)
    ↓
 过滤脏任务 (getReturnVisitTaskExecutionIssue):
 ├─ 非可执行状态 → 跳过
@@ -503,7 +482,7 @@ listReturnVisitPrepareTasks
 │  │  ├─ buildCommentContext(task, resolvedWork)
 │  │  ├─ HttpAgentProvider.generateComment()
 │  │  │  └─ POST agent-server /generate-comment
-│  │  │     └─ Hermes 返回 {"comment":"评论内容"}
+│  │  │     └─ Hermes/OpenClaw 返回 {"comment":"评论内容"}
 │  │  └─ fail → failed_generate_comment
 │  │
 │  ├─ [5/5] postReturnVisitComment(page, comment, presentation):
@@ -523,9 +502,6 @@ listReturnVisitPrepareTasks
    ↓
    每任务间 waitBetweenUsersMs (默认 [8000, 20000]ms)
    每 restEveryTasksRange 个任务后休息 restDurationMs (默认 [60000, 180000]ms)
-   ↓
-   全部成功 + 有 --items-file → 删除兼容 JSON 文件
-   有失败 + 有 --items-file → 保留兼容 JSON 文件
 ```
 
 ### 3.3 任务状态枚举
@@ -533,13 +509,13 @@ listReturnVisitPrepareTasks
 ```text
 pending_visit → executing → done
 
-兼容旧状态: collecting_content / content_collected / comment_generated / pending_execute
+过渡状态: collecting_content / content_collected / comment_generated / pending_execute
 
 跳转路径: skipped_no_work / skipped_private / skipped_no_suitable_work
 失败路径: failed_collect / failed_generate_comment / failed_like / failed_comment / failed
 ```
 
-> 注意：新流程在执行阶段实时调用 agent-server 生成评论，`comment_generated` / `pending_execute` 仅作为旧流程兼容状态保留。
+> 注意：新流程在执行阶段实时调用 agent-server 生成评论，`comment_generated` / `pending_execute` 只作为状态机过渡状态保留。
 
 ### 3.4 状态码（回访阶段）
 
@@ -552,13 +528,13 @@ pending_visit → executing → done
 ### A. 模块边界与约束
 
 ```text
-采集模块 (interactions:scan) — 通知面板唯一入口，负责入库；生成待处理范围时必须显式输入 --days 与 --max-count
+采集模块 (interactions:scan) — 通知面板唯一入口，负责入库；查询待处理范围时必须显式输入 --days 与 --max-count；不生成中间 JSON
 agent-server — 只负责调用 Hermes/OpenClaw 生成 comment/reply 文本，可通过 AGENT_PROVIDER=hermes|openclaw 切换
 回评模块 (comments:execute) — 默认从 DB 查询待回评，必须显式输入 --days 与 --limit/--max-count，调用 agent-server 生成 reply_text，再由 CLI 执行浏览器动作
 回访模块 (visit:run / return-visit:execute) — 打开主页监听作品列表 API，匹配 workId，进入作品页后调用 agent-server 生成 comment，再由 CLI 填写提交
 
-actions:pending 不属于主流程；第一步已拿到按作品分组的评论 JSON。
-return-visit:prepare 不属于评论回复默认流程。
+actions:pending 不属于主流程；第一步已把评论和回访任务写入 DB。
+return-visit:prepare 不属于推荐主流程。
 只有用户明确要求回访时，才在评论回复结束后单独执行回访流程。
 ```
 
@@ -569,10 +545,10 @@ return-visit:prepare 不属于评论回复默认流程。
 评论回复:   interactions:scan --days N --max-count M
            → npm run agent-server
            → comments:execute --days N --limit M
-明确回访:   interactions:scan --days N --max-count M --generate-visit-json
+明确回访:   interactions:scan --days N --max-count M --prepare-visits
            → npm run agent-server
            → visit:run --execute
-评论+回访:  interactions:scan --days N --max-count M --generate-reply-json --generate-visit-json
+评论+回访:  interactions:scan --days N --max-count M
            → npm run agent-server
            → comments:execute --days N --limit M
            → visit:run --execute
@@ -586,8 +562,8 @@ return-visit:prepare 不属于评论回复默认流程。
 2. 新互动采集入口以通知中心为准，主路径使用 notice API（拦截 /aweme/v1/web/notice/），DOM 解析为降级路径
 3. 采集业务数据通过 `upsertNotificationEvent()` 写入 `interaction_events`
 4. 评论回复由 `comments:execute --days N --limit M` 调用 agent-server 写入 `reply_text` 到 `work_comments` 并执行
-5. 回访任务由 `interactions:scan --generate-visit-json` / `return-visit:prepare` 创建或更新，默认执行入口是 `visit:run`
-6. `return-visit:prepare` 仅保留最小 JSON 兼容能力，默认读取 `new`，可通过 `--event-status` 覆盖
+5. 回访任务由 `interactions:scan --prepare-visits` 或 `return-visit:prepare` 创建/更新，默认执行入口是 `visit:run`
+6. `return-visit:prepare` 仅从 DB 事件创建/查询任务，默认读取 `new`，可通过 `--event-status` 覆盖
 7. 日志里 `newInBatch` 不是"新入库数量"，是"本次扫描内未见过且通过过滤"
 8. `seenItemKeys` 是本次扫描级别去重，不是每轮去重
 
@@ -603,7 +579,7 @@ docs/COMMANDS.md                       — 全部命令参数详情
 docs/todo_plan.md（本文件）              — 开发文档、流程图、架构约束
 ```
 
-需注意避免的旧说明：采集产物用于回访、默认完整流程必须先 return-visit:prepare。
+需注意避免的旧说明：采集产物是 JSON 文件、默认完整流程必须先 return-visit:prepare、Agent 需要编辑 JSON。
 
 ### D. 字段映射
 

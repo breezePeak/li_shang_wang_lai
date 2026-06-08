@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, readFileSync, rmSync, unlinkSync } from 'fs';
+import { existsSync, rmSync } from 'fs';
 import { resolve } from 'path';
 import { getDb, resetDb } from '../../src/db/database.mjs';
 import { runMigrations } from '../../src/db/migrations.mjs';
@@ -8,21 +8,13 @@ import { upsertWorkContext } from '../../src/db/work-repository.mjs';
 import {
   buildIdentityKey,
   buildTaskId,
-  listReturnVisitScanJsonTasks,
+  listReturnVisitScanTasks,
   RETURN_VISIT_STATUS,
   updateReturnVisitTask,
 } from '../../src/services/return-visit-task-service.mjs';
-import { writePendingReplyJson, writePendingVisitJson } from '../../src/cli/scan-interactions.mjs';
+import { summarizePendingReplies, preparePendingVisitTasks } from '../../src/cli/scan-interactions.mjs';
 
 const TEST_DB = resolve('data', 'test-scan-pending-visit.db');
-
-function readJson(filePath) {
-  return JSON.parse(readFileSync(filePath, 'utf8'));
-}
-
-function cleanupJson(filePath) {
-  if (filePath && existsSync(filePath)) unlinkSync(filePath);
-}
 
 function makeEvent(overrides = {}) {
   return {
@@ -42,7 +34,7 @@ function taskIdFor(userId, userProfileUrl, userName) {
   return buildTaskId(buildIdentityKey({ userId, userProfileUrl, userName }));
 }
 
-describe('writePendingReplyJson', () => {
+describe('summarizePendingReplies', () => {
   beforeEach(() => {
     if (existsSync(TEST_DB)) rmSync(TEST_DB, { force: true });
     resetDb();
@@ -56,7 +48,7 @@ describe('writePendingReplyJson', () => {
     if (existsSync(TEST_DB)) rmSync(TEST_DB, { force: true });
   });
 
-  it('按主页 -> 作品 -> 评论输出待回评 JSON，并过滤缺少 author_profile_url 的作品', () => {
+  it('按主页和作品统计待回评 DB 数据，并过滤缺少 author_profile_url 的作品', () => {
     upsertWorkContext({
       workId: 'work-recent',
       modalId: 'work-recent',
@@ -156,7 +148,7 @@ describe('writePendingReplyJson', () => {
       actorName: '缺主页评论',
       actorProfileUrl: 'https://www.douyin.com/user/missing-homepage-comment',
       actorProfileKey: 'missing-homepage-comment',
-      commentText: '不应该进 JSON',
+      commentText: '不应该进入待回评摘要',
       eventTimeText: '刚刚',
       commentKey: 'missing-homepage-key',
       sourceEventId: 5,
@@ -167,45 +159,19 @@ describe('writePendingReplyJson', () => {
     const oldSeenAt = new Date(Date.now() - 3 * 86400000).toISOString();
     db.prepare('UPDATE work_comments SET last_seen_at = ? WHERE id = ?').run(oldSeenAt, old.id);
 
-    const file = writePendingReplyJson({ days: 1, maxCount: 10 });
-    const users = readJson(file.filePath);
+    const summary = summarizePendingReplies({ days: 1, maxCount: 10 });
 
-    expect(users).toHaveLength(1);
-    expect(users[0].id).toBe('author-a');
-    expect(users[0].author_name).toBe('作者A');
-    expect(users[0].homepage_url).toBe('https://www.douyin.com/user/author-a');
-    expect(users[0].works).toHaveLength(2);
-    expect(users[0].works[0].work_id).toBe('work-recent');
-    expect(users[0].works[0].work_url).toBe('https://www.douyin.com/jingxuan?modal_id=work-recent');
-    expect(users[0].works[0].aweme_url).toBe('https://www.douyin.com/jingxuan?modal_id=work-recent');
-    expect(users[0].works[0].work_title).toBe('最近作品一');
-    expect(users[0].works[0].work_type).toBe('video');
-    expect(users[0].works[0].thumbnail_key).toBe('thumb-recent');
-    expect(users[0].works[0].thumbnail_src).toBe('https://p3.douyinpic.com/thumb-recent.jpeg');
-    expect(users[0].works[0].author_name).toBe('作者A');
-    expect(users[0].works[0].author_profile_url).toBe('https://www.douyin.com/user/author-a');
-    expect(users[0].works[0].author_profile_key).toBe('author-a');
-    expect(users[0].works[0].published_at).toBe('2026-06-01T10:00:00.000Z');
-    expect(users[0].works[0].comments).toHaveLength(2);
-    expect(users[0].works[0].comments[0].target_comment_id).toBe('cid-recent-1');
-    expect(users[0].works[0].comments[0].targetCommentId).toBe('cid-recent-1');
-    expect(users[0].works[0].comments[0].cid).toBe('cid-recent-1');
-    expect(users[0].works[1].work_id).toBe('work-recent-2');
-    expect(users[0].works[1].work_title).toBe('最近作品二');
-    expect(users[0].works[1].comments).toHaveLength(1);
-    expect(users[0].works[0].comments[0].actor_name).toBe('最近评论');
-    expect(file.homepageCount).toBe(1);
-    expect(file.workCount).toBe(2);
-    expect(file.totalComments).toBe(3);
-    expect(file.skippedMissingHomepageWorkCount).toBe(1);
-
-    cleanupJson(file.filePath);
+    expect(summary.homepageCount).toBe(1);
+    expect(summary.workCount).toBe(2);
+    expect(summary.totalComments).toBe(3);
+    expect(summary.skippedMissingHomepageWorkCount).toBe(1);
+    expect(summary.nextStep).toContain('comments:execute');
     expect(recent.action).toBe('inserted');
     expect(old.action).toBe('inserted');
   });
 });
 
-describe('writePendingVisitJson', () => {
+describe('preparePendingVisitTasks', () => {
   beforeEach(() => {
     if (existsSync(TEST_DB)) rmSync(TEST_DB, { force: true });
     resetDb();
@@ -220,15 +186,14 @@ describe('writePendingVisitJson', () => {
   });
 
   it('skips duplicate and ambiguous events, but keeps inserted and enriched', () => {
-    const file = writePendingVisitJson([
+    const result = preparePendingVisitTasks([
       makeEvent({ actorName: '重复好友', actorProfileKey: 'dup-user', actorProfileUrl: 'https://www.douyin.com/user/dup-user', relation: 'friend', dbAction: 'duplicate' }),
       makeEvent({ actorName: '新增好友', actorProfileKey: 'insert-user', actorProfileUrl: 'https://www.douyin.com/user/insert-user', relation: 'friend', dbAction: 'inserted', eventId: 101 }),
       makeEvent({ actorName: '补全互关', actorProfileKey: 'enrich-user', actorProfileUrl: 'https://www.douyin.com/user/enrich-user', relation: 'mutual', dbAction: 'enriched', eventId: 102 }),
       makeEvent({ actorName: '歧义用户', actorProfileKey: 'amb-user', actorProfileUrl: 'https://www.douyin.com/user/amb-user', relation: 'friend', dbAction: 'ambiguous' }),
     ], { maxCount: 10 });
 
-    const users = readJson(file.filePath);
-    expect(users).toEqual([
+    expect(result.tasks.map(task => ({ id: task.taskId, homepage_url: task.userProfileUrl }))).toEqual([
       {
         id: taskIdFor('insert-user', 'https://www.douyin.com/user/insert-user', '新增好友'),
         homepage_url: 'https://www.douyin.com/user/insert-user',
@@ -238,12 +203,10 @@ describe('writePendingVisitJson', () => {
         homepage_url: 'https://www.douyin.com/user/enrich-user',
       },
     ]);
-
-    cleanupJson(file.filePath);
   });
 
-  it('merges same-identity sources into one json item and one return_visit_task', () => {
-    const file = writePendingVisitJson([
+  it('merges same-identity sources into one return_visit_task', () => {
+    const result = preparePendingVisitTasks([
       makeEvent({
         eventId: 201,
         eventType: 'like',
@@ -266,9 +229,8 @@ describe('writePendingVisitJson', () => {
       }),
     ], { maxCount: 10 });
 
-    const users = readJson(file.filePath);
-    expect(users).toHaveLength(1);
-    expect(users[0]).toEqual({
+    expect(result.tasks).toHaveLength(1);
+    expect({ id: result.tasks[0].taskId, homepage_url: result.tasks[0].userProfileUrl }).toEqual({
       id: taskIdFor('same-user', 'https://www.douyin.com/user/same-user', '同一用户'),
       homepage_url: 'https://www.douyin.com/user/same-user',
     });
@@ -278,11 +240,9 @@ describe('writePendingVisitJson', () => {
     expect(JSON.parse(row.source_types_json)).toEqual(['like', 'comment']);
     expect(JSON.parse(row.source_event_ids_json)).toEqual([201, 202]);
     expect(row.source_type).toBe('like');
-
-    cleanupJson(file.filePath);
   });
 
-  it('uses db task status instead of groupedItems when building pending visits json', () => {
+  it('uses db task status instead of current grouped items when listing pending visits', () => {
     const event = makeEvent({
       actorName: '状态已推进',
       actorProfileKey: 'status-user',
@@ -292,18 +252,16 @@ describe('writePendingVisitJson', () => {
       eventId: 401,
     });
 
-    const first = writePendingVisitJson([event], { maxCount: 10 });
-    cleanupJson(first.filePath);
+    preparePendingVisitTasks([event], { maxCount: 10 });
 
     const taskId = taskIdFor('status-user', 'https://www.douyin.com/user/status-user', '状态已推进');
     updateReturnVisitTask(taskId, { status: RETURN_VISIT_STATUS.CONTENT_COLLECTED });
 
-    const second = writePendingVisitJson([
+    const second = preparePendingVisitTasks([
       { ...event, dbAction: 'enriched', eventId: 402 },
     ], { maxCount: 10 });
 
-    expect(readJson(second.filePath)).toEqual([]);
-    cleanupJson(second.filePath);
+    expect(second.tasks).toEqual([]);
   });
 
   it('filters out pending_execute done and skipped tasks even when this round is enriched', () => {
@@ -322,12 +280,11 @@ describe('writePendingVisitJson', () => {
         dbAction: 'inserted',
         eventId: 500 + index,
       });
-      const created = writePendingVisitJson([event], { maxCount: 10 });
-      cleanupJson(created.filePath);
+      preparePendingVisitTasks([event], { maxCount: 10 });
       updateReturnVisitTask(taskIdFor(userId, event.actorProfileUrl, event.actorName), { status });
     }
 
-    const second = writePendingVisitJson(cases.map((status, index) => makeEvent({
+    const second = preparePendingVisitTasks(cases.map((status, index) => makeEvent({
       actorName: `用户${index}`,
       actorProfileKey: `status-filter-${index}`,
       actorProfileUrl: `https://www.douyin.com/user/status-filter-${index}`,
@@ -337,8 +294,7 @@ describe('writePendingVisitJson', () => {
       eventType: 'comment',
     })), { maxCount: 10 });
 
-    expect(readJson(second.filePath)).toEqual([]);
-    cleanupJson(second.filePath);
+    expect(second.tasks).toEqual([]);
   });
 
   it('keeps a previously old task when this round refreshes updated_at', () => {
@@ -355,8 +311,7 @@ describe('writePendingVisitJson', () => {
       eventId: 702,
     });
 
-    const initial = writePendingVisitJson([recentEvent, oldEvent], { maxCount: 10 });
-    cleanupJson(initial.filePath);
+    preparePendingVisitTasks([recentEvent, oldEvent], { maxCount: 10 });
 
     const oldUpdatedAt = new Date(Date.now() - 3 * 86400000).toISOString();
     getDb().prepare('UPDATE return_visit_tasks SET updated_at = ? WHERE task_id = ?').run(
@@ -364,12 +319,12 @@ describe('writePendingVisitJson', () => {
       taskIdFor('old-visit', 'https://www.douyin.com/user/old-visit', '旧互动'),
     );
 
-    const file = writePendingVisitJson([
+    const result = preparePendingVisitTasks([
       { ...recentEvent, dbAction: 'enriched', eventId: 703 },
       { ...oldEvent, dbAction: 'enriched', eventId: 704 },
     ], { days: 1, maxCount: 10 });
 
-    expect(readJson(file.filePath)).toEqual([
+    expect(result.tasks.map(task => ({ id: task.taskId, homepage_url: task.userProfileUrl }))).toEqual([
       {
         id: taskIdFor('recent-visit', 'https://www.douyin.com/user/recent-visit', '最近互动'),
         homepage_url: 'https://www.douyin.com/user/recent-visit',
@@ -379,19 +334,17 @@ describe('writePendingVisitJson', () => {
         homepage_url: 'https://www.douyin.com/user/old-visit',
       },
     ]);
-
-    cleanupJson(file.filePath);
   });
 
-  it('limits final users by maxCount from db query results', () => {
+  it('limits final tasks by maxCount from db query results', () => {
     const events = [
       makeEvent({ actorName: '用户A', actorProfileKey: 'user-a', actorProfileUrl: 'https://www.douyin.com/user/user-a', eventId: 801 }),
       makeEvent({ actorName: '用户B', actorProfileKey: 'user-b', actorProfileUrl: 'https://www.douyin.com/user/user-b', eventId: 802 }),
       makeEvent({ actorName: '用户C', actorProfileKey: 'user-c', actorProfileUrl: 'https://www.douyin.com/user/user-c', eventId: 803 }),
     ];
 
-    const file = writePendingVisitJson(events, { maxCount: 2 });
-    const users = readJson(file.filePath);
+    const result = preparePendingVisitTasks(events, { maxCount: 2 });
+    const users = result.tasks.map(task => ({ id: task.taskId, homepage_url: task.userProfileUrl }));
 
     expect(users).toHaveLength(2);
     expect(users).toEqual([
@@ -404,8 +357,6 @@ describe('writePendingVisitJson', () => {
         homepage_url: 'https://www.douyin.com/user/user-b',
       },
     ]);
-
-    cleanupJson(file.filePath);
   });
 
   it('counts no-profile, relation-unknown, duplicate-db-action, seen-identity, and db filters in logs', () => {
@@ -414,11 +365,10 @@ describe('writePendingVisitJson', () => {
     console.error = (message) => logs.push(String(message));
 
     try {
-      const setup = writePendingVisitJson([
+      preparePendingVisitTasks([
         makeEvent({ actorName: 'DB状态过滤', actorProfileKey: 'db-status', actorProfileUrl: 'https://www.douyin.com/user/db-status', dbAction: 'inserted', eventId: 901 }),
         makeEvent({ actorName: 'DB时间过滤', actorProfileKey: 'db-days', actorProfileUrl: 'https://www.douyin.com/user/db-days', dbAction: 'inserted', eventId: 902 }),
       ], { maxCount: 10 });
-      cleanupJson(setup.filePath);
 
       updateReturnVisitTask(taskIdFor('db-status', 'https://www.douyin.com/user/db-status', 'DB状态过滤'), {
         status: RETURN_VISIT_STATUS.CONTENT_COLLECTED,
@@ -429,7 +379,7 @@ describe('writePendingVisitJson', () => {
         taskIdFor('db-days', 'https://www.douyin.com/user/db-days', 'DB时间过滤'),
       );
 
-      const file = writePendingVisitJson([
+      preparePendingVisitTasks([
         makeEvent({ actorName: '重复通知', actorProfileKey: 'dup-log', actorProfileUrl: 'https://www.douyin.com/user/dup-log', dbAction: 'duplicate' }),
         makeEvent({ actorName: '失败通知', actorProfileKey: 'failed-log', actorProfileUrl: 'https://www.douyin.com/user/failed-log', dbAction: 'failed' }),
         makeEvent({ actorName: '无主页', actorProfileKey: 'no-url', actorProfileUrl: '', dbAction: 'inserted' }),
@@ -439,8 +389,6 @@ describe('writePendingVisitJson', () => {
         makeEvent({ actorName: 'DB状态过滤', actorProfileKey: 'db-status', actorProfileUrl: 'https://www.douyin.com/user/db-status', dbAction: 'enriched', eventId: 905 }),
         makeEvent({ actorName: 'DB时间过滤', actorProfileKey: 'db-days', actorProfileUrl: 'https://www.douyin.com/user/db-days', dbAction: 'enriched', eventId: 906 }),
       ], { maxCount: 10, days: 1 });
-
-      cleanupJson(file.filePath);
     } finally {
       console.error = originalError;
     }
@@ -461,7 +409,7 @@ describe('writePendingVisitJson', () => {
   });
 });
 
-describe('listReturnVisitScanJsonTasks', () => {
+describe('listReturnVisitScanTasks', () => {
   beforeEach(() => {
     if (existsSync(TEST_DB)) rmSync(TEST_DB, { force: true });
     resetDb();
@@ -482,13 +430,12 @@ describe('listReturnVisitScanJsonTasks', () => {
       actorProfileUrl: 'https://www.douyin.com/user/window-user',
       eventId: 1001,
     });
-    const file = writePendingVisitJson([event], { maxCount: 10 });
-    cleanupJson(file.filePath);
+    preparePendingVisitTasks([event], { maxCount: 10 });
 
     const oldUpdatedAt = new Date(Date.now() - 3 * 86400000).toISOString();
     getDb().prepare('UPDATE return_visit_tasks SET updated_at = ?').run(oldUpdatedAt);
 
-    const result = listReturnVisitScanJsonTasks({ days: 1, limit: 10 });
+    const result = listReturnVisitScanTasks({ days: 1, limit: 10 });
     expect(result.candidateCount).toBe(1);
     expect(result.filteredStatusCount).toBe(0);
     expect(result.filteredDaysCount).toBe(1);
@@ -517,7 +464,7 @@ describe('listReturnVisitScanJsonTasks', () => {
       RETURN_VISIT_STATUS.PENDING_VISIT, now, now);
 
     // 空 events 也应该能查到 DB 中已有任务
-    const result = listReturnVisitScanJsonTasks({ limit: 10 });
+    const result = listReturnVisitScanTasks({ limit: 10 });
     expect(result.candidateCount).toBe(1);
     expect(result.filteredStatusCount).toBe(0);
     expect(result.filteredDaysCount).toBe(0);
@@ -545,7 +492,7 @@ describe('listReturnVisitScanJsonTasks', () => {
       'https://www.douyin.com/user/fc-user',
       RETURN_VISIT_STATUS.FAILED_COLLECT, now, now);
 
-    const result = listReturnVisitScanJsonTasks({ limit: 10 });
+    const result = listReturnVisitScanTasks({ limit: 10 });
     expect(result.tasks).toHaveLength(1);
     expect(result.tasks[0].taskId).toBe(taskId);
   });
@@ -587,7 +534,7 @@ describe('listReturnVisitScanJsonTasks', () => {
       idx++;
     }
 
-    const result = listReturnVisitScanJsonTasks({ limit: 100 });
+    const result = listReturnVisitScanTasks({ limit: 100 });
     expect(result.tasks).toHaveLength(0);
     expect(result.filteredStatusCount).toBe(undesiredStatuses.length);
   });
@@ -631,7 +578,7 @@ describe('listReturnVisitScanJsonTasks', () => {
       'https://www.douyin.com/user/old-user',
       RETURN_VISIT_STATUS.PENDING_VISIT, oldDate, oldDate);
 
-    const result = listReturnVisitScanJsonTasks({ days: 1, limit: 10 });
+    const result = listReturnVisitScanTasks({ days: 1, limit: 10 });
     expect(result.tasks).toHaveLength(1);
     expect(result.tasks[0].taskId).toBe(recentTaskId);
     expect(result.filteredDaysCount).toBe(1);
@@ -659,7 +606,7 @@ describe('listReturnVisitScanJsonTasks', () => {
         RETURN_VISIT_STATUS.PENDING_VISIT, now, now);
     }
 
-    const result = listReturnVisitScanJsonTasks({ limit: 3 });
+    const result = listReturnVisitScanTasks({ limit: 3 });
     expect(result.tasks).toHaveLength(3);
     expect(result.candidateCount).toBe(5);
   });

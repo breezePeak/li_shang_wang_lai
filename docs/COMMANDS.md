@@ -6,7 +6,7 @@
 
 | 分类 | 命令 |
 |---|---|
-| 主流程 | `auth`、`db:init`、`interactions:scan`、`comments:execute`、`return-visit:prepare`、`return-visit:execute` |
+| 主流程 | `auth`、`db:init`、`interactions:scan`、`agent-server`、`comments:execute`、`visit:run` / `return-visit:execute` |
 | 只读/辅助入口 | `actions:pending`、`comments:classify`、`return-visit:comment` |
 | 调试/开发入口 | `notify:inspect`、`interactions:inspect`、`debug:like-dom`、`debug:like-state`、`debug:open`、`dev:inspect-page`、`server` |
 
@@ -20,24 +20,23 @@
 
 ## 主流程
 
-评论回复（Agent 填写 reply_text 后直接执行）：
+评论回复（DB 查询 + agent-server 生成 + CLI 执行）：
 
 ```bash
-npm run interactions:scan -- --type comment --generate-reply-json
-# Agent 根据评论内容、作品上下文和安全规则，生成并填写 reply_text
-npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
+npm run interactions:scan -- --type comment --days 7 --max-count 50 --prepare-replies
+npm run agent-server
+npm run comments:execute -- --days 7 --limit 50
 ```
 
-回访（默认 7 天 / 100 条）：
+回访（DB 任务 + agent-server 生成 + CLI 执行）：
 
 ```bash
-npm run interactions:scan -- --generate-visit-json
-npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json
-# Agent 编辑 pending-visit-comments-xxx.json，填写 comment 字段
-npm run return-visit:execute -- --execute --items-file data/pending-visits/pending-visit-comments-xxx.json
+npm run interactions:scan -- --days 7 --max-count 50 --prepare-visits
+npm run agent-server
+npm run visit:run -- --execute
 ```
 
-评论回复结束后只有在用户明确要求回访时，才进入回访流程。回访准备从数据库读取待回访用户，完全按提供的回访 JSON 处理。
+评论回复结束后只有在用户明确要求回访时，才进入回访流程。回评和回访都不读写中间 JSON 文件。
 
 ## 1. auth
 
@@ -67,25 +66,25 @@ npm run db:init
 
 ```bash
 npm run interactions:scan -- --display-only
-npm run interactions:scan -- --type comment --generate-reply-json
-npm run interactions:scan -- --generate-visit-json
+npm run interactions:scan -- --type comment --days 7 --max-count 50 --prepare-replies
+npm run interactions:scan -- --days 7 --max-count 50 --prepare-visits
 ```
 
 源文件：`src/cli/scan-interactions.mjs`
 
 打开抖音通知中心，通过通知面板逐条扫描互动通知，点击作品缩略图采集评论，写入本地数据库。`runCommentScan()` 仅保留用于回复执行定位，不再用于新事件采集。
 
-用户意图由 Agent 判断，项目 CLI 不解析自然语言。Agent 应根据用户是否只看互动、是否明确回评、是否明确回访，选择 `--display-only`、`--generate-reply-json` 或 `--generate-visit-json`。
+用户意图由 Agent 判断，项目 CLI 不解析自然语言。Agent 应根据用户是否只看互动、是否明确回评、是否明确回访，选择 `--display-only`、`--prepare-replies` 或 `--prepare-visits`。不带 `--display-only` 且不显式指定 prepare 标志时，默认同时准备回评摘要和回访任务。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `--type` | `all` | `all` / `comment` / `like` / `reply` / `follow` |
-| `--days` | `7` | 限定最近 N 天通知，传 `0` 取消限制 |
-| `--max-count` | `100` | 最大采集通知条数 |
-| `--display-only` | `false` | 只采集和展示互动数据，不生成待回评 / 待回访 JSON |
-| `--generate-reply-json` | 兼容默认 | 生成 `data/pending-replies/pending-comments-xxx.json` |
-| `--generate-visit-json` | `false` | 生成 `data/pending-visits/pending-visits-xxx.json` |
-| `--collect-types` | `like,comment,reply,follow` | 生成待回访 JSON 时保留的来源类型 |
+| `--days` | 必填（非 display-only） | 限定最近 N 天通知，传 `0` 取消限制 |
+| `--max-count` | 必填（非 display-only） | 最大采集通知条数 |
+| `--display-only` | `false` | 只采集和展示互动数据，不查询待回评 / 准备待回访任务 |
+| `--prepare-replies` | 默认准备 | 查询待回评 DB 摘要，不生成文件 |
+| `--prepare-visits` | 默认准备 | 创建/更新待回访 DB 任务，不生成文件 |
+| `--collect-types` | `like,comment,reply,follow` | 准备待回访任务时保留的来源类型 |
 | `--json` | `false` | JSON 输出 |
 | `--debug` | `true` | 调试日志 |
 | `--keep-open` | `false` | 结束后保持浏览器打开 |
@@ -105,7 +104,7 @@ npm run actions:pending -- --type comment --json
 
 源文件：`src/cli/report-pending.mjs`
 
-只读辅助入口，用于查看当前待处理事件、最近动作状态、blocked 项和 unstable 项。评论回复推荐主流程不使用该命令；第一步扫描已经输出按作品分组的待回复评论 JSON。
+只读辅助入口，用于查看当前待处理事件、最近动作状态、blocked 项和 unstable 项。评论回复推荐主流程不使用该命令；第一步扫描已经把评论写入 `work_comments`。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
@@ -115,12 +114,13 @@ npm run actions:pending -- --type comment --json
 ## 5. comments:execute
 
 ```bash
-npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
+npm run comments:execute -- --days 7 --limit 50
+npm run comments:execute -- --days 7 --limit 50 --agent-only
 ```
 
 源文件：`src/cli/execute-comment-replies.mjs`
 
-读取同一个待回复评论 JSON，按作品分组打开对应抖音作品页，在作品评论区中查找目标评论。`reply_text` 由 Agent 根据评论内容、作品上下文和安全规则生成并填写。执行时优先结合 `cid/comment_id` 和 `/aweme/v1/web/comment/list/` 辅助确认目标评论，再在评论区 DOM 中唯一定位后点击“回复”、填写 `reply_text`、发送并校验；成功后更新 `work_comments.reply_status` 和 `interaction_events.status`，并回写 JSON 状态码。
+从数据库查询待回评评论，先调用本地 `agent-server` 生成缺失的 `reply_text` 并写回 `work_comments`，再按作品分组打开对应抖音作品页，在作品评论区中查找目标评论。执行时优先结合 `cid/comment_id` 和 `/aweme/v1/web/comment/list/` 辅助确认目标评论，再在评论区 DOM 中唯一定位后点击“回复”、填写、发送并校验；成功后更新 `work_comments.reply_status` 和 `interaction_events.status`。
 
 命令默认真实执行，不再需要 `--execute`。
 
@@ -128,7 +128,9 @@ reply_text 为空的评论会打印日志跳过。已经 succeeded / sent_unveri
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--items-file` | 必填 | `interactions:scan` 生成并已由 Agent 填写 reply_text 的 JSON |
+| `--days` | 必填 | 查询最近 N 天待回评评论 |
+| `--limit` / `--max-count` | 必填 | 最大处理评论数 |
+| `--agent-only` | `false` | 只生成并写回 `reply_text`，不打开浏览器执行 |
 | `--json` | `false` | JSON 输出 |
 
 安全规则：
@@ -142,16 +144,15 @@ reply_text 为空的评论会打印日志跳过。已经 succeeded / sent_unveri
 ## 6. return-visit:prepare
 
 ```bash
-npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json --json
+npm run return-visit:prepare -- --event-status new --json
 ```
 
 源文件：`src/cli/execute-return-visit-prepare.mjs`
 
-读取 `interactions:scan -- --generate-visit-json` 生成的待回访 JSON 中的 id，从数据库加载对应 `return_visit_tasks`（任务创建已在扫描阶段完成）。逐个打开用户主页，监听 `/aweme/v1/web/aweme/post/`，筛选第一条非置顶作品并记录作品元数据。该命令**不会生成评论**，也不会点赞或发表评论。评论由 Agent 直接填写 `pending-visit-comments-xxx.json` 的 `comment` 字段，或通过 `return-visit:comment` 辅助入口写入。
+辅助入口。只从数据库 `interaction_events` 创建/更新 `return_visit_tasks` 并列出待准备任务，不打开主页，不采集作品，不生成评论，不读写 JSON 文件。默认主流程使用 `interactions:scan --prepare-visits` 后直接运行 `visit:run`。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--items-file` | `''` | 待回访 JSON 文件路径，推荐主流程使用 |
 | `--event-status` | 配置 `returnVisit.eventSourceStatus` 或 `new` | 用于创建任务的事件状态 |
 | `--keep-open` | `false` | 复用并保留浏览器 |
 | `--headless` | `false` | 无头运行 |
@@ -166,32 +167,31 @@ npm run return-visit:comment -- --task-id <taskId> --comment "<评论内容>" --
 
 源文件：`src/cli/set-return-visit-comment.mjs`
 
-**可选单任务辅助入口，不属于推荐主流程。** 推荐主流程是 Agent 直接编辑 `pending-visit-comments-xxx.json` 的 `comment` 字段，然后 `return-visit:execute --execute --items-file ...` 执行。
+**可选单任务辅助入口，不属于推荐主流程。** 推荐主流程由 `visit:run` 在执行阶段实时调用 `agent-server` 生成回访评论。
 
 本命令用于单条写入：将生成的回访评论写入指定任务，校验评论是否符合小猿人格规范，校验通过后任务状态变为 `pending_execute`。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--task-id` | `''` | 必填。`return-visit:prepare` 输出的任务 ID |
+| `--task-id` | `''` | 必填。`return_visit_tasks.task_id` |
 | `--comment` | `''` | 必填。回访评论内容，需通过小猿人格校验 |
 | `--json` | `false` | JSON 输出 |
 
 ## 7. return-visit:execute
 
 ```bash
-npm run return-visit:execute -- --execute --items-file data/pending-visits/pending-visit-comments-xxx.json
+npm run return-visit:execute -- --execute
 npm run return-visit:execute -- --dry-run
 ```
 
 源文件：`src/cli/execute-return-visit.mjs`
 
-读取 `pending_execute` 等可执行回访任务，或从 `--items-file` 读取 Agent 已填写 `comment` 的 JSON。打开准备阶段选中的作品，检查点赞状态，并在 `--execute` 模式下执行点赞 + 评论。不带 `--execute` 时为 dry-run，不真实点赞或评论。
+读取数据库中可执行回访任务。打开目标用户主页，监听主页作品列表 API，按 `workId` 匹配并点击目标作品；进入作品页后调用 `agent-server` 生成回访评论，再在 `--execute` 模式下执行点赞 + 评论。不带 `--execute` 时为 dry-run，不真实点赞或评论。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `--execute` | `false` | 真实点赞并评论 |
 | `--dry-run` | `true` | 只预演，不真实点赞或评论 |
-| `--items-file` | `''` | 回访准备阶段生成、并由 Agent 填写 comment 的 JSON 文件 |
 | `--watch-policy` | 配置 `returnVisit.watchPolicy` 或 `seconds` | 看视频策略 |
 | `--watch-seconds` | 配置 `returnVisit.watchSeconds` 或 `5-8` | 看视频秒数 |
 | `--keep-open` | `false` | 复用并保留浏览器 |
@@ -325,5 +325,4 @@ npm run debug:open https://www.douyin.com/user/self
 源文件：`src/cli/open-page.mjs`
 
 打开指定页面，浏览器保持打开不做任何操作，用于手动排查页面 DOM 或调试问题。
-
 

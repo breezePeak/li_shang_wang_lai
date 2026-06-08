@@ -3,13 +3,9 @@ import { createBrowserContext } from '../browser/browser-context.mjs';
 import { loadConfig } from '../config/user-config.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
-import { readFileSync, unlinkSync, existsSync } from 'fs';
-import { resolve } from 'path';
 import {
   RETURN_VISIT_STATUS,
   listReturnVisitExecuteTasks,
-  listReturnVisitTasksByIds,
-  createOrUpdateReturnVisitTasksFromItems,
   updateReturnVisitTask,
   markReturnVisitFailure,
   markReturnVisitDone,
@@ -28,7 +24,7 @@ function parseArgs(argv) {
     execute: true,
     watchPolicy: null,
     watchSeconds: null,
-    itemsFile: '',
+    unsupportedItemsFile: false,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -40,7 +36,10 @@ function parseArgs(argv) {
     else if (arg === '--execute') { args.execute = true; args.dryRun = false; }
     else if (arg === '--watch-policy' && i + 1 < argv.length) args.watchPolicy = argv[++i];
     else if (arg === '--watch-seconds' && i + 1 < argv.length) args.watchSeconds = argv[++i];
-    else if (arg === '--items-file' && i + 1 < argv.length) args.itemsFile = String(argv[++i] || '').trim();
+    else if (arg === '--items-file') {
+      args.unsupportedItemsFile = true;
+      if (argv[i + 1] && !String(argv[i + 1]).startsWith('--')) i++;
+    }
   }
 
   return args;
@@ -60,15 +59,6 @@ function getRange(range, fallbackMin, fallbackMax) {
     }
   }
   return [fallbackMin, fallbackMax];
-}
-
-function loadVisitExecutionItems(itemsFile) {
-  const raw = readFileSync(resolve(itemsFile), 'utf8');
-  const parsed = JSON.parse(raw);
-  if (!Array.isArray(parsed)) {
-    throw new Error('--items-file 必须是回访准备阶段生成并由 agent 填写 comment 的数组 JSON');
-  }
-  return parsed;
 }
 
 function randomInRange(min, max) {
@@ -105,6 +95,15 @@ async function main() {
   runMigrations();
 
   const args = parseArgs(process.argv.slice(2));
+  if (args.unsupportedItemsFile) {
+    printJsonError(
+      'return-visit:execute',
+      RESULT_CODES.INVALID_ARGUMENTS,
+      'return-visit:execute 不再支持 --items-file；请先执行 interactions:scan --days N --max-count M --prepare-visits 入库，然后直接运行 visit:run/return-visit:execute',
+      { recoverable: false }
+    );
+    return;
+  }
   const config = loadConfig();
   const returnVisitConfig = config.returnVisit || {};
 
@@ -141,51 +140,9 @@ async function main() {
     watchSeconds = [watchSecondsRaw, watchSecondsRaw];
   }
 
-  let allTasks;
-  if (args.itemsFile) {
-    const items = loadVisitExecutionItems(args.itemsFile);
-    createOrUpdateReturnVisitTasksFromItems(items);
-    const tasksById = listReturnVisitTasksByIds(items.map(item => item.id || item.task_id || ''));
-    const taskMap = new Map(tasksById.map(task => [task.taskId, task]));
-    allTasks = [];
-    for (const item of items) {
-      const taskId = String(item.id || item.task_id || '').trim();
-      const task = taskMap.get(taskId);
-      if (!task) {
-        taskResults.push({ taskId, status: RETURN_VISIT_STATUS.FAILED_COLLECT, reason: 'task_not_found' });
-        failed++;
-        continue;
-      }
-
-      const generatedComment = String(item.comment || '').trim();
-
-      const updated = updateReturnVisitTask(task.taskId, {
-        status: RETURN_VISIT_STATUS.PENDING_VISIT,
-        generatedComment: generatedComment || null,
-        commentStatus: task.commentStatus === 'posted' ? 'posted' : (generatedComment ? 'generated' : 'pending'),
-        generatedAt: generatedComment ? new Date().toISOString() : task.generatedAt,
-        targetWork: {
-          workId: String(item.aweme_id || item.workId || task.targetWork?.workId || '').trim() || null,
-          workUrl: String(item.aweme_url || item.workUrl || task.targetWork?.workUrl || '').trim() || null,
-          workTitle: String(item.item_title || task.targetWork?.workTitle || '').trim() || null,
-          workText: String(item.desc || task.targetWork?.workText || '').trim() || null,
-          desc: String(item.desc || task.targetWork?.desc || '').trim() || null,
-          itemTitle: String(item.item_title || task.targetWork?.itemTitle || '').trim() || null,
-          awemeType: item.aweme_type ?? task.targetWork?.awemeType ?? null,
-          mediaType: item.media_type ?? task.targetWork?.mediaType ?? null,
-          isMultiContent: item.is_multi_content ?? task.targetWork?.isMultiContent ?? null,
-          userDigged: Number(item.user_digged ?? task.targetWork?.userDigged ?? 0),
-        },
-        lastError: null,
-      });
-
-      allTasks.push(updated);
-    }
-  } else {
-    allTasks = listReturnVisitExecuteTasks({
-      maxRetryCount,
-    });
-  }
+  const allTasks = listReturnVisitExecuteTasks({
+    maxRetryCount,
+  });
 
   const tasks = [];
 
@@ -345,17 +302,6 @@ async function main() {
     mode: executeMode ? 'execute' : 'dry-run',
   };
   log(args.json, `[return-visit:execute] summary done=${done} skipped=${skipped} failed=${failed}`);
-
-  // 全部成功则删除中间 JSON
-  if (args.itemsFile && failed === 0) {
-    const absPath = resolve(args.itemsFile);
-    if (existsSync(absPath)) {
-      unlinkSync(absPath);
-      log(args.json, `[return-visit:execute] 已删除中间 JSON: ${args.itemsFile}`);
-    }
-  } else if (args.itemsFile) {
-    log(args.json, `[return-visit:execute] 保留中间 JSON（有失败项）: ${args.itemsFile}`);
-  }
 
   if (args.json) {
     printJsonResult('return-visit:execute', { tasks: taskResults }, summary);

@@ -5,11 +5,7 @@ import { RESULT_CODES } from '../domain/result-codes.mjs';
 import {
   createOrUpdateReturnVisitTasksFromEvents,
   listReturnVisitPrepareTasks,
-  listReturnVisitTasksByIds,
 } from '../services/return-visit-task-service.mjs';
-import { readFileSync, unlinkSync, existsSync } from 'fs';
-import { resolve } from 'path';
-import { writeJSON } from '../utils/filesystem.mjs';
 
 function parseArgs(argv) {
   const args = {
@@ -17,7 +13,7 @@ function parseArgs(argv) {
     keepOpen: false,
     headless: false,
     eventStatus: null,
-    itemsFile: '',
+    unsupportedItemsFile: false,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -26,18 +22,13 @@ function parseArgs(argv) {
     else if (arg === '--keep-open') args.keepOpen = true;
     else if (arg === '--headless') args.headless = true;
     else if (arg === '--event-status' && i + 1 < argv.length) args.eventStatus = String(argv[++i] || '').trim() || null;
-    else if (arg === '--items-file' && i + 1 < argv.length) args.itemsFile = String(argv[++i] || '').trim();
+    else if (arg === '--items-file') {
+      args.unsupportedItemsFile = true;
+      if (argv[i + 1] && !String(argv[i + 1]).startsWith('--')) i++;
+    }
   }
 
   return args;
-}
-
-function loadVisitItems(itemsFile) {
-  const parsed = JSON.parse(readFileSync(resolve(itemsFile), 'utf8'));
-  if (Array.isArray(parsed)) return parsed;
-  if (Array.isArray(parsed?.users)) return parsed.users;
-  if (Array.isArray(parsed?.items)) return parsed.items;
-  throw new Error('--items-file 必须是 interactions:scan 生成的最小待回访数组');
 }
 
 function log(useJson, ...args) {
@@ -45,30 +36,19 @@ function log(useJson, ...args) {
   else console.log(...args);
 }
 
-function writePendingVisitCommentJson(items) {
-  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const filePath = resolve('data', 'pending-visits', `pending-visit-comments-${ts}.json`);
-  writeJSON(filePath, items);
-  return { filePath, totalItems: items.length };
-}
-
-function toMinimalVisitItems(tasks) {
-  return tasks.map(task => ({
-    interactionId: (task.sourceEventIds || [])[0] || '',
-    id: task.taskId,
-    task_id: task.taskId,
-    targetUserId: task.userId || '',
-    profileUrl: task.userProfileUrl || '',
-    homepage_url: task.userProfileUrl || '',
-    workId: task.targetWork?.workId || '',
-    interactionType: task.sourceType || 'like',
-  }));
-}
-
 async function main() {
   runMigrations();
 
   const args = parseArgs(process.argv.slice(2));
+  if (args.unsupportedItemsFile) {
+    printJsonError(
+      'return-visit:prepare',
+      RESULT_CODES.INVALID_ARGUMENTS,
+      'return-visit:prepare 不再支持 --items-file；回访任务只从数据库创建/查询，不再读写 JSON 文件',
+      { recoverable: false }
+    );
+    return;
+  }
   const config = loadConfig();
   const returnVisitConfig = config.returnVisit || {};
 
@@ -77,24 +57,12 @@ async function main() {
   let sourceSummary;
   let tasks;
   try {
-    if (args.itemsFile) {
-      const items = loadVisitItems(args.itemsFile);
-      const ids = items.map(item => item.id || item.task_id || '').filter(Boolean);
-      tasks = listReturnVisitTasksByIds(ids);
-      sourceSummary = {
-        totalItems: items.length,
-        inserted: 0,
-        enriched: tasks.length,
-        skipped: Math.max(0, items.length - tasks.length),
-      };
-    } else {
-      sourceSummary = createOrUpdateReturnVisitTasksFromEvents({
-        status: eventStatus,
-      });
-      tasks = listReturnVisitPrepareTasks({
-        maxRetryCount,
-      });
-    }
+    sourceSummary = createOrUpdateReturnVisitTasksFromEvents({
+      status: eventStatus,
+    });
+    tasks = listReturnVisitPrepareTasks({
+      maxRetryCount,
+    });
   } catch (err) {
     if (args.json) {
       printJsonError('return-visit:prepare', RESULT_CODES.INVALID_ARGUMENTS, err.message, { recoverable: false });
@@ -103,7 +71,7 @@ async function main() {
     throw err;
   }
 
-  log(args.json, `[return-visit:prepare] sourced ${args.itemsFile ? 'json users' : 'events'}: ${sourceSummary.totalEvents ?? sourceSummary.totalItems}, inserted=${sourceSummary.inserted}, enriched=${sourceSummary.enriched}, skipped=${sourceSummary.skipped}`);
+  log(args.json, `[return-visit:prepare] sourced events: ${sourceSummary.totalEvents}, inserted=${sourceSummary.inserted}, enriched=${sourceSummary.enriched}, skipped=${sourceSummary.skipped}`);
   log(args.json, `[return-visit:prepare] loaded pending tasks: ${tasks.length}`);
 
   if (tasks.length === 0) {
@@ -118,33 +86,20 @@ async function main() {
     return;
   }
 
-  const minimalItems = toMinimalVisitItems(tasks);
-  const pendingCommentFile = writePendingVisitCommentJson(minimalItems);
   const summary = {
     loaded: tasks.length,
-    prepared: minimalItems.length,
+    prepared: tasks.length,
     skipped: 0,
     failed: 0,
     inserted: sourceSummary.inserted,
     enriched: sourceSummary.enriched,
     sourceSkipped: sourceSummary.skipped,
-    pendingCommentFile: pendingCommentFile.filePath,
   };
 
-  log(args.json, `[return-visit:prepare] 已改为最小 JSON，不再打开主页采集作品: ${pendingCommentFile.filePath} (${pendingCommentFile.totalItems} 条)`);
-  console.error('[return-visit:prepare] Agent 提示: 不再需要填写 comment 字段；启动 agent-server 后直接执行 visit:run/return-visit:execute');
+  log(args.json, `[return-visit:prepare] 已准备 DB 回访任务: ${tasks.length} 条，不生成 JSON 文件`);
+  console.error('[return-visit:prepare] Agent 提示: 启动 agent-server 后直接执行 visit:run/return-visit:execute');
   if (args.json) {
-    printJsonResult('return-visit:prepare', { tasks: minimalItems, pendingCommentFile }, summary);
-  }
-
-  if (args.itemsFile) {
-    try {
-      const absPath = resolve(args.itemsFile);
-      if (existsSync(absPath)) {
-        unlinkSync(absPath);
-        log(args.json, `[return-visit:prepare] 已删除中间 JSON: ${args.itemsFile}`);
-      }
-    } catch {}
+    printJsonResult('return-visit:prepare', { tasks }, summary);
   }
 
   return;

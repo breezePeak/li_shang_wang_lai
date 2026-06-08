@@ -19,14 +19,11 @@ import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { promptRecoveryAction } from '../browser/interactive-control.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
-import { writeJSON } from '../utils/filesystem.mjs';
 import { createHash } from 'crypto';
 import { resolve } from 'path';
 import {
   createOrUpdateReturnVisitTasksFromItems,
-  buildIdentityKey,
-  buildTaskId,
-  listReturnVisitScanJsonTasks,
+  listReturnVisitScanTasks,
 } from '../services/return-visit-task-service.mjs';
 
 async function runCommentScan(page, run) {
@@ -655,12 +652,12 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
   }
 }
 
-export function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
+export function summarizePendingReplies({ days = null, maxCount = 500 } = {}) {
   const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: maxCount, days });
-  const homepageMap = new Map();
+  const homepageKeys = new Set();
+  const workKeys = new Set();
   const missingHomepageWorkMap = new Map();
   let totalComments = 0;
-  let workCount = 0;
   let skippedMissingHomepageWorkCount = 0;
 
   for (const row of rows) {
@@ -682,71 +679,8 @@ export function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
       continue;
     }
 
-    if (!workKey) continue;
-
-    let homepageEntry = homepageMap.get(homepageUrl);
-    if (!homepageEntry) {
-      homepageEntry = {
-        id: row.joined_author_profile_key || stableHash(homepageUrl),
-        author_name: row.joined_author_name || '',
-        homepage_url: homepageUrl,
-        works: [],
-        _works: new Map(),
-      };
-      homepageMap.set(homepageUrl, homepageEntry);
-    } else if (!homepageEntry.id && row.joined_author_profile_key) {
-      homepageEntry.id = row.joined_author_profile_key;
-    }
-
-    if (!homepageEntry.author_name && row.joined_author_name) {
-      homepageEntry.author_name = row.joined_author_name;
-    }
-
-    let workEntry = homepageEntry._works.get(workKey);
-    if (!workEntry) {
-      workEntry = {
-        work_id: workId || null,
-        modal_id: modalId || null,
-        work_key: workKey,
-        work_url: row.joined_work_url || row.work_url || '',
-        aweme_url: row.joined_work_url || row.work_url || '',
-        work_title: row.joined_work_title || '',
-        work_desc: row.joined_work_desc || '',
-        work_type: row.joined_work_type || '',
-        thumbnail_key: row.joined_thumbnail_key || '',
-        thumbnail_src: row.joined_thumbnail_src || '',
-        author_name: row.joined_author_name || '',
-        author_profile_url: homepageUrl,
-        author_profile_key: row.joined_author_profile_key || homepageEntry.id || '',
-        published_at: row.joined_published_at || null,
-        comments: [],
-      };
-      homepageEntry._works.set(workKey, workEntry);
-      homepageEntry.works.push(workEntry);
-      workCount++;
-    }
-
-    const targetCommentId = extractPendingReplyTargetCommentId(row);
-
-    workEntry.comments.push({
-      id: row.id,
-      target_comment_id: targetCommentId,
-      targetCommentId,
-      cid: targetCommentId,
-      actor_name: row.actor_name,
-      actor_profile_url: row.actor_profile_url,
-      actor_profile_key: row.actor_profile_key,
-      comment_text: row.comment_text,
-      event_time_text: row.event_time_text,
-      comment_key: row.comment_key,
-      source_event_id: row.source_event_id,
-      source_notification_key: row.source_notification_key,
-      reply_status: row.reply_status,
-      reply_text: row.reply_text || '',
-      collect_status_code: 'COLLECT_PENDING_REPLY',
-      prepare_status_code: (row.reply_text && row.reply_text.trim()) ? 'PREPARE_READY' : 'PREPARE_WAIT_REPLY_TEXT',
-      execute_status_code: row.reply_status === 'succeeded' ? 'EXECUTE_CONFIRMED' : 'EXECUTE_WAIT_PREPARE',
-    });
+    if (workKey) workKeys.add(workKey);
+    homepageKeys.add(homepageUrl);
     totalComments++;
   }
 
@@ -755,30 +689,14 @@ export function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
     console.error(`[scan] skip_missing_author_profile_url work_id=${missing.workId || ''} modal_id=${missing.modalId || ''} comments=${missing.count}`);
   }
 
-  const users = [...homepageMap.values()].map(item => {
-    delete item._works;
-    return item;
-  });
-
-  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const filePath = resolve('data', 'pending-replies', `pending-comments-${ts}.json`);
-  writeJSON(filePath, users);
-  console.error(`[scan] pending_reply_homepage_count=${users.length} pending_reply_work_count=${workCount} pending_reply_comment_count=${totalComments} skip_missing_author_profile_url=${skippedMissingHomepageWorkCount}`);
-  console.error(`[scan] 待回评 JSON（兼容旧流程）路径=${filePath}`);
-  console.error('[scan] Agent 提示: 新回评流程不需要填写中间 JSON；启动 agent-server 后直接执行 comments:execute');
+  console.error(`[scan] pending_reply_homepage_count=${homepageKeys.size} pending_reply_work_count=${workKeys.size} pending_reply_comment_count=${totalComments} skip_missing_author_profile_url=${skippedMissingHomepageWorkCount}`);
+  console.error('[scan] 待回评数据已入库；启动 agent-server 后执行 comments:execute --days N --limit M');
   return {
-    filePath,
     totalComments,
-    workCount,
-    homepageCount: users.length,
+    workCount: workKeys.size,
+    homepageCount: homepageKeys.size,
     skippedMissingHomepageWorkCount,
-    agentInstructions: {
-      action: 'reply',
-      jsonPath: filePath,
-      nextStep: 'npm run agent-server，然后 npm run comments:execute',
-      replyFields: ['comments[].comment_text', 'work_desc', 'work_title', 'actor_name'],
-      fillField: 'reply_text（新流程自动生成）',
-    },
+    nextStep: 'npm run agent-server，然后 npm run comments:execute -- --days N --limit M',
   };
 }
 
@@ -790,32 +708,8 @@ function getVisitSourceType(event) {
   return 'other';
 }
 
-function extractPendingReplyTargetCommentId(row = {}) {
-  const direct = String(row.target_comment_id || '').trim();
-  if (direct) return direct;
-
-  const rawCommentJson = row.raw_comment_json || '';
-  if (rawCommentJson) {
-    try {
-      const parsed = JSON.parse(rawCommentJson);
-      const fromRaw = String(
-        parsed?.comment?.comment?.commentId ??
-        parsed?.comment?.comment?.cid ??
-        parsed?.comment?.commentId ??
-        parsed?.comment?.cid ??
-        parsed?.targetCommentId ??
-        ''
-      ).trim();
-      if (fromRaw) return fromRaw;
-    } catch {}
-  }
-
-  return String(row.comment_key || '').trim();
-}
-
-export function writePendingVisitJson(events, { days = null, maxCount = 100, collectTypes = ['like', 'comment', 'reply', 'follow'] } = {}) {
+export function preparePendingVisitTasks(events, { days = null, maxCount = 100, collectTypes = ['like', 'comment', 'reply', 'follow'] } = {}) {
   const allowed = new Set((collectTypes || []).map(type => String(type || '').trim()).filter(Boolean));
-  const users = [];
   const stats = {
     skipDbDuplicate: 0,
     skipDbAmbiguous: 0,
@@ -896,10 +790,10 @@ export function writePendingVisitJson(events, { days = null, maxCount = 100, col
   }
 
   const sourceItems = Array.from(groupedItems.values()).flatMap(group => group.items);
-  createOrUpdateReturnVisitTasksFromItems(sourceItems);
+  const sourceSummary = createOrUpdateReturnVisitTasksFromItems(sourceItems);
 
-  // 从数据库全量查询所有符合扫描参数的待回访准备任务，不限定本轮 taskIds
-  const dbResult = listReturnVisitScanJsonTasks({
+  // 从数据库全量查询所有符合扫描参数的待回访任务，不限定本轮 taskIds。
+  const dbResult = listReturnVisitScanTasks({
     days,
     limit: maxCount,
   });
@@ -907,29 +801,16 @@ export function writePendingVisitJson(events, { days = null, maxCount = 100, col
   stats.dbFilteredStatus = dbResult.filteredStatusCount;
   stats.dbFilteredDays = dbResult.filteredDaysCount;
 
+  const tasks = [];
   for (const task of dbResult.tasks || []) {
     const sourceTypes = Array.isArray(task.sourceTypes) && task.sourceTypes.length > 0
       ? task.sourceTypes
       : [task.sourceType || 'other'];
     if (allowed.size > 0 && !sourceTypes.some(type => allowed.has(type))) continue;
-    const visitItem = {
-      id: task.taskId,
-      homepage_url: task.userProfileUrl || '',
-    };
-    if (task.targetWork?.workId) {
-      visitItem.interactionId = (task.sourceEventIds || [])[0] || '';
-      visitItem.targetUserId = task.userId || '';
-      visitItem.profileUrl = task.userProfileUrl || '';
-      visitItem.workId = task.targetWork.workId;
-      visitItem.interactionType = task.sourceType || 'like';
-    }
-    users.push(visitItem);
+    tasks.push(task);
   }
-  stats.dbSelected = users.length;
+  stats.dbSelected = tasks.length;
 
-  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const filePath = resolve('data', 'pending-visits', `pending-visits-${ts}.json`);
-  writeJSON(filePath, users);
   console.error(
     `[scan] pending_visit_skip_db_duplicate=${stats.skipDbDuplicate} ` +
     `pending_visit_skip_db_ambiguous=${stats.skipDbAmbiguous} ` +
@@ -942,20 +823,35 @@ export function writePendingVisitJson(events, { days = null, maxCount = 100, col
     `pending_visit_db_candidate=${stats.dbCandidate} ` +
     `pending_visit_db_selected=${stats.dbSelected} ` +
     `pending_visit_db_filtered_status=${stats.dbFilteredStatus} ` +
-    `pending_visit_db_filtered_days=${stats.dbFilteredDays}`
+      `pending_visit_db_filtered_days=${stats.dbFilteredDays}`
   );
-  console.error(`[scan] Agent 提示: 回访 JSON 路径=${filePath}`);
+  console.error(`[scan] 待回访 DB 任务: ${tasks.length} 个`);
   console.error('[scan] Agent 提示: 回访流程=启动 agent-server 后直接执行 visit:run/return-visit:execute，执行阶段会实时匹配作品并生成评论');
   return {
-    filePath,
-    totalUsers: users.length,
-    agentInstructions: {
-      action: 'visit',
-      jsonPath: filePath,
-      nextStep: 'npm run agent-server，然后 npm run visit:run -- --execute',
-      afterPrepare: '不再需要 prepare 阶段扩展 JSON',
-    },
+    totalTasks: tasks.length,
+    tasks,
+    sourceSummary,
+    stats,
+    nextStep: 'npm run agent-server，然后 npm run visit:run -- --execute',
   };
+}
+
+function buildPostScanPendingSummaries(scanPlan, allEvents, { days, maxCount }) {
+  const pendingReplySummary = scanPlan.prepareReplies
+    ? summarizePendingReplies({ days, maxCount: maxCount || 500 })
+    : null;
+  if (!pendingReplySummary) {
+    console.error('[scan] 本次计划不查询待回评评论');
+  }
+
+  const pendingVisitSummary = scanPlan.prepareVisits
+    ? preparePendingVisitTasks(allEvents, { days, maxCount: maxCount || 100, collectTypes: scanPlan.collectTypes })
+    : null;
+  if (!pendingVisitSummary) {
+    console.error('[scan] 本次计划不准备待回访任务');
+  }
+
+  return { pendingReplySummary, pendingVisitSummary };
 }
 
 async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNotificationDom = false, scanPlan = {}) {
@@ -1272,12 +1168,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
           console.error(`[scan] 达到最大采集条数 maxCount=${maxCount}，停止采集`);
           scrollRounds = round;
           if (!run.options?.keepOpen) await closeNotificationPanel(page);
-          const pendingReplyFile = scanPlan.generateReplyJson
-            ? writePendingReplyJson({ days: notificationDays, maxCount: maxCount || 500 })
-            : null;
-          const pendingVisitFile = scanPlan.generateVisitJson
-            ? writePendingVisitJson(allEvents, { days: notificationDays, maxCount: maxCount || 100, collectTypes: scanPlan.collectTypes })
-            : null;
+          const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays, maxCount });
           return success({
             inserted: totalInserted,
             duplicateCount: totalDuplicateCount,
@@ -1290,8 +1181,8 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
             workCommentsInserted: totalWorkCommentInserted,
             workCommentsEnriched: totalWorkCommentEnriched,
             workCommentsDuplicate: totalWorkCommentDuplicate,
-            pendingReplyFile,
-            pendingVisitFile,
+            pendingReplySummary,
+            pendingVisitSummary,
             events: allEvents,
             ambiguousEvents,
             failedEvents,
@@ -1300,12 +1191,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
         }
         if (result?.stop === 'old-relevant') {
           scrollRounds = round;
-          const pendingReplyFile = scanPlan.generateReplyJson
-            ? writePendingReplyJson({ days: notificationDays, maxCount: maxCount || 500 })
-            : null;
-          const pendingVisitFile = scanPlan.generateVisitJson
-            ? writePendingVisitJson(allEvents, { days: notificationDays, maxCount: maxCount || 100, collectTypes: scanPlan.collectTypes })
-            : null;
+          const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays, maxCount });
           if (!run.options?.keepOpen) await closeNotificationPanel(page);
           return success({
             inserted: totalInserted,
@@ -1319,8 +1205,8 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
             workCommentsInserted: totalWorkCommentInserted,
             workCommentsEnriched: totalWorkCommentEnriched,
             workCommentsDuplicate: totalWorkCommentDuplicate,
-            pendingReplyFile,
-            pendingVisitFile,
+            pendingReplySummary,
+            pendingVisitSummary,
             events: allEvents,
             ambiguousEvents,
             failedEvents,
@@ -1381,23 +1267,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       await closeNotificationPanel(page);
     }
 
-    const pendingReplyFile = scanPlan.generateReplyJson
-      ? writePendingReplyJson({ days: notificationDays, maxCount: maxCount || 500 })
-      : null;
-    if (pendingReplyFile) {
-      console.error(`[scan] 待回复评论 JSON: ${pendingReplyFile.filePath} (${pendingReplyFile.homepageCount} 个主页, ${pendingReplyFile.workCount} 个作品, ${pendingReplyFile.totalComments} 条评论)`);
-    } else {
-      console.error('[scan] 本次计划不生成待回复评论 JSON');
-    }
-
-    const pendingVisitFile = scanPlan.generateVisitJson
-      ? writePendingVisitJson(allEvents, { days: notificationDays, maxCount: maxCount || 100, collectTypes: scanPlan.collectTypes })
-      : null;
-    if (pendingVisitFile) {
-      console.error(`[scan] 待回访 JSON: ${pendingVisitFile.filePath} (${pendingVisitFile.totalUsers} 个用户)`);
-    } else {
-      console.error('[scan] 本次计划不生成待回访 JSON');
-    }
+    const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays, maxCount });
 
     console.error(
       `[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalAmbiguousCount} 歧义 | ` +
@@ -1417,8 +1287,8 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       workCommentsInserted: totalWorkCommentInserted,
       workCommentsEnriched: totalWorkCommentEnriched,
       workCommentsDuplicate: totalWorkCommentDuplicate,
-      pendingReplyFile,
-      pendingVisitFile,
+      pendingReplySummary,
+      pendingVisitSummary,
       events: allEvents,
       ambiguousEvents,
       failedEvents,
@@ -1920,23 +1790,7 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
     await closeNotificationPanel(page);
   }
 
-  const pendingReplyFile = scanPlan.generateReplyJson
-    ? writePendingReplyJson({ days: notificationDays, maxCount: maxCount || 500 })
-    : null;
-  if (pendingReplyFile) {
-    console.error(`[scan] 待回复评论 JSON: ${pendingReplyFile.filePath} (${pendingReplyFile.homepageCount} 个主页, ${pendingReplyFile.workCount} 个作品, ${pendingReplyFile.totalComments} 条评论)`);
-  } else {
-    console.error('[scan] 本次计划不生成待回复评论 JSON');
-  }
-
-  const pendingVisitFile = scanPlan.generateVisitJson
-    ? writePendingVisitJson(allEvents, { days: notificationDays, maxCount: maxCount || 100, collectTypes: scanPlan.collectTypes })
-    : null;
-  if (pendingVisitFile) {
-    console.error(`[scan] 待回访 JSON: ${pendingVisitFile.filePath} (${pendingVisitFile.totalUsers} 个用户)`);
-  } else {
-    console.error('[scan] 本次计划不生成待回访 JSON');
-  }
+  const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays, maxCount });
 
   console.error(`[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalAmbiguousCount} 歧义 | ${totalProfileResolved} 主页已解析 | ${totalProfileUnresolved} 主页未解析 | work_comments ${totalWorkCommentInserted} 新增/${totalWorkCommentEnriched} 补全/${totalWorkCommentDuplicate} 重复 | ${parseFailedCount} 条解析失败 | ${scrollRounds} 轮滚动`);
   return success({
@@ -1949,8 +1803,8 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
     workCommentsInserted: totalWorkCommentInserted,
     workCommentsEnriched: totalWorkCommentEnriched,
     workCommentsDuplicate: totalWorkCommentDuplicate,
-    pendingReplyFile,
-    pendingVisitFile,
+    pendingReplySummary,
+    pendingVisitSummary,
     events: allEvents,
     ambiguousEvents,
     failedEvents,
@@ -1976,17 +1830,27 @@ async function main() {
     ? remaining[collectTypesIdx + 1].split(',').map(type => type.trim()).filter(Boolean)
     : ['like', 'comment', 'reply', 'follow'];
   const displayOnly = remaining.includes('--display-only');
-  const explicitReplyJson = remaining.includes('--generate-reply-json');
-  const explicitVisitJson = remaining.includes('--generate-visit-json');
-  const noExplicitJsonFlags = !explicitReplyJson && !explicitVisitJson;
+  const unsupportedJsonFlags = remaining.includes('--generate-reply-json') || remaining.includes('--generate-visit-json');
+  if (unsupportedJsonFlags) {
+    const message = 'interactions:scan 不再支持 --generate-reply-json / --generate-visit-json；请使用 --prepare-replies / --prepare-visits，扫描结果只写入数据库';
+    if (options.json) {
+      printJsonError('interactions:scan', RESULT_CODES.INVALID_ARGUMENTS, message, { recoverable: false });
+    } else {
+      console.error(`[scan] ${message}`);
+    }
+    process.exit(1);
+  }
+  const explicitPrepareReplies = remaining.includes('--prepare-replies');
+  const explicitPrepareVisits = remaining.includes('--prepare-visits');
+  const noExplicitPrepareFlags = !explicitPrepareReplies && !explicitPrepareVisits;
   const scanPlan = {
     maxCount,
     collectTypes,
-    generateReplyJson: displayOnly ? false : (explicitReplyJson || noExplicitJsonFlags),
-    generateVisitJson: displayOnly ? false : (explicitVisitJson || noExplicitJsonFlags),
+    prepareReplies: displayOnly ? false : (explicitPrepareReplies || noExplicitPrepareFlags),
+    prepareVisits: displayOnly ? false : (explicitPrepareVisits || noExplicitPrepareFlags),
   };
-  if ((scanPlan.generateReplyJson || scanPlan.generateVisitJson) && (!hasExplicitDays || !hasExplicitMaxCount)) {
-    const message = '生成/查询待回评或待回访必须手动输入采集天数和最大条数限制，例如：interactions:scan --days 7 --max-count 50';
+  if ((scanPlan.prepareReplies || scanPlan.prepareVisits) && (!hasExplicitDays || !hasExplicitMaxCount)) {
+    const message = '查询待回评或待回访范围必须手动输入采集天数和最大条数限制，例如：interactions:scan --days 7 --max-count 50';
     if (options.json) {
       printJsonError('interactions:scan', RESULT_CODES.INVALID_ARGUMENTS, message, { recoverable: false });
     } else {
@@ -2049,8 +1913,8 @@ async function main() {
         failedEvents: notifData.failedEvents || [],
         ambiguousEvents: notifData.ambiguousEvents || [],
         counts,
-        pendingReplyFile: notifData.pendingReplyFile || null,
-        pendingVisitFile: notifData.pendingVisitFile || null,
+        pendingReplySummary: notifData.pendingReplySummary || null,
+        pendingVisitSummary: notifData.pendingVisitSummary || null,
       }, {
         totalScanned: run.scanned,
         inserted: notifData.inserted || 0,

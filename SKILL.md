@@ -16,98 +16,62 @@ Agent 生成或填写评论时，必须遵守 `references/comment-safety-rules.m
 - 不绕过登录、验证码、滑块或平台风控。
 - 所有 `npm run` 参数必须放在 `--` 后面。
 - 命令失败后停止后续真实动作，先读取错误并诊断。
-- 评论回复由 `comments:execute` 读取 JSON 执行。
+- 评论回复由 `comments:execute --days N --limit M` 从数据库读取并执行。
 - 回访必须带 `--execute` 才真实点赞和评论。
-- Agent 只填写 JSON 中的 `reply_text` 或 `comment`，不能改 `id`，不能删条目。
+- Agent / agent-server 只生成 `reply_text` 或回访评论文本，不控制浏览器，不编辑中间文件。
 
 ## 用户意图映射
 
 | 用户意图 | 采集命令 | 后续动作 |
 |---|---|---|
 | 只看互动 | `npm run interactions:scan -- --type all --days N --max-count M --display-only` | 只展示互动数据 |
-| 评论回复 | `npm run interactions:scan -- --type comment --days N --max-count M --generate-reply-json` | Agent 填 `reply_text`，然后 `comments:execute` |
-| 明确回访 | `npm run interactions:scan -- --type all --days N --max-count M --generate-visit-json` | `return-visit:prepare`，然后 Agent 填 `comment`，再 `return-visit:execute --execute` |
-| 评论回复并回访 | `npm run interactions:scan -- --type all --days N --max-count M --generate-reply-json --generate-visit-json` | 先回评，再按用户明确要求回访 |
+| 评论回复 | `npm run interactions:scan -- --type comment --days N --max-count M --prepare-replies` | 启动 `agent-server`，然后 `comments:execute --days N --limit M` |
+| 明确回访 | `npm run interactions:scan -- --type all --days N --max-count M --prepare-visits` | 启动 `agent-server`，然后 `visit:run --execute` |
+| 评论回复并回访 | `npm run interactions:scan -- --type all --days N --max-count M` | 先回评，再按用户明确要求回访 |
 
 ## 评论回复流程
 
-先扫描并生成待回评 JSON：
+先扫描入库并查询待回评范围：
 
 ```bash
-npm run interactions:scan -- --type comment --generate-reply-json
+npm run interactions:scan -- --type comment --days N --max-count M --prepare-replies
 ```
 
-生成文件：
+启动生成服务：
 
-```text
-data/pending-replies/pending-comments-xxx.json
+```bash
+npm run agent-server
 ```
-
-Agent 读取 JSON，根据评论内容、作品上下文和共享规则填写 `reply_text` 字段。
 
 然后执行：
 
 ```bash
-npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
+npm run comments:execute -- --days N --limit M
 ```
 
-执行阶段会直接打开待回复评论所属的抖音作品页，在作品评论区定位目标评论；优先结合 `cid/comment_id` 与 `/aweme/v1/web/comment/list/` 做确认，唯一命中后点击“回复”、填写 `reply_text`、发送并校验，不再进入创作者评论管理页。
+`comments:execute` 会从 `work_comments` 查询待回评评论，调用 `agent-server` 生成并写回 `reply_text`，然后打开待回复评论所属的抖音作品页，在作品评论区定位目标评论；优先结合 `cid/comment_id` 与 `/aweme/v1/web/comment/list/` 做确认，唯一命中后点击“回复”、填写、发送并校验，不再进入创作者评论管理页。
 
 ## 回访流程
 
-先扫描并生成最小待回访 JSON：
+先扫描入库并准备待回访 DB 任务：
 
 ```bash
-npm run interactions:scan -- --generate-visit-json
+npm run interactions:scan -- --days N --max-count M --prepare-visits
 ```
 
-生成文件：
-
-```text
-data/pending-visits/pending-visits-xxx.json
-```
-
-该 JSON 只包含类似：
-
-```json
-[
-  {
-    "id": "数据库记录ID",
-    "homepage_url": "https://www.douyin.com/user/xxx"
-  }
-]
-```
-
-然后执行回访准备：
+启动生成服务：
 
 ```bash
-npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json
+npm run agent-server
 ```
 
-该命令负责：
-- 读取待回访 JSON 中的 id，从数据库加载对应 return_visit_tasks（任务创建已在 interactions:scan --generate-visit-json 阶段完成）
-- 逐个打开用户主页
-- 监听 `/aweme/v1/web/aweme/post/`
-- 过滤置顶作品 `is_top = 1`
-- 选择第一条非置顶作品
-- 记录作品 ID、作品 URL、描述等元数据
-- 输出：
-
-```text
-data/pending-visits/pending-visit-comments-xxx.json
-```
-
-Agent 读取该 JSON，根据作品描述和共享规则填写：
-
-```text
-comment
-```
-
-最后执行：
+然后执行回访：
 
 ```bash
-npm run return-visit:execute -- --execute --items-file data/pending-visits/pending-visit-comments-xxx.json
+npm run visit:run -- --execute
 ```
+
+执行阶段会从 `return_visit_tasks` 读取任务，打开目标用户主页一次，监听 `/aweme/v1/web/aweme/post/` 主页作品列表 API，根据 `workId` 匹配并点击目标作品，进入作品页后调用 `agent-server` 生成回访评论，再由 CLI 填写并提交。
 
 不带 `--execute` 时只能 dry-run，不得真实点赞或评论。
 
@@ -115,15 +79,13 @@ npm run return-visit:execute -- --execute --items-file data/pending-visits/pendi
 
 - 评论回复使用 `work_comments.id`。
 - 回访执行使用 `return_visit_tasks.taskId`。
-- Agent 不能改 JSON 中的 `id`。
-- Agent 不能删除 JSON 条目。
-- Agent 只填写 `reply_text` 或 `comment` 字段。
+- Agent 不编辑任务 ID，也不编辑中间文件。
 
 ## 安全限制
 
 - 不发送空评论。
 - 不发送广告、引流、互关、互赞、骚扰内容。
 - 不在命令失败后继续真实动作。
-- 不跳过 `return-visit:prepare` 直接执行回访。
+- 回访默认直接执行 `visit:run --execute`，不依赖 `return-visit:prepare` 或 JSON 文件。
 
 - 页面未稳定、登录失效、点赞状态未知、重复执行风险或发送结果未确认时必须阻断。

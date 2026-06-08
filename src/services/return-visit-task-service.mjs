@@ -46,7 +46,7 @@ export const RETURN_VISIT_EXECUTE_RETRY_STATUS = [
   RETURN_VISIT_STATUS.FAILED_COMMENT,
 ];
 
-export const RETURN_VISIT_SCAN_JSON_STATUS = [
+export const RETURN_VISIT_SCAN_STATUS = [
   RETURN_VISIT_STATUS.PENDING_VISIT,
   RETURN_VISIT_STATUS.FAILED_COLLECT,
 ];
@@ -548,7 +548,7 @@ export function listReturnVisitPendingPrepareTasksByIds(taskIds = [], {
     ORDER BY updated_at ASC, id ASC
   `).all(...ids, maxRetryCount);
 
-  const statusSet = new Set(RETURN_VISIT_SCAN_JSON_STATUS);
+  const statusSet = new Set(RETURN_VISIT_SCAN_STATUS);
   const nowMs = Date.now();
   const minUpdatedAtMs = Number(days || 0) > 0 ? nowMs - Number(days) * 86400000 : null;
   let filteredStatusCount = 0;
@@ -582,8 +582,7 @@ export function listReturnVisitPendingPrepareTasksByIds(taskIds = [], {
 }
 
 /**
- * 从数据库全量查询待回访准备任务（不限定本轮 taskIds）
- * 用于 interactions:scan 生成 pending-visits JSON。
+ * 从数据库全量查询待回访任务（不限定本轮 taskIds）。
  *
  * 状态过滤：只输出 pending_visit / failed_collect。
  * 不输出 content_collected / comment_generated / pending_execute 等后续阶段状态，
@@ -595,13 +594,13 @@ export function listReturnVisitPendingPrepareTasksByIds(taskIds = [], {
  * @param {number} options.maxRetryCount - 最大重试次数
  * @returns {{ tasks: Array, candidateCount: number, filteredStatusCount: number, filteredDaysCount: number }}
  */
-export function listReturnVisitScanJsonTasks({
+export function listReturnVisitScanTasks({
   days = null,
   limit = 100,
   maxRetryCount = 2,
 } = {}) {
   const db = getDb();
-  const statusSet = new Set(RETURN_VISIT_SCAN_JSON_STATUS);
+  const statusSet = new Set(RETURN_VISIT_SCAN_STATUS);
   const nowMs = Date.now();
   const minUpdatedAtMs = Number(days || 0) > 0 ? nowMs - Number(days) * 86400000 : null;
 
