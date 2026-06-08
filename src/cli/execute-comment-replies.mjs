@@ -41,11 +41,13 @@ function parseArgs(argv) {
   const args = {
     itemsFile: '',
     json: false,
+    diagnosePosition: false,
   };
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--items-file' && argv[i + 1]) args.itemsFile = argv[++i];
     if (argv[i] === '--json') args.json = true;
+    if (argv[i] === '--diagnose-position') args.diagnosePosition = true;
   }
 
   return args;
@@ -632,6 +634,13 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       const plan = planViewportPendingMatches(pendingItems, visibleCandidates, { commentListCollector });
 
       if (plan.blocked.length > 0) {
+        await captureSinglePassDebugSnapshot(page, {
+          currentWork,
+          viewportRound,
+          visibleCandidates,
+          pendingItems: plan.blocked.map(entry => entry.item),
+          commentListCollector,
+        });
         for (const blockedEntry of plan.blocked) {
           if (!pendingMap.has(blockedEntry.item.commentId)) continue;
           const reason = formatBlockedReason(blockedEntry);
@@ -790,14 +799,15 @@ function pickedReasonLabel(reason) {
 }
 
 async function executeWorkCommentItems(items, args) {
+  const diagnosePosition = Boolean(args.diagnosePosition);
   const run = createRunContext('comment-execute-json', {
     debug: true,
     dryRun: false,
-    execute: true,
+    execute: !diagnosePosition,
     json: args.json,
     keepOpen: false,
-    keepOpenOnError: !args.json,
-    pauseOnError: !args.json,
+    keepOpenOnError: !args.json && !diagnosePosition,
+    pauseOnError: !args.json && !diagnosePosition,
     writeRunFiles: false,
   });
 
@@ -880,7 +890,7 @@ async function executeWorkCommentItems(items, args) {
           if (!openResult.ok) {
             console.log(`[comments:execute] open_profile_failed reason=${openResult.reason || openResult.message || openResult.code || 'work_open_failed'}`);
             for (const validated of group) {
-              markCommentBlocked(validated.commentId, openResult.reason || openResult.message || openResult.code || 'work_open_failed');
+              if (!diagnosePosition) markCommentBlocked(validated.commentId, openResult.reason || openResult.message || openResult.code || 'work_open_failed');
               results.push({ ...validated, ok: false, status: 'blocked', error: openResult.reason || openResult.message || openResult.code });
             }
             continue;
@@ -891,7 +901,7 @@ async function executeWorkCommentItems(items, args) {
           const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
           if (!modalReady.ok) {
             for (const validated of group) {
-              markCommentBlocked(validated.commentId, modalReady.message || modalReady.code || 'work_modal_not_ready');
+              if (!diagnosePosition) markCommentBlocked(validated.commentId, modalReady.message || modalReady.code || 'work_modal_not_ready');
               results.push({ ...validated, ok: false, status: 'blocked', error: modalReady.message || modalReady.code });
             }
             continue;
@@ -900,13 +910,25 @@ async function executeWorkCommentItems(items, args) {
           const commentAreaReady = await waitForWorkCommentArea(page, { timeoutMs: 10000 });
           if (!commentAreaReady.ok) {
             for (const validated of group) {
-              markCommentBlocked(validated.commentId, commentAreaReady.message || commentAreaReady.code || 'comment_area_not_ready');
+              if (!diagnosePosition) markCommentBlocked(validated.commentId, commentAreaReady.message || commentAreaReady.code || 'comment_area_not_ready');
               results.push({ ...validated, ok: false, status: 'blocked', error: commentAreaReady.message || commentAreaReady.code });
             }
             continue;
           }
 
           const groupResults = await executeSinglePassForWorkGroup(page, group, commentListCollector, {
+            ...(diagnosePosition ? {
+              openMatchedReplyBox: async (_page, target, candidate, { matchedBy }) => {
+                console.log(`[comments:execute:diagnose] matched commentId=${target?.targetCommentId || ''} matchedBy=${matchedBy} actor="${target?.actorName || ''}" comment="${String(target?.commentText || '').slice(0, 60)}" domIndex=${candidate?.domIndex}`);
+                return { ok: true, data: { diagnoseOnly: true, target, candidate, matchedBy } };
+              },
+              fillReply: async () => ({ ok: true, data: { diagnoseOnly: true } }),
+              clickSend: async () => ({ ok: true, data: { diagnoseOnly: true } }),
+              verifyReply: async () => ({ ok: true, data: { diagnoseOnly: true } }),
+              saveSucceeded: () => {},
+              saveBlocked: () => {},
+              saveSentUnverified: () => {},
+            } : {}),
             onResult(result) {
               results.push(result);
             },
@@ -931,7 +953,7 @@ async function executeWorkCommentItems(items, args) {
       } catch (err) {
         run.hadBlocked = true;
         for (const validated of group) {
-          markCommentBlocked(validated.commentId, err.message);
+          if (!diagnosePosition) markCommentBlocked(validated.commentId, err.message);
           results.push({ ...validated, ok: false, status: 'blocked', error: err.message });
         }
         await captureGroupEvidence(err, currentWork);
@@ -984,10 +1006,12 @@ async function main() {
   }
 
   const results = await executeWorkCommentItems(loaded.items, args);
-  updateExecuteJsonFile(args.itemsFile, loaded.parsed, results);
+  if (!args.diagnosePosition) {
+    updateExecuteJsonFile(args.itemsFile, loaded.parsed, results);
+  }
 
   const allDoneWithoutRetry = results.length > 0 && results.every(isDoneWithoutRetryResult);
-  if (allDoneWithoutRetry) {
+  if (!args.diagnosePosition && allDoneWithoutRetry) {
     try {
       const absPath = resolve(args.itemsFile);
       if (existsSync(absPath)) {
@@ -995,8 +1019,10 @@ async function main() {
         console.log(`[comments:execute] 已删除中间 JSON: ${args.itemsFile}`);
       }
     } catch {}
-  } else {
+  } else if (!args.diagnosePosition) {
     console.log(`[comments:execute] 保留中间 JSON（未全部成功）: ${args.itemsFile}`);
+  } else {
+    console.log(`[comments:execute] diagnose-position 模式：未写回 JSON，未更新 DB，未发送回复`);
   }
 
   const succeeded = results.filter(item => item.ok && item.status === 'succeeded').length;
@@ -1011,9 +1037,9 @@ async function main() {
   const skippedLog = skipped > 0 ? `，跳过 ${skipped} 条（${Object.entries(skipReasons).map(([k, v]) => `${k}×${v}`).join(', ')}）` : '';
 
   if (args.json) {
-    printJsonResult('comments:execute', { results }, { succeeded, failed, skipped, mode: 'work_comment_json' });
+    printJsonResult('comments:execute', { results }, { succeeded, failed, skipped, mode: args.diagnosePosition ? 'diagnose_position' : 'work_comment_json' });
   } else {
-    console.log(`[comments:execute] mode=work_comment_json 成功 ${succeeded} 条，失败 ${failed} 条${skippedLog}`);
+    console.log(`[comments:execute] mode=${args.diagnosePosition ? 'diagnose_position' : 'work_comment_json'} 成功 ${succeeded} 条，失败 ${failed} 条${skippedLog}`);
     for (const item of results) {
       const tag = item.status === 'skipped_empty_reply' ? ' [empty-reply]'
         : (!item.ok && item.status === 'succeeded') ? ' [already-done]'
