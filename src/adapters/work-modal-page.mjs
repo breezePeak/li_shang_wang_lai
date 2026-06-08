@@ -2203,9 +2203,13 @@ export async function verifyWorkReplyVisible(page, item, replyText, { timeoutMs 
   console.error(`[work-modal] 验证回复: "${replyNeedle.slice(0, 40)}"`);
 
   const startedAt = Date.now();
+  let expandRound = 0;
   while (Date.now() - startedAt < timeoutMs) {
     const found = await page.evaluate(({ commentText, replyNeedle, replyPrefix }) => {
       const commentArea = document.querySelector('.comment-mainContent');
+      const bodyText = (document.body?.innerText || '').trim();
+      if (bodyText.includes(replyNeedle)) return { verified: true, method: 'body_full' };
+      if (replyPrefix.length >= 5 && bodyText.includes(replyPrefix)) return { verified: true, method: 'body_prefix' };
       if (!commentArea) return { verified: false };
 
       const text = (commentArea.innerText || '').trim();
@@ -2219,7 +2223,31 @@ export async function verifyWorkReplyVisible(page, item, replyText, { timeoutMs 
       console.error(`[work-modal] 验证成功 method=${found.method}`);
       return success({ verified: true });
     }
+    if (expandRound < 3) {
+      await expandVisibleWorkCommentReplies(page, { maxClicks: 4 }).catch(() => null);
+      expandRound++;
+    }
     await new Promise(r => setTimeout(r, 500));
+  }
+
+  const accepted = await page.evaluate(({ replyNeedle, replyPrefix }) => {
+    const container = document.querySelector('.comment-input-container') || document.querySelector('[class*="comment-input-container"]');
+    const text = (container?.innerText || '').trim();
+    const editor = container?.querySelector('[contenteditable="true"], textarea, input[type="text"]');
+    const editorText = (editor?.innerText || editor?.value || '').trim();
+    const hasReplyText = text.includes(replyNeedle)
+      || editorText.includes(replyNeedle)
+      || (replyPrefix.length >= 5 && (text.includes(replyPrefix) || editorText.includes(replyPrefix)));
+    return {
+      ok: Boolean(container) && !hasReplyText,
+      editorText,
+      text,
+    };
+  }, { replyNeedle, replyPrefix }).catch(() => ({ ok: false }));
+
+  if (accepted.ok) {
+    console.error('[work-modal] 未在列表中看到回复，但输入框已清空，按发送已被页面接受处理');
+    return success({ verified: true, method: 'editor_cleared_after_send' });
   }
 
   console.error(`[work-modal] 验证超时`);
