@@ -6,6 +6,7 @@ import { resolve } from 'path';
 const execFileAsync = promisify(execFile);
 
 export const DEFAULT_COMMENT_MAX_LENGTH = 30;
+export const DEFAULT_REPLY_MIN_LENGTH = 15;
 const COMMENT_RULES_PATH = resolve('references', 'comment-safety-rules.md');
 let cachedCommentRules = null;
 
@@ -22,6 +23,15 @@ export function loadCommentSafetyRules() {
 export function getCommentMaxLength(value = process.env.COMMENT_MAX_LENGTH) {
   const n = Number(value || DEFAULT_COMMENT_MAX_LENGTH);
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_COMMENT_MAX_LENGTH;
+}
+
+export function getReplyMinLength(value = process.env.REPLY_MIN_LENGTH || process.env.COMMENT_MIN_LENGTH) {
+  const n = Number(value || DEFAULT_REPLY_MIN_LENGTH);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_REPLY_MIN_LENGTH;
+}
+
+export function countVisibleChars(text = '') {
+  return Array.from(String(text || '').replace(/\s+/g, '')).length;
 }
 
 export function buildCommentPrompt(context = {}) {
@@ -64,6 +74,7 @@ export function buildCommentPrompt(context = {}) {
 
 export function buildReplyPrompt(context = {}) {
   const maxLength = Number(context?.requirements?.maxLength || getCommentMaxLength());
+  const minLength = Number(context?.requirements?.minLength || getReplyMinLength());
   const safetyRules = loadCommentSafetyRules();
   const work = context.work || {};
   const comment = context.comment || {};
@@ -72,7 +83,7 @@ export function buildReplyPrompt(context = {}) {
     '你是抖音创作者互动助手，只负责生成一条对评论的回复。',
     safetyRules ? ['必须遵守下面这份项目评论生成规则：', safetyRules].join('\n') : '',
     '输出格式要求：只能返回 JSON，格式为：{"reply":"回复内容"}。reply 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
-    `本次 maxLength=${maxLength}。`,
+    `本次回复长度必须在 ${minLength}-${maxLength} 个中文可见字符之间，少于 ${minLength} 个字不合格。`,
     '',
     '上下文：',
     JSON.stringify({
@@ -90,6 +101,7 @@ export function buildReplyPrompt(context = {}) {
         timeText: comment.timeText || '',
       },
       requirements: {
+        minLength,
         maxLength,
         tone: context?.requirements?.tone || '自然、简短、像真人',
       },
@@ -125,10 +137,12 @@ export function validateComment(comment, { maxLength = getCommentMaxLength() } =
   return text;
 }
 
-export function validateReply(reply, { maxLength = getCommentMaxLength() } = {}) {
+export function validateReply(reply, { minLength = getReplyMinLength(), maxLength = getCommentMaxLength() } = {}) {
   const text = String(reply || '').trim();
+  const visibleLength = countVisibleChars(text);
   if (!text) throw new Error('reply 为空');
-  if (text.length > maxLength) throw new Error(`reply 超长: ${text.length}/${maxLength}`);
+  if (visibleLength < minLength) throw new Error(`reply 过短: ${visibleLength}/${minLength}`);
+  if (visibleLength > maxLength) throw new Error(`reply 超长: ${visibleLength}/${maxLength}`);
   if (/```|\{\s*"reply"|^\s*\[/.test(text)) throw new Error('reply 必须是纯文本');
   return text;
 }
@@ -219,10 +233,12 @@ export async function generateCommentWithHermes(context, options = {}) {
 
 export async function generateReplyWithHermes(context, options = {}) {
   const maxLength = Number(context?.requirements?.maxLength || options.maxLength || getCommentMaxLength());
+  const minLength = Number(context?.requirements?.minLength || options.minLength || getReplyMinLength());
   const basePrompt = buildReplyPrompt({
     ...context,
     requirements: {
       ...(context?.requirements || {}),
+      minLength,
       maxLength,
     },
   });
@@ -233,7 +249,7 @@ export async function generateReplyWithHermes(context, options = {}) {
       '',
       '上一次返回格式错误。你只能返回 JSON，例如：',
       '{"reply":"回复内容"}',
-      '不要解释，不要 Markdown。',
+      `回复必须是 ${minLength}-${maxLength} 个中文可见字符，不要解释，不要 Markdown。`,
     ].join('\n');
     try {
       const output = await callAgentCli(`${basePrompt}${retryHint}`, options);
@@ -241,7 +257,7 @@ export async function generateReplyWithHermes(context, options = {}) {
       if (typeof parsed.reply !== 'string') {
         throw new Error('Agent 返回格式错误: reply 必须是 string');
       }
-      return validateReply(parsed.reply, { maxLength });
+      return validateReply(parsed.reply, { minLength, maxLength });
     } catch (err) {
       lastError = err;
     }
