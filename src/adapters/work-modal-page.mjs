@@ -233,7 +233,7 @@ async function typeIntoReplyDraftEditor(page, replyText) {
   }
   await page.waitForTimeout(300).catch(() => {});
 
-  let typed = await page.evaluate((text, method) => {
+  let typed = await page.evaluate(({ text, method }) => {
     const container = document.querySelector('.comment-input-container');
     const editorEl = document.querySelector('[data-return-visit-editor="true"]')
       || container?.querySelector('.public-DraftEditor-content[contenteditable="true"]')
@@ -253,7 +253,7 @@ async function typeIntoReplyDraftEditor(page, replyText) {
       };
     }
     return { ok: false, reason: 'text not reflected in reply editor' };
-  }, replyText, inputMethod);
+  }, { text: replyText, method: inputMethod });
 
   if (!typed.ok && inputMethod === 'keyboard_type_effect') {
     console.error(`[work-modal] 打字效果未反映到输入框，回退一次性填入: ${typed.reason || 'unknown'}`);

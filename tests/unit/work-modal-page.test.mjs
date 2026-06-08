@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   buildWorkReplyTarget,
   extractModalIdFromUrl,
+  fillWorkReplyText,
   parseDouyinTimeText,
   pickWorkCommentCandidate,
   resolveReplyTypingOptions,
@@ -93,6 +94,43 @@ describe('回复输入打字效果', () => {
     expect(page.keyboard.insertText).toHaveBeenCalledTimes(1);
     expect(page.keyboard.insertText).toHaveBeenCalledWith('一次填入');
     expect(page.waitForTimeout).not.toHaveBeenCalled();
+  });
+
+  it('fillWorkReplyText 使用单对象参数调用 evaluate，兼容 Playwright', async () => {
+    const originalTyping = process.env.LISHANGWANGLAI_REPLY_TYPING;
+    process.env.LISHANGWANGLAI_REPLY_TYPING = '0';
+
+    const page = {
+      evaluate: vi.fn(async function(fn, arg) {
+        expect(arguments.length).toBeLessThanOrEqual(2);
+        if (arg?.text && arg?.method) {
+          expect(arg).toEqual({ text: '收到啦', method: 'keyboard_insert_text' });
+          return { ok: true, method: arg.method, sendButtonVisible: true };
+        }
+        return { ok: true };
+      }),
+      locator: vi.fn(() => ({
+        last: () => ({
+          waitFor: vi.fn(async () => {}),
+          click: vi.fn(async () => {}),
+        }),
+      })),
+      keyboard: {
+        press: vi.fn(async () => {}),
+        insertText: vi.fn(async () => {}),
+      },
+      waitForTimeout: vi.fn(async () => {}),
+    };
+
+    try {
+      const result = await fillWorkReplyText(page, '收到啦');
+      expect(result.ok).toBe(true);
+      expect(result.data.method).toBe('keyboard_insert_text');
+      expect(page.keyboard.insertText).toHaveBeenCalledWith('收到啦');
+    } finally {
+      if (originalTyping === undefined) delete process.env.LISHANGWANGLAI_REPLY_TYPING;
+      else process.env.LISHANGWANGLAI_REPLY_TYPING = originalTyping;
+    }
   });
 });
 
