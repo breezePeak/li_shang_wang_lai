@@ -135,15 +135,55 @@ export function validateReply(reply, { maxLength = getCommentMaxLength() } = {})
   return text;
 }
 
-export async function callHermes(prompt, options = {}) {
-  const bin = options.hermesBin || process.env.HERMES_BIN || 'hermes';
-  const timeoutMs = Number(options.timeoutMs || process.env.HERMES_TIMEOUT_MS || 60000);
-  const { stdout } = await execFileAsync(bin, ['chat', '-Q', '-q', prompt], {
-    timeout: timeoutMs,
+export function resolveAgentCliConfig(options = {}) {
+  const provider = String(options.provider || process.env.AGENT_PROVIDER || 'hermes').trim().toLowerCase();
+  if (!['hermes', 'openclaw'].includes(provider)) {
+    throw new Error(`不支持的 AGENT_PROVIDER: ${provider}`);
+  }
+
+  const bin = options.bin
+    || (provider === 'openclaw' ? options.openclawBin : options.hermesBin)
+    || (provider === 'openclaw' ? process.env.OPENCLAW_BIN : process.env.HERMES_BIN)
+    || provider;
+
+  const argsEnv = provider === 'openclaw' ? process.env.OPENCLAW_ARGS : process.env.HERMES_ARGS;
+  const argsTemplate = Array.isArray(options.argsTemplate)
+    ? options.argsTemplate
+    : String(options.argsTemplate || argsEnv || 'chat -Q -q {prompt}')
+      .split(' ')
+      .map(part => part.trim())
+      .filter(Boolean);
+
+  const timeoutMs = Number(
+    options.timeoutMs
+    || process.env.AGENT_TIMEOUT_MS
+    || (provider === 'openclaw' ? process.env.OPENCLAW_TIMEOUT_MS : process.env.HERMES_TIMEOUT_MS)
+    || 60000
+  );
+
+  return {
+    provider,
+    bin,
+    argsTemplate,
+    timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 60000,
+  };
+}
+
+export async function callAgentCli(prompt, options = {}) {
+  const config = resolveAgentCliConfig(options);
+  const args = config.argsTemplate.map(part => part === '{prompt}' ? prompt : part);
+  if (!args.includes(prompt)) args.push(prompt);
+
+  const { stdout } = await execFileAsync(config.bin, args, {
+    timeout: config.timeoutMs,
     maxBuffer: 1024 * 1024,
     windowsHide: true,
   });
   return stdout;
+}
+
+export async function callHermes(prompt, options = {}) {
+  return callAgentCli(prompt, { ...options, provider: 'hermes' });
 }
 
 export async function generateCommentWithHermes(context, options = {}) {
@@ -165,7 +205,7 @@ export async function generateCommentWithHermes(context, options = {}) {
       '不要解释，不要 Markdown。',
     ].join('\n');
     try {
-      const output = await callHermes(`${basePrompt}${retryHint}`, options);
+      const output = await callAgentCli(`${basePrompt}${retryHint}`, options);
       const parsed = extractJson(output);
       return validateComment(parsed.comment, { maxLength });
     } catch (err) {
@@ -173,7 +213,7 @@ export async function generateCommentWithHermes(context, options = {}) {
     }
   }
 
-  throw lastError || new Error('Hermes 生成评论失败');
+  throw lastError || new Error('Agent 生成评论失败');
 }
 
 export async function generateReplyWithHermes(context, options = {}) {
@@ -195,10 +235,10 @@ export async function generateReplyWithHermes(context, options = {}) {
       '不要解释，不要 Markdown。',
     ].join('\n');
     try {
-      const output = await callHermes(`${basePrompt}${retryHint}`, options);
+      const output = await callAgentCli(`${basePrompt}${retryHint}`, options);
       const parsed = extractJson(output);
       if (typeof parsed.reply !== 'string') {
-        throw new Error('Hermes 返回格式错误: reply 必须是 string');
+        throw new Error('Agent 返回格式错误: reply 必须是 string');
       }
       return validateReply(parsed.reply, { maxLength });
     } catch (err) {
@@ -206,5 +246,5 @@ export async function generateReplyWithHermes(context, options = {}) {
     }
   }
 
-  throw lastError || new Error('Hermes 生成回复失败');
+  throw lastError || new Error('Agent 生成回复失败');
 }

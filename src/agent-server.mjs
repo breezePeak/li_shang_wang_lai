@@ -1,5 +1,5 @@
 import express from 'express';
-import { generateCommentWithHermes, generateReplyWithHermes, getCommentMaxLength } from './agent/comment-agent-server.mjs';
+import { generateCommentWithHermes, generateReplyWithHermes, getCommentMaxLength, resolveAgentCliConfig } from './agent/comment-agent-server.mjs';
 
 const app = express();
 const port = Number(process.env.AGENT_SERVER_PORT || 3001);
@@ -51,9 +51,11 @@ app.post('/generate-reply', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true });
+  const config = resolveAgentCliConfig();
+  res.json({ ok: true, provider: config.provider, bin: config.bin });
 });
 
 app.listen(port, () => {
-  console.error(`[agent] server listening on http://localhost:${port}`);
+  const config = resolveAgentCliConfig();
+  console.error(`[agent] server listening on http://localhost:${port} provider=${config.provider} bin=${config.bin}`);
 });

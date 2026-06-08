@@ -553,7 +553,7 @@ pending_visit → executing → done
 
 ```text
 采集模块 (interactions:scan) — 通知面板唯一入口，负责入库；生成待处理范围时必须显式输入 --days 与 --max-count
-agent-server — 只负责调用 Hermes 生成 comment/reply 文本
+agent-server — 只负责调用 Hermes/OpenClaw 生成 comment/reply 文本，可通过 AGENT_PROVIDER=hermes|openclaw 切换
 回评模块 (comments:execute) — 默认从 DB 查询待回评，必须显式输入 --days 与 --limit/--max-count，调用 agent-server 生成 reply_text，再由 CLI 执行浏览器动作
 回访模块 (visit:run / return-visit:execute) — 打开主页监听作品列表 API，匹配 workId，进入作品页后调用 agent-server 生成 comment，再由 CLI 填写提交
 

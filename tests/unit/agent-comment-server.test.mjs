@@ -5,6 +5,7 @@ import {
   buildCommentPrompt,
   buildReplyPrompt,
   loadCommentSafetyRules,
+  resolveAgentCliConfig,
 } from '../../src/agent/comment-agent-server.mjs';
 
 describe('agent comment server helpers', () => {
@@ -48,5 +49,19 @@ describe('agent comment server helpers', () => {
     const prompt = buildReplyPrompt({ taskId: 'reply_001' });
     expect(prompt).toContain('{"reply":"回复内容"}');
     expect(prompt).toContain('评论生成规则与安全边界');
+  });
+
+  it('resolveAgentCliConfig supports hermes and openclaw providers', () => {
+    expect(resolveAgentCliConfig({ provider: 'hermes' })).toMatchObject({
+      provider: 'hermes',
+      bin: 'hermes',
+      argsTemplate: ['chat', '-Q', '-q', '{prompt}'],
+    });
+
+    expect(resolveAgentCliConfig({ provider: 'openclaw' })).toMatchObject({
+      provider: 'openclaw',
+      bin: 'openclaw',
+      argsTemplate: ['chat', '-Q', '-q', '{prompt}'],
+    });
   });
 });

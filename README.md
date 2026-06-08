@@ -2,7 +2,7 @@
 
 基于 Node.js、Playwright 和 SQLite 的抖音创作者互动助手，支持 Hermes / OpenClaw Skill 加载。
 
-项目用于辅助创作者扫描互动、生成并执行评论回复、生成并执行回访点赞 + 评论。浏览器控制由 CLI 完成；本地 `agent-server` 只负责调用 Hermes 生成评论/回复文本。评论回复默认真实执行；回访需 `--execute`。
+项目用于辅助创作者扫描互动、生成并执行评论回复、生成并执行回访点赞 + 评论。浏览器控制由 CLI 完成；本地 `agent-server` 只负责调用 Hermes 或 OpenClaw 生成评论/回复文本。评论回复默认真实执行；回访需 `--execute`。
 
 
 ## 环境要求
@@ -116,6 +116,41 @@ npm run auth
 `visit:run` 会打开目标用户主页，监听主页作品列表 API，按 `workId` 匹配并点击目标作品，进入作品页后调用 `agent-server` 生成回访评论，再由 CLI 填写并提交。Agent 不控制浏览器、不点击、不提交评论。
 
 旧 JSON 文件路径仍保留兼容能力，但不再作为常用入口：`comments:execute --items-file <JSON>`、`return-visit:prepare --items-file <JSON>`。
+
+## agent-server Provider
+
+默认使用 Hermes：
+
+```bash
+npm run agent-server
+```
+
+切换 OpenClaw：
+
+```bash
+AGENT_PROVIDER=openclaw npm run agent-server
+```
+
+Windows PowerShell：
+
+```powershell
+$env:AGENT_PROVIDER="openclaw"; npm run agent-server
+```
+
+可配置环境变量：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `AGENT_PROVIDER` | `hermes` | 可选 `hermes` / `openclaw` |
+| `HERMES_BIN` | `hermes` | Hermes 命令路径 |
+| `OPENCLAW_BIN` | `openclaw` | OpenClaw 命令路径 |
+| `HERMES_ARGS` | `chat -Q -q {prompt}` | Hermes 参数模板，`{prompt}` 会替换为提示词 |
+| `OPENCLAW_ARGS` | `chat -Q -q {prompt}` | OpenClaw 参数模板，`{prompt}` 会替换为提示词 |
+| `AGENT_SERVER_PORT` | `3001` | agent-server 端口 |
+| `COMMENT_MAX_LENGTH` | `30` | 默认评论/回复最大长度 |
+| `AGENT_TIMEOUT_MS` | `60000` | 通用超时，优先级低于 provider 专用超时 |
+| `HERMES_TIMEOUT_MS` | `60000` | Hermes 超时 |
+| `OPENCLAW_TIMEOUT_MS` | `60000` | OpenClaw 超时 |
 
 
 ## 文档边界
