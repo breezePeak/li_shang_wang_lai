@@ -54,7 +54,7 @@ export function listPendingCommentsGroupedByWork(options = {}) {
   const db = getDb();
   const { limit = 100, days = null } = options;
   const params = [];
-  let sql = "SELECT * FROM work_comments WHERE reply_status = 'pending' AND (reply_text IS NULL OR reply_text = '')";
+  let sql = "SELECT * FROM work_comments WHERE reply_status = 'pending'";
   if (Number(days) > 0) {
     const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
     sql += ' AND last_seen_at >= ?';
@@ -103,7 +103,6 @@ export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
       AND wc.modal_id != ''
       AND w_by_modal.modal_id = wc.modal_id
     WHERE wc.reply_status = 'pending'
-      AND (wc.reply_text IS NULL OR wc.reply_text = '')
   `;
 
   if (Number(days) > 0) {
@@ -120,7 +119,7 @@ export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
 export function saveReplyText(commentId, replyText) {
   const db = getDb();
   db.prepare(
-    "UPDATE work_comments SET reply_text = ?, last_seen_at = ? WHERE id = ?"
+    "UPDATE work_comments SET reply_text = ?, reply_reason = NULL, last_seen_at = ? WHERE id = ?"
   ).run(replyText, new Date().toISOString(), commentId);
 }
 
@@ -136,7 +135,7 @@ export function markCommentReplied(commentId) {
   if (!row) return false;
 
   db.prepare(
-    "UPDATE work_comments SET reply_status = 'succeeded', replied_at = ?, last_seen_at = ? WHERE id = ?"
+    "UPDATE work_comments SET reply_status = 'succeeded', reply_reason = NULL, replied_at = ?, last_seen_at = ? WHERE id = ?"
   ).run(now, now, commentId);
 
   if (row.source_event_id) {
@@ -159,6 +158,43 @@ export function markCommentBlocked(commentId, reason) {
   db.prepare(
     "UPDATE work_comments SET reply_status = 'blocked', reply_reason = ?, last_seen_at = ? WHERE id = ?"
   ).run(reason || null, new Date().toISOString(), commentId);
+}
+
+export function markCommentPending(commentId, reason = null) {
+  const db = getDb();
+  db.prepare(
+    "UPDATE work_comments SET reply_status = 'pending', reply_reason = ?, last_seen_at = ? WHERE id = ?"
+  ).run(reason || null, new Date().toISOString(), commentId);
+}
+
+export function updateCommentReplyState(commentId, { replyStatus = null, replyText = undefined, replyReason = undefined } = {}) {
+  const db = getDb();
+  const allowedStatuses = new Set(['pending', 'blocked', 'sent_unverified', 'skipped']);
+  const updates = ['last_seen_at = ?'];
+  const params = [new Date().toISOString()];
+
+  if (replyStatus !== null) {
+    const status = String(replyStatus || '').trim();
+    if (!allowedStatuses.has(status)) throw new Error(`不支持的 reply_status: ${status}`);
+    updates.push('reply_status = ?');
+    params.push(status);
+  }
+
+  if (replyText !== undefined) {
+    updates.push('reply_text = ?');
+    params.push(String(replyText || '').trim() || null);
+  }
+
+  if (replyReason !== undefined) {
+    updates.push('reply_reason = ?');
+    params.push(String(replyReason || '').trim() || null);
+  } else if (replyStatus === 'pending') {
+    updates.push('reply_reason = NULL');
+  }
+
+  params.push(commentId);
+  const result = db.prepare(`UPDATE work_comments SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  return result.changes > 0;
 }
 
 export function markCommentSkipped(commentId, reason) {

@@ -34,6 +34,16 @@ app.get('/api/stats', (req, res) => {
       WHERE reply_status = 'pending'
     `).get().count;
 
+    const blockedReplies = db.prepare(`
+      SELECT COUNT(*) as count FROM work_comments
+      WHERE reply_status = 'blocked'
+    `).get().count;
+
+    const sentUnverifiedReplies = db.prepare(`
+      SELECT COUNT(*) as count FROM work_comments
+      WHERE reply_status = 'sent_unverified'
+    `).get().count;
+
     // 已完成回访任务数
     const completedTasks = db.prepare(`
       SELECT COUNT(*) as count FROM return_visit_tasks 
@@ -72,6 +82,9 @@ app.get('/api/stats', (req, res) => {
         pendingLikes,
         pendingComments,
         pendingReplies,
+        blockedReplies,
+        sentUnverifiedReplies,
+        replyExceptions: blockedReplies + sentUnverifiedReplies,
         completedTasks,
         totalTasks,
         collectedTotal,
@@ -253,14 +266,33 @@ app.post('/api/revisit-tasks/bulk-skip', (req, res) => {
   }
 });
 
-// 5. GET /api/pending-comments: 获取暂缓回复的评论列表
+// 5. GET /api/pending-comments: 获取待处理/异常回评评论列表
 app.get('/api/pending-comments', (req, res) => {
   try {
     const db = getDb();
     const comments = db.prepare(`
-      SELECT * FROM work_comments 
-      WHERE reply_status = 'pending'
-      ORDER BY last_seen_at DESC
+      SELECT
+        wc.*,
+        COALESCE(w_by_work.work_url, w_by_modal.work_url, wc.work_url) AS joined_work_url,
+        COALESCE(w_by_work.work_title, w_by_modal.work_title) AS joined_work_title,
+        COALESCE(w_by_work.work_desc, w_by_modal.work_desc) AS joined_work_desc,
+        COALESCE(w_by_work.author_profile_url, w_by_modal.author_profile_url) AS joined_author_profile_url
+      FROM work_comments wc
+      LEFT JOIN works w_by_work
+        ON wc.work_id IS NOT NULL
+        AND wc.work_id != ''
+        AND w_by_work.work_id = wc.work_id
+      LEFT JOIN works w_by_modal
+        ON (wc.work_id IS NULL OR wc.work_id = '' OR w_by_work.id IS NULL)
+        AND wc.modal_id IS NOT NULL
+        AND wc.modal_id != ''
+        AND w_by_modal.modal_id = wc.modal_id
+      WHERE wc.reply_status IN ('pending', 'blocked', 'sent_unverified')
+      ORDER BY CASE wc.reply_status
+        WHEN 'blocked' THEN 0
+        WHEN 'sent_unverified' THEN 1
+        ELSE 2
+      END, wc.last_seen_at DESC
     `).all();
 
     res.json({ ok: true, data: comments });
@@ -272,22 +304,72 @@ app.get('/api/pending-comments', (req, res) => {
 // 6. POST /api/pending-comments/:id/reply: 确定对某挂起评论进行回复
 app.post('/api/pending-comments/:id/reply', (req, res) => {
   const { id } = req.params;
+  const { replyText } = req.body || {};
 
   try {
     const db = getDb();
     const now = new Date().toISOString();
+    const updates = ["reply_status = 'pending'", 'reply_reason = NULL', 'last_seen_at = ?'];
+    const params = [now];
+    if (replyText !== undefined) {
+      updates.push('reply_text = ?');
+      params.push(String(replyText || '').trim() || null);
+    }
+    params.push(id);
 
-    const result = db.prepare(`
-      UPDATE work_comments 
-      SET last_seen_at = ?
-      WHERE id = ?
-    `).run(now, id);
+    const result = db.prepare(`UPDATE work_comments SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
     if (result.changes === 0) {
       return res.status(404).json({ ok: false, error: '未找到该评论' });
     }
 
     res.json({ ok: true, message: '评论已标记待回复' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 6b. POST /api/pending-comments/:id/update: 修改回评文本或人工调整状态
+app.post('/api/pending-comments/:id/update', (req, res) => {
+  const { id } = req.params;
+  const { replyText, replyStatus, replyReason } = req.body || {};
+  const allowedStatuses = new Set(['pending', 'blocked', 'sent_unverified', 'skipped']);
+
+  try {
+    const db = getDb();
+    const now = new Date().toISOString();
+    const updates = ['last_seen_at = ?'];
+    const params = [now];
+
+    if (replyText !== undefined) {
+      updates.push('reply_text = ?');
+      params.push(String(replyText || '').trim() || null);
+    }
+
+    if (replyStatus !== undefined) {
+      const status = String(replyStatus || '').trim();
+      if (!allowedStatuses.has(status)) {
+        return res.status(400).json({ ok: false, error: '不支持的回评状态' });
+      }
+      updates.push('reply_status = ?');
+      params.push(status);
+      if (status === 'pending' && replyReason === undefined) {
+        updates.push('reply_reason = NULL');
+      }
+    }
+
+    if (replyReason !== undefined) {
+      updates.push('reply_reason = ?');
+      params.push(String(replyReason || '').trim() || null);
+    }
+
+    params.push(id);
+    const result = db.prepare(`UPDATE work_comments SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    if (result.changes === 0) {
+      return res.status(404).json({ ok: false, error: '未找到该评论' });
+    }
+
+    res.json({ ok: true, message: '回评信息已更新' });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -303,7 +385,7 @@ app.post('/api/pending-comments/:id/ignore', (req, res) => {
 
     const result = db.prepare(`
       UPDATE work_comments 
-      SET reply_status = 'skipped', last_seen_at = ?
+      SET reply_status = 'skipped', reply_reason = 'user_ignored', last_seen_at = ?
       WHERE id = ?
     `).run(now, id);
 

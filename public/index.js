@@ -151,7 +151,7 @@ function renderRiverTimeline() {
 
     let branchCount = 0;
     if (stage.branch.id === 'hold') {
-      branchCount = statsData.pendingReplies || 0;
+      branchCount = (statsData.pendingReplies || 0) + (statsData.replyExceptions || 0);
     } else if (stage.branch.id === 'retry') {
       branchCount = reviewTasks.filter((task) => String(task.status || '').startsWith('failed')).length;
     }
@@ -212,9 +212,9 @@ function buildStageMap() {
       tag: '需要点击',
     },
     hold: {
-      label: '暂缓回复分支',
-      count: statsData.pendingReplies || 0,
-      helper: '这条支流只收“先别自动回复”的评论，提醒用户单独处理。',
+      label: '回评处理分支',
+      count: (statsData.pendingReplies || 0) + (statsData.replyExceptions || 0),
+      helper: '这条支流承接待回评和异常回评，可手动改文本、改状态或忽略。',
       tag: '提醒分支',
     },
     execute: {
@@ -256,7 +256,7 @@ function buildStageDetailData() {
       ],
       branches: [
         buildBranchCard('回访任务生成', `${statsData.totalTasks || 0} 条任务已由通知沉淀而来。`, statsData.totalTasks || 0),
-        buildBranchCard('暂缓回复', `${statsData.pendingReplies || 0} 条评论被引向人工判断分支。`, statsData.pendingReplies || 0),
+        buildBranchCard('回评处理', `${statsData.pendingReplies || 0} 条待回评，${statsData.replyExceptions || 0} 条异常待处理。`, (statsData.pendingReplies || 0) + (statsData.replyExceptions || 0)),
       ],
       workspaceTitle: '通知源概览',
       workspaceSubtitle: '这里先展示流程说明，真正可操作的内容在后续阶段。',
@@ -297,7 +297,7 @@ function buildStageDetailData() {
         { label: '失败任务', value: failedTasks.length },
       ],
       branches: [
-        buildBranchCard('暂缓回复评论', '有些评论不该直接回，应该分流到提醒支线。', statsData.pendingReplies || 0),
+        buildBranchCard('回评处理台', '待回评和异常回评都在这里人工处理。', (statsData.pendingReplies || 0) + (statsData.replyExceptions || 0)),
         buildBranchCard('失败回退', '如果评论草稿不稳定或上下文不足，会流去失败分支。', failedTasks.length),
       ],
       workspaceTitle: '需要人工审核的回访任务',
@@ -307,20 +307,20 @@ function buildStageDetailData() {
     },
     hold: {
       kicker: '提醒分支',
-      title: '暂缓回复评论分支',
-      description: '这不是回访动作，而是需要提醒用户的旁路。这里专门承接自动规则暂缓下来的评论，让你单独决定回不回。',
+      title: '回评处理分支',
+      description: '这里承接待回评和被阻塞/未确认的异常回评。你可以修改回复文本、把异常重置回 pending 队列，或直接忽略。',
       metrics: [
-        { label: '暂缓评论', value: statsData.pendingReplies || 0 },
-        { label: '待人工确认', value: pendingComments.length },
+        { label: '待回评', value: statsData.pendingReplies || 0 },
+        { label: '异常回评', value: statsData.replyExceptions || 0 },
+        { label: '未确认发送', value: statsData.sentUnverifiedReplies || 0 },
         { label: '主线任务', value: statsData.totalTasks || 0 },
-        { label: '已完成回访', value: statsData.completedTasks || 0 },
       ],
       branches: [
-        buildBranchCard('人工回复', '确定回复后，评论会重新汇入回复队列。', pendingComments.length),
-        buildBranchCard('忽略离开', '不合适的评论可以在这里直接掐断。', pendingComments.length),
+        buildBranchCard('重新排队', '把 blocked 评论改回 pending 后，下次 comments:execute 会继续处理。', pendingComments.filter(c => c.reply_status === 'blocked').length),
+        buildBranchCard('人工核查', 'sent_unverified 代表可能已发送，重试前应人工确认。', pendingComments.filter(c => c.reply_status === 'sent_unverified').length),
       ],
-      workspaceTitle: '暂缓评论列表',
-      workspaceSubtitle: '这里是支流，不进入回访审批卡片。',
+      workspaceTitle: '回评处理台',
+      workspaceSubtitle: 'pending 会自动进入下次执行；blocked/sent_unverified 需要人工修改状态。',
       workspaceType: 'pending-comments',
     },
     execute: {
@@ -614,32 +614,50 @@ function renderTaskTableHtml(tasks) {
 
 function renderPendingCommentsHtml() {
   if (!pendingComments.length) {
-    return renderEmptyState('fa-face-smile-beam', '当前没有暂缓评论。');
+    return renderEmptyState('fa-face-smile-beam', '当前没有待处理或异常回评。');
   }
 
   return `
     <div class="pending-list">
-      ${pendingComments.map((comment) => `
-        <article class="pending-card">
+      ${pendingComments.map((comment) => {
+        const badge = getReplyBadge(comment.reply_status);
+        const textareaId = `reply-text-${comment.id}`;
+        const workUrl = comment.joined_work_url || comment.work_url || '';
+        const workTitle = comment.joined_work_title || comment.work_id || comment.modal_id || '原作品';
+        const reason = comment.reply_reason || '';
+        return `
+        <article class="pending-card reply-${escapeHtml(comment.reply_status || 'pending')}">
           <div class="pending-main">
             <div class="pending-user">
               <div class="pending-user-avatar">${escapeHtml((comment.actor_name || '?').charAt(0))}</div>
               <div>
                 <h4>${escapeHtml(comment.actor_name || '未知用户')}</h4>
-                <span>${escapeHtml(comment.event_time_text || '不久前')}</span>
+                <span>${escapeHtml(comment.event_time_text || '不久前')} · <span class="reply-badge ${badge.className}">${badge.text}</span></span>
               </div>
             </div>
             <div class="pending-text"><strong>原留言：</strong>${escapeHtml(comment.comment_text || '')}</div>
-            ${comment.work_url ? `<div class="pending-work-context"><a class="work-link" target="_blank" href="${comment.work_url}">打开原作品 <i class="fa-solid fa-arrow-up-right-from-square"></i></a></div>` : ''}
+            ${reason ? `<div class="pending-reason"><strong>异常：</strong>${escapeHtml(reason)}</div>` : ''}
+            <div class="pending-reply-editor">
+              <label for="${textareaId}">回评文本</label>
+              <textarea id="${textareaId}" class="comment-textarea" placeholder="可手动填写或修改回评文本...">${escapeHtml(comment.reply_text || '')}</textarea>
+            </div>
+            ${workUrl ? `<div class="pending-work-context"><a class="work-link" target="_blank" href="${escapeAttribute(workUrl)}">打开${escapeHtml(workTitle)} <i class="fa-solid fa-arrow-up-right-from-square"></i></a></div>` : ''}
           </div>
           <div class="pending-actions">
-            <button class="btn btn-primary" onclick="replyComment(${comment.id})"><i class="fa-solid fa-check"></i>确定回复</button>
+            <button class="btn btn-primary" onclick="retryComment(${comment.id})"><i class="fa-solid fa-rotate-right"></i>重试</button>
+            <button class="btn btn-secondary" onclick="saveCommentReply(${comment.id})"><i class="fa-solid fa-floppy-disk"></i>保存</button>
             <button class="btn btn-danger" onclick="ignoreComment(${comment.id})"><i class="fa-solid fa-trash-can"></i>忽略</button>
           </div>
         </article>
-      `).join('')}
+      `;}).join('')}
     </div>
   `;
+}
+
+function getReplyBadge(status) {
+  if (status === 'blocked') return { text: '已阻塞', className: 'reply-badge-blocked' };
+  if (status === 'sent_unverified') return { text: '发送未确认', className: 'reply-badge-unverified' };
+  return { text: '待回评', className: 'reply-badge-pending' };
 }
 
 function renderOverviewContent(items) {
@@ -872,9 +890,15 @@ function clearSelectedTasks() {
   renderStageWorkspace();
 }
 
-window.replyComment = async function(id) {
+window.retryComment = async function(id) {
+  const input = document.getElementById(`reply-text-${id}`);
+  const replyText = input ? input.value.trim() : '';
   try {
-    const res = await fetch(`/api/pending-comments/${id}/reply`, { method: 'POST' });
+    const res = await fetch(`/api/pending-comments/${id}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ replyText }),
+    });
     const json = await res.json();
     if (!json.ok) {
       showToast(json.error || '移入回复队列失败', 'error');
@@ -884,6 +908,27 @@ window.replyComment = async function(id) {
     await refreshAll();
   } catch (err) {
     showToast('操作失败', 'error');
+  }
+};
+
+window.saveCommentReply = async function(id) {
+  const input = document.getElementById(`reply-text-${id}`);
+  const replyText = input ? input.value.trim() : '';
+  try {
+    const res = await fetch(`/api/pending-comments/${id}/update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ replyText }),
+    });
+    const json = await res.json();
+    if (!json.ok) {
+      showToast(json.error || '保存失败', 'error');
+      return;
+    }
+    showToast(json.message || '回评文本已保存', 'success');
+    await refreshAll();
+  } catch (err) {
+    showToast('保存失败', 'error');
   }
 };
 

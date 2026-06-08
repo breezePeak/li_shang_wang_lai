@@ -1024,11 +1024,21 @@ body {
   padding: 8px 12px;
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: stretch;
   gap: 12px;
   background: rgba(255, 255, 255, 0.75);
   border: 1px solid rgba(76, 99, 83, 0.08);
   border-radius: 14px;
+}
+
+.cabin-workspace .pending-card.reply-blocked {
+  border-color: rgba(212, 87, 59, 0.24);
+  background: rgba(255, 247, 243, 0.86);
+}
+
+.cabin-workspace .pending-card.reply-sent_unverified {
+  border-color: rgba(211, 155, 52, 0.28);
+  background: rgba(255, 250, 238, 0.88);
 }
 
 .cabin-workspace .pending-main {
@@ -1066,6 +1076,31 @@ body {
   font-size: 10px;
 }
 
+.cabin-workspace .reply-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.cabin-workspace .reply-badge-pending {
+  background: rgba(47, 143, 115, 0.12);
+  color: #1e5946;
+}
+
+.cabin-workspace .reply-badge-blocked {
+  background: rgba(212, 87, 59, 0.14);
+  color: #943421;
+}
+
+.cabin-workspace .reply-badge-unverified {
+  background: rgba(211, 155, 52, 0.16);
+  color: #8e5808;
+}
+
 .cabin-workspace .pending-text {
   margin-top: 4px;
   padding: 6px 10px;
@@ -1074,6 +1109,33 @@ body {
   font-size: 11px;
   line-height: 1.4;
   color: var(--text);
+}
+
+.cabin-workspace .pending-reason {
+  margin-top: 4px;
+  padding: 5px 8px;
+  border-radius: 9px;
+  background: rgba(212, 87, 59, 0.08);
+  color: #7b2c1e;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.cabin-workspace .pending-reply-editor {
+  margin-top: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cabin-workspace .pending-reply-editor label {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.cabin-workspace .pending-reply-editor .comment-textarea {
+  height: 42px;
 }
 
 .cabin-workspace .pending-work-context {
@@ -1085,6 +1147,7 @@ body {
   flex-direction: column;
   gap: 6px;
   flex-shrink: 0;
+  justify-content: center;
 }
 
 .cabin-workspace .pending-actions .btn {

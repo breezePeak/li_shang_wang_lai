@@ -13,6 +13,7 @@ import {
   resolveWorkUrlFromItem,
   validateWorkCommentItem,
 } from '../../src/cli/execute-comment-replies.mjs';
+import { listPendingCommentsGroupedByHomepageAndWork } from '../../src/db/work-comment-repository.mjs';
 
 // ============================================================
 // Test helpers — run CLI and capture stdout
@@ -75,6 +76,7 @@ function setup() {
       modal_id TEXT,
       work_url TEXT,
       work_title TEXT,
+      work_desc TEXT,
       work_type TEXT,
       thumbnail_key TEXT,
       thumbnail_src TEXT,
@@ -180,6 +182,16 @@ describe('comments:execute refactored logic', () => {
     expect(items[0].workId).toBe('7639733344284064741');
     expect(items[0].workUrl).toBe('https://www.douyin.com/video/7639733344284064741');
     expect(items[0].targetCommentId).toBe('cid-10');
+  });
+
+  it('待回评查询只按 pending 状态查询，已有 reply_text 也会被查到', () => {
+    const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: 10, days: 7 });
+    const ids = rows.map(row => row.id);
+
+    expect(ids).toContain(1);
+    expect(ids).toContain(2);
+    expect(ids).not.toContain(3);
+    expect(ids).not.toContain(4);
   });
 
   it('resolveWorkUrlFromItem 优先使用现有字段并回退到 workId/modalId', () => {
@@ -583,6 +595,38 @@ describe('comments:execute single-pass per work', () => {
     expect(results).toHaveLength(1);
     expect(results[0].error).toContain('single_pass_not_found');
     expect(saveBlocked).toHaveBeenCalledWith(expect.objectContaining({ commentId: 1 }), 'single_pass_not_found');
+  });
+
+  it('回复框打不开属于可重试失败，保留 pending 状态而不是 blocked', async () => {
+    const page = createFakePage();
+    const saveBlocked = vi.fn();
+    const saveRetryable = vi.fn();
+
+    const results = await executeSinglePassForWorkGroup(page, [
+      { commentId: 1, replyText: 'r1', actorName: 'u1', commentText: 'hello', eventTimeText: '06-01' },
+    ], { getByCid: () => null, getStats: () => ({ hasMore: 0 }) }, {
+      collectCandidates: vi.fn(async () => ({
+        ok: true,
+        candidates: [
+          { domIndex: 0, cid: '', actorName: 'u1', commentText: 'hello', timeText: '06-01', hasReplyButton: true },
+        ],
+      })),
+      openMatchedReplyBox: vi.fn(async () => ({ ok: false, code: 'reply_button_not_clickable' })),
+      fillReply: vi.fn(),
+      clickSend: vi.fn(),
+      verifyReply: vi.fn(),
+      scrollOnce: vi.fn(),
+      saveSucceeded: vi.fn(),
+      saveBlocked,
+      saveRetryable,
+      saveSentUnverified: vi.fn(),
+      onResult: vi.fn(),
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].status).toBe('pending');
+    expect(saveBlocked).not.toHaveBeenCalled();
+    expect(saveRetryable).toHaveBeenCalledWith(expect.objectContaining({ commentId: 1 }), expect.stringContaining('reply_box_not_opened'));
   });
 
   it('planViewportPendingMatches 会为当前屏产出可执行项和阻断项', () => {

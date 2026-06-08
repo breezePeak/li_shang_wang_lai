@@ -11,7 +11,7 @@
 //   命令默认真实执行回复，不再需要 --execute。
 
 import { runMigrations } from '../db/migrations.mjs';
-import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentSentUnverified, findCommentByWorkActorAndText, listPendingCommentsGroupedByHomepageAndWork } from '../db/work-comment-repository.mjs';
+import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentPending, markCommentSentUnverified, findCommentByWorkActorAndText, listPendingCommentsGroupedByHomepageAndWork } from '../db/work-comment-repository.mjs';
 import { findWorkByIdentity } from '../db/work-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
@@ -134,12 +134,16 @@ export async function generateMissingReplies(items = [], { agentProvider = new L
       results.push({ commentId, ok: true, reply });
     } catch (err) {
       const message = err?.message || String(err);
-      markCommentBlocked(commentId, `agent_generate_failed:${message}`);
+      markCommentPending(commentId, `agent_generate_failed:${message}`);
       console.error(`[agent] commentId=${commentId} failed reason=${message}`);
       results.push({ commentId, ok: false, error: message });
     }
   }
   return results;
+}
+
+function saveRetryablePending(item, reason) {
+  markCommentPending(item.commentId, reason);
 }
 
 export function groupExecutableItemsByWork(items) {
@@ -487,6 +491,9 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
   saveBlocked = (item, reason) => {
     markCommentBlocked(item.commentId, reason);
   },
+  saveRetryable = (item, reason) => {
+    saveRetryablePending(item, reason);
+  },
   saveSentUnverified = (item, reason) => {
     markCommentSentUnverified(item.commentId, reason);
   },
@@ -547,42 +554,39 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       });
       if (!opened.ok) {
         const reason = opened.message || opened.code || 'reply_box_not_opened';
-        saveBlocked(nextAction.item, reason);
+        saveRetryable(nextAction.item, `reply_box_not_opened:${reason}`);
         pendingMap.delete(nextAction.item.commentId);
-        blockedCount++;
         progressedInViewport = true;
-        const result = { ...nextAction.item, ok: false, status: 'blocked', error: reason };
+        const result = { ...nextAction.item, ok: false, status: 'pending', error: reason };
         localResults.push(result);
         onResult(result);
-        console.log(`[comments:execute] blocked commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
+        console.log(`[comments:execute] pending_retry commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
         continue;
       }
 
       const filled = await fillReply(page, nextAction.item.replyText);
       if (!filled.ok) {
         const reason = filled.message || filled.code || 'fill_failed';
-        saveBlocked(nextAction.item, reason);
+        saveRetryable(nextAction.item, `fill_failed:${reason}`);
         pendingMap.delete(nextAction.item.commentId);
-        blockedCount++;
         progressedInViewport = true;
-        const result = { ...nextAction.item, ok: false, status: 'blocked', error: reason };
+        const result = { ...nextAction.item, ok: false, status: 'pending', error: reason };
         localResults.push(result);
         onResult(result);
-        console.log(`[comments:execute] blocked commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
+        console.log(`[comments:execute] pending_retry commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
         continue;
       }
 
       const sent = await clickSend(page);
       if (!sent.ok) {
         const reason = sent.message || sent.code || 'send_failed';
-        saveBlocked(nextAction.item, reason);
+        saveRetryable(nextAction.item, `send_failed:${reason}`);
         pendingMap.delete(nextAction.item.commentId);
-        blockedCount++;
         progressedInViewport = true;
-        const result = { ...nextAction.item, ok: false, status: 'blocked', error: reason };
+        const result = { ...nextAction.item, ok: false, status: 'pending', error: reason };
         localResults.push(result);
         onResult(result);
-        console.log(`[comments:execute] blocked commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
+        console.log(`[comments:execute] pending_retry commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
         continue;
       }
 
@@ -773,8 +777,9 @@ async function executeWorkCommentItems(items, args) {
           if (!openResult.ok) {
             console.log(`[comments:execute] open_profile_failed reason=${openResult.reason || openResult.message || openResult.code || 'work_open_failed'}`);
             for (const validated of group) {
-              if (!diagnosePosition) markCommentBlocked(validated.commentId, openResult.reason || openResult.message || openResult.code || 'work_open_failed');
-              results.push({ ...validated, ok: false, status: 'blocked', error: openResult.reason || openResult.message || openResult.code });
+              const reason = openResult.reason || openResult.message || openResult.code || 'work_open_failed';
+              if (!diagnosePosition) markCommentPending(validated.commentId, `work_open_failed:${reason}`);
+              results.push({ ...validated, ok: false, status: 'pending', error: reason });
             }
             continue;
           }
@@ -784,8 +789,9 @@ async function executeWorkCommentItems(items, args) {
           const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
           if (!modalReady.ok) {
             for (const validated of group) {
-              if (!diagnosePosition) markCommentBlocked(validated.commentId, modalReady.message || modalReady.code || 'work_modal_not_ready');
-              results.push({ ...validated, ok: false, status: 'blocked', error: modalReady.message || modalReady.code });
+              const reason = modalReady.message || modalReady.code || 'work_modal_not_ready';
+              if (!diagnosePosition) markCommentPending(validated.commentId, `work_modal_not_ready:${reason}`);
+              results.push({ ...validated, ok: false, status: 'pending', error: reason });
             }
             continue;
           }
@@ -793,8 +799,9 @@ async function executeWorkCommentItems(items, args) {
           const commentAreaReady = await waitForWorkCommentArea(page, { timeoutMs: 10000 });
           if (!commentAreaReady.ok) {
             for (const validated of group) {
-              if (!diagnosePosition) markCommentBlocked(validated.commentId, commentAreaReady.message || commentAreaReady.code || 'comment_area_not_ready');
-              results.push({ ...validated, ok: false, status: 'blocked', error: commentAreaReady.message || commentAreaReady.code });
+              const reason = commentAreaReady.message || commentAreaReady.code || 'comment_area_not_ready';
+              if (!diagnosePosition) markCommentPending(validated.commentId, `comment_area_not_ready:${reason}`);
+              results.push({ ...validated, ok: false, status: 'pending', error: reason });
             }
             continue;
           }
@@ -810,6 +817,7 @@ async function executeWorkCommentItems(items, args) {
               verifyReply: async () => ({ ok: true, data: { diagnoseOnly: true } }),
               saveSucceeded: () => {},
               saveBlocked: () => {},
+              saveRetryable: () => {},
               saveSentUnverified: () => {},
             } : {}),
             onResult(result) {
@@ -836,8 +844,8 @@ async function executeWorkCommentItems(items, args) {
       } catch (err) {
         run.hadBlocked = true;
         for (const validated of group) {
-          if (!diagnosePosition) markCommentBlocked(validated.commentId, err.message);
-          results.push({ ...validated, ok: false, status: 'blocked', error: err.message });
+          if (!diagnosePosition) markCommentPending(validated.commentId, `group_execute_failed:${err.message}`);
+          results.push({ ...validated, ok: false, status: 'pending', error: err.message });
         }
         await captureGroupEvidence(err, currentWork);
 
