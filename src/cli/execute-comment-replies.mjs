@@ -11,7 +11,7 @@
 //   命令默认真实执行回复，不再需要 --execute。
 
 import { runMigrations } from '../db/migrations.mjs';
-import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentPending, markCommentSentUnverified, findCommentByWorkActorAndText, listPendingCommentsGroupedByHomepageAndWork } from '../db/work-comment-repository.mjs';
+import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentPending, markCommentSentUnverified, markCommentSkipped, findCommentByWorkActorAndText, listPendingCommentsGroupedByHomepageAndWork } from '../db/work-comment-repository.mjs';
 import { findWorkByIdentity } from '../db/work-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
@@ -40,6 +40,7 @@ import { writeFileSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
+import { normalizeNoticeApiItem } from '../domain/notice-api-normalization.mjs';
 
 function parseArgs(argv) {
   const args = {
@@ -208,6 +209,38 @@ export function extractTargetCommentId(item = {}, row = {}) {
   }
 }
 
+export function classifyStoredWorkCommentRaw(rawCommentJson = '') {
+  if (!rawCommentJson) return { ok: true, action: 'unknown', eventType: 'unknown', reason: 'missing_raw' };
+
+  try {
+    const parsed = JSON.parse(rawCommentJson);
+
+    // Only raw notification payloads carry a Douyin notice type. Other sources such
+    // as comment-list snapshots are already scoped to an opened work and cannot be
+    // safely reclassified here.
+    if (parsed?.type !== 31 || !parsed?.comment) {
+      return { ok: true, action: 'unknown', eventType: 'unknown', reason: 'not_notice_api_raw' };
+    }
+
+    const normalized = normalizeNoticeApiItem(parsed);
+    const action = normalized?.notificationAction || 'unknown';
+    const eventType = normalized?.eventType || 'unknown';
+
+    if (action !== 'comment_on_my_work' || eventType !== 'comment') {
+      return {
+        ok: false,
+        action,
+        eventType,
+        reason: `not_comment_on_my_work:${action || eventType || 'unknown'}`,
+      };
+    }
+
+    return { ok: true, action, eventType, reason: 'comment_on_my_work' };
+  } catch {
+    return { ok: true, action: 'unknown', eventType: 'unknown', reason: 'parse_failed' };
+  }
+}
+
 export function isDoneWithoutRetryResult(result) {
   return Boolean(result?.ok)
     || (!result?.ok && result?.status === 'succeeded')
@@ -248,6 +281,14 @@ export function validateWorkCommentItem(item) {
   if (row.reply_status === 'sent_unverified') {
     console.error(`[comments:execute] commentId=${item.commentId} 已发送但未确认，跳过重复执行`);
     return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, status: 'sent_unverified', fromAlready: true };
+  }
+
+  const rawClass = classifyStoredWorkCommentRaw(row.raw_comment_json || item.raw_comment_json || '');
+  if (!rawClass.ok) {
+    const reason = rawClass.reason || 'not_comment_on_my_work';
+    markCommentSkipped(row.id, reason);
+    console.error(`[comments:execute] commentId=${row.id} 跳过非“别人评论我的作品”通知 reason=${reason}`);
+    return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, status: 'skipped', error: reason };
   }
 
   const workId = item.workId || row.work_id || '';
@@ -895,6 +936,7 @@ async function executeWorkCommentItems(items, args) {
 
 function isSkippedResult(result) {
   return result.status === 'skipped_empty_reply'
+    || result.status === 'skipped'
     || (!result.ok && result.status === 'succeeded')
     || (!result.ok && result.status === 'sent_unverified');
 }
@@ -954,7 +996,7 @@ async function main() {
 
   const skipReasons = {};
   results.filter(isSkippedResult).forEach(r => {
-    const reason = r.status === 'skipped_empty_reply' ? 'empty' : r.status;
+    const reason = r.status === 'skipped_empty_reply' ? 'empty' : (r.error || r.status);
     skipReasons[reason] = (skipReasons[reason] || 0) + 1;
   });
   const skippedLog = skipped > 0 ? `，跳过 ${skipped} 条（${Object.entries(skipReasons).map(([k, v]) => `${k}×${v}`).join(', ')}）` : '';
@@ -965,10 +1007,12 @@ async function main() {
     console.log(`[comments:execute] mode=${args.diagnosePosition ? 'diagnose_position' : 'db_agent_execute'} 成功 ${succeeded} 条，失败 ${failed} 条${skippedLog}`);
     for (const item of results) {
       const tag = item.status === 'skipped_empty_reply' ? ' [empty-reply]'
+        : item.status === 'skipped' ? ' [skipped]'
         : (!item.ok && item.status === 'succeeded') ? ' [already-done]'
         : (!item.ok && item.status === 'sent_unverified') ? ' [already-sent]'
         : '';
-      console.log(`  [comment#${item.commentId || '-'}] ${item.ok ? item.status : `failed ${item.error}`}${tag}`);
+      const lineStatus = item.ok ? item.status : (item.status === 'skipped' ? `skipped ${item.error}` : `failed ${item.error}`);
+      console.log(`  [comment#${item.commentId || '-'}] ${lineStatus}${tag}`);
     }
   }
 }

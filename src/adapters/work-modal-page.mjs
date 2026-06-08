@@ -1613,14 +1613,35 @@ export async function collectVisibleWorkCommentCandidates(page) {
 
     function extractCid(el) {
       const attrs = ['data-comment-id', 'data-commentid', 'data-id', 'data-cid', 'id'];
+      function normalizeCid(value) {
+        const text = String(value || '').trim();
+        if (!text) return '';
+        const exact = text.match(/^\d{8,}$/);
+        if (exact) return exact[0];
+        const embedded = text.match(/(?:comment|cid|tooltip)[_-]?(\d{8,})/i) || text.match(/(\d{16,})/);
+        return embedded ? embedded[1] : '';
+      }
+
+      function fromNode(node) {
+        for (const attr of attrs) {
+          const cid = normalizeCid(node.getAttribute?.(attr));
+          if (cid) return cid;
+        }
+        return '';
+      }
+
       let current = el;
       for (let depth = 0; depth < 4 && current && current !== document.body; depth++) {
-        for (const attr of attrs) {
-          const value = current.getAttribute?.(attr);
-          if (value && String(value).trim()) return String(value).trim();
-        }
+        const cid = fromNode(current);
+        if (cid) return cid;
         current = current.parentElement;
       }
+
+      for (const node of el.querySelectorAll('[id], [data-comment-id], [data-commentid], [data-id], [data-cid]')) {
+        const cid = fromNode(node);
+        if (cid) return cid;
+      }
+
       return '';
     }
 
@@ -1847,20 +1868,36 @@ async function clickReplyButtonForCandidate(page, candidate) {
 
     function extractCidFromItem(el) {
       const attrs = ['data-comment-id', 'data-commentid', 'data-id', 'data-cid', 'id'];
-      let foundCid = '';
+      function normalizeCid(value) {
+        const text = String(value || '').trim();
+        if (!text) return '';
+        const exact = text.match(/^\d{8,}$/);
+        if (exact) return exact[0];
+        const embedded = text.match(/(?:comment|cid|tooltip)[_-]?(\d{8,})/i) || text.match(/(\d{16,})/);
+        return embedded ? embedded[1] : '';
+      }
+
+      function fromNode(node) {
+        for (const attr of attrs) {
+          const cid = normalizeCid(node.getAttribute?.(attr));
+          if (cid) return cid;
+        }
+        return '';
+      }
+
       let current = el;
       for (let depth = 0; depth < 4 && current && current !== document.body; depth++) {
-        for (const attr of attrs) {
-          const value = current.getAttribute?.(attr);
-          if (value && String(value).trim()) {
-            foundCid = String(value).trim();
-            break;
-          }
-        }
-        if (foundCid) break;
+        const cid = fromNode(current);
+        if (cid) return cid;
         current = current.parentElement;
       }
-      return foundCid;
+
+      for (const node of el.querySelectorAll('[id], [data-comment-id], [data-commentid], [data-id], [data-cid]')) {
+        const cid = fromNode(node);
+        if (cid) return cid;
+      }
+
+      return '';
     }
 
     function tryClickReplyOnItem(item) {

@@ -5,6 +5,7 @@ import { resolve, join } from 'path';
 import { getDb, resetDb } from '../../src/db/database.mjs';
 import {
   buildWorkCommentItemsFromDbRows,
+  classifyStoredWorkCommentRaw,
   executeSinglePassForWorkGroup,
   extractTargetCommentId,
   groupExecutableItemsByWork,
@@ -221,6 +222,37 @@ describe('comments:execute refactored logic', () => {
       }),
     });
     expect(cid).toBe('cid-from-raw');
+  });
+
+  it('classifyStoredWorkCommentRaw 会拒绝回复了你的评论通知，避免打开别人作品回评', () => {
+    const raw = JSON.stringify({
+      type: 31,
+      interactive_biz_id: 1003112,
+      create_time: 1780352085,
+      nid_str: 'notice-reply',
+      comment: {
+        comment_type: 12,
+        forward_id: 'other-work-id',
+        parent_id: 'parent-comment-id',
+        reply_comment: { text: '我的原评论' },
+        comment: {
+          cid: 'reply-cid',
+          text: '别人回复我的内容',
+          aweme_id: 'other-work-id',
+          user: { nickname: '别人' },
+        },
+        aweme: {
+          aweme_id: 'other-work-id',
+          author: { nickname: '别人作品作者', sec_uid: 'other-author' },
+        },
+      },
+    });
+
+    const result = classifyStoredWorkCommentRaw(raw);
+
+    expect(result.ok).toBe(false);
+    expect(result.action).toBe('reply_to_my_comment');
+    expect(result.reason).toContain('not_comment_on_my_work');
   });
 
   it('extractTargetCommentId 能兼容 notification 原始结构中的 comment.comment.cid', () => {
