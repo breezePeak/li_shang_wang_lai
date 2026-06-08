@@ -2,7 +2,7 @@
 
 基于 Node.js、Playwright 和 SQLite 的抖音创作者互动助手，支持 Hermes / OpenClaw Skill 加载。
 
-项目用于辅助创作者扫描互动、准备评论回复、准备回访任务，并在显式执行模式下完成评论回复或回访点赞 + 评论。评论回复默认真实执行；回访需 `--execute`。
+项目用于辅助创作者扫描互动、生成并执行评论回复、生成并执行回访点赞 + 评论。浏览器控制由 CLI 完成；本地 `agent-server` 只负责调用 Hermes 生成评论/回复文本。评论回复默认真实执行；回访需 `--execute`。
 
 
 ## 环境要求
@@ -99,17 +99,23 @@ npm run auth
 | 初始化数据库 | `npm run db:init` |
 | 清空表数据 | `npm run db:reset` |
 | 只看互动 | `npm run interactions:scan -- --display-only` |
-| 扫描并生成待回评 | `npm run interactions:scan -- --type comment --generate-reply-json` |
-| 扫描并生成待回访 | `npm run interactions:scan -- --generate-visit-json` |
-| 填写评论回复 | Agent 生成并填写 `data/pending-replies/pending-comments-xxx.json` 的 `reply_text` |
-| 执行评论回复 | `npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json` |
-| 准备回访 | `npm run return-visit:prepare -- --items-file data/pending-visits/pending-visits-xxx.json` |
-| 执行回访 | `npm run return-visit:execute -- --execute --items-file data/pending-visits/pending-visit-comments-xxx.json` |
+| 扫描互动入库 | `npm run interactions:scan -- --days 7 --max-count 50` |
+| 启动 agent-server | `npm run agent-server` |
+| 生成并执行评论回复 | `npm run comments:execute -- --days 7 --limit 50` |
+| 只生成评论回复不执行 | `npm run comments:execute -- --days 7 --limit 50 --agent-only` |
+| 扫描并生成待回访任务 | `npm run interactions:scan -- --days 7 --max-count 50 --generate-visit-json` |
+| 执行回访 | `npm run visit:run -- --execute` |
 | 运行默认测试 | `npm test` |
 
 完整命令参数见 `docs/COMMANDS.md`。
 
-`comments:execute` 会直接打开待回复评论所属的抖音作品页，在作品评论区里定位目标评论；优先结合 `cid/comment_id` 与 `comment/list` 接口做精确确认，再在 DOM 中唯一定位后点击“回复”、填写 `reply_text`、发送并校验结果，不再进入创作者评论管理页。
+`interactions:scan` 生成/查询待回评或待回访范围时必须手动输入 `--days` 和 `--max-count`，例如 `--days 7 --max-count 50`。
+
+`comments:execute` 默认从数据库查询待回评评论，必须手动输入 `--days` 和 `--limit`，调用 `agent-server` 生成 `reply_text` 并写回 DB，然后打开待回复评论所属的抖音作品页，在作品评论区里定位目标评论；优先结合 `cid/comment_id` 与 `comment/list` 接口做精确确认，再在 DOM 中唯一定位后点击“回复”、填写、发送并校验结果，不再进入创作者评论管理页。
+
+`visit:run` 会打开目标用户主页，监听主页作品列表 API，按 `workId` 匹配并点击目标作品，进入作品页后调用 `agent-server` 生成回访评论，再由 CLI 填写并提交。Agent 不控制浏览器、不点击、不提交评论。
+
+旧 JSON 文件路径仍保留兼容能力，但不再作为常用入口：`comments:execute --items-file <JSON>`、`return-visit:prepare --items-file <JSON>`。
 
 
 ## 文档边界
