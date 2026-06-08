@@ -8,6 +8,7 @@ let pendingComments = [];
 let currentViewMode = localStorage.getItem('viewMode') || 'grid';
 let selectedTaskIds = new Set();
 let selectedStageId = 'collect';
+let selectedDetailBranchIndex = null;
 
 const REPLY_STAGE_IDS = new Set(['replies', 'replyPending', 'replyExceptions', 'replySkipped', 'replyDone']);
 const VISIT_STAGE_IDS = new Set(['visits', 'visitUnhandled', 'visitRetry', 'execute', 'executeErrors', 'visitSkipped', 'done', 'archive']);
@@ -625,12 +626,12 @@ function renderStageDetail() {
   const branchesEl = document.getElementById('detail-branches');
   const branchCountEl = document.getElementById('detail-branch-count');
   branchCountEl.textContent = detailData.branches.length;
-  branchesEl.innerHTML = detailData.branches.map((branch) => `
-    <article class="branch-card">
-      <h5><i class="fa-solid fa-code-branch"></i>${branch.title}</h5>
-      <p>${branch.description}</p>
-      <strong><i class="fa-solid fa-bell"></i> 当前涉及 ${branch.count} 条</strong>
-    </article>
+  branchesEl.innerHTML = detailData.branches.map((branch, index) => `
+    <button class="branch-card ${selectedDetailBranchIndex === index ? 'is-active' : ''}" onclick="selectDetailBranch(${index})">
+      <span class="branch-main"><i class="fa-solid fa-code-branch"></i>${branch.title}</span>
+      <span class="branch-count">${branch.count} 条</span>
+      <small>${branch.description}</small>
+    </button>
   `).join('');
 
   renderStageWorkspace();
@@ -640,6 +641,14 @@ function renderStageWorkspace() {
   const detailData = buildStageDetailData()[selectedStageId] || buildStageDetailData().collect;
   const workspace = document.getElementById('workspace-body');
   const toolbar = document.getElementById('workspace-actions');
+
+  if (selectedDetailBranchIndex !== null && detailData.branches[selectedDetailBranchIndex]) {
+    toolbar.style.display = 'none';
+    workspace.className = 'workspace-body';
+    workspace.innerHTML = renderBranchDetail(detailData.branches[selectedDetailBranchIndex], detailData);
+    updateBulkBar();
+    return;
+  }
 
   if (detailData.workspaceType === 'pending-comments') {
     toolbar.style.display = 'none';
@@ -671,6 +680,20 @@ function renderStageWorkspace() {
   }
 
   updateBulkBar();
+}
+
+function renderBranchDetail(branch, detailData) {
+  return `
+    <article class="branch-detail-card">
+      <span class="detail-kicker">${escapeHtml(detailData.kicker || 'DETAIL')}</span>
+      <h4>${escapeHtml(branch.title)}</h4>
+      <strong>${escapeHtml(String(branch.count ?? 0))} 条</strong>
+      <p>${escapeHtml(branch.description || '')}</p>
+      <button class="btn btn-secondary" onclick="clearDetailBranch()">
+        <i class="fa-solid fa-arrow-left"></i> 返回 ${escapeHtml(detailData.workspaceTitle || '详情')}
+      </button>
+    </article>
+  `;
 }
 
 function getFilteredTasksByStage(taskSource) {
@@ -924,7 +947,18 @@ window.closeDetailCabin = function() {};
 
 window.selectStage = function(stageId) {
   selectedStageId = stageId;
+  selectedDetailBranchIndex = null;
   renderRiverTimeline();
+  renderStageDetail();
+};
+
+window.selectDetailBranch = function(index) {
+  selectedDetailBranchIndex = Number(index);
+  renderStageDetail();
+};
+
+window.clearDetailBranch = function() {
+  selectedDetailBranchIndex = null;
   renderStageDetail();
 };
 
@@ -946,7 +980,7 @@ function updateBulkBar() {
   const bar = document.getElementById('bulk-action-bar');
   const countEl = document.getElementById('selected-count');
   const detailData = buildStageDetailData()[selectedStageId];
-  const activeForTasks = detailData.workspaceType === 'tasks';
+  const activeForTasks = selectedDetailBranchIndex === null && detailData.workspaceType === 'tasks';
   const size = selectedTaskIds.size;
   countEl.textContent = size;
   bar.classList.toggle('active', activeForTasks && size > 0);

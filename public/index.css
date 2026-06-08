@@ -32,6 +32,8 @@ body {
     linear-gradient(180deg, #f8f4ea 0%, #efe8d8 100%);
   color: var(--text);
   overflow: hidden;
+  display: grid;
+  place-items: center;
 }
 
 .page-noise,
@@ -67,25 +69,30 @@ body {
   background: rgba(211, 155, 52, 0.25);
 }
 
-/* 100vh 满屏弹性外壳 */
 .app-shell {
   position: relative;
-  width: 100vw;
-  height: 100vh;
-  margin: 0;
+  width: 80vw;
+  height: 80vh;
+  min-width: 1080px;
+  min-height: 680px;
+  margin: 0 auto;
   padding: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-radius: 28px;
+  border: 1px solid rgba(76, 99, 83, 0.10);
+  background: rgba(255, 252, 244, 0.50);
+  box-shadow: 0 28px 80px rgba(58, 53, 34, 0.12);
 }
 
 /* 宽屏大河道面板（高度占比提高至屏幕高度的 2/3 - 65vh） */
 .river-board {
-  width: 100vw;
-  height: 34vh;
-  min-height: 276px;
+  width: 100%;
+  height: 34%;
+  min-height: 230px;
   margin: 0;
-  padding: 16px 24px 0;
+  padding: 16px 22px 0;
   background:
     radial-gradient(circle at 18% 20%, rgba(47, 143, 115, 0.08), transparent 30%),
     rgba(255, 252, 244, 0.70);
@@ -890,13 +897,13 @@ body {
 }
 
 .stage-dashboard {
-  width: 100vw;
-  height: 66vh;
-  min-height: 360px;
-  padding: 14px 24px 24px;
+  width: 100%;
+  height: 66%;
+  min-height: 0;
+  padding: 14px 22px 22px;
   display: grid;
-  grid-template-columns: minmax(260px, 0.95fr) minmax(280px, 1fr) minmax(480px, 1.9fr);
-  gap: 14px;
+  grid-template-columns: minmax(320px, 0.82fr) minmax(0, 1.62fr);
+  gap: 16px;
   background:
     linear-gradient(180deg, rgba(255, 252, 244, 0.72), rgba(250, 245, 234, 0.92)),
     radial-gradient(circle at 78% 20%, rgba(31, 109, 120, 0.06), transparent 30%);
@@ -914,19 +921,19 @@ body {
   box-sizing: border-box;
   padding: 16px 18px;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.42);
-  border: 1px solid rgba(76, 99, 83, 0.06);
-  box-shadow: none;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(76, 99, 83, 0.08);
+  box-shadow: 0 12px 34px rgba(58, 53, 34, 0.05);
 }
 
 .cabin-workspace {
-  background: rgba(255, 255, 255, 0.62);
-  box-shadow: 0 14px 34px rgba(58, 53, 34, 0.05);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 /* 第一列：概要与指标 */
 .cabin-summary {
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 14px;
 }
 
 .detail-heading {
@@ -959,8 +966,8 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px 16px;
-  flex: 1;
-  align-content: end;
+  flex: 0 0 auto;
+  align-content: start;
 }
 
 .metric-card {
@@ -987,16 +994,11 @@ body {
   line-height: 1.1;
 }
 
-/* 第二列：告警与提醒分支 */
-.cabin-branches-wrap {
-  min-width: 0;
-}
-
 .detail-branches-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin: 2px 0 0;
 }
 
 .detail-branches-head h4 {
@@ -1019,21 +1021,35 @@ body {
 .detail-branches {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   flex: 1;
   justify-content: flex-start;
   overflow-y: auto;
 }
 
 .branch-card {
-  padding: 10px 0;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  border-top: 1px solid rgba(76, 99, 83, 0.08);
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.48);
+  border: 1px solid rgba(76, 99, 83, 0.08);
+  border-radius: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
 }
 
-.branch-card h5 {
+.branch-card:hover,
+.branch-card.is-active {
+  transform: translateX(2px);
+  background: rgba(255, 255, 255, 0.78);
+  border-color: rgba(31, 109, 120, 0.24);
+}
+
+.branch-main {
   margin: 0;
   font-size: 12px;
   font-weight: 800;
@@ -1043,23 +1059,21 @@ body {
   color: var(--text);
 }
 
-.branch-card h5 i {
+.branch-main i {
   color: var(--river-a);
 }
 
-.branch-card strong {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.branch-count {
+  align-self: center;
   color: var(--river-a);
   font-size: 11px;
   font-weight: 800;
-  margin-top: 4px;
+  white-space: nowrap;
 }
 
-.branch-card p {
+.branch-card small {
   display: block;
-  margin: 6px 0 0;
+  grid-column: 1 / -1;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.5;
@@ -1089,6 +1103,40 @@ body {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: 11px;
+}
+
+.branch-detail-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 28px;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 90% 12%, rgba(31, 109, 120, 0.08), transparent 28%),
+    rgba(255, 255, 255, 0.56);
+}
+
+.branch-detail-card h4 {
+  margin: 8px 0 0;
+  font-size: 24px;
+  color: var(--text);
+}
+
+.branch-detail-card strong {
+  margin-top: 10px;
+  color: var(--river-a);
+  font-size: 42px;
+  line-height: 1;
+}
+
+.branch-detail-card p {
+  max-width: 560px;
+  margin: 14px 0 22px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
 }
 
 .workspace-actions {
@@ -1625,6 +1673,19 @@ body {
 }
 
 @media (max-width: 1080px) {
+  body {
+    overflow: auto;
+    place-items: start center;
+    padding: 18px 0;
+  }
+
+  .app-shell {
+    width: min(96vw, 1080px);
+    height: auto;
+    min-width: 0;
+    min-height: 80vh;
+  }
+
   .river-board {
     min-height: 318px;
   }
@@ -1649,7 +1710,8 @@ body {
 
   .stage-dashboard {
     grid-template-columns: 1fr;
-    height: 62vh;
+    height: auto;
+    min-height: 560px;
     overflow-y: auto;
   }
 
@@ -1675,8 +1737,10 @@ body {
 
   .app-shell {
     padding: 0;
+    width: 100vw;
     height: auto;
     min-height: 100vh;
+    border-radius: 0;
   }
 
   .river-board {
