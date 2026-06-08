@@ -298,7 +298,7 @@ describe('comments:execute refactored logic', () => {
     expect(validated.workId).toBe('7639733344284064741');
   });
 
-  it('validateWorkCommentItem 缺 homepageUrl 时尝试从 works 补齐，仍缺失则失败', () => {
+  it('validateWorkCommentItem 缺 homepageUrl 时可直接使用作品 URL，works 作者主页仍可补齐', () => {
     const db = new Database(testDb);
     db.prepare(`
       INSERT INTO work_comments (
@@ -323,14 +323,15 @@ describe('comments:execute refactored logic', () => {
     `).run();
     db.close();
 
-    const failed = validateWorkCommentItem({
+    const directWork = validateWorkCommentItem({
       itemIndex: 0,
       commentId: 12,
       replyText: '验证回复2',
       workId: 'no-homepage-work',
     });
-    expect(failed.ok).toBe(false);
-    expect(failed.error).toContain('homepage_url 为空');
+    expect(directWork.ok).toBe(true);
+    expect(directWork.authorProfileUrl).toBe('');
+    expect(directWork.workUrl).toBe('https://www.douyin.com/jingxuan?modal_id=no-homepage-work');
 
     const fallback = validateWorkCommentItem({
       itemIndex: 1,
@@ -573,9 +574,9 @@ describe('comments:execute single-pass per work', () => {
     expect(saveBlocked).toHaveBeenCalledWith(expect.objectContaining({ commentId: 1 }), expect.stringContaining('not_unique'));
   });
 
-  it('滚到底仍找不到的 pending 标记 blocked，原因包含 single_pass_not_found', async () => {
+  it('滚到底仍找不到的 pending 保持 pending 可重试，原因包含 single_pass_not_found', async () => {
     const page = createFakePage();
-    const saveBlocked = vi.fn();
+    const saveRetryable = vi.fn();
 
     const results = await executeSinglePassForWorkGroup(page, [
       { commentId: 1, replyText: 'r1', actorName: 'u1', commentText: 'missing' },
@@ -587,14 +588,14 @@ describe('comments:execute single-pass per work', () => {
       clickSend: vi.fn(),
       verifyReply: vi.fn(),
       saveSucceeded: vi.fn(),
-      saveBlocked,
+      saveRetryable,
       saveSentUnverified: vi.fn(),
       onResult: vi.fn(),
     });
 
     expect(results).toHaveLength(1);
     expect(results[0].error).toContain('single_pass_not_found');
-    expect(saveBlocked).toHaveBeenCalledWith(expect.objectContaining({ commentId: 1 }), 'single_pass_not_found');
+    expect(saveRetryable).toHaveBeenCalledWith(expect.objectContaining({ commentId: 1 }), 'single_pass_not_found');
   });
 
   it('回复框打不开属于可重试失败，保留 pending 状态而不是 blocked', async () => {
@@ -671,7 +672,7 @@ describe('comments:execute single-pass per work', () => {
     const source = fs.readFileSync(resolve(__dirname, '../../src/cli/execute-comment-replies.mjs'), 'utf8');
     expect(source.includes('commentListCollector.stop();')).toBe(true);
     expect(source.includes('const commentListCollector = createCommentListApiCollector(page);')).toBe(true);
-    expect(source.includes('try {\n          const openResult = await openProfileWorkByAwemeIdFromPostApi')).toBe(true);
+    expect(source.includes('try {\n          let openResult = await openProfileWorkByAwemeIdFromPostApi')).toBe(true);
     expect(source.includes('finally {\n          commentListCollector.stop();')).toBe(true);
   });
 });

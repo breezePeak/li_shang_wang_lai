@@ -83,6 +83,7 @@ export async function wheelInBox(page, box, {
   deltaYRandomRange = null,
   waitMs = null,
   profile = '',
+  domScrollFallback = false,
   logPrefix = '[scroll]',
 } = {}) {
   const moved = await moveMouseIntoBox(page, box, { logPrefix });
@@ -97,6 +98,24 @@ export async function wheelInBox(page, box, {
 
   console.error(`${logPrefix} wheel 滚动容器 delta=${plan.deltaY}${plan.jitter ? ` jitter=${plan.jitter}` : ''}`);
   await page.mouse.wheel(0, plan.deltaY);
+  if (domScrollFallback) {
+    const domScrolled = await page.evaluate(({ x, y, deltaY: scrollDelta }) => {
+      const el = document.elementFromPoint(x, y);
+      let current = el;
+      while (current && current !== document.body) {
+        if (current.scrollHeight > current.clientHeight + 20) {
+          const before = current.scrollTop;
+          current.scrollTop = before + scrollDelta;
+          return { ok: true, before, after: current.scrollTop };
+        }
+        current = current.parentElement;
+      }
+      return { ok: false };
+    }, { x: moved.x, y: moved.y, deltaY: plan.deltaY }).catch(() => ({ ok: false })) || { ok: false };
+    if (domScrolled.ok) {
+      console.error(`${logPrefix} DOM scrollTop ${domScrolled.before}->${domScrolled.after}`);
+    }
+  }
   await page.waitForTimeout(plan.waitMs);
 
   return { ok: true, scrolled: true, deltaY: plan.deltaY, jitter: plan.jitter };
@@ -184,6 +203,7 @@ export async function scrollContainerByWheel(page, {
   minWidth = 250,
   minHeight = 250,
   profile = '',
+  domScrollFallback = false,
   logPrefix = '[scroll]',
 } = {}) {
   let targetBox = box;
@@ -205,6 +225,7 @@ export async function scrollContainerByWheel(page, {
     deltaYRandomRange,
     waitMs,
     profile,
+    domScrollFallback,
     logPrefix,
   });
 }

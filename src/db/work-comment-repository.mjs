@@ -111,7 +111,13 @@ export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
     params.push(since);
   }
 
-  sql += ' ORDER BY wc.first_seen_at ASC LIMIT ?';
+  sql += `
+    ORDER BY
+      CASE WHEN wc.reply_reason IS NULL OR wc.reply_reason = '' THEN 0 ELSE 1 END,
+      wc.last_seen_at ASC,
+      wc.first_seen_at ASC
+    LIMIT ?
+  `;
   params.push(limit);
   return db.prepare(sql).all(...params);
 }

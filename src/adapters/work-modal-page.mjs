@@ -791,8 +791,14 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
             });
           });
 
+          commentContainer.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+          commentContainer.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+          commentContainer.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+          commentContainer.click?.();
+
           return {
             found: true,
+            domClicked: true,
             selector: '[data-e2e="feed-comment-icon"]',
             tag: commentContainer.tagName,
             className: typeof commentContainer.className === 'string' ? commentContainer.className.slice(0, 120) : '',
@@ -828,14 +834,14 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
       console.error(`[click-comment] 按钮内部子元素:`, JSON.stringify(prepared.diagChildren));
       console.error(`[click-comment] action bar 元素列表:`, JSON.stringify(prepared.diagActionBarElements));
 
-      let clickMethod = '';
-      if (prepared.y < 0 || prepared.y > 800 || prepared.x < 0 || prepared.x > 1280) {
+      let clickMethod = prepared.domClicked ? 'dom' : '';
+      if (!prepared.domClicked && (prepared.y < 0 || prepared.y > 800 || prepared.x < 0 || prepared.x > 1280)) {
         console.error(`[click-comment] 坐标异常 (${prepared.x},${prepared.y})，使用 locator.click 兜底`);
         clickMethod = 'locator';
         const button = page.locator('[data-return-visit-comment-button="true"]').last();
         await button.scrollIntoViewIfNeeded().catch(() => {});
         await button.click({ timeout: 3000, force: true }).catch(() => {});
-      } else {
+      } else if (!prepared.domClicked) {
         console.error(`[click-comment] 使用 mouse.click 坐标 (${prepared.x},${prepared.y})`);
         clickMethod = 'mouse';
         await page.mouse.click(prepared.x, prepared.y).catch(async (err) => {
@@ -1450,8 +1456,10 @@ function sameTextMatch(actual, expected) {
   if (!left || !right) return false;
   if (left === right) return true;
 
-  // 短评论/昵称信息量太低，不能用 includes 做宽松匹配。
-  // 例如目标评论 "2222" 不能误命中页面上的 "22222"，否则会变成 not_unique。
+  const leftNoEmoji = left.replace(/[\p{Emoji}\u200d]+/gu, '').trim();
+  const rightNoEmoji = right.replace(/[\p{Emoji}\u200d]+/gu, '').trim();
+  if (leftNoEmoji && rightNoEmoji && leftNoEmoji === rightNoEmoji) return true;
+
   if (Math.min(left.length, right.length) <= 6) return false;
 
   return left.includes(right) || right.includes(left);
@@ -1734,6 +1742,64 @@ export async function collectVisibleWorkCommentCandidates(page) {
     containerSelectors: WORK_COMMENT_CONTAINER_SELECTORS,
     itemSelectors: WORK_COMMENT_ITEM_SELECTORS,
   });
+}
+
+export async function expandVisibleWorkCommentReplies(page, { maxClicks = 6 } = {}) {
+  const result = await page.evaluate(({ containerSelectors, maxClicks }) => {
+    function visible(el) {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    }
+
+    function findContainer() {
+      for (const selector of containerSelectors) {
+        const el = document.querySelector(selector);
+        if (visible(el)) return el;
+      }
+      return null;
+    }
+
+    const commentArea = findContainer();
+    if (!commentArea) return { ok: false, clicked: 0, reason: 'comment_area_not_found' };
+
+    const nodes = Array.from(commentArea.querySelectorAll('button, [role="button"], span, div'));
+    let clicked = 0;
+    const clickedTexts = [];
+    for (const node of nodes) {
+      if (clicked >= maxClicks) break;
+      if (!visible(node)) continue;
+      const text = (node.innerText || node.textContent || '').trim();
+      if (!text) continue;
+      const normalized = text.replace(/\s+/g, '');
+      const isExpand = normalized.includes('展开')
+        || normalized.includes('更多回复')
+        || normalized.includes('查看回复')
+        || normalized.includes('条回复');
+      if (!isExpand) continue;
+      if (normalized.includes('收起')) continue;
+
+      const target = node.closest('button,[role="button"]') || node;
+      target.scrollIntoView({ block: 'center', behavior: 'instant' });
+      target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      target.click?.();
+      clicked++;
+      clickedTexts.push(text.slice(0, 80));
+    }
+
+    return { ok: true, clicked, clickedTexts };
+  }, { containerSelectors: WORK_COMMENT_CONTAINER_SELECTORS, maxClicks }).catch(err => ({ ok: false, clicked: 0, reason: err.message }));
+
+  if (result.clicked > 0) {
+    console.error(`[work-modal] 已展开评论回复 clicked=${result.clicked} texts=${JSON.stringify(result.clickedTexts || [])}`);
+    await page.waitForTimeout(800).catch(() => {});
+  }
+
+  return result;
 }
 
 async function clickReplyButtonForCandidate(page, candidate) {
@@ -2176,6 +2242,7 @@ export async function scrollCommentAreaOnce(page) {
   return scrollContainerByWheel(page, {
     box: found.box,
     profile: 'commentArea',
+    domScrollFallback: true,
     logPrefix: '[work-modal]',
   });
 }

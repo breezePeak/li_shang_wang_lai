@@ -18,12 +18,14 @@ import { RESULT_CODES } from '../domain/result-codes.mjs';
 import { createBrowserContext } from '../browser/browser-context.mjs';
 import { createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
 import { captureEvidence } from '../browser/failure-evidence.mjs';
+import { buildDouyinWorkUrl } from '../utils/douyin-url.mjs';
 import {
   buildWorkReplyTarget,
   WORK_COMMENT_CONTAINER_SELECTORS,
   WORK_COMMENT_ITEM_SELECTORS,
   clickSendWorkReply,
   collectVisibleWorkCommentCandidates,
+  expandVisibleWorkCommentReplies,
   fillWorkReplyText,
   openReplyBoxForMatchedWorkComment,
   pickWorkCommentCandidate,
@@ -261,13 +263,19 @@ export function validateWorkCommentItem(item) {
     || item.author_profile_url
     || knownWork?.author_profile_url
     || '';
+  const workUrl = item.workUrl
+    || item.awemeUrl
+    || item.work_url
+    || row.work_url
+    || knownWork?.work_url
+    || buildDouyinWorkUrl(workId || modalId);
   const authorProfileKey = item.authorProfileKey
     || item.author_profile_key
     || knownWork?.author_profile_key
     || '';
 
-  if (!homepageUrl) {
-    return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, error: 'homepage_url 为空，无法通过主页定位作品' };
+  if (!homepageUrl && !workUrl) {
+    return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, error: 'homepage_url/work_url 均为空，无法定位作品' };
   }
 
   return {
@@ -283,6 +291,8 @@ export function validateWorkCommentItem(item) {
     homepage_url: homepageUrl,
     authorProfileUrl: homepageUrl,
     authorProfileKey,
+    workUrl,
+    awemeUrl: workUrl,
     workId,
     modalId,
     workKey: item.workKey || workId || modalId || '',
@@ -479,6 +489,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
   maxViewportRounds = 20,
   maxNoProgressRounds = 3,
   collectCandidates = collectVisibleWorkCommentCandidates,
+  expandReplies = expandVisibleWorkCommentReplies,
   openMatchedReplyBox = openReplyBoxForMatchedWorkComment,
   fillReply = fillWorkReplyText,
   clickSend = clickSendWorkReply,
@@ -511,6 +522,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
   console.log(`[comments:execute] single-pass start work=${currentWork.workId || currentWork.modalId || currentWork.workUrl} pending=${pendingMap.size}`);
 
   while (pendingMap.size > 0 && viewportRound <= maxViewportRounds) {
+    await expandReplies(page, { maxClicks: 6 }).catch(() => null);
     const collected = await collectCandidates(page);
     const visibleCandidates = normalizeVisibleCandidatesResult(collected);
     const signature = getCandidateSignature(visibleCandidates);
@@ -643,7 +655,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
     }
 
     const stats = commentListCollector?.getStats?.() || {};
-    if (Number(stats.hasMore) === 0) {
+    if (Number(stats.hasMore) === 0 && viewportRound > 2) {
       break;
     }
 
@@ -669,9 +681,8 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
 
   for (const leftover of pendingMap.values()) {
     const reason = 'single_pass_not_found';
-    saveBlocked(leftover, reason);
-    blockedCount++;
-    const result = { ...leftover, ok: false, status: 'blocked', error: reason };
+    saveRetryable(leftover, reason);
+    const result = { ...leftover, ok: false, status: 'pending', error: reason };
     localResults.push(result);
     onResult(result);
   }
@@ -768,12 +779,26 @@ async function executeWorkCommentItems(items, args) {
         const reuseCurrentProfile = Boolean(activeHomepageUrl && targetHomepageUrl && activeHomepageUrl === targetHomepageUrl);
         const commentListCollector = createCommentListApiCollector(page);
         try {
-          const openResult = await openProfileWorkByAwemeIdFromPostApi(
+          let openResult = await openProfileWorkByAwemeIdFromPostApi(
             page,
             targetHomepageUrl,
             currentWork.workId || currentWork.modalId,
             { timeoutMs: 30000, reuseCurrentProfile }
           );
+
+          if (!openResult.ok) {
+            const fallbackWorkUrl = currentWork.workUrl
+              || currentWork.awemeUrl
+              || buildDouyinWorkUrl(currentWork.workId || currentWork.modalId);
+            if (fallbackWorkUrl) {
+              const reason = openResult.reason || openResult.message || openResult.code || 'work_open_failed';
+              console.log(`[comments:execute] open_profile_failed reason=${reason}; fallback_open_work_url=${fallbackWorkUrl}`);
+              await page.goto(fallbackWorkUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+              await page.waitForTimeout(1500);
+              openResult = { ok: true, url: page.url(), fallback: 'direct_work_url', previousReason: reason };
+            }
+          }
+
           if (!openResult.ok) {
             console.log(`[comments:execute] open_profile_failed reason=${openResult.reason || openResult.message || openResult.code || 'work_open_failed'}`);
             for (const validated of group) {
@@ -784,7 +809,7 @@ async function executeWorkCommentItems(items, args) {
             continue;
           }
           console.log(`[comments:execute] open_profile_success opened_work_url=${openResult.url || ''}`);
-          activeHomepageUrl = targetHomepageUrl;
+          activeHomepageUrl = openResult.fallback ? '' : targetHomepageUrl;
 
           const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
           if (!modalReady.ok) {
