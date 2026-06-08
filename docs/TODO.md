@@ -384,85 +384,122 @@ raw_comment_json.comment.comment.cid
 
 ### 3.1 准备阶段（`return-visit:prepare`）
 
+采集作品信息并生成待回访 JSON，**不在准备阶段生成评论**（评论由 Agent 事后填写）。
+
 ```text
 加载数据源
-├─ --items-file → createOrUpdateReturnVisitTasksFromItems
-│  JSON 中每个用户: identity_key 去重 → insert/enrich
+├─ --items-file → loadVisitItems → listReturnVisitTasksByIds
+│  从 JSON 中提取用户列表，按 task_id 匹配已有任务
 └─ 无文件 → createOrUpdateReturnVisitTasksFromEvents
-   从 interaction_events (status=new)
-   筛选 friend/mutual → identity_key 去重 → insert/enrich
+   从 interaction_events (status=new, event_type=like/comment)
+   筛选 relation=friend/mutual → identity_key 去重 → insert/enrich
+   跳过其他 relation 的通知
    ↓
-listReturnVisitPrepareTasks (状态: pending_visit 等)
+listReturnVisitPrepareTasks (状态: pending_visit, failed_collect; retry 次数限制)
    ↓
 启动浏览器
    ↓
 遍历待准备任务 (连续失败 ≥ maxConsecutiveFailures 则停止):
-├─ 无 profileUrl → FAILED_COLLECT
+├─ profileUrl = userProfileUrl 或根据 userId 拼接
+│  └─ 无 profileUrl → SKIPPED_NO_WORK (reason: skip_no_homepage_url)
 │
-├─ 打开用户主页
-│  ├─ 私密账号 → SKIPPED_PRIVATE
-│  └─ listProfileWorkUrls (滚动采集视频/笔记链接)
+├─ 状态 → COLLECTING_CONTENT
 │
-├─ 遍历候选作品 (最多 maxWorksToCheck 个):
-│  ├─ navigateToVideo → 检查点赞状态
-│  ├─ getVideoTitle → 提取作品标题
-│  ├─ extractVideoCommentContext → 提取参考评论
-│  ├─ analyzeReturnVisitContext → 场景信号分析
-│  │  └─ 无场景信号 / 无作品标题且无评论 → 跳过
-│  └─ 选择最佳作品
+├─ collectFirstNonTopAwemeFromProfile(page, profileUrl):
+│  ├─ 打开用户主页 → 拦截 /aweme/v1/web/aweme/post/ API
+│  ├─ 检测私密账号 → skipped (reason: skip_homepage_load_failed)
+│  ├─ API 无响应 / 空作品列表 → skipped (reason: skip_post_api_empty)
+│  ├─ 全部为置顶作品 → skipped (reason: skip_only_top_aweme)
+│  └─ 取第一个非置顶作品（不遍历多候选，不逐条分析）
 │
-├─ 无合适作品 → SKIPPED_NO_SUITABLE_WORK
+├─ 采集失败 → 区分 skipped / failed:
+│  ├─ skipped → SKIPPED_NO_WORK
+│  └─ failed → FAILED_COLLECT (连续失败累加)
 │
-├─ generateReturnVisitComment → 生成回访评论
-│  └─ 失败 → FAILED_GENERATE_COMMENT
+├─ 采集成功 → 更新任务:
+│  ├─ status → CONTENT_COLLECTED
+│  ├─ targetWork: 写入 workId / workUrl / workTitle / desc 等作品信息
+│  ├─ likeStatus: userDigged==1 则为 already_liked，否则 pending
+│  ├─ commentStatus: pending
+│  ├─ referenceComments: []（不提取参考评论）
+│  └─ likeStatus 在准备阶段即确认（基于作品 API 的 user_digged 字段）
 │
-└─ 成功 → 更新任务:
-   status: collecting_content → content_collected
-          → comment_generated → pending_execute
-   写入 targetWork + referenceComments + generatedComment
+└─ 全部处理完毕 → 输出 JSON 文件:
+   data/pending-visits/pending-visit-comments-<timestamp>.json
+   每条记录包含 id / homepage_url / aweme_id / aweme_url / desc / item_title
+   / aweme_type / media_type / is_multi_content / user_digged / comment（空，待 Agent 填写）
 ```
+
+> 注意：准备阶段不调用 `analyzeReturnVisitContext` / `generateReturnVisitComment`，
+> 不遍历候选作品，不做场景分析。任务状态停留在 `content_collected`，
+> 由 Agent 读取 JSON 填写 comment 后，再走执行阶段。
 
 ### 3.2 执行阶段（`return-visit:execute`）
 
 ```text
-listReturnVisitExecuteTasks (status: pending_execute 等)
+加载任务
+├─ --items-file → loadVisitExecutionItems → listReturnVisitTasksByIds
+│  从 JSON 中提取 Agent 填写的 comment → updateReturnVisitTask
+│  ├─ 有 generatedComment → PENDING_EXECUTE, commentStatus=generated
+│  └─ 无 generatedComment → FAILED_GENERATE_COMMENT
+└─ 无文件 → listReturnVisitExecuteTasks
+   (状态: pending_execute, executing, failed_like, failed_comment; retry 次数限制)
    ↓
-过滤脏任务:
+过滤脏任务 (getReturnVisitTaskExecutionIssue):
+├─ 非可执行状态 → 跳过
 ├─ 无 generatedComment → FAILED_GENERATE_COMMENT
-├─ 无 targetWork.workUrl → FAILED_COLLECT
-└─ 通过 → 加入执行队列
+├─ 无 targetWork.workUrl 且无 targetWork.workId → FAILED_COLLECT
+└─ commentStatus=posted → 跳过（已回复）
+   ↓
+通过 → 加入执行队列
    ↓
 启动浏览器
    ↓
 遍历可执行任务 (连续失败 ≥ max / 每 N 个休息 M ms):
-├─ 状态 → executing
+├─ 状态 → EXECUTING
 │
-├─ executeReturnVisitTask:
-│  ├─ resolveWorkForExecution:
-│  │  ├─ knownWorkUrl → collectWorkFromUrl
-│  │  └─ 失败 → 降级: collectCandidateWorkFromProfile
-│  │     ├─ 私密 → skipped_private
-│  │     └─ 无合适作品 → skipped_no_suitable_work
+├─ executeReturnVisitTask(page, task, options):
 │  │
-│  ├─ navigateToVideo(workUrl)
+│  ├─ [1/5] resolveWorkForExecution:
+│  │  有 profileUrl + workId → openProfileWorkByAwemeId
+│  │  ├─ 从主页打开目标作品 → collectCurrentOpenedWork
+│  │  │  收集 workId / workUrl / workTitle / workText / contentSummary / referenceComments 等
+│  │  ├─ 失败 → failed_collect
+│  │  └─ 缺少 profileUrl 或 workId → failed_collect (missing_profile_url_or_work_id)
 │  │
-│  ├─ checkLikeState → 点赞状态检测
+│  ├─ [2/5] detectWorkPresentationKind + handleVideoWatch:
+│  │  检测页面类型 (modal / note / video)
+│  │  ├─ 视频页 → handleVideoWatch (policy=seconds/full, watchSeconds=[5,8])
+│  │  └─ 图文/note → 跳过观看
+│  │  （注：观看视频在点赞之前执行）
+│  │
+│  ├─ [3/5] checkLikeState:
 │  │  ├─ already_liked → 跳过点赞
-│  │  └─ neutral → clickLike → confirmLikeSucceeded
+│  │  ├─ neutral → clickLike → confirmLikeSucceeded
+│  │  └─ 无法确认 → failed_like (截图 debug)
 │  │
-│  ├─ waitRandom(likeToCommentMs) → 随机等待
-│  ├─ handleVideoWatch → 观看视频
+│  ├─ waitRandom(likeToCommentMs) → 随机等待 (默认 [2000, 6000]ms)
 │  │
-│  ├─ postVideoComment → 发送回访评论
+│  ├─ [4/5] postReturnVisitComment(page, text, presentation):
+│  │  ├─ modal 页 → waitForWorkModal → postWorkModalComment
+│  │  └─ 视频页 → postVideoComment
+│  │  fail → failed_comment
 │  │
-│  └─ dry-run 模式: 只检查不执行
+│  └─ 全部成功 → DONE
 │
 └─ 结果处理:
-   ├─ done → markReturnVisitDone
+   ├─ result.ok → markReturnVisitDone
    │  likeStatus=liked/already_liked, commentStatus=posted
-   ├─ dry-run → 回退 PENDING_EXECUTE
-   ├─ skipped_* → 记录跳过原因
-   └─ 失败 → markReturnVisitFailure (累计连续失败)
+   ├─ result.dryRun → 回退 PENDING_EXECUTE (保留 likeStatus/commentStatus)
+   ├─ result.status starts with "skipped_" → 记录跳过原因
+   └─ 失败 → markReturnVisitFailure (FAILED_LIKE / FAILED_COMMENT / FAILED)
+      累计连续失败, 达到阈值则暂停
+   ↓
+   每任务间 waitBetweenUsersMs (默认 [8000, 20000]ms)
+   每 restEveryTasksRange 个任务后休息 restDurationMs (默认 [60000, 180000]ms)
+   ↓
+   全部成功 + 有 --items-file → 删除中间 JSON 文件
+   有失败 + 有 --items-file → 保留 JSON 文件
 ```
 
 ### 3.3 任务状态枚举
@@ -474,6 +511,9 @@ pending_visit → collecting_content → content_collected
 跳转路径: skipped_no_work / skipped_private / skipped_no_suitable_work
 失败路径: failed_collect / failed_generate_comment / failed_like / failed_comment / failed
 ```
+
+> 注意：`comment_generated` 和 `pending_execute` 状态不是由 prepare 阶段写入的，
+> 而是执行阶段通过 --items-file 模式从 Agent 填写的 JSON 回填时写入。
 
 ### 3.4 状态码（回访阶段）
 
