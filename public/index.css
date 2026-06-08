@@ -35,8 +35,9 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 14px;
+  justify-content: flex-start;
+  gap: 10px;
+  padding-top: 16px;
 }
 
 .app-header {
@@ -86,7 +87,7 @@ body {
 .app-shell {
   position: relative;
   width: 80vw;
-  height: calc(80vh - 64px);
+  height: calc(80vh - 54px);
   min-width: 1080px;
   min-height: 616px;
   margin: 0 auto;
@@ -440,9 +441,49 @@ body {
   z-index: 0;
 }
 
+.lane-spark {
+  position: absolute;
+  top: 39px;
+  left: 16px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 4px rgba(47, 143, 115, 0.12),
+    0 0 18px rgba(47, 143, 115, 0.75),
+    0 0 34px rgba(211, 155, 52, 0.30);
+  z-index: 0;
+  animation: sparkFlow 4.8s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+.timeline-lane + .timeline-lane .lane-spark {
+  animation-duration: 5.6s;
+  animation-delay: 0.8s;
+}
+
+@keyframes sparkFlow {
+  0% {
+    left: 16px;
+    transform: scale(0.72);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  84% {
+    opacity: 1;
+  }
+  100% {
+    left: calc(100% - 28px);
+    transform: scale(1.05);
+    opacity: 0;
+  }
+}
+
 .timeline-point {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   width: 98px;
   min-height: 72px;
   border: none;
@@ -579,6 +620,86 @@ body {
   background: rgba(255, 255, 255, 0.46);
   z-index: -1;
   pointer-events: none;
+}
+
+.stage-click-effect {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+  overflow: hidden;
+}
+
+.stage-click-effect.pulse::before,
+.stage-click-effect.danger::before {
+  content: '';
+  position: absolute;
+  left: var(--effect-x, 50vw);
+  top: var(--effect-y, 34vh);
+  width: 24vmin;
+  height: 24vmin;
+  border-radius: 999px;
+  transform: translate(-50%, -50%) scale(0.2);
+  animation: stagePulse 780ms ease-out forwards;
+}
+
+.stage-click-effect.pulse::before {
+  border: 2px solid rgba(31, 109, 120, 0.28);
+  background: radial-gradient(circle, rgba(47, 143, 115, 0.14), transparent 62%);
+}
+
+.stage-click-effect.danger::before {
+  border: 2px solid rgba(212, 87, 59, 0.24);
+  background: radial-gradient(circle, rgba(212, 87, 59, 0.12), transparent 62%);
+}
+
+@keyframes stagePulse {
+  0% { opacity: 0.9; transform: translate(-50%, -50%) scale(0.2); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(2.4); }
+}
+
+.stage-click-effect.success span {
+  position: absolute;
+  left: var(--effect-x, 50vw);
+  top: var(--effect-y, 34vh);
+  width: 8px;
+  height: 14px;
+  border-radius: 4px;
+  background: hsl(var(--h), 72%, 58%);
+  box-shadow: 0 0 16px hsla(var(--h), 72%, 58%, 0.42);
+  transform: translate(-50%, -50%) rotate(0deg);
+  animation: confettiFly 1050ms cubic-bezier(0.22, 0.9, 0.28, 1) forwards;
+  animation-delay: var(--d);
+}
+
+.stage-click-effect.success::before {
+  content: '';
+  position: absolute;
+  left: var(--effect-x, 50vw);
+  top: var(--effect-y, 34vh);
+  width: 26vmin;
+  height: 26vmin;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.90), rgba(47, 143, 115, 0.16) 38%, transparent 68%);
+  transform: translate(-50%, -50%) scale(0.35);
+  animation: successBloom 820ms ease-out forwards;
+}
+
+@keyframes successBloom {
+  0% { opacity: 0.95; transform: translate(-50%, -50%) scale(0.35); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(2.2); }
+}
+
+@keyframes confettiFly {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) rotate(0deg) scale(0.7);
+  }
+  12% { opacity: 1; }
+  100% {
+    opacity: 0;
+    transform: translate(var(--x), var(--y)) rotate(var(--r)) scale(1);
+  }
 }
 
 .river-svg {

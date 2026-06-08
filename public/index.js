@@ -122,7 +122,7 @@ function renderRiverTimeline() {
 
   container.innerHTML = `
     <div class="timeline-overview">
-      <button class="timeline-origin ${activeStageId === 'collect' ? 'is-active' : ''}" onclick="selectStage('collect')">
+      <button class="timeline-origin ${activeStageId === 'collect' ? 'is-active' : ''}" onclick="selectStage('collect', this)">
         <span class="origin-icon"><i class="fa-solid fa-database"></i></span>
         <span class="origin-copy">
           <strong>扫描入库</strong>
@@ -155,6 +155,7 @@ function renderTimelineLane({ id, title, subtitle, icon, points, activeStageId }
         </div>
       </div>
       <div class="lane-track">
+        <span class="lane-spark" aria-hidden="true"></span>
         ${points.map(point => renderTimelinePoint(point, activeStageId)).join('')}
       </div>
     </section>
@@ -166,7 +167,7 @@ function renderTimelinePoint(point, activeStageId) {
   const countClass = Number(point.count || 0) > 0 ? 'has-count' : '';
   const focusClass = Number(point.count || 0) > 0 && (point.tone === 'warning' || point.tone === 'danger' || point.id === 'replyPending' || point.id === 'visitUnhandled') ? 'is-focus' : '';
   return `
-    <button class="timeline-point ${point.tone} ${activeClass} ${countClass} ${focusClass}" onclick="selectStage('${point.id}')" title="${escapeAttribute(point.helper || point.label)}">
+    <button class="timeline-point ${point.tone} ${activeClass} ${countClass} ${focusClass}" onclick="selectStage('${point.id}', this)" title="${escapeAttribute(point.helper || point.label)}">
       <span class="point-dot"><i class="fa-solid ${point.icon}"></i></span>
       <span class="point-copy">
         <strong>${point.label}</strong>
@@ -945,12 +946,40 @@ function getTaskBadge(task) {
 
 window.closeDetailCabin = function() {};
 
-window.selectStage = function(stageId) {
+window.selectStage = function(stageId, sourceElement) {
   selectedStageId = stageId;
   selectedDetailBranchIndex = null;
+  playStageEffect(stageId, sourceElement);
   renderRiverTimeline();
   renderStageDetail();
 };
+
+function playStageEffect(stageId, sourceElement) {
+  const isDone = ['replyDone', 'done', 'archive'].includes(stageId);
+  const isError = ['replyExceptions', 'visitRetry', 'executeErrors'].includes(stageId);
+  const rect = sourceElement?.getBoundingClientRect?.();
+  const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+  const y = rect ? rect.top + rect.height / 2 : window.innerHeight * 0.34;
+  const effect = document.createElement('div');
+  effect.className = `stage-click-effect ${isDone ? 'success' : isError ? 'danger' : 'pulse'}`;
+  effect.style.setProperty('--effect-x', `${Math.round(x)}px`);
+  effect.style.setProperty('--effect-y', `${Math.round(y)}px`);
+
+  if (isDone) {
+    effect.innerHTML = Array.from({ length: 26 }, (_, i) => {
+      const spread = i - 13;
+      const xOffset = spread * 24 + (i % 2 ? 18 : -12);
+      const yOffset = -150 - (i % 6) * 28;
+      const rotate = 160 + i * 37;
+      const hue = (i * 31) % 360;
+      const delay = i * 13;
+      return `<span style="--x:${xOffset}px; --y:${yOffset}px; --r:${rotate}deg; --h:${hue}; --d:${delay}ms"></span>`;
+    }).join('');
+  }
+
+  document.body.appendChild(effect);
+  window.setTimeout(() => effect.remove(), 1100);
+}
 
 window.selectDetailBranch = function(index) {
   selectedDetailBranchIndex = Number(index);
