@@ -22,7 +22,7 @@ app.get('/api/stats', (req, res) => {
       WHERE like_status = 'pending' AND status != 'done' AND status != 'skipped_no_work' AND status != 'skipped_private' AND status != 'skipped_no_suitable_work' AND status != 'failed'
     `).get().count;
 
-    // 待评论审核数
+    // 已有回访评论草稿但尚未落地的任务数
     const pendingComments = db.prepare(`
       SELECT COUNT(*) as count FROM return_visit_tasks 
       WHERE comment_status = 'generated' OR (status = 'comment_generated' AND comment_status != 'posted')
@@ -98,13 +98,13 @@ app.get('/api/stats', (req, res) => {
   }
 });
 
-// 2. GET /api/revisit-tasks: 获取待审核/待执行的任务
+// 2. GET /api/revisit-tasks: 获取可执行/可重试/异常回访任务
 app.get('/api/revisit-tasks', (req, res) => {
   try {
     const db = getDb();
     const tasks = db.prepare(`
       SELECT * FROM return_visit_tasks 
-      WHERE status IN ('pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'pending_execute', 'executing', 'failed_like', 'failed_comment')
+      WHERE status IN ('pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment', 'failed')
       ORDER BY updated_at DESC
     `).all();
 
@@ -138,7 +138,7 @@ app.get('/api/revisit-tasks', (req, res) => {
   }
 });
 
-// 3. POST /api/revisit-tasks/:id/approve: 批准某条回访并更新 AI 评论内容
+// 3. POST /api/revisit-tasks/:id/approve: 保存某条回访评论并进入待执行
 app.post('/api/revisit-tasks/:id/approve', (req, res) => {
   const { id } = req.params;
   const { commentText } = req.body;
@@ -161,7 +161,7 @@ app.post('/api/revisit-tasks/:id/approve', (req, res) => {
       return res.status(404).json({ ok: false, error: '未找到该任务' });
     }
 
-    res.json({ ok: true, message: '任务已批准通过，加入了待执行队列' });
+    res.json({ ok: true, message: '任务已保存，加入待执行队列' });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -192,7 +192,7 @@ app.post('/api/revisit-tasks/:id/skip', (req, res) => {
   }
 });
 
-// 4b. POST /api/revisit-tasks/bulk-approve: 批量批准回访任务并更新 AI 评论
+// 4b. POST /api/revisit-tasks/bulk-approve: 批量保存回访任务并更新 AI 评论
 app.post('/api/revisit-tasks/bulk-approve', (req, res) => {
   const { tasks } = req.body;
 
@@ -224,7 +224,7 @@ app.post('/api/revisit-tasks/bulk-approve', (req, res) => {
     });
 
     const count = bulkApprove(tasks);
-    res.json({ ok: true, message: `成功批量批准通过了 ${count} 个回访任务` });
+    res.json({ ok: true, message: `成功批量保存了 ${count} 个回访任务` });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

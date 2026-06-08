@@ -12,40 +12,40 @@ let selectedStageId = 'collect';
 const STAGE_LAYOUT = [
   {
     id: 'collect',
-    left: '10%',
-    y: 163,
+    left: '9%',
+    y: 138,
     icon: 'fa-inbox',
-    label: '通知入库',
-    branch: { id: 'fallback', label: '回退', icon: 'fa-triangle-exclamation', color: 'orange' }
+    label: '扫描入库',
+    branch: { id: 'fallback', label: '采集异常', icon: 'fa-triangle-exclamation', color: 'orange' }
   },
   {
-    id: 'tasks',
-    left: '32%',
-    y: 43,
-    icon: 'fa-seedling',
-    label: '生成回访任务',
-    branch: { id: 'hold', label: '暂缓', icon: 'fa-pause', color: 'orange' }
+    id: 'replies',
+    left: '30%',
+    y: 38,
+    icon: 'fa-comments',
+    label: '回评队列',
+    branch: { id: 'replyExceptions', label: '回评异常', icon: 'fa-circle-exclamation', color: 'orange' }
   },
   {
-    id: 'review',
-    left: '54%',
-    y: 183,
-    icon: 'fa-comment-medical',
-    label: '评论审核',
-    branch: { id: 'risk', label: '风险', icon: 'fa-triangle-exclamation', color: 'orange' }
+    id: 'visits',
+    left: '52%',
+    y: 150,
+    icon: 'fa-route',
+    label: '回访任务',
+    branch: { id: 'visitRetry', label: '待重试', icon: 'fa-rotate-left', color: 'orange' }
   },
   {
     id: 'execute',
-    left: '75%',
-    y: 133,
+    left: '74%',
+    y: 96,
     icon: 'fa-bolt',
-    label: '执行互动',
-    branch: { id: 'retry', label: '失败', icon: 'fa-circle-xmark', color: 'red' }
+    label: '执行回访',
+    branch: { id: 'executeErrors', label: '执行异常', icon: 'fa-circle-xmark', color: 'red' }
   },
   {
     id: 'done',
-    left: '92%',
-    y: 93,
+    left: '91%',
+    y: 62,
     icon: 'fa-circle-check',
     label: '完成归档',
     branch: { id: 'archive', label: '归档完成', icon: 'fa-circle-check', color: 'green' }
@@ -123,7 +123,7 @@ async function fetchPendingComments() {
       pendingComments = json.data;
     }
   } catch (err) {
-    console.error('获取暂缓评论失败:', err);
+    console.error('获取回评评论失败:', err);
   }
 }
 
@@ -143,17 +143,20 @@ function renderRiverTimeline() {
     const data = stageMap[stage.id] || { count: 0, label: stage.label };
     
     const isMainActive = activeStageId === stage.id || 
-                         (stage.id === 'tasks' && activeStageId === 'hold') ||
-                         (stage.id === 'execute' && activeStageId === 'retry');
+                         (stage.id === 'replies' && activeStageId === 'replyExceptions') ||
+                         (stage.id === 'visits' && activeStageId === 'visitRetry') ||
+                         (stage.id === 'execute' && activeStageId === 'executeErrors');
     
     const activeClass = isMainActive ? 'is-active' : '';
     const selectedBadgeHtml = activeStageId === stage.id ? `<span class="selected-badge">当前节点 (已选中)</span>` : '';
 
     let branchCount = 0;
-    if (stage.branch.id === 'hold') {
-      branchCount = (statsData.pendingReplies || 0) + (statsData.replyExceptions || 0);
-    } else if (stage.branch.id === 'retry') {
-      branchCount = reviewTasks.filter((task) => String(task.status || '').startsWith('failed')).length;
+    if (stage.branch.id === 'replyExceptions') {
+      branchCount = statsData.replyExceptions || 0;
+    } else if (stage.branch.id === 'visitRetry') {
+      branchCount = reviewTasks.filter((task) => ['failed_collect', 'failed_generate_comment'].includes(task.status)).length;
+    } else if (stage.branch.id === 'executeErrors') {
+      branchCount = reviewTasks.filter((task) => ['failed_like', 'failed_comment', 'failed'].includes(task.status)).length;
     }
 
     const isBranchActive = activeStageId === stage.branch.id;
@@ -188,45 +191,53 @@ function renderRiverTimeline() {
 }
 
 function buildStageMap() {
-  const failedCount = reviewTasks.filter((task) => String(task.status || '').startsWith('failed')).length;
-  const processingCount = reviewTasks.filter((task) => ['pending_visit', 'collecting_content', 'content_collected', 'comment_generated'].includes(task.status)).length;
-  const readyCount = reviewTasks.filter((task) => ['pending_execute', 'executing'].includes(task.status)).length;
+  const replyWorkCount = (statsData.pendingReplies || 0) + (statsData.replyExceptions || 0);
+  const visitQueueCount = reviewTasks.filter((task) => ['pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'failed_collect', 'failed_generate_comment'].includes(task.status)).length;
+  const executableCount = reviewTasks.filter((task) => ['pending_visit', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment'].includes(task.status)).length;
+  const executeErrorCount = reviewTasks.filter((task) => ['failed_like', 'failed_comment', 'failed'].includes(task.status)).length;
+  const retryCount = reviewTasks.filter((task) => ['failed_collect', 'failed_generate_comment'].includes(task.status)).length;
 
   return {
     collect: {
-      label: '通知入库',
+      label: '扫描入库',
       count: statsData.collectedTotal || 0,
-      helper: `点赞 ${statsData.collectedLikes || 0} 条，评论 ${statsData.collectedComments || 0} 条，全部从这里起流。`,
+      helper: `通知中心扫描入库，点赞 ${statsData.collectedLikes || 0} 条，评论 ${statsData.collectedComments || 0} 条。`,
       tag: '第一站',
     },
-    tasks: {
-      label: '生成回访任务',
-      count: statsData.totalTasks || 0,
-      helper: `${processingCount} 条正在挑作品、抓上下文、拼装回访任务。`,
-      tag: '主河道',
+    replies: {
+      label: '回评队列',
+      count: replyWorkCount,
+      helper: `${statsData.pendingReplies || 0} 条待回评，${statsData.replyExceptions || 0} 条异常待处理。`,
+      tag: 'DB 队列',
     },
-    review: {
-      label: '评论审核',
-      count: statsData.pendingComments || 0,
-      helper: '这里是 AI 评论草稿和待批准任务，适合人工把关。',
-      tag: '需要点击',
+    replyExceptions: {
+      label: '回评异常',
+      count: statsData.replyExceptions || 0,
+      helper: 'blocked / sent_unverified 在这里人工处理后再回到 pending。',
+      tag: '人工处理',
     },
-    hold: {
-      label: '回评处理分支',
-      count: (statsData.pendingReplies || 0) + (statsData.replyExceptions || 0),
-      helper: '这条支流承接待回评和异常回评，可手动改文本、改状态或忽略。',
-      tag: '提醒分支',
+    visits: {
+      label: '回访任务',
+      count: visitQueueCount,
+      helper: `${visitQueueCount} 条任务等待 visit:run 执行或重新匹配作品。`,
+      tag: '主页匹配',
+    },
+    visitRetry: {
+      label: '待重试',
+      count: retryCount,
+      helper: '作品收集或评论生成失败的回访任务，可重新进入执行。',
+      tag: '可重试',
     },
     execute: {
-      label: '执行互访',
-      count: statsData.pendingLikes || 0,
-      helper: `${readyCount} 条进入待执行或执行中，等待真实动作落地。`,
-      tag: '动作下发',
+      label: '执行回访',
+      count: executableCount,
+      helper: `${executableCount} 条任务可由 visit:run --execute 继续推进。`,
+      tag: '真实动作',
     },
-    retry: {
-      label: '失败回退分支',
-      count: failedCount,
-      helper: '执行失败、状态不稳、动作中断的任务会在这里回流提醒。',
+    executeErrors: {
+      label: '执行异常',
+      count: executeErrorCount,
+      helper: '点赞、评论或最终状态确认失败，需要人工判断是否重试。',
       tag: '风险分支',
     },
     done: {
@@ -239,138 +250,181 @@ function buildStageMap() {
 }
 
 function buildStageDetailData() {
-  const failedTasks = reviewTasks.filter((task) => String(task.status || '').startsWith('failed'));
-  const inReviewTasks = reviewTasks.filter((task) => ['pending_visit', 'collecting_content', 'content_collected', 'comment_generated'].includes(task.status));
-  const readyTasks = reviewTasks.filter((task) => ['pending_execute', 'executing'].includes(task.status));
+  const replyWorkCount = (statsData.pendingReplies || 0) + (statsData.replyExceptions || 0);
+  const replyExceptionComments = pendingComments.filter(c => c.reply_status !== 'pending');
+  const visitQueueTasks = reviewTasks.filter((task) => ['pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'failed_collect', 'failed_generate_comment'].includes(task.status));
+  const visitRetryTasks = reviewTasks.filter((task) => ['failed_collect', 'failed_generate_comment'].includes(task.status));
+  const executableTasks = reviewTasks.filter((task) => ['pending_visit', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment'].includes(task.status));
+  const executeErrorTasks = reviewTasks.filter((task) => ['failed_like', 'failed_comment', 'failed'].includes(task.status));
 
   return {
     collect: {
       kicker: '起点',
-      title: '通知入库阶段',
-      description: '所有礼尚往来的线索都先流进这里。这个阶段关注的是入库量、来源结构，以及系统有没有把点赞和评论正确吸进来。',
+      title: '扫描互动并写入数据库',
+      description: '当前主流程从通知中心扫描互动，数据只写入 SQLite。后续回评和回访都直接从数据库读取，不再依赖中间 JSON。',
       metrics: [
         { label: '总通知', value: statsData.collectedTotal || 0 },
         { label: '点赞通知', value: statsData.collectedLikes || 0 },
         { label: '评论通知', value: statsData.collectedComments || 0 },
-        { label: '回访转化任务', value: statsData.totalTasks || 0 },
+        { label: '回访任务', value: statsData.totalTasks || 0 },
       ],
       branches: [
-        buildBranchCard('回访任务生成', `${statsData.totalTasks || 0} 条任务已由通知沉淀而来。`, statsData.totalTasks || 0),
-        buildBranchCard('回评处理', `${statsData.pendingReplies || 0} 条待回评，${statsData.replyExceptions || 0} 条异常待处理。`, (statsData.pendingReplies || 0) + (statsData.replyExceptions || 0)),
+        buildBranchCard('回评队列', `comments:execute --days N --limit M 会处理 ${statsData.pendingReplies || 0} 条 pending 回评。`, statsData.pendingReplies || 0),
+        buildBranchCard('回访任务', `visit:run --execute 会读取 ${reviewTasks.length} 条可见回访任务状态。`, reviewTasks.length),
       ],
       workspaceTitle: '通知源概览',
-      workspaceSubtitle: '这里先展示流程说明，真正可操作的内容在后续阶段。',
+      workspaceSubtitle: '建议先确认扫描入库是否正常，再分别处理回评和回访。',
       workspaceType: 'overview',
       workspaceContent: renderOverviewContent([
-        ['主输入', `当前共入库 ${statsData.collectedTotal || 0} 条通知，其中点赞 ${statsData.collectedLikes || 0}，评论 ${statsData.collectedComments || 0}。`],
-        ['关键判断', '如果这一站异常，后面的任务、审核、执行全部会缺料。'],
-        ['建议关注', '先看通知采集量是否突然下降，再看后续任务是否同步增长。'],
+        ['推荐命令', 'npm run interactions:scan -- --days N --max-count M --prepare-replies --prepare-visits'],
+        ['数据边界', '扫描只负责入库和准备 DB 任务，不生成 pending JSON。'],
+        ['下一步', '有评论就进入回评队列；有点赞/评论/关注线索就进入回访任务。'],
       ]),
     },
-    tasks: {
-      kicker: '主河道',
-      title: '回访任务生成阶段',
-      description: '系统正在根据互动用户主页和作品上下文，筛出可回访作品，并准备后续评论草稿。',
+    fallback: {
+      kicker: '采集异常',
+      title: '扫描异常与降级提醒',
+      description: '这里用于提示通知 API 采集、主页解析或 DOM 降级相关问题。目前前端没有单独异常表，主要看扫描命令输出日志。',
       metrics: [
-        { label: '总任务', value: statsData.totalTasks || 0 },
-        { label: '处理中', value: inReviewTasks.length },
-        { label: '待执行', value: readyTasks.length },
-        { label: '失败回退', value: failedTasks.length },
+        { label: '入库通知', value: statsData.collectedTotal || 0 },
+        { label: '点赞通知', value: statsData.collectedLikes || 0 },
+        { label: '评论通知', value: statsData.collectedComments || 0 },
+        { label: '异常记录', value: 0 },
       ],
       branches: [
-        buildBranchCard('没有可回访作品', '如果主页抓不到作品，任务会在这里提前断流。', reviewTasks.filter(task => task.status === 'pending_visit').length),
-        buildBranchCard('失败回退', '挑作品或抓内容失败时，会回流到失败分支。', failedTasks.length),
+        buildBranchCard('看命令输出', 'scan 会打印解析失败、主页缺失、重复跳过等统计。', 0),
       ],
-      workspaceTitle: '任务生成中的条目',
-      workspaceSubtitle: '这里展示还在收集内容或等待生成评论的任务。',
-      workspaceType: 'tasks',
-      taskSource: 'processing',
+      workspaceTitle: '采集异常说明',
+      workspaceSubtitle: '如果这里长期没有数据但扫描异常，请先看终端日志。',
+      workspaceType: 'overview',
+      workspaceContent: renderOverviewContent([
+        ['排查入口', 'npm run interactions:scan -- --display-only 可以先确认通知是否能读取。'],
+        ['常见原因', '登录失效、通知接口变化、主页链接缺失、网络超时。'],
+      ]),
     },
-    review: {
-      kicker: '人工审核',
-      title: '评论审核阶段',
-      description: '这是主驾驶区。你点击这个节点时，下方只保留需要人工看一眼的回访任务，并允许你直接批准或跳过。',
-      metrics: [
-        { label: '待审核评论', value: statsData.pendingComments || 0 },
-        { label: '审核中任务', value: inReviewTasks.length },
-        { label: '批量选择', value: selectedTaskIds.size },
-        { label: '失败任务', value: failedTasks.length },
-      ],
-      branches: [
-        buildBranchCard('回评处理台', '待回评和异常回评都在这里人工处理。', (statsData.pendingReplies || 0) + (statsData.replyExceptions || 0)),
-        buildBranchCard('失败回退', '如果评论草稿不稳定或上下文不足，会流去失败分支。', failedTasks.length),
-      ],
-      workspaceTitle: '需要人工审核的回访任务',
-      workspaceSubtitle: '批准后进入待执行；跳过则在主河道止损。',
-      workspaceType: 'tasks',
-      taskSource: 'review',
-    },
-    hold: {
-      kicker: '提醒分支',
-      title: '回评处理分支',
-      description: '这里承接待回评和被阻塞/未确认的异常回评。你可以修改回复文本、把异常重置回 pending 队列，或直接忽略。',
+    replies: {
+      kicker: '回评',
+      title: '回评队列',
+      description: 'comments:execute 会查询所有 reply_status=pending 的评论。已有 reply_text 也会继续被查到，用于恢复上次中断的执行。',
       metrics: [
         { label: '待回评', value: statsData.pendingReplies || 0 },
         { label: '异常回评', value: statsData.replyExceptions || 0 },
         { label: '未确认发送', value: statsData.sentUnverifiedReplies || 0 },
-        { label: '主线任务', value: statsData.totalTasks || 0 },
+        { label: '总待处理', value: replyWorkCount },
+      ],
+      branches: [
+        buildBranchCard('异常处理', 'blocked / sent_unverified 需要人工确认后再重试或忽略。', replyExceptionComments.length),
+        buildBranchCard('直接执行', '回评文本由 Hermes/OpenClaw 在命令进程内生成，CLI 负责打开作品页并回复。', statsData.pendingReplies || 0),
+      ],
+      workspaceTitle: '待回评评论',
+      workspaceSubtitle: '这里只显示 pending；异常请点“回评异常”。',
+      workspaceType: 'pending-comments',
+      commentSource: 'pending',
+    },
+    replyExceptions: {
+      kicker: '回评异常',
+      title: '被阻塞或发送未确认的回评',
+      description: '定位风险、目标找不到、发送未确认等不会自动重试。你可以在这里修改回复文本、重置为 pending，或忽略。',
+      metrics: [
+        { label: '阻塞', value: statsData.blockedReplies || 0 },
+        { label: '未确认发送', value: statsData.sentUnverifiedReplies || 0 },
+        { label: '异常回评', value: statsData.replyExceptions || 0 },
+        { label: '待回评', value: statsData.pendingReplies || 0 },
       ],
       branches: [
         buildBranchCard('重新排队', '把 blocked 评论改回 pending 后，下次 comments:execute 会继续处理。', pendingComments.filter(c => c.reply_status === 'blocked').length),
         buildBranchCard('人工核查', 'sent_unverified 代表可能已发送，重试前应人工确认。', pendingComments.filter(c => c.reply_status === 'sent_unverified').length),
       ],
       workspaceTitle: '回评处理台',
-      workspaceSubtitle: 'pending 会自动进入下次执行；blocked/sent_unverified 需要人工修改状态。',
+      workspaceSubtitle: '异常项默认不会自动执行；点“重试”会改回 pending。',
       workspaceType: 'pending-comments',
+      commentSource: 'exceptions',
+    },
+    visits: {
+      kicker: '回访',
+      title: '回访任务队列',
+      description: '回访不再提前生成评论 JSON。执行阶段打开用户主页一次，监听主页作品列表 API，根据 workId 点击目标作品，再生成评论并执行点赞/评论。',
+      metrics: [
+        { label: '回访任务', value: statsData.totalTasks || 0 },
+        { label: '待执行/匹配', value: visitQueueTasks.length },
+        { label: '待重试', value: visitRetryTasks.length },
+        { label: '已完成', value: statsData.completedTasks || 0 },
+      ],
+      branches: [
+        buildBranchCard('作品匹配重试', '主页打开、作品列表匹配或评论生成失败时会回到这里。', visitRetryTasks.length),
+        buildBranchCard('执行入口', '主入口是 npm run visit:run -- --execute。', executableTasks.length),
+      ],
+      workspaceTitle: '回访任务',
+      workspaceSubtitle: '展示 pending_visit / failed_collect / failed_generate_comment 等任务。',
+      workspaceType: 'tasks',
+      taskSource: 'visitQueue',
+    },
+    visitRetry: {
+      kicker: '回访重试',
+      title: '作品收集或评论生成失败',
+      description: '这些任务通常是页面加载、作品匹配或 Agent 生成评论失败。再次执行 visit:run 可重新尝试。',
+      metrics: [
+        { label: '待重试', value: visitRetryTasks.length },
+        { label: '收集失败', value: reviewTasks.filter(task => task.status === 'failed_collect').length },
+        { label: '生成失败', value: reviewTasks.filter(task => task.status === 'failed_generate_comment').length },
+        { label: '可执行任务', value: executableTasks.length },
+      ],
+      branches: [
+        buildBranchCard('重新执行', '通常直接再次运行 visit:run --execute。', visitRetryTasks.length),
+      ],
+      workspaceTitle: '待重试回访任务',
+      workspaceSubtitle: '这里不是终态失败，可重新执行。',
+      workspaceType: 'tasks',
+      taskSource: 'visitRetry',
     },
     execute: {
       kicker: '动作阶段',
-      title: '执行互访阶段',
-      description: '任务已经完成作品选择和评论审核，等待真实执行点赞与评论。这里适合看即将落地的动作量。',
+      title: '执行回访点赞与评论',
+      description: 'visit:run --execute 会对 DB 任务执行真实动作：打开主页、进入作品、确认点赞状态、按需点赞、生成并发送评论。',
       metrics: [
-        { label: '待回访作品', value: statsData.pendingLikes || 0 },
-        { label: '待执行任务', value: readyTasks.length },
+        { label: '可执行任务', value: executableTasks.length },
+        { label: '执行中/待执行', value: reviewTasks.filter(task => ['pending_execute', 'executing'].includes(task.status)).length },
         { label: '已完成任务', value: statsData.completedTasks || 0 },
-        { label: '失败回退', value: failedTasks.length },
+        { label: '执行异常', value: executeErrorTasks.length },
       ],
       branches: [
-        buildBranchCard('失败回退', '动作失败会直接从这里冲出分支，提醒你重新介入。', failedTasks.length),
+        buildBranchCard('执行异常', '点赞失败、评论失败、最终状态确认失败会进入异常分支。', executeErrorTasks.length),
       ],
-      workspaceTitle: '已准备好执行的任务',
-      workspaceSubtitle: '这些任务已经通过审核，只差真实执行。',
+      workspaceTitle: '可执行回访任务',
+      workspaceSubtitle: '执行前确认账号已登录；真实点赞/评论需要 --execute。',
       workspaceType: 'tasks',
-      taskSource: 'ready',
+      taskSource: 'executable',
     },
-    retry: {
+    executeErrors: {
       kicker: '风险分支',
-      title: '失败回退分支',
-      description: '这条分支承接所有执行失败、状态确认失败、评论发送异常的任务。你可以把它看成河道边的告警堤坝。',
+      title: '执行异常任务',
+      description: '这里承接动作层面的失败。需要结合页面截图、last_error 和账号状态判断是否重试或跳过。',
       metrics: [
-        { label: '失败任务', value: failedTasks.length },
+        { label: '异常任务', value: executeErrorTasks.length },
         { label: '点赞失败', value: reviewTasks.filter(task => task.status === 'failed_like').length },
         { label: '评论失败', value: reviewTasks.filter(task => task.status === 'failed_comment').length },
-        { label: '待重新介入', value: failedTasks.length },
+        { label: '待人工判断', value: executeErrorTasks.length },
       ],
       branches: [
-        buildBranchCard('重新审核', '失败任务通常需要回到审核视角重新看一遍评论和作品上下文。', failedTasks.length),
+        buildBranchCard('谨慎重试', '如果已可能发出评论，先人工核查，避免重复互动。', executeErrorTasks.length),
       ],
       workspaceTitle: '失败与回退任务',
       workspaceSubtitle: '这里不显示正常流程，只显示需要救火的任务。',
       workspaceType: 'tasks',
-      taskSource: 'failed',
+      taskSource: 'executeErrors',
     },
     done: {
       kicker: '终点',
       title: '完成归档阶段',
-      description: '所有点赞和评论都落地后，任务会汇入这里。这个节点更多是让你看闭环效率，而不是做人工操作。',
+      description: '回访任务完成后进入 done。回评成功会写入 work_comments.succeeded，并同步 interaction_events 状态。',
       metrics: [
         { label: '已完成', value: statsData.completedTasks || 0 },
         { label: '总任务', value: statsData.totalTasks || 0 },
         { label: '完成率', value: calcCompletionRate() },
-        { label: '仍在流动', value: Math.max((statsData.totalTasks || 0) - (statsData.completedTasks || 0), 0) },
+        { label: '仍在流动', value: Math.max(executableTasks.length + replyWorkCount, 0) },
       ],
       branches: [
-        buildBranchCard('继续扩流', '想提升完成率，就回去看审核和执行节点的堵点。', Math.max((statsData.totalTasks || 0) - (statsData.completedTasks || 0), 0)),
+        buildBranchCard('继续处理', '还有未完成的回评或回访时，回到对应队列处理。', executableTasks.length + replyWorkCount),
       ],
       workspaceTitle: '完成阶段说明',
       workspaceSubtitle: '这里展示闭环结果和效率，不展示待处理卡片。',
@@ -378,7 +432,26 @@ function buildStageDetailData() {
       workspaceContent: renderOverviewContent([
         ['闭环结果', `当前已完成 ${statsData.completedTasks || 0} 条，总任务 ${statsData.totalTasks || 0} 条。`],
         ['完成率', `${calcCompletionRate()} 的任务已经走完全链路。`],
-        ['下一步', '如果完成率低，优先点失败回退分支，再看审核节点。'],
+        ['下一步', '如果完成率低，优先查看回评异常、待重试和执行异常分支。'],
+      ]),
+    },
+    archive: {
+      kicker: '归档',
+      title: '完成归档',
+      description: '归档节点用于查看闭环结果。当前不提供人工操作。',
+      metrics: [
+        { label: '已完成', value: statsData.completedTasks || 0 },
+        { label: '总任务', value: statsData.totalTasks || 0 },
+        { label: '完成率', value: calcCompletionRate() },
+        { label: '待处理', value: executableTasks.length + replyWorkCount },
+      ],
+      branches: [],
+      workspaceTitle: '归档说明',
+      workspaceSubtitle: '完成归档由执行结果自动写入。',
+      workspaceType: 'overview',
+      workspaceContent: renderOverviewContent([
+        ['自动归档', '回访 done 与回评 succeeded 都由执行命令自动写入 DB。'],
+        ['人工关注', '如果结果不符合预期，请看异常分支，而不是直接修改归档状态。'],
       ]),
     },
   };
@@ -434,7 +507,7 @@ function renderStageWorkspace() {
   if (detailData.workspaceType === 'pending-comments') {
     toolbar.style.display = 'none';
     workspace.className = 'workspace-body';
-    workspace.innerHTML = renderPendingCommentsHtml();
+    workspace.innerHTML = renderPendingCommentsHtml(detailData.commentSource || 'all');
     updateBulkBar();
     return;
   }
@@ -464,14 +537,16 @@ function renderStageWorkspace() {
 
 function getFilteredTasksByStage(taskSource) {
   let tasks = reviewTasks.slice();
-  if (taskSource === 'processing') {
-    tasks = tasks.filter((task) => ['pending_visit', 'collecting_content', 'content_collected', 'comment_generated'].includes(task.status));
-  } else if (taskSource === 'review') {
-    tasks = tasks.filter((task) => ['pending_visit', 'collecting_content', 'content_collected', 'comment_generated'].includes(task.status));
+  if (taskSource === 'visitQueue') {
+    tasks = tasks.filter((task) => ['pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'failed_collect', 'failed_generate_comment'].includes(task.status));
+  } else if (taskSource === 'visitRetry') {
+    tasks = tasks.filter((task) => ['failed_collect', 'failed_generate_comment'].includes(task.status));
+  } else if (taskSource === 'executable') {
+    tasks = tasks.filter((task) => ['pending_visit', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment'].includes(task.status));
   } else if (taskSource === 'ready') {
     tasks = tasks.filter((task) => ['pending_execute', 'executing'].includes(task.status));
-  } else if (taskSource === 'failed') {
-    tasks = tasks.filter((task) => String(task.status || '').startsWith('failed'));
+  } else if (taskSource === 'executeErrors') {
+    tasks = tasks.filter((task) => ['failed_like', 'failed_comment', 'failed'].includes(task.status));
   }
 
   const searchQuery = document.getElementById('search-input').value.toLowerCase().trim();
@@ -541,7 +616,7 @@ function renderTaskCardsHtml(tasks) {
           <textarea class="comment-textarea" id="textarea-${task.id}" placeholder="输入评论内容...">${escapeHtml(task.generatedComment || '')}</textarea>
         </div>
         <div class="card-actions">
-          <button class="btn btn-primary" onclick="approveTask(${task.id})"><i class="fa-solid fa-circle-check"></i>批准</button>
+          <button class="btn btn-primary" onclick="approveTask(${task.id})"><i class="fa-solid fa-floppy-disk"></i>保存待执行</button>
           <button class="btn btn-secondary" onclick="skipTask(${task.id})"><i class="fa-solid fa-circle-xmark"></i>跳过</button>
         </div>
       </article>
@@ -599,7 +674,7 @@ function renderTaskTableHtml(tasks) {
                 <td><div class="status-dot-wrapper"><span class="status-dot ${dotClass}"></span>${badgeText}</div></td>
                 <td>
                   <div class="table-actions">
-                    <button class="btn-mini btn-mini-primary" onclick="approveTask(${task.id})"><i class="fa-solid fa-check"></i></button>
+                    <button class="btn-mini btn-mini-primary" onclick="approveTask(${task.id})"><i class="fa-solid fa-floppy-disk"></i></button>
                     <button class="btn-mini btn-mini-secondary" onclick="skipTask(${task.id})"><i class="fa-solid fa-xmark"></i></button>
                   </div>
                 </td>
@@ -612,14 +687,21 @@ function renderTaskTableHtml(tasks) {
   `;
 }
 
-function renderPendingCommentsHtml() {
-  if (!pendingComments.length) {
+function renderPendingCommentsHtml(commentSource = 'all') {
+  let comments = pendingComments.slice();
+  if (commentSource === 'pending') {
+    comments = comments.filter(comment => comment.reply_status === 'pending');
+  } else if (commentSource === 'exceptions') {
+    comments = comments.filter(comment => comment.reply_status !== 'pending');
+  }
+
+  if (!comments.length) {
     return renderEmptyState('fa-face-smile-beam', '当前没有待处理或异常回评。');
   }
 
   return `
     <div class="pending-list">
-      ${pendingComments.map((comment) => {
+      ${comments.map((comment) => {
         const badge = getReplyBadge(comment.reply_status);
         const textareaId = `reply-text-${comment.id}`;
         const workUrl = comment.joined_work_url || comment.work_url || '';
@@ -748,14 +830,14 @@ window.approveTask = async function(id) {
     });
     const json = await res.json();
     if (!json.ok) {
-      showToast(json.error || '批准失败', 'error');
+      showToast(json.error || '保存失败', 'error');
       return;
     }
     selectedTaskIds.delete(id);
-    showToast(json.message || '任务已批准', 'success');
+    showToast(json.message || '任务已保存为待执行', 'success');
     await refreshAll();
   } catch (err) {
-    showToast('批准请求失败', 'error');
+    showToast('保存请求失败', 'error');
   }
 };
 
@@ -800,14 +882,14 @@ async function bulkApproveTasks() {
     });
     const json = await res.json();
     if (!json.ok) {
-      showToast(json.error || '批量批准失败', 'error');
+      showToast(json.error || '批量保存失败', 'error');
       return;
     }
     selectedTaskIds.clear();
-    showToast(json.message || '批量批准成功', 'success');
+    showToast(json.message || '批量保存成功', 'success');
     await refreshAll();
   } catch (err) {
-    showToast('批量批准请求失败', 'error');
+    showToast('批量保存请求失败', 'error');
   }
 }
 
