@@ -4,7 +4,9 @@ import {
   extractModalIdFromUrl,
   parseDouyinTimeText,
   pickWorkCommentCandidate,
+  resolveReplyTypingOptions,
   scrollCommentAreaOnce,
+  typeReplyTextWithEffect,
 } from '../../src/adapters/work-modal-page.mjs';
 import { checkWorkOwner } from '../../src/adapters/work-context-page.mjs';
 
@@ -55,6 +57,42 @@ describe('replyText 前缀匹配逻辑', () => {
     expect(prefix.length).toBeLessThan(5);
     const shouldUsePrefix = prefix.length >= 5;
     expect(shouldUsePrefix).toBe(false);
+  });
+});
+
+describe('回复输入打字效果', () => {
+  it('默认逐字 insertText 并等待短暂停顿', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    const page = {
+      keyboard: { insertText: vi.fn(async () => {}) },
+      waitForTimeout: vi.fn(async () => {}),
+    };
+
+    try {
+      const result = await typeReplyTextWithEffect(page, '谢谢支持', { enabled: true, delayMs: 10, jitterMs: 0 });
+      expect(result.method).toBe('keyboard_type_effect');
+      expect(page.keyboard.insertText).toHaveBeenCalledTimes(4);
+      expect(page.keyboard.insertText.mock.calls.map(([text]) => text)).toEqual(['谢', '谢', '支', '持']);
+      expect(page.waitForTimeout).toHaveBeenCalledTimes(4);
+      expect(page.waitForTimeout).toHaveBeenCalledWith(10);
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
+  it('可通过环境变量关闭打字效果', async () => {
+    const page = {
+      keyboard: { insertText: vi.fn(async () => {}) },
+      waitForTimeout: vi.fn(async () => {}),
+    };
+
+    const options = resolveReplyTypingOptions({ LISHANGWANGLAI_REPLY_TYPING: '0' });
+    const result = await typeReplyTextWithEffect(page, '一次填入', options);
+
+    expect(result.method).toBe('keyboard_insert_text');
+    expect(page.keyboard.insertText).toHaveBeenCalledTimes(1);
+    expect(page.keyboard.insertText).toHaveBeenCalledWith('一次填入');
+    expect(page.waitForTimeout).not.toHaveBeenCalled();
   });
 });
 

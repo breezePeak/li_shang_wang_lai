@@ -8,6 +8,43 @@ function isTruthyEnv(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
 }
 
+function toNonNegativeNumber(value, fallback) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return fallback;
+  return num;
+}
+
+export function resolveReplyTypingOptions(env = process.env) {
+  return {
+    enabled: !['0', 'false', 'no', 'off'].includes(String(env.LISHANGWANGLAI_REPLY_TYPING || '').trim().toLowerCase()),
+    delayMs: toNonNegativeNumber(env.LISHANGWANGLAI_REPLY_TYPE_DELAY_MS, 45),
+    jitterMs: toNonNegativeNumber(env.LISHANGWANGLAI_REPLY_TYPE_JITTER_MS, 35),
+  };
+}
+
+export async function typeReplyTextWithEffect(page, replyText, options = resolveReplyTypingOptions()) {
+  const text = String(replyText || '');
+  if (!options.enabled) {
+    await page.keyboard.insertText(text);
+    return { method: 'keyboard_insert_text', charCount: Array.from(text).length };
+  }
+
+  const chars = Array.from(text);
+  for (const ch of chars) {
+    await page.keyboard.insertText(ch);
+    const jitter = options.jitterMs > 0 ? Math.floor(Math.random() * (options.jitterMs + 1)) : 0;
+    const waitMs = Math.round(options.delayMs + jitter);
+    if (waitMs > 0) await page.waitForTimeout(waitMs).catch(() => {});
+  }
+
+  return { method: 'keyboard_type_effect', charCount: chars.length };
+}
+
+async function clearReplyEditor(page) {
+  await page.keyboard.press('Control+A').catch(() => {});
+  await page.keyboard.press('Backspace').catch(() => {});
+}
+
 async function captureReplyBoxDebug(page, phase, { success = false } = {}) {
   if (success && !isTruthyEnv(process.env.LISHANGWANGLAI_REPLY_DEBUG_SUCCESS)) {
     return null;
@@ -181,12 +218,22 @@ async function typeIntoReplyDraftEditor(page, replyText) {
   await editor.waitFor({ state: 'visible', timeout: 3000 });
   await editor.click({ timeout: 3000 }).catch(() => {});
 
-  await page.keyboard.press('Control+A').catch(() => {});
-  await page.keyboard.press('Backspace').catch(() => {});
-  await page.keyboard.insertText(replyText);
+  await clearReplyEditor(page);
+
+  const typingOptions = resolveReplyTypingOptions();
+  let inputMethod = 'keyboard_type_effect';
+  try {
+    const typedByEffect = await typeReplyTextWithEffect(page, replyText, typingOptions);
+    inputMethod = typedByEffect.method;
+  } catch (err) {
+    console.error(`[work-modal] 打字输入失败，回退一次性填入: ${err.message}`);
+    await clearReplyEditor(page);
+    await page.keyboard.insertText(replyText);
+    inputMethod = 'keyboard_insert_text_fallback';
+  }
   await page.waitForTimeout(300).catch(() => {});
 
-  const typed = await page.evaluate((text) => {
+  let typed = await page.evaluate((text, method) => {
     const container = document.querySelector('.comment-input-container');
     const editorEl = document.querySelector('[data-return-visit-editor="true"]')
       || container?.querySelector('.public-DraftEditor-content[contenteditable="true"]')
@@ -201,12 +248,33 @@ async function typeIntoReplyDraftEditor(page, replyText) {
     if (fallbackText.includes(text) || fallbackText.includes(text.slice(0, Math.min(10, text.length)))) {
       return {
         ok: true,
-        method: 'keyboard_insert_text',
+        method,
         sendButtonVisible: !!sendButton,
       };
     }
     return { ok: false, reason: 'text not reflected in reply editor' };
-  }, replyText);
+  }, replyText, inputMethod);
+
+  if (!typed.ok && inputMethod === 'keyboard_type_effect') {
+    console.error(`[work-modal] 打字效果未反映到输入框，回退一次性填入: ${typed.reason || 'unknown'}`);
+    await clearReplyEditor(page);
+    await page.keyboard.insertText(replyText);
+    await page.waitForTimeout(300).catch(() => {});
+    typed = await page.evaluate((text) => {
+      const container = document.querySelector('.comment-input-container');
+      const editorEl = document.querySelector('[data-return-visit-editor="true"]')
+        || container?.querySelector('.public-DraftEditor-content[contenteditable="true"]')
+        || container?.querySelector('[contenteditable="true"]');
+      if (!editorEl) return { ok: false, reason: 'editor disappeared after fallback insertText' };
+      const fallbackRaw = editorEl.innerText;
+      const fallbackText = (container?.innerText || fallbackRaw || '').trim();
+      const sendButton = container?.querySelector('.commentInput-right-ct .FbVIhLlK');
+      if (fallbackText.includes(text) || fallbackText.includes(text.slice(0, Math.min(10, text.length)))) {
+        return { ok: true, method: 'keyboard_insert_text_fallback', sendButtonVisible: !!sendButton };
+      }
+      return { ok: false, reason: 'text not reflected in reply editor after fallback' };
+    }, replyText);
+  }
 
   return typed;
 }
