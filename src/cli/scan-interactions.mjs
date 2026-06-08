@@ -764,8 +764,8 @@ export function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
   const filePath = resolve('data', 'pending-replies', `pending-comments-${ts}.json`);
   writeJSON(filePath, users);
   console.error(`[scan] pending_reply_homepage_count=${users.length} pending_reply_work_count=${workCount} pending_reply_comment_count=${totalComments} skip_missing_author_profile_url=${skippedMissingHomepageWorkCount}`);
-  console.error(`[scan] Agent 提示: 回评 JSON 路径=${filePath}`);
-  console.error('[scan] Agent 提示: 回复依据字段=comments[].comment_text(对方评论内容), work_desc(你的作品文案), work_title(作品标题), actor_name(评论者昵称)');
+  console.error(`[scan] 待回评 JSON（兼容旧流程）路径=${filePath}`);
+  console.error('[scan] Agent 提示: 新回评流程不需要填写中间 JSON；启动 agent-server 后直接执行 comments:execute');
   return {
     filePath,
     totalComments,
@@ -775,8 +775,9 @@ export function writePendingReplyJson({ days = null, maxCount = 500 } = {}) {
     agentInstructions: {
       action: 'reply',
       jsonPath: filePath,
+      nextStep: 'npm run agent-server，然后 npm run comments:execute',
       replyFields: ['comments[].comment_text', 'work_desc', 'work_title', 'actor_name'],
-      fillField: 'reply_text',
+      fillField: 'reply_text（新流程自动生成）',
     },
   };
 }
@@ -911,10 +912,18 @@ export function writePendingVisitJson(events, { days = null, maxCount = 100, col
       ? task.sourceTypes
       : [task.sourceType || 'other'];
     if (allowed.size > 0 && !sourceTypes.some(type => allowed.has(type))) continue;
-    users.push({
+    const visitItem = {
       id: task.taskId,
       homepage_url: task.userProfileUrl || '',
-    });
+    };
+    if (task.targetWork?.workId) {
+      visitItem.interactionId = (task.sourceEventIds || [])[0] || '';
+      visitItem.targetUserId = task.userId || '';
+      visitItem.profileUrl = task.userProfileUrl || '';
+      visitItem.workId = task.targetWork.workId;
+      visitItem.interactionType = task.sourceType || 'like';
+    }
+    users.push(visitItem);
   }
   stats.dbSelected = users.length;
 
@@ -936,15 +945,15 @@ export function writePendingVisitJson(events, { days = null, maxCount = 100, col
     `pending_visit_db_filtered_days=${stats.dbFilteredDays}`
   );
   console.error(`[scan] Agent 提示: 回访 JSON 路径=${filePath}`);
-  console.error('[scan] Agent 提示: 回访流程=先 return-visit:prepare 采集作品，再填写 comment 字段，最后 return-visit:execute --execute 执行');
+  console.error('[scan] Agent 提示: 回访流程=启动 agent-server 后直接执行 visit:run/return-visit:execute，执行阶段会实时匹配作品并生成评论');
   return {
     filePath,
     totalUsers: users.length,
     agentInstructions: {
       action: 'visit',
       jsonPath: filePath,
-      nextStep: 'return-visit:prepare --items-file <此文件>',
-      afterPrepare: '填写 comment 字段 → return-visit:execute --execute --items-file <prepare 输出文件>',
+      nextStep: 'npm run agent-server，然后 npm run visit:run -- --execute',
+      afterPrepare: '不再需要 prepare 阶段扩展 JSON',
     },
   };
 }
@@ -1950,7 +1959,8 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
 }
 
 async function main() {
-  const { options, remaining } = parseCommonArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const { options, remaining } = parseCommonArgs(argv);
 
   const typeIdx = remaining.indexOf('--type');
   const type = typeIdx >= 0 ? remaining[typeIdx + 1] : 'all';
@@ -1958,7 +1968,9 @@ async function main() {
   const pauseAfterOpen = pauseIdx >= 0 ? parseInt(remaining[pauseIdx + 1], 10) || 0 : 0;
   const debugNotificationDom = remaining.includes('--debug-notification-dom');
   const maxCountIdx = remaining.indexOf('--max-count');
-  const maxCount = maxCountIdx >= 0 ? Math.max(1, parseInt(remaining[maxCountIdx + 1], 10) || 1) : 100;
+  const hasExplicitMaxCount = maxCountIdx >= 0;
+  const hasExplicitDays = argv.includes('--days');
+  const maxCount = hasExplicitMaxCount ? Math.max(1, parseInt(remaining[maxCountIdx + 1], 10) || 1) : null;
   const collectTypesIdx = remaining.indexOf('--collect-types');
   const collectTypes = collectTypesIdx >= 0 && remaining[collectTypesIdx + 1]
     ? remaining[collectTypesIdx + 1].split(',').map(type => type.trim()).filter(Boolean)
@@ -1973,6 +1985,15 @@ async function main() {
     generateReplyJson: displayOnly ? false : (explicitReplyJson || noExplicitJsonFlags),
     generateVisitJson: displayOnly ? false : (explicitVisitJson || noExplicitJsonFlags),
   };
+  if ((scanPlan.generateReplyJson || scanPlan.generateVisitJson) && (!hasExplicitDays || !hasExplicitMaxCount)) {
+    const message = '生成/查询待回评或待回访必须手动输入采集天数和最大条数限制，例如：interactions:scan --days 7 --max-count 50';
+    if (options.json) {
+      printJsonError('interactions:scan', RESULT_CODES.INVALID_ARGUMENTS, message, { recoverable: false });
+    } else {
+      console.error(`[scan] ${message}`);
+    }
+    process.exit(1);
+  }
   const validTypes = ['all', 'comment', 'like', 'reply', 'follow'];
   if (!validTypes.includes(type)) {
     if (options.json) {

@@ -1,0 +1,52 @@
+import { describe, expect, it } from 'vitest';
+import {
+  extractJson,
+  validateComment,
+  buildCommentPrompt,
+  buildReplyPrompt,
+  loadCommentSafetyRules,
+} from '../../src/agent/comment-agent-server.mjs';
+
+describe('agent comment server helpers', () => {
+  it('extractJson parses fenced json and trims comment', () => {
+    const parsed = extractJson('说明\n```json\n{"comment":" 这个说得挺真实 "}\n```');
+    expect(parsed.comment).toBe('这个说得挺真实');
+  });
+
+  it('extractJson parses json surrounded by text', () => {
+    const parsed = extractJson('好的 {"comment":"挺实在的分享"} 就这样');
+    expect(parsed.comment).toBe('挺实在的分享');
+  });
+
+  it('validateComment rejects empty and too long comments', () => {
+    expect(() => validateComment('', { maxLength: 30 })).toThrow('comment 为空');
+    expect(() => validateComment('这是一条明显超过限制的评论内容', { maxLength: 5 })).toThrow('comment 超长');
+  });
+
+  it('buildCommentPrompt keeps browser-control out of agent instructions', () => {
+    const prompt = buildCommentPrompt({
+      taskId: 'visit_001',
+      work: { workId: '987654', desc: '今天聊聊做账号过程中的几个坑' },
+      requirements: { maxLength: 30 },
+    });
+    expect(prompt).toContain('只负责生成一条回访评论');
+    expect(prompt).toContain('只能返回 JSON');
+    expect(prompt).not.toContain('点击');
+    expect(prompt).not.toContain('提交');
+  });
+
+  it('buildCommentPrompt includes project comment safety rules', () => {
+    const rules = loadCommentSafetyRules();
+    const prompt = buildCommentPrompt({ taskId: 'visit_002' });
+    expect(rules).toContain('评论生成规则与安全边界');
+    expect(prompt).toContain('评论生成规则与安全边界');
+    expect(prompt).toContain('不出现“互关”“互赞”“回访”“已赞”“求关注”“三连”等词');
+    expect(prompt).toContain('{"comment":"评论内容"}');
+  });
+
+  it('buildReplyPrompt puts reply output format in code prompt', () => {
+    const prompt = buildReplyPrompt({ taskId: 'reply_001' });
+    expect(prompt).toContain('{"reply":"回复内容"}');
+    expect(prompt).toContain('评论生成规则与安全边界');
+  });
+});

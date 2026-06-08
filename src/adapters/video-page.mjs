@@ -1108,7 +1108,7 @@ export async function extractVideoCommentContext(page) {
   }
 }
 
-async function ensureCommentPanelOpen(page) {
+export async function ensureCommentPanelOpen(page) {
   try {
     const isOpen = async () => await page.evaluate(() => {
       const selectors = [
@@ -1231,7 +1231,7 @@ const inputSelectors = [
   '[id*="comment"] textarea'
 ];
 
-async function findCommentInput(page) {
+export async function findCommentInput(page) {
   const isSearchInput = async (el) => {
     try {
       const ph = await el.evaluate(node => {
@@ -1279,7 +1279,7 @@ async function findCommentInput(page) {
   return null;
 }
 
-async function activateCommentComposer(page) {
+export async function activateCommentComposer(page) {
   return await page.evaluate(() => {
     function visible(el) {
       if (!el) return false;

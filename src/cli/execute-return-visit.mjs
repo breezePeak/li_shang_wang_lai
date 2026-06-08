@@ -9,6 +9,7 @@ import {
   RETURN_VISIT_STATUS,
   listReturnVisitExecuteTasks,
   listReturnVisitTasksByIds,
+  createOrUpdateReturnVisitTasksFromItems,
   updateReturnVisitTask,
   markReturnVisitFailure,
   markReturnVisitDone,
@@ -76,22 +77,20 @@ function randomInRange(min, max) {
 }
 
 export function getReturnVisitTaskExecutionIssue(task) {
-  const hasComment = task?.generatedComment && String(task.generatedComment).trim();
   const hasWorkUrl = task?.targetWork?.workUrl && String(task.targetWork.workUrl).trim();
   const hasWorkId = task?.targetWork?.workId && String(task.targetWork.workId).trim();
 
   const isTargetStatus = [
     RETURN_VISIT_STATUS.PENDING_EXECUTE,
+    RETURN_VISIT_STATUS.PENDING_VISIT,
     RETURN_VISIT_STATUS.EXECUTING,
+    RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT,
     RETURN_VISIT_STATUS.FAILED_LIKE,
     RETURN_VISIT_STATUS.FAILED_COMMENT,
   ].includes(task?.status);
 
   if (!isTargetStatus) {
     return 'non_executable_status';
-  }
-  if (!hasComment) {
-    return 'no_generated_comment';
   }
   if (!hasWorkUrl && !hasWorkId) {
     return 'no_work_target';
@@ -145,6 +144,7 @@ async function main() {
   let allTasks;
   if (args.itemsFile) {
     const items = loadVisitExecutionItems(args.itemsFile);
+    createOrUpdateReturnVisitTasksFromItems(items);
     const tasksById = listReturnVisitTasksByIds(items.map(item => item.id || item.task_id || ''));
     const taskMap = new Map(tasksById.map(task => [task.taskId, task]));
     allTasks = [];
@@ -158,18 +158,15 @@ async function main() {
       }
 
       const generatedComment = String(item.comment || '').trim();
-      const nextStatus = generatedComment
-        ? RETURN_VISIT_STATUS.PENDING_EXECUTE
-        : RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT;
 
       const updated = updateReturnVisitTask(task.taskId, {
-        status: nextStatus,
+        status: RETURN_VISIT_STATUS.PENDING_VISIT,
         generatedComment: generatedComment || null,
-        commentStatus: generatedComment ? 'generated' : 'pending',
+        commentStatus: task.commentStatus === 'posted' ? 'posted' : (generatedComment ? 'generated' : 'pending'),
         generatedAt: generatedComment ? new Date().toISOString() : task.generatedAt,
         targetWork: {
-          workId: String(item.aweme_id || task.targetWork?.workId || '').trim() || null,
-          workUrl: String(item.aweme_url || task.targetWork?.workUrl || '').trim() || null,
+          workId: String(item.aweme_id || item.workId || task.targetWork?.workId || '').trim() || null,
+          workUrl: String(item.aweme_url || item.workUrl || task.targetWork?.workUrl || '').trim() || null,
           workTitle: String(item.item_title || task.targetWork?.workTitle || '').trim() || null,
           workText: String(item.desc || task.targetWork?.workText || '').trim() || null,
           desc: String(item.desc || task.targetWork?.desc || '').trim() || null,
@@ -179,7 +176,7 @@ async function main() {
           isMultiContent: item.is_multi_content ?? task.targetWork?.isMultiContent ?? null,
           userDigged: Number(item.user_digged ?? task.targetWork?.userDigged ?? 0),
         },
-        lastError: nextStatus === RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT ? 'no_generated_comment' : null,
+        lastError: null,
       });
 
       allTasks.push(updated);
@@ -195,15 +192,7 @@ async function main() {
   for (const task of allTasks) {
     const issue = getReturnVisitTaskExecutionIssue(task);
     if (issue) {
-      if (issue === 'no_generated_comment') {
-        log(args.json, `[return-visit:execute] task ${task.taskId} skipped due to empty generatedComment`);
-        updateReturnVisitTask(task.taskId, {
-          status: RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT,
-          lastError: 'no_generated_comment'
-        });
-        taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT, reason: 'no_generated_comment' });
-        failed++;
-      } else if (issue === 'no_work_target') {
+      if (issue === 'no_work_target') {
         log(args.json, `[return-visit:execute] task ${task.taskId} skipped due to empty work target`);
         updateReturnVisitTask(task.taskId, {
           status: RETURN_VISIT_STATUS.FAILED_COLLECT,
@@ -279,6 +268,7 @@ async function main() {
 
     if (result.resolvedWork) {
       updateReturnVisitTask(task.taskId, {
+        generatedComment: result.generatedComment || task.generatedComment || null,
         targetWork: {
           workId: result.resolvedWork.workId,
           workUrl: result.resolvedWork.workUrl,

@@ -842,6 +842,26 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
   }
 }
 
+export async function ensureWorkModalCommentBoxReady(page) {
+  const ready = await page.evaluate(() => {
+    function visible(el) {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 20 || rect.height < 18) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    }
+
+    const container = document.querySelector('.comment-input-container');
+    if (!visible(container)) return { ok: false, reason: 'comment_input_container_not_found' };
+    const editor = container.querySelector('.public-DraftEditor-content[contenteditable="true"], [contenteditable="true"], [role="textbox"]');
+    if (visible(editor)) return { ok: true, method: 'editor_visible' };
+    return { ok: true, method: 'container_visible' };
+  }).catch(() => ({ ok: false, reason: 'comment_box_probe_failed' }));
+
+  return ready;
+}
+
 export async function detectVideoRemoved(page) {
   return await page.evaluate(() => {
     const REMOVED_PATTERNS = ['视频不见了', '作品已删除', '该作品已删除', '视频已删除', '内容不可见', '该内容不可见', '作品不可见', '视频无法播放', '看看其他推荐'];

@@ -28,6 +28,8 @@
     "return-visit:prepare": "node ./src/cli/execute-return-visit-prepare.mjs",
     "return-visit:comment": "node ./src/cli/set-return-visit-comment.mjs",
     "return-visit:execute": "node ./src/cli/execute-return-visit.mjs",
+    "visit:run": "node ./src/cli/execute-return-visit.mjs",
+    "agent-server": "node ./src/agent-server.mjs",
     "notify:inspect": "node ./src/cli/inspect-notifications.mjs",
     "debug:like-dom": "node ./scripts/debug-like-dom.mjs",
     "debug:like-state": "node ./scripts/debug-like-state.mjs",

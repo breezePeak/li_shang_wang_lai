@@ -37,9 +37,11 @@ export const RETURN_VISIT_PREPARE_RETRY_STATUS = [
 ];
 
 export const RETURN_VISIT_EXECUTE_RETRY_STATUS = [
+  RETURN_VISIT_STATUS.PENDING_VISIT,
   RETURN_VISIT_STATUS.PENDING_EXECUTE,
   RETURN_VISIT_STATUS.EXECUTING,
   RETURN_VISIT_STATUS.FAILED_COLLECT,
+  RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT,
   RETURN_VISIT_STATUS.FAILED_LIKE,
   RETURN_VISIT_STATUS.FAILED_COMMENT,
 ];
@@ -252,12 +254,12 @@ export function createOrUpdateReturnVisitTasksFromEvents(options = {}) {
     INSERT INTO return_visit_tasks (
       task_id, identity_key, user_id, user_name, user_profile_url,
       source_type, source_types_json, source_event_ids_json,
-      action_type, status, like_status, comment_status,
+      action_type, status, target_work_id, target_work_url, like_status, comment_status,
       created_at, updated_at
     ) VALUES (
       ?, ?, ?, ?, ?,
       ?, ?, ?,
-      'like_and_comment', ?, 'pending', 'pending',
+      'like_and_comment', ?, ?, ?, 'pending', 'pending',
       ?, ?
     )
   `);
@@ -279,6 +281,8 @@ export function createOrUpdateReturnVisitTasksFromEvents(options = {}) {
     }
 
     const sourceType = normalizeEventSourceType(event.event_type);
+    const targetWorkId = String(event.target_work_id || '').trim() || null;
+    const targetWorkUrl = normalizeDouyinUrl(event.target_work_url || '') || null;
     const existing = selectStmt.get(identityKey);
 
     if (!existing) {
@@ -293,6 +297,8 @@ export function createOrUpdateReturnVisitTasksFromEvents(options = {}) {
         JSON.stringify([sourceType]),
         JSON.stringify([event.id]),
         RETURN_VISIT_STATUS.PENDING_VISIT,
+        targetWorkId,
+        targetWorkUrl,
         now,
         now
       );
@@ -332,6 +338,14 @@ export function createOrUpdateReturnVisitTasksFromEvents(options = {}) {
       updateCols.push('user_name = ?');
       params.push(userName);
     }
+    if (targetWorkId && !existing.target_work_id) {
+      updateCols.push('target_work_id = ?');
+      params.push(targetWorkId);
+    }
+    if (targetWorkUrl && !existing.target_work_url) {
+      updateCols.push('target_work_url = ?');
+      params.push(targetWorkUrl);
+    }
 
     updateCols.push('updated_at = ?');
     params.push(now);
@@ -361,12 +375,12 @@ export function createOrUpdateReturnVisitTasksFromItems(items = []) {
     INSERT INTO return_visit_tasks (
       task_id, identity_key, user_id, user_name, user_profile_url,
       source_type, source_types_json, source_event_ids_json,
-      action_type, status, like_status, comment_status,
+      action_type, status, target_work_id, target_work_url, like_status, comment_status,
       created_at, updated_at
     ) VALUES (
       ?, ?, ?, ?, ?,
       ?, ?, ?,
-      'like_and_comment', ?, 'pending', 'pending',
+      'like_and_comment', ?, ?, ?, 'pending', 'pending',
       ?, ?
     )
   `);
@@ -378,17 +392,19 @@ export function createOrUpdateReturnVisitTasksFromItems(items = []) {
       continue;
     }
 
-    const userId = String(item.actor_profile_key || item.user_id || '').trim() || null;
-    const userProfileUrl = normalizeDouyinUrl(item.actor_profile_url || item.user_profile_url || '') || null;
-    const userName = String(item.actor_name || item.user_name || '').trim();
+    const userId = String(item.actor_profile_key || item.user_id || item.targetUserId || '').trim() || null;
+    const userProfileUrl = normalizeDouyinUrl(item.actor_profile_url || item.user_profile_url || item.profileUrl || item.homepage_url || '') || null;
+    const userName = String(item.actor_name || item.user_name || item.nickname || '').trim();
     const identityKey = buildIdentityKey({ userId, userProfileUrl, userName });
     if (!identityKey) {
       skipped++;
       continue;
     }
 
-    const sourceType = normalizeEventSourceType(item.source_type || item.event_type);
-    const sourceEventId = item.source_event_id || item.event_id || null;
+    const sourceType = normalizeEventSourceType(item.source_type || item.event_type || item.interactionType);
+    const sourceEventId = item.source_event_id || item.event_id || item.interactionId || null;
+    const targetWorkId = String(item.target_work_id || item.targetWorkId || item.work_id || item.workId || '').trim() || null;
+    const targetWorkUrl = normalizeDouyinUrl(item.target_work_url || item.targetWorkUrl || item.work_url || item.workUrl || '') || null;
     const existing = selectStmt.get(identityKey);
 
     if (!existing) {
@@ -403,6 +419,8 @@ export function createOrUpdateReturnVisitTasksFromItems(items = []) {
         JSON.stringify([sourceType]),
         JSON.stringify(sourceEventId ? [sourceEventId] : []),
         RETURN_VISIT_STATUS.PENDING_VISIT,
+        targetWorkId,
+        targetWorkUrl,
         now,
         now
       );
@@ -442,6 +460,14 @@ export function createOrUpdateReturnVisitTasksFromItems(items = []) {
     if (userName && (!existing.user_name || existing.user_name === '(unknown)')) {
       updateCols.push('user_name = ?');
       params.push(userName);
+    }
+    if (targetWorkId && !existing.target_work_id) {
+      updateCols.push('target_work_id = ?');
+      params.push(targetWorkId);
+    }
+    if (targetWorkUrl && !existing.target_work_url) {
+      updateCols.push('target_work_url = ?');
+      params.push(targetWorkUrl);
     }
     params.push(existing.id);
     db.prepare(`UPDATE return_visit_tasks SET ${updateCols.join(', ')} WHERE id = ?`).run(...params);

@@ -4,9 +4,13 @@ import {
   checkLikeState,
   clickLike,
   confirmLikeSucceeded,
+  activateCommentComposer,
+  ensureCommentPanelOpen,
+  findCommentInput,
   postVideoComment,
 } from '../adapters/video-page.mjs';
 import {
+  ensureWorkModalCommentBoxReady,
   postWorkModalComment,
   waitForWorkModal,
 } from '../adapters/work-modal-page.mjs';
@@ -15,6 +19,7 @@ import {
   collectCurrentOpenedWork,
   openProfileWorkByAwemeId,
 } from './return-visit-work-collector.mjs';
+import { HttpAgentProvider } from '../agent/http-agent-provider.mjs';
 
 async function saveDebugScreenshot(page, taskId, phase) {
   try {
@@ -168,18 +173,71 @@ export async function postReturnVisitComment(page, text, presentation = {}, { ex
   return postVideoComment(page, text, { execute });
 }
 
+export async function ensureReturnVisitCommentBoxReady(page, presentation = {}) {
+  if (presentation?.isModalPage) {
+    const modalReady = await waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true });
+    if (!modalReady?.ok) {
+      return { ok: false, reason: modalReady?.message || modalReady?.code || 'work_modal_not_ready', data: modalReady?.data };
+    }
+    return ensureWorkModalCommentBoxReady(page);
+  }
+
+  const panelOpen = await ensureCommentPanelOpen(page);
+  if (!panelOpen) return { ok: false, reason: 'comment_panel_not_open' };
+
+  let input = await findCommentInput(page);
+  if (!input) {
+    const activated = await activateCommentComposer(page);
+    if (activated?.ok) {
+      await page.waitForTimeout(800);
+      input = await findCommentInput(page);
+    }
+  }
+
+  return input ? { ok: true, method: 'video_comment_input' } : { ok: false, reason: 'comment_input_not_found' };
+}
+
+export function buildCommentContext(task, resolvedWork = {}) {
+  const maxLength = Number(process.env.COMMENT_MAX_LENGTH || task?.requirements?.maxLength || 30);
+  return {
+    taskId: task.taskId,
+    targetUser: {
+      userId: task.userId || '',
+      nickname: task.userName || task.actorName || '',
+      profileUrl: task.userProfileUrl || '',
+    },
+    work: {
+      workId: resolvedWork.workId || task?.targetWork?.workId || '',
+      desc: resolvedWork.workText || resolvedWork.desc || resolvedWork.contentSummary || task?.targetWork?.workText || task?.targetWork?.desc || '',
+      authorNickname: task.userName || task.actorName || '',
+    },
+    interaction: {
+      type: task.sourceType || task.interactionType || 'like',
+      source: 'notification',
+    },
+    requirements: {
+      maxLength,
+      tone: '自然、简短、像真人',
+    },
+  };
+}
+
 async function resolveWorkForExecution(page, task, options = {}) {
   const { pageLoadRetryCount = 1, maxReferenceComments = 5 } = options;
   const knownWorkId = String(task?.targetWork?.workId || '').trim();
   const profileUrl = task?.userProfileUrl;
 
   if (profileUrl && knownWorkId) {
-    console.error(`[resolve] 打开主页: ${profileUrl}`);
+    console.error(`[visit] task=${task.taskId} 打开用户主页 profileUrl=${profileUrl}`);
     const opened = await openProfileWorkByAwemeId(page, profileUrl, knownWorkId, {
       pageLoadRetryCount,
     });
     if (opened.ok) {
-      console.error(`[resolve] 作品已打开, 收集信息...`);
+      const count = opened.stats?.awemeCount ?? opened.stats?.responseCount ?? 0;
+      console.error(`[visit] task=${task.taskId} 已监听到主页作品列表 API count=${count}`);
+      console.error(`[visit] task=${task.taskId} 匹配作品成功 workId=${knownWorkId} index=${opened.index}`);
+      console.error(`[visit] task=${task.taskId} 已点击目标作品`);
+      console.error(`[visit] task=${task.taskId} 已进入作品页`);
       const fromCurrent = await collectCurrentOpenedWork(page, { maxReferenceComments });
       if (fromCurrent.ok) {
         console.error(`[resolve] 作品收集完成: title="${String(fromCurrent.work.workTitle || '').slice(0, 30)}"`);
@@ -192,8 +250,12 @@ async function resolveWorkForExecution(page, task, options = {}) {
       }
       console.error(`[resolve] [FAIL] 当前页收集失败`);
     } else {
-      console.error(`[resolve] [FAIL] 主页打开作品失败: ${opened.reason || 'unknown'}`);
-      return { ok: false, status: 'failed_open_work_from_profile', reason: opened.reason || 'open_profile_work_failed' };
+      if (opened.reason === 'target_work_not_found_in_profile_post_api') {
+        console.error(`[visit] task=${task.taskId} failed reason=未在主页作品列表中找到目标作品`);
+      } else {
+        console.error(`[visit] task=${task.taskId} failed reason=${opened.reason || '主页打开作品失败'}`);
+      }
+      return { ok: false, status: 'failed_collect', reason: opened.reason || 'open_profile_work_failed' };
     }
     return { ok: false, status: 'failed_collect', reason: 'opened_work_collect_failed' };
   }
@@ -211,6 +273,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     waitBetweenLikeAndCommentMs = [2000, 6000],
     watchPolicy = 'seconds',
     watchSeconds = [5, 8],
+    agentProvider = new HttpAgentProvider(),
   } = options;
 
   const taskId = task.taskId;
@@ -318,15 +381,32 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     return { ok: true, status: 'pending_execute', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork, dryRun: true };
   }
 
-  const commentText = String(task.generatedComment || '').trim();
-  if (!commentText) {
-    console.error(`${logTag} [4/5] 跳过评论(无评论文本)`);
-    const done = canMarkDone({ likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value });
-    return { ok: done, status: done ? 'done' : 'skipped_no_suitable_work', error: 'no_comment_text', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork: done ? resolvedWork : undefined };
+  if (task.commentStatus === 'posted') {
+    console.error(`[visit] task=${taskId} skipped reason=已评论过`);
+    return { ok: false, status: 'skipped_no_suitable_work', error: '已评论过', likeStatus: nextLikeStatus.value, commentStatus: 'posted', resolvedWork };
   }
 
   console.error(`${logTag} [4/5] 等待发评论... delay=${waitBetweenLikeAndCommentMs}ms`);
   await waitRandom(page, waitBetweenLikeAndCommentMs, 2000, 6000);
+
+  const boxReady = await ensureReturnVisitCommentBoxReady(page, presentation);
+  if (!boxReady.ok) {
+    console.error(`[visit] task=${taskId} failed reason=评论框不存在 detail=${boxReady.reason || ''}`);
+    await saveDebugScreenshot(page, task.taskId, 'comment_box');
+    return { ok: false, status: 'failed_comment', error: boxReady.reason || 'comment_box_not_found', likeStatus: nextLikeStatus.value, commentStatus: 'failed', resolvedWork };
+  }
+  console.error(`[visit] task=${taskId} 评论框可用，进入 WAIT_AGENT_COMMENT`);
+
+  let commentText = '';
+  try {
+    const commentContext = buildCommentContext(task, resolvedWork);
+    console.error(`[agent] task=${taskId} 请求生成评论`);
+    commentText = await agentProvider.generateComment(commentContext);
+    console.error(`[agent] task=${taskId} 评论生成成功 comment=${commentText}`);
+  } catch (err) {
+    console.error(`[visit] task=${taskId} failed reason=agent-server 请求失败: ${err.message}`);
+    return { ok: false, status: 'failed_generate_comment', error: err.message || 'agent_comment_failed', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork };
+  }
 
   console.error(`${logTag} [5/5] 发送评论: "${commentText.slice(0, 40)}"`);
   const commentResult = await postReturnVisitComment(page, commentText, presentation, { execute: true });
@@ -344,6 +424,8 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   }
 
   console.error(`${logTag} [5/5] 评论成功 confirmed=true`);
+  console.error(`[visit] task=${taskId} 评论填写完成`);
+  console.error(`[visit] task=${taskId} 评论提交成功`);
   nextCommentStatus.value = 'posted';
 
   const done = canMarkDone({ likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value });
@@ -353,5 +435,5 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   }
 
   console.error(`${logTag} [DONE] 回访完成 like=${nextLikeStatus.value} comment=${nextCommentStatus.value}`);
-  return { ok: true, status: 'done', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork, executedAt: new Date().toISOString() };
+  return { ok: true, status: 'done', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork, generatedComment: commentText, executedAt: new Date().toISOString() };
 }

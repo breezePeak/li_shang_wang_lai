@@ -1,16 +1,20 @@
 // 评论回复执行命令
-// 只支持 interactions:scan 生成的按作品分组 JSON。
+// 默认从数据库查询 pending 回评，调用 agent-server 生成 reply_text 后执行回复。
+// 仍兼容 interactions:scan 生成的按作品分组 JSON。
 //
 // 用法：
+//   npm run comments:execute
+//   npm run comments:execute -- --agent-only
 //   npm run comments:execute -- --items-file data/pending-replies/pending-comments-xxx.json
 //
 // 输入要求：
-//   JSON 中每条 comments[] 的 reply_text 由 Agent 根据评论内容、作品上下文和安全规则生成并填写。
-//   reply_text 为空的评论会跳过。已经 succeeded/sent_unverified 的评论会跳过重复执行。
+//   DB 模式会自动生成缺失的 reply_text。
+//   JSON 模式中 reply_text 为空时也会先调用 agent-server 生成并写回 DB。
+//   已经 succeeded/sent_unverified 的评论会跳过重复执行。
 //   命令默认真实执行回复，不再需要 --execute。
 
 import { runMigrations } from '../db/migrations.mjs';
-import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentSentUnverified, findCommentByWorkActorAndText } from '../db/work-comment-repository.mjs';
+import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentSentUnverified, findCommentByWorkActorAndText, listPendingCommentsGroupedByHomepageAndWork } from '../db/work-comment-repository.mjs';
 import { findWorkByIdentity } from '../db/work-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
@@ -36,21 +40,106 @@ import { closeCurrentWorkModalToProfile, openProfileWorkByAwemeIdFromPostApi } f
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
 import { pathToFileURL } from 'url';
+import { HttpAgentProvider } from '../agent/http-agent-provider.mjs';
 
 function parseArgs(argv) {
   const args = {
     itemsFile: '',
     json: false,
     diagnosePosition: false,
+    limit: null,
+    days: null,
+    agentOnly: false,
   };
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--items-file' && argv[i + 1]) args.itemsFile = argv[++i];
     if (argv[i] === '--json') args.json = true;
     if (argv[i] === '--diagnose-position') args.diagnosePosition = true;
+    if ((argv[i] === '--limit' || argv[i] === '--max-count') && argv[i + 1]) args.limit = Number(argv[++i] || 0) || null;
+    if (argv[i] === '--days' && argv[i + 1]) args.days = Number(argv[++i] || 0) || null;
+    if (argv[i] === '--agent-only') args.agentOnly = true;
   }
 
   return args;
+}
+
+export function buildWorkCommentItemsFromDbRows(rows = []) {
+  return rows.map((row, index) => ({
+    itemIndex: index,
+    commentId: Number(row.id),
+    replyText: String(row.reply_text || ''),
+    homepageUrl: row.joined_author_profile_url || '',
+    homepage_url: row.joined_author_profile_url || '',
+    authorProfileUrl: row.joined_author_profile_url || '',
+    authorProfileKey: row.joined_author_profile_key || '',
+    workUrl: row.joined_work_url || row.work_url || '',
+    awemeUrl: row.joined_work_url || row.work_url || '',
+    workId: row.joined_work_id || row.work_id || '',
+    modalId: row.joined_modal_id || row.modal_id || '',
+    workKey: row.joined_work_id || row.work_id || row.joined_modal_id || row.modal_id || '',
+    work_title: row.joined_work_title || '',
+    work_desc: row.joined_work_desc || '',
+    work_type: row.joined_work_type || '',
+    author_name: row.joined_author_name || '',
+    actorName: row.actor_name || '',
+    actorProfileUrl: row.actor_profile_url || '',
+    actorProfileKey: row.actor_profile_key || '',
+    commentText: row.comment_text || '',
+    eventTimeText: row.event_time_text || '',
+    targetCommentId: extractTargetCommentId({}, row),
+    raw_comment_json: row.raw_comment_json || '',
+  }));
+}
+
+export function buildReplyContext(item = {}) {
+  const maxLength = Number(process.env.COMMENT_MAX_LENGTH || 30);
+  return {
+    taskId: `work_comment_${item.commentId}`,
+    work: {
+      workId: item.workId || item.modalId || '',
+      title: item.work_title || item.workTitle || '',
+      desc: item.work_desc || item.workText || '',
+      authorNickname: item.author_name || '',
+    },
+    comment: {
+      commentId: item.commentId || '',
+      actorName: item.actorName || '',
+      text: item.commentText || '',
+      timeText: item.eventTimeText || '',
+    },
+    requirements: {
+      maxLength,
+      tone: '自然、简短、像真人',
+    },
+  };
+}
+
+export async function generateMissingReplies(items = [], { agentProvider = new HttpAgentProvider() } = {}) {
+  const results = [];
+  for (const item of items) {
+    const commentId = Number(item.commentId || 0);
+    const existing = String(item.replyText || '').trim();
+    if (!commentId || existing) {
+      results.push({ commentId, ok: true, skipped: true, reason: existing ? 'reply_text_exists' : 'missing_comment_id' });
+      continue;
+    }
+
+    try {
+      console.error(`[agent] commentId=${commentId} 请求生成回复`);
+      const reply = await agentProvider.generateReply(buildReplyContext(item));
+      saveReplyText(commentId, reply);
+      item.replyText = reply;
+      console.error(`[agent] commentId=${commentId} 回复生成成功 reply=${reply}`);
+      results.push({ commentId, ok: true, reply });
+    } catch (err) {
+      const message = err?.message || String(err);
+      markCommentBlocked(commentId, `agent_generate_failed:${message}`);
+      console.error(`[agent] commentId=${commentId} failed reason=${message}`);
+      results.push({ commentId, ok: false, error: message });
+    }
+  }
+  return results;
 }
 
 export function loadWorkCommentItemsFromFile(itemsFile) {
@@ -987,31 +1076,51 @@ async function main() {
   runMigrations();
   const args = parseArgs(process.argv.slice(2));
 
-  if (!args.itemsFile) {
-    printJsonError(
-      'comments:execute',
-      RESULT_CODES.INVALID_ARGUMENTS,
-      'comments:execute 只支持 --items-file <第一步JSON>',
-      { recoverable: false }
-    );
-    return;
+  let loaded = { parsed: null, items: [] };
+  let agentResults = [];
+
+  if (args.itemsFile) {
+    try {
+      loaded = loadWorkCommentItemsFromFile(args.itemsFile);
+    } catch (err) {
+      printJsonError('comments:execute', RESULT_CODES.INVALID_ARGUMENTS, err.message, { recoverable: false });
+      return;
+    }
+  } else {
+    if (!Number(args.days || 0) || !Number(args.limit || 0)) {
+      printJsonError(
+        'comments:execute',
+        RESULT_CODES.INVALID_ARGUMENTS,
+        'DB 查询模式必须手动输入采集天数和最大条数限制，例如：comments:execute --days 7 --limit 50',
+        { recoverable: false }
+      );
+      return;
+    }
+    const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: args.limit, days: args.days });
+    loaded = { parsed: null, items: buildWorkCommentItemsFromDbRows(rows) };
+    console.log(`[comments:execute] loaded pending comments from db: ${loaded.items.length}`);
   }
 
-  let loaded = { parsed: null, items: [] };
-  try {
-    loaded = loadWorkCommentItemsFromFile(args.itemsFile);
-  } catch (err) {
-    printJsonError('comments:execute', RESULT_CODES.INVALID_ARGUMENTS, err.message, { recoverable: false });
+  agentResults = await generateMissingReplies(loaded.items);
+
+  if (args.agentOnly) {
+    const generated = agentResults.filter(r => r.ok && r.reply).length;
+    const failedAgent = agentResults.filter(r => !r.ok).length;
+    if (args.json) {
+      printJsonResult('comments:execute', { agentResults }, { generated, failed: failedAgent, mode: 'agent_only' });
+    } else {
+      console.log(`[comments:execute] agent-only generated=${generated} failed=${failedAgent}`);
+    }
     return;
   }
 
   const results = await executeWorkCommentItems(loaded.items, args);
-  if (!args.diagnosePosition) {
+  if (!args.diagnosePosition && args.itemsFile) {
     updateExecuteJsonFile(args.itemsFile, loaded.parsed, results);
   }
 
   const allDoneWithoutRetry = results.length > 0 && results.every(isDoneWithoutRetryResult);
-  if (!args.diagnosePosition && allDoneWithoutRetry) {
+  if (!args.diagnosePosition && args.itemsFile && allDoneWithoutRetry) {
     try {
       const absPath = resolve(args.itemsFile);
       if (existsSync(absPath)) {
@@ -1019,10 +1128,12 @@ async function main() {
         console.log(`[comments:execute] 已删除中间 JSON: ${args.itemsFile}`);
       }
     } catch {}
-  } else if (!args.diagnosePosition) {
+  } else if (!args.diagnosePosition && args.itemsFile) {
     console.log(`[comments:execute] 保留中间 JSON（未全部成功）: ${args.itemsFile}`);
   } else {
-    console.log(`[comments:execute] diagnose-position 模式：未写回 JSON，未更新 DB，未发送回复`);
+    console.log(args.diagnosePosition
+      ? `[comments:execute] diagnose-position 模式：未写回 JSON，未更新 DB，未发送回复`
+      : `[comments:execute] DB 模式：不生成/写回中间 JSON`);
   }
 
   const succeeded = results.filter(item => item.ok && item.status === 'succeeded').length;
@@ -1037,9 +1148,9 @@ async function main() {
   const skippedLog = skipped > 0 ? `，跳过 ${skipped} 条（${Object.entries(skipReasons).map(([k, v]) => `${k}×${v}`).join(', ')}）` : '';
 
   if (args.json) {
-    printJsonResult('comments:execute', { results }, { succeeded, failed, skipped, mode: args.diagnosePosition ? 'diagnose_position' : 'work_comment_json' });
+    printJsonResult('comments:execute', { agentResults, results }, { succeeded, failed, skipped, mode: args.diagnosePosition ? 'diagnose_position' : (args.itemsFile ? 'work_comment_json' : 'db_agent_execute') });
   } else {
-    console.log(`[comments:execute] mode=${args.diagnosePosition ? 'diagnose_position' : 'work_comment_json'} 成功 ${succeeded} 条，失败 ${failed} 条${skippedLog}`);
+    console.log(`[comments:execute] mode=${args.diagnosePosition ? 'diagnose_position' : (args.itemsFile ? 'work_comment_json' : 'db_agent_execute')} 成功 ${succeeded} 条，失败 ${failed} 条${skippedLog}`);
     for (const item of results) {
       const tag = item.status === 'skipped_empty_reply' ? ' [empty-reply]'
         : (!item.ok && item.status === 'succeeded') ? ' [already-done]'
