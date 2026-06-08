@@ -156,6 +156,9 @@ function renderTimelineLane({ id, title, subtitle, icon, points, activeStageId }
       </div>
       <div class="lane-track">
         <span class="lane-spark" aria-hidden="true"></span>
+        <span class="lane-finale-burst" aria-hidden="true">
+          ${Array.from({ length: 10 }, (_, i) => `<i style="--i:${i}"></i>`).join('')}
+        </span>
         ${points.map(point => renderTimelinePoint(point, activeStageId)).join('')}
       </div>
     </section>

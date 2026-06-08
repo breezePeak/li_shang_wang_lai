@@ -52,7 +52,8 @@ body {
 }
 
 .page-noise,
-.page-orb {
+.page-orb,
+.page-fireworks {
   position: fixed;
   pointer-events: none;
 }
@@ -84,8 +85,111 @@ body {
   background: rgba(211, 155, 52, 0.25);
 }
 
+.page-fireworks {
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+}
+
+.bg-firework {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  opacity: 0;
+  color: rgba(47, 143, 115, 0.48);
+  animation: backgroundFirework 7.2s ease-out infinite;
+}
+
+.bg-firework::before,
+.bg-firework::after,
+.bg-firework i {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+}
+
+.bg-firework::before {
+  width: 12px;
+  height: 12px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95), currentColor 42%, transparent 68%);
+  filter: blur(0.2px);
+}
+
+.bg-firework::after {
+  width: 2px;
+  height: 2px;
+  color: currentColor;
+  box-shadow:
+    0 -42px 0 0 currentColor,
+    30px -30px 0 0 currentColor,
+    42px 0 0 0 currentColor,
+    30px 30px 0 0 currentColor,
+    0 42px 0 0 currentColor,
+    -30px 30px 0 0 currentColor,
+    -42px 0 0 0 currentColor,
+    -30px -30px 0 0 currentColor;
+}
+
+.bg-firework i {
+  width: 3px;
+  height: 3px;
+  color: rgba(211, 155, 52, 0.42);
+  box-shadow:
+    0 -64px 0 0 currentColor,
+    45px -45px 0 0 currentColor,
+    64px 0 0 0 currentColor,
+    45px 45px 0 0 currentColor,
+    0 64px 0 0 currentColor,
+    -45px 45px 0 0 currentColor,
+    -64px 0 0 0 currentColor,
+    -45px -45px 0 0 currentColor;
+}
+
+.bg-firework-a {
+  left: 18vw;
+  top: 22vh;
+}
+
+.bg-firework-b {
+  right: 16vw;
+  top: 34vh;
+  color: rgba(211, 155, 52, 0.42);
+  animation-delay: 2.35s;
+}
+
+.bg-firework-c {
+  left: 54vw;
+  bottom: 16vh;
+  color: rgba(97, 139, 172, 0.34);
+  animation-delay: 4.7s;
+}
+
+@keyframes backgroundFirework {
+  0%, 58% {
+    opacity: 0;
+    transform: translateY(26px) scale(0.15) rotate(0deg);
+  }
+  64% {
+    opacity: 0.72;
+    transform: translateY(0) scale(0.5) rotate(10deg);
+  }
+  82% {
+    opacity: 0.32;
+    transform: translateY(-8px) scale(1.5) rotate(28deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-14px) scale(2.05) rotate(46deg);
+  }
+}
+
 .app-shell {
   position: relative;
+  z-index: 10;
   width: 80vw;
   height: calc(80vh - 54px);
   min-width: 1080px;
@@ -378,6 +482,8 @@ body {
 }
 
 .timeline-lane {
+  --lane-cycle: 4.8s;
+  --lane-delay: 0s;
   display: grid;
   grid-template-rows: auto 1fr;
   gap: 4px;
@@ -387,6 +493,11 @@ body {
 
 .timeline-lane.is-active {
   opacity: 1;
+}
+
+.timeline-lane + .timeline-lane {
+  --lane-cycle: 5.6s;
+  --lane-delay: 0.8s;
 }
 
 .lane-title {
@@ -454,12 +565,89 @@ body {
     0 0 18px rgba(47, 143, 115, 0.75),
     0 0 34px rgba(211, 155, 52, 0.30);
   z-index: 0;
-  animation: sparkFlow 4.8s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+  animation: sparkFlow var(--lane-cycle) cubic-bezier(0.45, 0, 0.25, 1) infinite;
+  animation-delay: var(--lane-delay);
 }
 
-.timeline-lane + .timeline-lane .lane-spark {
-  animation-duration: 5.6s;
-  animation-delay: 0.8s;
+.lane-finale-burst {
+  position: absolute;
+  left: calc(100% - 88px);
+  top: 45px;
+  width: 1px;
+  height: 1px;
+  z-index: 1;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.lane-finale-burst::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.94), rgba(47, 143, 115, 0.30) 44%, transparent 70%);
+  transform: translate(-50%, -50%) scale(0.12);
+  opacity: 0;
+  animation: laneFinaleBloom var(--lane-cycle) ease-out infinite;
+  animation-delay: var(--lane-delay);
+}
+
+.lane-finale-burst i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 10px;
+  border-radius: 999px;
+  background: hsl(var(--h), 78%, 58%);
+  box-shadow: 0 0 12px hsla(var(--h), 78%, 58%, 0.58);
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(0deg) scale(0.4);
+  animation: laneFinalePiece var(--lane-cycle) cubic-bezier(0.18, 0.9, 0.24, 1) infinite;
+  animation-delay: var(--lane-delay);
+}
+
+.lane-finale-burst i:nth-child(1) { --x: 0px; --y: -48px; --r: 24deg; --h: 165; }
+.lane-finale-burst i:nth-child(2) { --x: 31px; --y: -37px; --r: 68deg; --h: 43; }
+.lane-finale-burst i:nth-child(3) { --x: 50px; --y: -8px; --r: 112deg; --h: 192; }
+.lane-finale-burst i:nth-child(4) { --x: 38px; --y: 26px; --r: 156deg; --h: 28; }
+.lane-finale-burst i:nth-child(5) { --x: 12px; --y: 48px; --r: 210deg; --h: 120; }
+.lane-finale-burst i:nth-child(6) { --x: -23px; --y: 44px; --r: 252deg; --h: 212; }
+.lane-finale-burst i:nth-child(7) { --x: -48px; --y: 16px; --r: 302deg; --h: 56; }
+.lane-finale-burst i:nth-child(8) { --x: -42px; --y: -24px; --r: 336deg; --h: 145; }
+.lane-finale-burst i:nth-child(9) { --x: -16px; --y: -58px; --r: 380deg; --h: 18; }
+.lane-finale-burst i:nth-child(10) { --x: 52px; --y: 34px; --r: 430deg; --h: 205; }
+
+@keyframes laneFinaleBloom {
+  0%, 78% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.12);
+  }
+  84% {
+    opacity: 0.86;
+    transform: translate(-50%, -50%) scale(0.56);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.95);
+  }
+}
+
+@keyframes laneFinalePiece {
+  0%, 80% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(0deg) scale(0.4);
+  }
+  86% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--x), var(--y)) rotate(var(--r)) scale(1);
+  }
 }
 
 @keyframes sparkFlow {
@@ -475,7 +663,7 @@ body {
     opacity: 1;
   }
   100% {
-    left: calc(100% - 28px);
+    left: calc(100% - 94px);
     transform: scale(1.05);
     opacity: 0;
   }
