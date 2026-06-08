@@ -9,48 +9,8 @@ let currentViewMode = localStorage.getItem('viewMode') || 'grid';
 let selectedTaskIds = new Set();
 let selectedStageId = 'collect';
 
-const STAGE_LAYOUT = [
-  {
-    id: 'collect',
-    left: '9%',
-    y: 138,
-    icon: 'fa-inbox',
-    label: '扫描入库',
-    branch: { id: 'fallback', label: '采集异常', icon: 'fa-triangle-exclamation', color: 'orange' }
-  },
-  {
-    id: 'replies',
-    left: '30%',
-    y: 38,
-    icon: 'fa-comments',
-    label: '回评队列',
-    branch: { id: 'replyExceptions', label: '回评异常', icon: 'fa-circle-exclamation', color: 'orange' }
-  },
-  {
-    id: 'visits',
-    left: '52%',
-    y: 150,
-    icon: 'fa-route',
-    label: '回访任务',
-    branch: { id: 'visitRetry', label: '待重试', icon: 'fa-rotate-left', color: 'orange' }
-  },
-  {
-    id: 'execute',
-    left: '74%',
-    y: 96,
-    icon: 'fa-bolt',
-    label: '执行回访',
-    branch: { id: 'executeErrors', label: '执行异常', icon: 'fa-circle-xmark', color: 'red' }
-  },
-  {
-    id: 'done',
-    left: '91%',
-    y: 62,
-    icon: 'fa-circle-check',
-    label: '完成归档',
-    branch: { id: 'archive', label: '归档完成', icon: 'fa-circle-check', color: 'green' }
-  }
-];
+const REPLY_STAGE_IDS = new Set(['replies', 'replyPending', 'replyExceptions', 'replySkipped', 'replyDone']);
+const VISIT_STAGE_IDS = new Set(['visits', 'visitUnhandled', 'visitRetry', 'execute', 'executeErrors', 'visitSkipped', 'done', 'archive']);
 
 async function initApp() {
   bindEvents();
@@ -139,55 +99,78 @@ function renderRiverTimeline() {
   const stageMap = buildStageMap();
   const activeStageId = selectedStageId;
 
-  container.innerHTML = STAGE_LAYOUT.map((stage) => {
-    const data = stageMap[stage.id] || { count: 0, label: stage.label };
-    
-    const isMainActive = activeStageId === stage.id || 
-                         (stage.id === 'replies' && activeStageId === 'replyExceptions') ||
-                         (stage.id === 'visits' && activeStageId === 'visitRetry') ||
-                         (stage.id === 'execute' && activeStageId === 'executeErrors');
-    
-    const activeClass = isMainActive ? 'is-active' : '';
-    const selectedBadgeHtml = activeStageId === stage.id ? `<span class="selected-badge">当前节点 (已选中)</span>` : '';
+  const replyLane = [
+    timelinePoint('replies', '回评入口', 'fa-comments', stageMap.replies?.count || 0, '评论入库后进入 reply_status 队列', 'main'),
+    timelinePoint('replyPending', '待回评', 'fa-reply', statsData.pendingReplies || 0, 'pending 会被 comments:execute 处理', 'work'),
+    timelinePoint('replyExceptions', '回评异常', 'fa-triangle-exclamation', statsData.replyExceptions || 0, 'blocked / sent_unverified 需要人工介入', 'warning'),
+    timelinePoint('replySkipped', '忽略回评', 'fa-ban', statsData.skippedReplies || 0, '人工忽略或不再处理的回复', 'muted'),
+    timelinePoint('replyDone', '回评完成', 'fa-circle-check', statsData.succeededReplies || 0, '已回复成功写入 DB', 'done'),
+  ];
 
-    let branchCount = 0;
-    if (stage.branch.id === 'replyExceptions') {
-      branchCount = statsData.replyExceptions || 0;
-    } else if (stage.branch.id === 'visitRetry') {
-      branchCount = reviewTasks.filter((task) => ['failed_collect', 'failed_generate_comment'].includes(task.status)).length;
-    } else if (stage.branch.id === 'executeErrors') {
-      branchCount = reviewTasks.filter((task) => ['failed_like', 'failed_comment', 'failed'].includes(task.status)).length;
-    }
+  const visitLane = [
+    timelinePoint('visits', '回访入口', 'fa-route', stageMap.visits?.count || 0, '点赞/评论/关注/回复沉淀为回访线索', 'main'),
+    timelinePoint('visitUnhandled', '未处理线索', 'fa-inbox', getUnhandledEventCount(), 'new 状态的关注、回复、点赞、评论', 'work'),
+    timelinePoint('visitRetry', '匹配/生成重试', 'fa-rotate-left', stageMap.visitRetry?.count || 0, '作品收集或评论生成失败，可重试', 'warning'),
+    timelinePoint('execute', '执行回访', 'fa-bolt', stageMap.execute?.count || 0, 'visit:run --execute 真实点赞/评论', 'work'),
+    timelinePoint('executeErrors', '执行异常', 'fa-circle-xmark', stageMap.executeErrors?.count || 0, '点赞、评论或状态确认失败', 'danger'),
+    timelinePoint('visitSkipped', '无法回访', 'fa-user-slash', statsData.skippedVisitTasks || 0, '私密、无作品、无合适作品等跳过', 'muted'),
+    timelinePoint('done', '回访完成', 'fa-circle-check', statsData.completedTasks || 0, '回访任务 done', 'done'),
+  ];
 
-    const isBranchActive = activeStageId === stage.branch.id;
-    const branchActiveClass = isBranchActive ? 'is-active' : '';
+  container.innerHTML = `
+    <div class="timeline-overview">
+      <button class="timeline-origin ${activeStageId === 'collect' ? 'is-active' : ''}" onclick="selectStage('collect')">
+        <span class="origin-icon"><i class="fa-solid fa-database"></i></span>
+        <span class="origin-copy">
+          <strong>扫描入库</strong>
+          <small>点赞 ${statsData.collectedLikes || 0} · 评论 ${statsData.collectedComments || 0} · 回复 ${statsData.collectedReplies || 0} · 关注 ${statsData.collectedFollows || 0}</small>
+        </span>
+        <span class="origin-count">${statsData.collectedTotal || 0}</span>
+      </button>
+      <div class="timeline-splitter" aria-hidden="true"></div>
+    </div>
+    ${renderTimelineLane({ id: 'reply', title: '回评时间线', subtitle: '处理别人评论我的作品', icon: 'fa-reply-all', points: replyLane, activeStageId })}
+    ${renderTimelineLane({ id: 'visit', title: '回访时间线', subtitle: '回访点赞/评论/关注/回复线索', icon: 'fa-route', points: visitLane, activeStageId })}
+  `;
+}
 
-    return `
-      <div class="river-node-v2 ${activeClass}" style="left:${stage.left}; top:${stage.y}px;">
-        <div class="node-meta">
-          <span class="node-label">${stage.label}</span>
-          <span class="node-count">${data.count} 条</span>
-        </div>
-        
-        <button class="node-circle-btn" onclick="selectStage('${stage.id}')" title="${stage.label}">
-          <div class="node-circle-ripple"></div>
-          <div class="node-circle-inner">
-            <i class="fa-solid ${stage.icon}"></i>
-          </div>
-        </button>
+function timelinePoint(id, label, icon, count, helper, tone = 'work') {
+  return { id, label, icon, count, helper, tone };
+}
 
-        ${selectedBadgeHtml}
-
-        <div class="node-branch-capsule" onclick="selectStage('${stage.branch.id}'); event.stopPropagation();">
-          <div class="branch-connector"></div>
-          <div class="branch-pill ${stage.branch.color} ${branchActiveClass}">
-            <i class="fa-solid ${stage.branch.icon}"></i>
-            <span>${stage.branch.label} ${branchCount} 条</span>
-          </div>
+function renderTimelineLane({ id, title, subtitle, icon, points, activeStageId }) {
+  const isLaneActive = id === 'reply'
+    ? REPLY_STAGE_IDS.has(activeStageId)
+    : VISIT_STAGE_IDS.has(activeStageId);
+  return `
+    <section class="timeline-lane ${isLaneActive ? 'is-active' : ''}">
+      <div class="lane-title">
+        <span><i class="fa-solid ${icon}"></i></span>
+        <div>
+          <strong>${title}</strong>
+          <small>${subtitle}</small>
         </div>
       </div>
-    `;
-  }).join('');
+      <div class="lane-track">
+        ${points.map(point => renderTimelinePoint(point, activeStageId)).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderTimelinePoint(point, activeStageId) {
+  const activeClass = activeStageId === point.id ? 'is-active' : '';
+  const countClass = Number(point.count || 0) > 0 ? 'has-count' : '';
+  return `
+    <button class="timeline-point ${point.tone} ${activeClass} ${countClass}" onclick="selectStage('${point.id}')" title="${escapeAttribute(point.helper || point.label)}">
+      <span class="point-dot"><i class="fa-solid ${point.icon}"></i></span>
+      <span class="point-copy">
+        <strong>${point.label}</strong>
+        <small>${point.helper}</small>
+      </span>
+      <span class="point-count">${point.count || 0}</span>
+    </button>
+  `;
 }
 
 function buildStageMap() {
@@ -210,17 +193,41 @@ function buildStageMap() {
       helper: `${statsData.pendingReplies || 0} 条待回评，${statsData.replyExceptions || 0} 条异常待处理。`,
       tag: 'DB 队列',
     },
+    replyPending: {
+      label: '待回评',
+      count: statsData.pendingReplies || 0,
+      helper: 'pending 状态会被 comments:execute 自动处理。',
+      tag: '可执行',
+    },
     replyExceptions: {
       label: '回评异常',
       count: statsData.replyExceptions || 0,
       helper: 'blocked / sent_unverified 在这里人工处理后再回到 pending。',
       tag: '人工处理',
     },
+    replySkipped: {
+      label: '忽略回评',
+      count: statsData.skippedReplies || 0,
+      helper: '人工忽略或无需继续处理的回评。',
+      tag: '止损',
+    },
+    replyDone: {
+      label: '回评完成',
+      count: statsData.succeededReplies || 0,
+      helper: '已成功回复的评论。',
+      tag: '完成',
+    },
     visits: {
       label: '回访任务',
       count: visitQueueCount,
       helper: `${visitQueueCount} 条任务等待 visit:run 执行或重新匹配作品。`,
       tag: '主页匹配',
+    },
+    visitUnhandled: {
+      label: '未处理线索',
+      count: getUnhandledEventCount(),
+      helper: 'new 状态的点赞、评论、回复、关注通知。',
+      tag: '待准备',
     },
     visitRetry: {
       label: '待重试',
@@ -240,6 +247,12 @@ function buildStageMap() {
       helper: '点赞、评论或最终状态确认失败，需要人工判断是否重试。',
       tag: '风险分支',
     },
+    visitSkipped: {
+      label: '无法回访',
+      count: statsData.skippedVisitTasks || 0,
+      helper: '私密、无作品、无合适作品等跳过任务。',
+      tag: '止损',
+    },
     done: {
       label: '完成归档',
       count: statsData.completedTasks || 0,
@@ -256,6 +269,8 @@ function buildStageDetailData() {
   const visitRetryTasks = reviewTasks.filter((task) => ['failed_collect', 'failed_generate_comment'].includes(task.status));
   const executableTasks = reviewTasks.filter((task) => ['pending_visit', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment'].includes(task.status));
   const executeErrorTasks = reviewTasks.filter((task) => ['failed_like', 'failed_comment', 'failed'].includes(task.status));
+  const unhandledEventCount = getUnhandledEventCount();
+  const skippedVisitTasks = statsData.skippedVisitTasks || 0;
 
   return {
     collect: {
@@ -266,11 +281,11 @@ function buildStageDetailData() {
         { label: '总通知', value: statsData.collectedTotal || 0 },
         { label: '点赞通知', value: statsData.collectedLikes || 0 },
         { label: '评论通知', value: statsData.collectedComments || 0 },
-        { label: '回访任务', value: statsData.totalTasks || 0 },
+        { label: '回复/关注', value: (statsData.collectedReplies || 0) + (statsData.collectedFollows || 0) },
       ],
       branches: [
-        buildBranchCard('回评队列', `comments:execute --days N --limit M 会处理 ${statsData.pendingReplies || 0} 条 pending 回评。`, statsData.pendingReplies || 0),
-        buildBranchCard('回访任务', `visit:run --execute 会读取 ${reviewTasks.length} 条可见回访任务状态。`, reviewTasks.length),
+        buildBranchCard('回评时间线', `comments:execute --days N --limit M 会处理 ${statsData.pendingReplies || 0} 条 pending 回评。`, statsData.pendingReplies || 0),
+        buildBranchCard('回访时间线', `点赞/评论/回复/关注线索并列沉淀为回访任务。当前 ${unhandledEventCount} 条通知仍是 new。`, unhandledEventCount),
       ],
       workspaceTitle: '通知源概览',
       workspaceSubtitle: '建议先确认扫描入库是否正常，再分别处理回评和回访。',
@@ -278,7 +293,7 @@ function buildStageDetailData() {
       workspaceContent: renderOverviewContent([
         ['推荐命令', 'npm run interactions:scan -- --days N --max-count M --prepare-replies --prepare-visits'],
         ['数据边界', '扫描只负责入库和准备 DB 任务，不生成 pending JSON。'],
-        ['下一步', '有评论就进入回评队列；有点赞/评论/关注线索就进入回访任务。'],
+        ['下一步', '评论进入回评线；点赞、评论、回复、关注进入回访线，两条线并列推进。'],
       ]),
     },
     fallback: {
@@ -289,7 +304,7 @@ function buildStageDetailData() {
         { label: '入库通知', value: statsData.collectedTotal || 0 },
         { label: '点赞通知', value: statsData.collectedLikes || 0 },
         { label: '评论通知', value: statsData.collectedComments || 0 },
-        { label: '异常记录', value: 0 },
+        { label: '回复/关注', value: (statsData.collectedReplies || 0) + (statsData.collectedFollows || 0) },
       ],
       branches: [
         buildBranchCard('看命令输出', 'scan 会打印解析失败、主页缺失、重复跳过等统计。', 0),
@@ -304,20 +319,40 @@ function buildStageDetailData() {
     },
     replies: {
       kicker: '回评',
-      title: '回评队列',
-      description: 'comments:execute 会查询所有 reply_status=pending 的评论。已有 reply_text 也会继续被查到，用于恢复上次中断的执行。',
+      title: '回评时间线入口',
+      description: '回评和回访是同级流程。回评线只处理别人评论我的作品，comments:execute 会读取 reply_status=pending，并把异常留在人工节点。',
       metrics: [
         { label: '待回评', value: statsData.pendingReplies || 0 },
         { label: '异常回评', value: statsData.replyExceptions || 0 },
-        { label: '未确认发送', value: statsData.sentUnverifiedReplies || 0 },
-        { label: '总待处理', value: replyWorkCount },
+        { label: '忽略回评', value: statsData.skippedReplies || 0 },
+        { label: '已完成回评', value: statsData.succeededReplies || 0 },
       ],
       branches: [
+        buildBranchCard('待回评', 'pending 状态会进入下一次 comments:execute。', statsData.pendingReplies || 0),
         buildBranchCard('异常处理', 'blocked / sent_unverified 需要人工确认后再重试或忽略。', replyExceptionComments.length),
-        buildBranchCard('直接执行', '回评文本由 Hermes/OpenClaw 在命令进程内生成，CLI 负责打开作品页并回复。', statsData.pendingReplies || 0),
+        buildBranchCard('完成与忽略', 'succeeded 和 skipped 是回评线的终点。', (statsData.succeededReplies || 0) + (statsData.skippedReplies || 0)),
       ],
       workspaceTitle: '待回评评论',
-      workspaceSubtitle: '这里只显示 pending；异常请点“回评异常”。',
+      workspaceSubtitle: '入口默认展示 pending；点击异常、忽略、完成可看对应时间点。',
+      workspaceType: 'pending-comments',
+      commentSource: 'pending',
+    },
+    replyPending: {
+      kicker: '回评待处理',
+      title: '待回评评论',
+      description: '只要 reply_status=pending，就会被待回评查询查到；即使已有 reply_text，也会继续用于恢复中断执行。',
+      metrics: [
+        { label: '待回评', value: statsData.pendingReplies || 0 },
+        { label: '已写草稿', value: statsData.preparedReplies || 0 },
+        { label: '异常回评', value: statsData.replyExceptions || 0 },
+        { label: '回评完成', value: statsData.succeededReplies || 0 },
+      ],
+      branches: [
+        buildBranchCard('自动执行', 'comments:execute --days N --limit M 会打开作品页并回复。', statsData.pendingReplies || 0),
+        buildBranchCard('临时失败可重试', '浏览器、网络、页面临时失败会保留 pending + reason。', statsData.pendingReplies || 0),
+      ],
+      workspaceTitle: '待回评评论',
+      workspaceSubtitle: 'pending 会自动进入下次执行。',
       workspaceType: 'pending-comments',
       commentSource: 'pending',
     },
@@ -340,24 +375,91 @@ function buildStageDetailData() {
       workspaceType: 'pending-comments',
       commentSource: 'exceptions',
     },
+    replySkipped: {
+      kicker: '回评止损',
+      title: '已忽略回评',
+      description: '这里显示时间线上的忽略终点。当前接口不加载 skipped 明细，只展示统计，避免把已止损项混回执行队列。',
+      metrics: [
+        { label: '忽略回评', value: statsData.skippedReplies || 0 },
+        { label: '待回评', value: statsData.pendingReplies || 0 },
+        { label: '异常回评', value: statsData.replyExceptions || 0 },
+        { label: '已完成', value: statsData.succeededReplies || 0 },
+      ],
+      branches: [
+        buildBranchCard('人工忽略', '通常由处理台点击忽略产生，状态为 skipped。', statsData.skippedReplies || 0),
+      ],
+      workspaceTitle: '忽略回评说明',
+      workspaceSubtitle: 'skipped 不进入自动执行。',
+      workspaceType: 'overview',
+      workspaceContent: renderOverviewContent([
+        ['状态含义', 'skipped 表示人工决定不再回复。'],
+        ['恢复方式', '如需恢复，需要在数据库层或后续接口中重新改回 pending。'],
+      ]),
+    },
+    replyDone: {
+      kicker: '回评完成',
+      title: '已完成回评',
+      description: '回评发送成功后写入 succeeded，并清理 reply_reason。这里作为回评线的完成时间点。',
+      metrics: [
+        { label: '已完成回评', value: statsData.succeededReplies || 0 },
+        { label: '待回评', value: statsData.pendingReplies || 0 },
+        { label: '异常回评', value: statsData.replyExceptions || 0 },
+        { label: '忽略回评', value: statsData.skippedReplies || 0 },
+      ],
+      branches: [
+        buildBranchCard('完成闭环', '成功回复后不会再进入 pending 队列。', statsData.succeededReplies || 0),
+      ],
+      workspaceTitle: '回评完成说明',
+      workspaceSubtitle: '已完成项不展示明细，避免重复操作。',
+      workspaceType: 'overview',
+      workspaceContent: renderOverviewContent([
+        ['状态含义', 'succeeded 表示已成功回复。'],
+        ['风险提示', '不要把 succeeded 项手动放回 pending，避免重复回复。'],
+      ]),
+    },
     visits: {
       kicker: '回访',
-      title: '回访任务队列',
-      description: '回访不再提前生成评论 JSON。执行阶段打开用户主页一次，监听主页作品列表 API，根据 workId 点击目标作品，再生成评论并执行点赞/评论。',
+      title: '回访时间线入口',
+      description: '回访线与回评线同级。点赞、评论、回复、关注通知都应在这条线上看到：未处理线索、任务准备、重试、执行、异常、跳过、完成。',
       metrics: [
         { label: '回访任务', value: statsData.totalTasks || 0 },
-        { label: '待执行/匹配', value: visitQueueTasks.length },
+        { label: '未处理线索', value: unhandledEventCount },
         { label: '待重试', value: visitRetryTasks.length },
         { label: '已完成', value: statsData.completedTasks || 0 },
       ],
       branches: [
+        buildBranchCard('点赞/评论线索', `${(statsData.unhandledLikes || 0) + (statsData.unhandledComments || 0)} 条点赞/评论通知仍是 new。`, (statsData.unhandledLikes || 0) + (statsData.unhandledComments || 0)),
+        buildBranchCard('回复/关注线索', `${(statsData.unhandledReplies || 0) + (statsData.unhandledFollows || 0)} 条回复/关注通知仍是 new。`, (statsData.unhandledReplies || 0) + (statsData.unhandledFollows || 0)),
         buildBranchCard('作品匹配重试', '主页打开、作品列表匹配或评论生成失败时会回到这里。', visitRetryTasks.length),
-        buildBranchCard('执行入口', '主入口是 npm run visit:run -- --execute。', executableTasks.length),
       ],
       workspaceTitle: '回访任务',
-      workspaceSubtitle: '展示 pending_visit / failed_collect / failed_generate_comment 等任务。',
+      workspaceSubtitle: '展示 pending_visit / failed_collect / failed_generate_comment 等可继续推进任务。',
       workspaceType: 'tasks',
       taskSource: 'visitQueue',
+    },
+    visitUnhandled: {
+      kicker: '回访未处理',
+      title: '未处理关注、回复、点赞、评论线索',
+      description: '这些是 interaction_events 中仍为 new 的通知。时间线上明确展示关注和回复，避免它们被点赞/评论主路径淹没。',
+      metrics: [
+        { label: '未处理点赞', value: statsData.unhandledLikes || 0 },
+        { label: '未处理评论', value: statsData.unhandledComments || 0 },
+        { label: '未处理回复', value: statsData.unhandledReplies || 0 },
+        { label: '未处理关注', value: statsData.unhandledFollows || 0 },
+      ],
+      branches: [
+        buildBranchCard('点赞通知', '可转为回访任务的点赞线索。', statsData.unhandledLikes || 0),
+        buildBranchCard('评论通知', '既可能产生回评，也可能沉淀回访。', statsData.unhandledComments || 0),
+        buildBranchCard('回复/关注通知', '当前时间线单独展示，便于发现未处理来源。', (statsData.unhandledReplies || 0) + (statsData.unhandledFollows || 0)),
+      ],
+      workspaceTitle: '未处理线索说明',
+      workspaceSubtitle: '这里展示统计，不直接展示通知明细。',
+      workspaceType: 'overview',
+      workspaceContent: renderOverviewContent([
+        ['推荐命令', 'npm run interactions:scan -- --days N --max-count M --prepare-visits'],
+        ['关注/回复', `当前未处理关注 ${statsData.unhandledFollows || 0} 条，未处理回复 ${statsData.unhandledReplies || 0} 条。`],
+        ['处理边界', '回访任务准备仍以 DB 状态为准，时间线只展示入口压力。'],
+      ]),
     },
     visitRetry: {
       kicker: '回访重试',
@@ -413,6 +515,27 @@ function buildStageDetailData() {
       workspaceType: 'tasks',
       taskSource: 'executeErrors',
     },
+    visitSkipped: {
+      kicker: '回访止损',
+      title: '无法回访或已跳过任务',
+      description: '私密账号、无作品、无合适作品等任务会进入跳过终点。这些也是时间线分支，不应和异常重试混在一起。',
+      metrics: [
+        { label: '跳过总数', value: skippedVisitTasks },
+        { label: '无作品', value: getVisitStatusCount('skipped_no_work') },
+        { label: '私密', value: getVisitStatusCount('skipped_private') },
+        { label: '无合适作品', value: getVisitStatusCount('skipped_no_suitable_work') },
+      ],
+      branches: [
+        buildBranchCard('不再自动执行', '跳过任务是回访线的止损终点。', skippedVisitTasks),
+      ],
+      workspaceTitle: '跳过回访说明',
+      workspaceSubtitle: '跳过状态不进入执行列表。',
+      workspaceType: 'overview',
+      workspaceContent: renderOverviewContent([
+        ['状态含义', 'skipped_no_work / skipped_private / skipped_no_suitable_work 都是无法继续的回访结果。'],
+        ['下一步', '如果跳过过多，优先看作品匹配逻辑和主页可访问性。'],
+      ]),
+    },
     done: {
       kicker: '终点',
       title: '完成归档阶段',
@@ -421,10 +544,11 @@ function buildStageDetailData() {
         { label: '已完成', value: statsData.completedTasks || 0 },
         { label: '总任务', value: statsData.totalTasks || 0 },
         { label: '完成率', value: calcCompletionRate() },
-        { label: '仍在流动', value: Math.max(executableTasks.length + replyWorkCount, 0) },
+        { label: '回评完成', value: statsData.succeededReplies || 0 },
       ],
       branches: [
-        buildBranchCard('继续处理', '还有未完成的回评或回访时，回到对应队列处理。', executableTasks.length + replyWorkCount),
+        buildBranchCard('回访完成', '回访 done 是回访线的完成终点。', statsData.completedTasks || 0),
+        buildBranchCard('回评完成', '回评 succeeded 是回评线的完成终点。', statsData.succeededReplies || 0),
       ],
       workspaceTitle: '完成阶段说明',
       workspaceSubtitle: '这里展示闭环结果和效率，不展示待处理卡片。',
@@ -443,7 +567,7 @@ function buildStageDetailData() {
         { label: '已完成', value: statsData.completedTasks || 0 },
         { label: '总任务', value: statsData.totalTasks || 0 },
         { label: '完成率', value: calcCompletionRate() },
-        { label: '待处理', value: executableTasks.length + replyWorkCount },
+        { label: '回评完成', value: statsData.succeededReplies || 0 },
       ],
       branches: [],
       workspaceTitle: '归档说明',
@@ -462,6 +586,17 @@ function calcCompletionRate() {
   const done = Number(statsData.completedTasks || 0);
   if (!total) return '0%';
   return `${Math.round((done / total) * 100)}%`;
+}
+
+function getUnhandledEventCount() {
+  return (statsData.unhandledLikes || 0) +
+    (statsData.unhandledComments || 0) +
+    (statsData.unhandledReplies || 0) +
+    (statsData.unhandledFollows || 0);
+}
+
+function getVisitStatusCount(...statuses) {
+  return statuses.reduce((sum, status) => sum + (statsData.statusDistribution?.[status] || 0), 0);
 }
 
 function buildBranchCard(title, description, count) {
@@ -499,10 +634,9 @@ function renderStageDetail() {
 }
 
 function renderStageWorkspace() {
-  const detailData = buildStageDetailData()[selectedStageId];
+  const detailData = buildStageDetailData()[selectedStageId] || buildStageDetailData().collect;
   const workspace = document.getElementById('workspace-body');
   const toolbar = document.getElementById('workspace-actions');
-  const filteredTasks = getFilteredTasksByStage(detailData.taskSource);
 
   if (detailData.workspaceType === 'pending-comments') {
     toolbar.style.display = 'none';
@@ -520,6 +654,7 @@ function renderStageWorkspace() {
     return;
   }
 
+  const filteredTasks = getFilteredTasksByStage(detailData.taskSource);
   toolbar.style.display = 'flex';
   const visibleIds = new Set(filteredTasks.map((task) => task.id));
   selectedTaskIds = new Set([...selectedTaskIds].filter((id) => visibleIds.has(id)));

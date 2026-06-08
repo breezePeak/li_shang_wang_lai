@@ -17,10 +17,10 @@
       <!-- 融入式顶栏：左侧品牌，右侧悬浮毛玻璃数据卡与刷新 -->
       <div class="river-header-full">
         <div class="river-brand">
-          <div class="river-brand-mark"><i class="fa-solid fa-water"></i></div>
+          <div class="river-brand-mark"><i class="fa-solid fa-timeline"></i></div>
           <div class="river-brand-text">
             <h1>礼尚往来</h1>
-            <p>DB WORKFLOW COCKPIT</p>
+            <p>PARALLEL TIMELINE COCKPIT</p>
           </div>
         </div>
 
@@ -50,29 +50,7 @@
 
       <div class="river-scroll">
         <div class="river-stage-strip" id="river-stage-strip">
-          <!-- SVG 渐变波浪河流（拓宽至 1400x320，起伏大，水流更加波澜壮阔） -->
-          <svg class="river-svg" viewBox="0 0 1400 320" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="river-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#1f6d78" stop-opacity="0.85" />
-                <stop offset="25%" stop-color="#2f8f73" stop-opacity="0.85" />
-                <stop offset="50%" stop-color="#a3b899" stop-opacity="0.9" />
-                <stop offset="75%" stop-color="#d39b34" stop-opacity="0.9" />
-                <stop offset="100%" stop-color="#cc782a" stop-opacity="0.88" />
-              </linearGradient>
-            </defs>
-            <!-- 底色主干河道 -->
-            <path d="M 0,190 C 150,190 280,70 450,70 C 620,70 650,210 750,210 C 850,210 950,160 1050,160 C 1150,160 1200,120 1300,120 L 1400,120" 
-                  fill="none" stroke="url(#river-gradient)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round" class="river-base-path" />
-            <!-- 柔和中宽流光 -->
-            <path d="M 0,190 C 150,190 280,70 450,70 C 620,70 650,210 750,210 C 850,210 950,160 1050,160 C 1150,160 1200,120 1300,120 L 1400,120" 
-                  fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" class="river-flow-path-1" />
-            <!-- 高亮细流星流光 -->
-            <path d="M 0,190 C 150,190 280,70 450,70 C 620,70 650,210 750,210 C 850,210 950,160 1050,160 C 1150,160 1200,120 1300,120 L 1400,120" 
-                  fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="river-flow-path-2" />
-          </svg>
-          
-          <!-- 时间线圆形主节点与挂载分支容器 -->
+          <!-- 并列时间线：回评和回访同级展示 -->
           <div class="river-nodes-container" id="river-nodes-container"></div>
         </div>
       </div>

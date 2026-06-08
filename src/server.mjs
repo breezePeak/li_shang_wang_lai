@@ -28,7 +28,7 @@ app.get('/api/stats', (req, res) => {
       WHERE comment_status = 'generated' OR (status = 'comment_generated' AND comment_status != 'posted')
     `).get().count;
 
-    // 暂缓回复评论数
+    // 待回评评论数
     const pendingReplies = db.prepare(`
       SELECT COUNT(*) as count FROM work_comments 
       WHERE reply_status = 'pending'
@@ -44,6 +44,14 @@ app.get('/api/stats', (req, res) => {
       WHERE reply_status = 'sent_unverified'
     `).get().count;
 
+    const replyStatusRows = db.prepare(`
+      SELECT reply_status, COUNT(*) as count FROM work_comments GROUP BY reply_status
+    `).all();
+    const replyStatusDistribution = {};
+    for (const r of replyStatusRows) {
+      replyStatusDistribution[r.reply_status] = r.count;
+    }
+
     // 已完成回访任务数
     const completedTasks = db.prepare(`
       SELECT COUNT(*) as count FROM return_visit_tasks 
@@ -56,7 +64,7 @@ app.get('/api/stats', (req, res) => {
     // 通知采集入库数
     const collectedTotal = db.prepare(`
       SELECT COUNT(*) as count FROM interaction_events
-      WHERE event_type IN ('like', 'comment')
+      WHERE event_type IN ('like', 'comment', 'reply', 'follow')
     `).get().count;
     const collectedLikes = db.prepare(`
       SELECT COUNT(*) as count FROM interaction_events
@@ -66,6 +74,14 @@ app.get('/api/stats', (req, res) => {
       SELECT COUNT(*) as count FROM interaction_events
       WHERE event_type = 'comment'
     `).get().count;
+    const collectedReplies = db.prepare(`
+      SELECT COUNT(*) as count FROM interaction_events
+      WHERE event_type = 'reply'
+    `).get().count;
+    const collectedFollows = db.prepare(`
+      SELECT COUNT(*) as count FROM interaction_events
+      WHERE event_type = 'follow'
+    `).get().count;
 
     // 各状态任务数量分布
     const statusRows = db.prepare(`
@@ -74,6 +90,17 @@ app.get('/api/stats', (req, res) => {
     const statusDistribution = {};
     for (const r of statusRows) {
       statusDistribution[r.status] = r.count;
+    }
+
+    const eventStatusRows = db.prepare(`
+      SELECT event_type, status, COUNT(*) as count
+      FROM interaction_events
+      GROUP BY event_type, status
+    `).all();
+    const eventStatusDistribution = {};
+    for (const r of eventStatusRows) {
+      if (!eventStatusDistribution[r.event_type]) eventStatusDistribution[r.event_type] = {};
+      eventStatusDistribution[r.event_type][r.status] = r.count;
     }
 
     res.json({
@@ -90,7 +117,22 @@ app.get('/api/stats', (req, res) => {
         collectedTotal,
         collectedLikes,
         collectedComments,
-        statusDistribution
+        collectedReplies,
+        collectedFollows,
+        unhandledLikes: eventStatusDistribution.like?.new || 0,
+        unhandledComments: eventStatusDistribution.comment?.new || 0,
+        unhandledReplies: eventStatusDistribution.reply?.new || 0,
+        unhandledFollows: eventStatusDistribution.follow?.new || 0,
+        succeededReplies: replyStatusDistribution.succeeded || 0,
+        skippedReplies: replyStatusDistribution.skipped || 0,
+        preparedReplies: replyStatusDistribution.prepared || 0,
+        skippedVisitTasks:
+          (statusDistribution.skipped_no_work || 0) +
+          (statusDistribution.skipped_private || 0) +
+          (statusDistribution.skipped_no_suitable_work || 0),
+        statusDistribution,
+        eventStatusDistribution,
+        replyStatusDistribution
       }
     });
   } catch (err) {
