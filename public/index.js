@@ -700,65 +700,12 @@ function getTaskBadge(task) {
   return { badgeClass: 'badge-pending', badgeText: '处理中', dotClass: 'pending' };
 }
 
-window.closeDetailCabin = function() {
-  const cabin = document.getElementById('detail-cabin');
-  if (cabin) {
-    cabin.classList.remove('active');
-  }
-  selectedStageId = '';
-  renderRiverTimeline();
-};
+window.closeDetailCabin = function() {};
 
 window.selectStage = function(stageId) {
   selectedStageId = stageId;
   renderRiverTimeline();
   renderStageDetail();
-
-  const cabin = document.getElementById('detail-cabin');
-  if (cabin) {
-    let layoutNode = STAGE_LAYOUT.find(n => n.id === stageId);
-    if (!layoutNode) {
-      if (stageId === 'hold') layoutNode = STAGE_LAYOUT.find(n => n.id === 'tasks');
-      else if (stageId === 'retry') layoutNode = STAGE_LAYOUT.find(n => n.id === 'execute');
-      else if (stageId === 'fallback') layoutNode = STAGE_LAYOUT.find(n => n.id === 'collect');
-      else if (stageId === 'risk') layoutNode = STAGE_LAYOUT.find(n => n.id === 'review');
-      else if (stageId === 'archive') layoutNode = STAGE_LAYOUT.find(n => n.id === 'done');
-    }
-
-    // 用 DOM 实际位置定位 cabin，不再依赖写死的 y 值
-    const activeNode = document.querySelector('.river-node-v2.is-active');
-    const nodeCircle = activeNode ? activeNode.querySelector('.node-circle-btn') : null;
-
-    if (layoutNode && nodeCircle) {
-      const nodeRect = nodeCircle.getBoundingClientRect();
-      const cabinHeight = cabin.offsetHeight || 280;
-      const marginTop = 24;
-      const marginBottom = 24;
-
-      cabin.classList.remove('arrow-on-top', 'arrow-on-bottom');
-
-      // 节点上方空间够 → cabin 在节点上方
-      if (nodeRect.top > cabinHeight + marginBottom) {
-        cabin.style.top = `${nodeRect.top - cabinHeight - marginBottom}px`;
-        cabin.classList.add('arrow-on-bottom');
-      } else {
-        // 否则 cabin 在节点下方
-        cabin.style.top = `${nodeRect.bottom + marginTop}px`;
-        cabin.classList.add('arrow-on-top');
-      }
-
-      cabin.style.left = `${nodeRect.left + nodeRect.width / 2}px`;
-      cabin.classList.add('active');
-    }
-  }
-
-  if (stageId === 'fallback') {
-    showToast('当前入库通知暂无异常回退', 'success');
-  } else if (stageId === 'risk') {
-    showToast('当前评论审核无额外告警风险', 'success');
-  } else if (stageId === 'archive') {
-    showToast('归档已闭环完成', 'success');
-  }
 };
 
 window.toggleSelect = function(id) {

@@ -13,9 +13,9 @@
   <div class="page-orb orb-b"></div>
 
   <div class="app-shell">
-    <section class="river-board" onclick="closeDetailCabin();">
+    <section class="river-board">
       <!-- 融入式顶栏：左侧品牌，右侧悬浮毛玻璃数据卡与刷新 -->
-      <div class="river-header-full" onclick="event.stopPropagation();">
+      <div class="river-header-full">
         <div class="river-brand">
           <div class="river-brand-mark"><i class="fa-solid fa-water"></i></div>
           <div class="river-brand-text">
@@ -48,7 +48,7 @@
         </div>
       </div>
 
-      <div class="river-scroll" onclick="event.stopPropagation();">
+      <div class="river-scroll">
         <div class="river-stage-strip" id="river-stage-strip">
           <!-- SVG 渐变波浪河流（拓宽至 1400x320，起伏大，水流更加波澜壮阔） -->
           <svg class="river-svg" viewBox="0 0 1400 320" preserveAspectRatio="none">
@@ -78,17 +78,8 @@
       </div>
     </section>
 
-    <!-- 空间三维磨砂悬浮详情舱 -->
-    <div class="floating-detail-cabin" id="detail-cabin" onclick="event.stopPropagation();">
-      <!-- 指向节点的发光三角形箭头 -->
-      <div class="cabin-arrow"></div>
-      
-      <!-- 关闭按钮 -->
-      <button class="cabin-close-btn" onclick="closeDetailCabin();">
-        <i class="fa-solid fa-xmark"></i>
-      </button>
-
-      <!-- 第一栏：概要与指标 -->
+    <!-- 下方常驻阶段驾驶台 -->
+    <main class="stage-dashboard" id="detail-cabin">
       <div class="cabin-column cabin-summary">
         <div class="detail-heading">
           <span class="detail-kicker" id="detail-kicker">STAGE</span>
@@ -100,7 +91,6 @@
         </div>
       </div>
 
-      <!-- 第二栏：告警分支 -->
       <div class="cabin-column cabin-branches-wrap">
         <div class="detail-branches-head">
           <h4>涉及分支</h4>
@@ -111,9 +101,8 @@
         </div>
       </div>
 
-      <!-- 第三栏：处理工作区 -->
       <div class="cabin-column cabin-workspace">
-        <div class="workspace-toolbar" style="display: none !important;">
+        <div class="workspace-toolbar">
           <div class="workspace-status">
             <h4 id="workspace-title">当前阶段任务</h4>
             <p id="workspace-subtitle">按所选流程节点自动切换内容。</p>
@@ -147,8 +136,7 @@
 
         <div class="workspace-body" id="workspace-body"></div>
       </div>
-    </div>
-    </section>
+    </main>
   </div>
 
   <div class="toast-container" id="toast-container"></div>

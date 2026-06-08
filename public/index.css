@@ -31,7 +31,7 @@ body {
     radial-gradient(circle at 85% 12%, rgba(211, 155, 52, 0.15), transparent 25%),
     linear-gradient(180deg, #f8f4ea 0%, #efe8d8 100%);
   color: var(--text);
-  overflow: hidden; /* 零全局滚动 */
+  overflow: hidden;
 }
 
 .page-noise,
@@ -82,8 +82,8 @@ body {
 /* 宽屏大河道面板（高度占比提高至屏幕高度的 2/3 - 65vh） */
 .river-board {
   width: 100vw;
-  height: 65vh;
-  min-height: 420px; /* 保证在小屏下也拥有足够的起伏和分支空间 */
+  height: 43vh;
+  min-height: 320px;
   margin: 0;
   padding: 16px 24px 0;
   background: rgba(255, 252, 244, 0.45); /* 半透明磨砂 */
@@ -228,7 +228,7 @@ body {
 .river-stage-strip {
   position: relative;
   width: 100%;
-  height: 310px;
+  height: 260px;
   margin: 0;
   padding: 0;
 }
@@ -238,7 +238,7 @@ body {
   top: 0;
   left: 0;
   width: 100%;
-  height: 320px;
+  height: 280px;
   pointer-events: none;
   z-index: 1;
 }
@@ -552,112 +552,20 @@ body {
   box-shadow: 0 0 0 4px rgba(63, 141, 87, 0.12), 0 8px 24px rgba(63, 141, 87, 0.15);
 }
 
-/* 空间三维磨砂悬浮详情舱 (Glassmorphic Detail Cabin) */
-.floating-detail-cabin {
-  position: fixed;
-  width: 920px;
-  height: 280px;
-  z-index: 99;
-  background: rgba(255, 252, 244, 0.90);
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
-  border: 1.5px solid rgba(255, 255, 255, 0.75);
-  border-radius: 24px;
-  box-shadow: 
-    0 24px 60px rgba(31, 109, 120, 0.22),
-    0 0 30px rgba(255, 255, 255, 0.3) inset;
+.stage-dashboard {
+  width: 100vw;
+  height: 57vh;
+  min-height: 360px;
+  padding: 18px 24px 24px;
   display: grid;
-  grid-template-columns: 200px 220px 1fr;
-  gap: 20px;
-  padding: 16px 22px;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1fr) minmax(420px, 1.8fr);
+  gap: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 252, 244, 0.78), rgba(250, 245, 234, 0.92)),
+    radial-gradient(circle at 78% 20%, rgba(31, 109, 120, 0.08), transparent 30%);
+  border-top: 1px solid rgba(58, 78, 63, 0.10);
   box-sizing: border-box;
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(-50%, 0) scale(0.94);
-  transition: 
-    opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
-    transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
-    top 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.floating-detail-cabin.active {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translate(-50%, 0) scale(1);
-}
-
-/* 关闭按钮 */
-.cabin-close-btn {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  width: 24px;
-  height: 24px;
-  border-radius: 99px;
-  background: rgba(0, 0, 0, 0.05);
-  border: none;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  font-size: 13px;
-  transition: all 0.22s ease;
-  z-index: 10;
-}
-
-.cabin-close-btn:hover {
-  background: var(--alert);
-  color: white;
-  transform: rotate(90deg);
-  box-shadow: 0 0 10px rgba(212, 87, 59, 0.4);
-}
-
-/* 动感发光指示箭头 */
-.cabin-arrow {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-style: solid;
-  pointer-events: none;
-  z-index: 100;
-}
-
-.arrow-on-top .cabin-arrow {
-  top: -14px;
-  border-width: 0 14px 14px 14px;
-  border-color: transparent transparent rgba(255, 252, 244, 0.90) transparent;
-  animation: arrowUpPulse 2s infinite ease-in-out;
-}
-
-.arrow-on-bottom .cabin-arrow {
-  bottom: -14px;
-  border-width: 14px 14px 0 14px;
-  border-color: rgba(255, 252, 244, 0.90) transparent transparent transparent;
-  animation: arrowDownPulse 2s infinite ease-in-out;
-}
-
-@keyframes arrowUpPulse {
-  0%, 100% {
-    filter: drop-shadow(0 -4px 6px rgba(47, 143, 115, 0.4));
-    transform: translateX(-50%) translateY(0);
-  }
-  50% {
-    filter: drop-shadow(0 -8px 12px rgba(47, 143, 115, 0.6));
-    transform: translateX(-50%) translateY(-2px);
-  }
-}
-
-@keyframes arrowDownPulse {
-  0%, 100% {
-    filter: drop-shadow(0 4px 6px rgba(47, 143, 115, 0.4));
-    transform: translateX(-50%) translateY(0);
-  }
-  50% {
-    filter: drop-shadow(0 8px 12px rgba(47, 143, 115, 0.6));
-    transform: translateX(-50%) translateY(2px);
-  }
+  overflow: hidden;
 }
 
 /* 三列公用布局 */
@@ -667,6 +575,11 @@ body {
   height: 100%;
   overflow: hidden;
   box-sizing: border-box;
+  padding: 16px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(76, 99, 83, 0.10);
+  box-shadow: 0 14px 38px rgba(58, 53, 34, 0.06);
 }
 
 /* 第一列：概要与指标 */
@@ -675,7 +588,7 @@ body {
 }
 
 .detail-heading {
-  margin-bottom: 6px;
+  margin-bottom: 12px;
 }
 
 .detail-kicker {
@@ -687,22 +600,29 @@ body {
 }
 
 .detail-title {
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 800;
   color: var(--text);
   margin: 1px 0 0 0;
 }
 
+#detail-description {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .detail-metrics {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
   flex: 1;
-  justify-content: center;
+  align-content: end;
 }
 
 .metric-card {
-  padding: 8px 12px;
+  padding: 12px;
   background: rgba(255, 255, 255, 0.65);
   border: 1px solid rgba(76, 99, 83, 0.08);
   border-radius: 12px;
@@ -717,7 +637,7 @@ body {
 }
 
 .metric-card strong {
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 800;
   color: var(--text);
   margin-top: 1px;
@@ -726,8 +646,7 @@ body {
 
 /* 第二列：告警与提醒分支 */
 .cabin-branches-wrap {
-  border-left: 1px solid rgba(58, 78, 63, 0.08);
-  padding-left: 18px;
+  min-width: 0;
 }
 
 .detail-branches-head {
@@ -759,12 +678,12 @@ body {
   flex-direction: column;
   gap: 8px;
   flex: 1;
-  justify-content: center;
+  justify-content: flex-start;
   overflow-y: auto;
 }
 
 .branch-card {
-  padding: 8px 12px;
+  padding: 12px;
   background: rgba(255, 255, 255, 0.65);
   border: 1px solid rgba(76, 99, 83, 0.08);
   border-radius: 12px;
@@ -795,17 +714,107 @@ body {
 }
 
 .branch-card p {
-  display: none !important;
+  display: block;
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 /* 第三列：处理工作区 */
 .cabin-workspace {
-  border-left: 1px solid rgba(58, 78, 63, 0.08);
-  padding-left: 18px;
+  min-width: 0;
+}
+
+.workspace-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.workspace-status h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.workspace-status p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.workspace-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.search-box {
+  height: 32px;
+  min-width: 180px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(76, 99, 83, 0.12);
+  color: var(--muted);
+}
+
+.search-box input {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.select-wrap select {
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid rgba(76, 99, 83, 0.12);
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  padding: 0 8px;
+}
+
+.view-toggle {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 10px;
+  background: rgba(76, 99, 83, 0.08);
+}
+
+.view-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.view-btn.active {
+  background: white;
+  color: var(--river-a);
+  box-shadow: 0 4px 10px rgba(58, 53, 34, 0.08);
 }
 
 .workspace-body {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -816,9 +825,16 @@ body {
 .workspace-body.view-table {
   height: 100%;
   width: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+  justify-content: flex-start;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.workspace-body.view-table {
+  display: block;
 }
 
 /* 极扁平任务卡片 */
@@ -830,7 +846,8 @@ body {
   flex-direction: column;
   justify-content: space-between;
   gap: 6px;
-  height: 100%;
+  min-height: 230px;
+  height: auto;
   background: rgba(255, 255, 255, 0.75);
   border: 1px solid rgba(76, 99, 83, 0.08);
   border-radius: 16px;
@@ -1012,11 +1029,11 @@ body {
 
 /* 暂缓评论与流程说明列表极密化 */
 .cabin-workspace .pending-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 6px;
   height: 100%;
-  justify-content: center;
+  align-content: start;
   overflow-y: auto;
 }
 
@@ -1029,6 +1046,7 @@ body {
   background: rgba(255, 255, 255, 0.75);
   border: 1px solid rgba(76, 99, 83, 0.08);
   border-radius: 14px;
+  min-height: 180px;
 }
 
 .cabin-workspace .pending-card.reply-blocked {
@@ -1263,9 +1281,10 @@ body {
 }
 
 @media (max-width: 1080px) {
-  .hero-panel,
-  .detail-summary {
+  .stage-dashboard {
     grid-template-columns: 1fr;
+    height: 57vh;
+    overflow-y: auto;
   }
 
   .workspace-toolbar {
@@ -1284,21 +1303,51 @@ body {
 }
 
 @media (max-width: 720px) {
-  .app-shell {
-    padding: 0;
+  body {
+    overflow: auto;
   }
 
-  .river-board,
-  .detail-panel {
+  .app-shell {
+    padding: 0;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .river-board {
+    height: auto;
+    min-height: 300px;
+    padding: 14px 14px 0;
+  }
+
+  .river-header-full {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .river-meta-container {
+    flex-wrap: wrap;
+  }
+
+  .stage-dashboard {
+    height: auto;
+    min-height: 0;
+    padding: 14px;
     border-radius: 0;
   }
 
-  .branch-list,
-  .workspace-body.view-grid {
+  .detail-metrics,
+  .workspace-body.view-grid,
+  .cabin-workspace .pending-list {
     grid-template-columns: 1fr;
   }
 
-  .pending-card {
+  .cabin-workspace .pending-card {
     flex-direction: column;
+  }
+
+  .cabin-workspace .pending-actions {
+    flex-direction: row;
+    justify-content: flex-start;
   }
 }
