@@ -99,6 +99,27 @@ describe('return-visit execute filtering & state flow logic', () => {
     expect(issue).toBeNull();
   });
 
+  it('getReturnVisitTaskExecutionIssue 允许 failed_collect 补齐作品后重试', () => {
+    const issue = getReturnVisitTaskExecutionIssue({
+      status: 'failed_collect',
+      targetWork: { workId: '7647191897097693115', workUrl: '' },
+      commentStatus: 'pending'
+    });
+
+    expect(issue).toBeNull();
+  });
+
+  it('getReturnVisitTaskExecutionIssue 允许只有主页没有作品目标', () => {
+    const issue = getReturnVisitTaskExecutionIssue({
+      status: 'failed_collect',
+      userProfileUrl: 'https://www.douyin.com/user/demo',
+      targetWork: { workId: '', workUrl: '' },
+      commentStatus: 'pending'
+    });
+
+    expect(issue).toBeNull();
+  });
+
   it('retains likeStatus on failed_comment simulation', () => {
     const simulateStatusUpdate = (task, actionResult) => {
       return {

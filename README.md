@@ -112,7 +112,7 @@ npm run auth
 
 `comments:execute` 默认从数据库查询待回评评论，必须手动输入 `--days` 和 `--limit`，直接调用 Hermes/OpenClaw 生成 `reply_text` 并写回 DB，然后打开待回复评论所属的抖音作品页，在作品评论区里定位目标评论；优先结合 `cid/comment_id` 与 `comment/list` 接口做精确确认，再在 DOM 中唯一定位后点击“回复”、填写、发送并校验结果，不再进入创作者评论管理页。
 
-`visit:run` 会打开目标用户主页，监听主页作品列表 API，按 `workId` 匹配并点击目标作品，进入作品页后直接调用 Hermes/OpenClaw 生成回访评论，再由 CLI 填写并提交。Agent 不控制浏览器、不点击、不提交评论。
+`visit:run` 会打开目标用户主页，监听主页作品列表 API；有可用的对方作品 `workId` 时优先匹配目标作品，否则选择主页首个非置顶作品，进入作品页后直接调用 Hermes/OpenClaw 生成回访评论，再由 CLI 填写并提交。Agent 不控制浏览器、不点击、不提交评论。
 
 ## Agent Provider
 

@@ -761,6 +761,8 @@ export function preparePendingVisitTasks(events, { days = null, maxCount = 100, 
       actor_name: event.actorName || '',
       actor_profile_key: event.actorProfileKey || null,
       actor_profile_url: event.actorProfileUrl || null,
+      target_work_id: sourceType === 'reply' ? event.targetWorkId || null : null,
+      target_work_url: sourceType === 'reply' ? event.targetWorkUrl || null : null,
       relation: event.relation || 'unknown',
     };
 

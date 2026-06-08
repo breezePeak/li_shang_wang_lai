@@ -242,6 +242,48 @@ describe('preparePendingVisitTasks', () => {
     expect(row.source_type).toBe('like');
   });
 
+  it('persists target work from interaction events into return_visit_task', () => {
+    const result = preparePendingVisitTasks([
+      makeEvent({
+        eventId: 301,
+        eventType: 'reply',
+        actorName: '有目标作品',
+        actorProfileKey: 'target-user',
+        actorProfileUrl: 'https://www.douyin.com/user/target-user',
+        relation: 'friend',
+        dbAction: 'inserted',
+        notificationAction: 'reply_to_my_comment',
+        targetWorkId: '7646778420181104228',
+        targetWorkUrl: 'https://www.douyin.com/jingxuan?modal_id=7646778420181104228',
+      }),
+    ], { maxCount: 10 });
+
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].targetWork.workId).toBe('7646778420181104228');
+    expect(result.tasks[0].targetWork.workUrl).toBe('https://www.douyin.com/jingxuan?modal_id=7646778420181104228');
+  });
+
+  it('does not use received-like work as return visit target', () => {
+    const result = preparePendingVisitTasks([
+      makeEvent({
+        eventId: 302,
+        eventType: 'like',
+        actorName: '点赞我的作品',
+        actorProfileKey: 'like-target-user',
+        actorProfileUrl: 'https://www.douyin.com/user/like-target-user',
+        relation: 'friend',
+        dbAction: 'inserted',
+        notificationAction: 'like_received',
+        targetWorkId: 'my-work-001',
+        targetWorkUrl: 'https://www.douyin.com/jingxuan?modal_id=my-work-001',
+      }),
+    ], { maxCount: 10 });
+
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].targetWork.workId).toBeNull();
+    expect(result.tasks[0].targetWork.workUrl).toBeNull();
+  });
+
   it('uses db task status instead of current grouped items when listing pending visits', () => {
     const event = makeEvent({
       actorName: '状态已推进',

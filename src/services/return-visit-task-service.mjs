@@ -281,8 +281,9 @@ export function createOrUpdateReturnVisitTasksFromEvents(options = {}) {
     }
 
     const sourceType = normalizeEventSourceType(event.event_type);
-    const targetWorkId = String(event.target_work_id || '').trim() || null;
-    const targetWorkUrl = normalizeDouyinUrl(event.target_work_url || '') || null;
+    const canUseSourceTargetWork = sourceType === 'reply';
+    const targetWorkId = canUseSourceTargetWork ? String(event.target_work_id || '').trim() || null : null;
+    const targetWorkUrl = canUseSourceTargetWork ? normalizeDouyinUrl(event.target_work_url || '') || null : null;
     const existing = selectStmt.get(identityKey);
 
     if (!existing) {
@@ -403,8 +404,9 @@ export function createOrUpdateReturnVisitTasksFromItems(items = []) {
 
     const sourceType = normalizeEventSourceType(item.source_type || item.event_type || item.interactionType);
     const sourceEventId = item.source_event_id || item.event_id || item.interactionId || null;
-    const targetWorkId = String(item.target_work_id || item.targetWorkId || item.work_id || item.workId || '').trim() || null;
-    const targetWorkUrl = normalizeDouyinUrl(item.target_work_url || item.targetWorkUrl || item.work_url || item.workUrl || '') || null;
+    const canUseSourceTargetWork = sourceType === 'reply';
+    const targetWorkId = canUseSourceTargetWork ? String(item.target_work_id || item.targetWorkId || item.work_id || item.workId || '').trim() || null : null;
+    const targetWorkUrl = canUseSourceTargetWork ? normalizeDouyinUrl(item.target_work_url || item.targetWorkUrl || item.work_url || item.workUrl || '') || null : null;
     const existing = selectStmt.get(identityKey);
 
     if (!existing) {

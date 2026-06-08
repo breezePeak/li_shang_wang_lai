@@ -17,6 +17,7 @@ import {
 import { canMarkDone } from './return-visit-task-service.mjs';
 import {
   collectCurrentOpenedWork,
+  collectFirstNonTopAwemeFromProfile,
   openProfileWorkByAwemeId,
 } from './return-visit-work-collector.mjs';
 import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
@@ -157,6 +158,10 @@ export async function detectWorkPresentationKind(page, resolvedWork = {}) {
   };
 }
 
+function isWorkUrl(value) {
+  return /\/(?:video|note)\/\d+|[?&]modal_id=\d+/.test(String(value || ''));
+}
+
 export async function postReturnVisitComment(page, text, presentation = {}, { execute = false } = {}) {
   if (presentation?.isModalPage) {
     console.error(`[comment] 发评论: modal页, 先打开评论区...`);
@@ -227,6 +232,61 @@ async function resolveWorkForExecution(page, task, options = {}) {
   const knownWorkId = String(task?.targetWork?.workId || '').trim();
   const profileUrl = task?.userProfileUrl;
 
+  async function openFallbackProfileWork(reason) {
+    console.error(`[visit] task=${task.taskId} 改为从主页选择回访作品 reason=${reason || 'no_known_work'}`);
+    const selected = await collectFirstNonTopAwemeFromProfile(page, profileUrl, {
+      pageLoadRetryCount,
+    });
+
+    if (!selected.ok) {
+      const selectedReason = selected.reason || 'select_profile_work_failed';
+      if (selectedReason === 'skip_no_aweme' || selectedReason === 'skip_only_top_aweme') {
+        return { ok: false, status: 'skipped_no_work', reason: selectedReason };
+      }
+      if (selectedReason === 'skip_aweme_id_missing') {
+        return { ok: false, status: 'skipped_no_suitable_work', reason: selectedReason };
+      }
+      return { ok: false, status: 'failed_collect', reason: selectedReason };
+    }
+
+    const fallbackWorkId = String(selected.aweme?.workId || selected.aweme?.awemeId || '').trim();
+    if (!fallbackWorkId) {
+      return { ok: false, status: 'skipped_no_suitable_work', reason: 'fallback_work_id_missing' };
+    }
+
+    console.error(`[visit] task=${task.taskId} 选择主页作品 workId=${fallbackWorkId}`);
+    const opened = await openProfileWorkByAwemeId(page, profileUrl, fallbackWorkId, {
+      pageLoadRetryCount,
+      reuseCurrentProfile: true,
+    });
+
+    if (!opened.ok) {
+      return { ok: false, status: 'failed_collect', reason: opened.reason || 'open_fallback_profile_work_failed' };
+    }
+
+    const fromCurrent = await collectCurrentOpenedWork(page, { maxReferenceComments });
+    if (!fromCurrent.ok) {
+      return { ok: false, status: 'failed_collect', reason: 'fallback_work_collect_failed' };
+    }
+
+    console.error(`[resolve] 回访作品收集完成: title="${String(fromCurrent.work.workTitle || selected.aweme?.workTitle || '').slice(0, 30)}"`);
+    return {
+      ok: true,
+      work: {
+        ...selected.aweme,
+        ...fromCurrent.work,
+        workId: fromCurrent.work.workId || fallbackWorkId,
+        workUrl: isWorkUrl(fromCurrent.work.workUrl) ? fromCurrent.work.workUrl : selected.aweme?.workUrl,
+      },
+      fromFallback: true,
+      openedFromProfile: true,
+    };
+  }
+
+  if (profileUrl && !knownWorkId) {
+    return openFallbackProfileWork('missing_known_work_id');
+  }
+
   if (profileUrl && knownWorkId) {
     console.error(`[visit] task=${task.taskId} 打开用户主页 profileUrl=${profileUrl}`);
     const opened = await openProfileWorkByAwemeId(page, profileUrl, knownWorkId, {
@@ -252,6 +312,7 @@ async function resolveWorkForExecution(page, task, options = {}) {
     } else {
       if (opened.reason === 'target_work_not_found_in_profile_post_api') {
         console.error(`[visit] task=${task.taskId} failed reason=未在主页作品列表中找到目标作品`);
+        return openFallbackProfileWork(opened.reason);
       } else {
         console.error(`[visit] task=${task.taskId} failed reason=${opened.reason || '主页打开作品失败'}`);
       }
@@ -399,10 +460,15 @@ export async function executeReturnVisitTask(page, task, options = {}) {
 
   let commentText = '';
   try {
-    const commentContext = buildCommentContext(task, resolvedWork);
-    console.error(`[agent] task=${taskId} 请求生成评论`);
-    commentText = await agentProvider.generateComment(commentContext);
-    console.error(`[agent] task=${taskId} 评论生成成功 comment=${commentText}`);
+    commentText = String(task.generatedComment || '').trim();
+    if (commentText) {
+      console.error(`[agent] task=${taskId} 复用已生成评论 comment=${commentText}`);
+    } else {
+      const commentContext = buildCommentContext(task, resolvedWork);
+      console.error(`[agent] task=${taskId} 请求生成评论`);
+      commentText = await agentProvider.generateComment(commentContext);
+      console.error(`[agent] task=${taskId} 评论生成成功 comment=${commentText}`);
+    }
   } catch (err) {
     console.error(`[visit] task=${taskId} failed reason=Agent 生成评论失败: ${err.message}`);
     return { ok: false, status: 'failed_generate_comment', error: err.message || 'agent_comment_failed', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork };
@@ -420,7 +486,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   if (commentResult.data?.unconfirmed) {
     console.error(`${logTag} [5/5] [FAIL] 评论未确认(已发送但未在评论区找到)`);
     await saveDebugScreenshot(page, task.taskId, 'comment_unconfirmed');
-    return { ok: false, status: 'failed_comment', error: 'comment_unconfirmed', likeStatus: nextLikeStatus.value, commentStatus: 'failed', resolvedWork };
+    return { ok: false, status: 'failed', error: 'comment_unconfirmed', likeStatus: nextLikeStatus.value, commentStatus: 'failed', resolvedWork, generatedComment: commentText };
   }
 
   console.error(`${logTag} [5/5] 评论成功 confirmed=true`);

@@ -59,7 +59,7 @@ npm run interactions:scan -- --days N --max-count M --prepare-visits
 npm run visit:run -- --execute
 ```
 
-执行阶段会从 `return_visit_tasks` 读取任务，打开目标用户主页一次，监听 `/aweme/v1/web/aweme/post/` 主页作品列表 API，根据 `workId` 匹配并点击目标作品，进入作品页后在当前进程内调用 Hermes/OpenClaw 生成回访评论，再由 CLI 填写并提交。
+执行阶段会从 `return_visit_tasks` 读取任务，打开目标用户主页一次，监听 `/aweme/v1/web/aweme/post/` 主页作品列表 API；有可用的对方作品 `workId` 时优先匹配并点击目标作品，否则选择主页首个非置顶作品，进入作品页后在当前进程内调用 Hermes/OpenClaw 生成回访评论，再由 CLI 填写并提交。
 
 不带 `--execute` 时只能 dry-run，不得真实点赞或评论。
 

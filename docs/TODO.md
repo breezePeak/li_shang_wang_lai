@@ -446,15 +446,15 @@ listReturnVisitExecuteTasks
 ├─ executeReturnVisitTask(page, task, options):
 │  │
 │  ├─ [1/5] resolveWorkForExecution:
-│  │  有 profileUrl + workId → openProfileWorkByAwemeId
+│  │  有 profileUrl + 对方作品 workId → openProfileWorkByAwemeId
 │  │  ├─ 打开用户主页（每个任务一次）
 │  │  ├─ 监听 /aweme/v1/web/aweme/post/ 主页作品列表 API
 │  │  ├─ 根据 workId 匹配目标作品 index / DOM 卡片
 │  │  ├─ 点击目标作品卡片 → 进入作品页 / modal
+│  │  ├─ 无 workId 或未找到 workId → 选择主页首个非置顶作品
 │  │  ├─ collectCurrentOpenedWork
 │  │  │  收集 workId / workUrl / workTitle / workText / contentSummary / referenceComments 等
-│  │  ├─ 未找到 workId → failed_collect（未在主页作品列表中找到目标作品）
-│  │  └─ 缺少 profileUrl 或 workId → failed_collect (missing_profile_url_or_work_id)
+│  │  └─ 缺少 profileUrl → failed_collect (missing_profile_url_or_work_id)
 │  │
 │  ├─ [2/5] detectWorkPresentationKind + handleVideoWatch:
 │  │  检测页面类型 (modal / note / video)

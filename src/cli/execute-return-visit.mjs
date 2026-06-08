@@ -69,11 +69,13 @@ function randomInRange(min, max) {
 export function getReturnVisitTaskExecutionIssue(task) {
   const hasWorkUrl = task?.targetWork?.workUrl && String(task.targetWork.workUrl).trim();
   const hasWorkId = task?.targetWork?.workId && String(task.targetWork.workId).trim();
+  const hasProfileUrl = task?.userProfileUrl && String(task.userProfileUrl).trim();
 
   const isTargetStatus = [
     RETURN_VISIT_STATUS.PENDING_EXECUTE,
     RETURN_VISIT_STATUS.PENDING_VISIT,
     RETURN_VISIT_STATUS.EXECUTING,
+    RETURN_VISIT_STATUS.FAILED_COLLECT,
     RETURN_VISIT_STATUS.FAILED_GENERATE_COMMENT,
     RETURN_VISIT_STATUS.FAILED_LIKE,
     RETURN_VISIT_STATUS.FAILED_COMMENT,
@@ -82,7 +84,7 @@ export function getReturnVisitTaskExecutionIssue(task) {
   if (!isTargetStatus) {
     return 'non_executable_status';
   }
-  if (!hasWorkUrl && !hasWorkId) {
+  if (!hasWorkUrl && !hasWorkId && !hasProfileUrl) {
     return 'no_work_target';
   }
   if (task?.commentStatus === 'posted') {
