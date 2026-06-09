@@ -1,5 +1,5 @@
 import express from 'express';
-import { generateCommentWithHermes, generateRepliesWithHermes, generateReplyWithHermes, getCommentMaxLength, resolveAgentCliConfig } from './agent/comment-agent-server.mjs';
+import { generateCommentWithHermes, generateRepliesWithHermes, generateReplyWithHermes, getCommentMaxLength, getReplyMaxLength, resolveAgentCliConfig } from './agent/comment-agent-server.mjs';
 
 const app = express();
 const port = Number(process.env.AGENT_SERVER_PORT || 3001);
@@ -32,7 +32,7 @@ app.post('/generate-reply', async (req, res) => {
   const context = req.body || {};
   const taskId = context.taskId || context?.comment?.commentId || 'unknown';
   try {
-    const maxLength = Number(context?.requirements?.maxLength || getCommentMaxLength());
+    const maxLength = Number(context?.requirements?.maxLength || getReplyMaxLength());
     console.error(`[agent] task=${taskId} 请求生成回复`);
     const reply = await generateReplyWithHermes({
       ...context,

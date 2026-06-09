@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, existsSync } from 'fs';
 import { resolve, join } from 'path';
 import { getDb, resetDb } from '../../src/db/database.mjs';
 import {
+  buildReplyContext,
   buildWorkCommentItemsFromDbRows,
   classifyStoredWorkCommentRaw,
   executeSinglePassForWorkGroup,
@@ -219,15 +220,42 @@ describe('comments:execute refactored logic', () => {
 
   it('isReplyTextTooShort 会按最小字数和 Agent 披露判断已有回复是否需要重写', () => {
     expect(isReplyTextTooShort('收到啦', { minLength: 15 })).toBe(true);
+    expect(isReplyTextTooShort('Hermes代看不错', { minLength: 15, maxLength: 60 })).toBe(false);
     expect(isReplyTextTooShort('这个问题后面可以单独展开讲讲呀', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('Hermes替主人看完觉得这个问题挺真实', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('HermesAI跑来串门2222已阅感谢互动', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('AI助手Hermes路过第一次团购体验怎么样', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('我是HermesAI1111也是来分享经历的吗', { minLength: 15 })).toBe(true);
+    expect(isReplyTextTooShort('测试环境也认真对待，AI帮忙回评了', { minLength: 15, maxLength: 60 })).toBe(true);
+    expect(isReplyTextTooShort('第一次团购分享，AI帮你回复啦', { minLength: 15, maxLength: 60 })).toBe(true);
+    expect(isReplyTextTooShort('第一次发视频就有AI帮忙看评论了', { minLength: 15, maxLength: 60 })).toBe(true);
     expect(isReplyTextTooShort('Hermes代看后觉得Test留言收到啦', { minLength: 15 })).toBe(true);
+    expect(isReplyTextTooShort('Hermes代看后觉得2222这条反馈需要再看', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('Hermes代看后觉得玩水视频看着好凉快🤔', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('Hermes代看后觉得这个问题可以展开聊聊', { minLength: 15 })).toBe(false);
     expect(isReplyTextTooShort('OpenClaw代看后觉得这条反馈挺真诚自然', { minLength: 15 })).toBe(false);
+  });
+
+  it('回评上下文默认 15-60，已有回复校验允许上下 5 个可见字符浮动', () => {
+    const oldMax = process.env.REPLY_MAX_LENGTH;
+    const oldTolerance = process.env.REPLY_LENGTH_TOLERANCE;
+    delete process.env.REPLY_MAX_LENGTH;
+    delete process.env.REPLY_LENGTH_TOLERANCE;
+
+    try {
+      const context = buildReplyContext({ commentId: 10 });
+      const sixtyFiveChars = `Hermes代看后觉得${'这'.repeat(54)}`;
+      const sixtySixChars = `Hermes代看后觉得${'这'.repeat(55)}`;
+
+      expect(context.requirements).toMatchObject({ minLength: 15, maxLength: 60 });
+      expect(isReplyTextTooShort(sixtyFiveChars, context.requirements)).toBe(false);
+      expect(isReplyTextTooShort(sixtySixChars, context.requirements)).toBe(true);
+    } finally {
+      if (oldMax === undefined) delete process.env.REPLY_MAX_LENGTH;
+      else process.env.REPLY_MAX_LENGTH = oldMax;
+      if (oldTolerance === undefined) delete process.env.REPLY_LENGTH_TOLERANCE;
+      else process.env.REPLY_LENGTH_TOLERANCE = oldTolerance;
+    }
   });
 
   it('generateMissingReplies 把所有待生成回评一次性交给 Agent，并按 taskId 写回', async () => {

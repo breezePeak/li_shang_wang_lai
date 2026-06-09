@@ -7,6 +7,8 @@ const execFileAsync = promisify(execFile);
 
 export const DEFAULT_COMMENT_MAX_LENGTH = 30;
 export const DEFAULT_REPLY_MIN_LENGTH = 15;
+export const DEFAULT_REPLY_MAX_LENGTH = 60;
+export const DEFAULT_REPLY_LENGTH_TOLERANCE = 5;
 const COMMENT_RULES_PATH = resolve('references', 'comment-safety-rules.md');
 let cachedCommentRules = null;
 
@@ -30,6 +32,16 @@ export function getReplyMinLength(value = process.env.REPLY_MIN_LENGTH || proces
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_REPLY_MIN_LENGTH;
 }
 
+export function getReplyMaxLength(value = process.env.REPLY_MAX_LENGTH) {
+  const n = Number(value || DEFAULT_REPLY_MAX_LENGTH);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_REPLY_MAX_LENGTH;
+}
+
+export function getReplyLengthTolerance(value = process.env.REPLY_LENGTH_TOLERANCE) {
+  const n = Number(value || DEFAULT_REPLY_LENGTH_TOLERANCE);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_REPLY_LENGTH_TOLERANCE;
+}
+
 export function countVisibleChars(text = '') {
   return Array.from(String(text || '').replace(/\s+/g, '')).length;
 }
@@ -40,11 +52,11 @@ export function hasAgentDisclosure(text = '') {
 }
 
 export function hasForbiddenReplyPersona(text = '') {
-  return /主人|主家|替.*主|帮.*主|自动回复|系统生成|系统提示|我是|这边是|这里是|AI助手|智能助手|小助手|[A-Za-z]+AI|AI[A-Za-z]+/.test(String(text || ''));
+  return /主人|主家|替.*主|帮.*主|自动回复|系统生成|系统提示|我是|这边是|这里是|AI助手|智能助手|小助手|[A-Za-z]+AI|AI[A-Za-z]+|AI.{0,6}(帮忙|帮你|代|替).{0,6}(回|回复|回评|看评论)|AI.{0,6}(回了|回复啦|回评啦|看评论了)|帮你守着评论区/.test(String(text || ''));
 }
 
 export function hasLowQualityReplyText(text = '') {
-  return /串门|路过|来啦|跑来|代班|已阅|收到啦|留言收到|感谢互动|打卡|test留言|测试留言|[0-9]{3,}已阅/i.test(String(text || ''));
+  return /串门|路过|来啦|跑来|代班|已阅|收到啦|留言收到|感谢互动|打卡|test留言|测试留言|[0-9]{3,}/i.test(String(text || ''));
 }
 
 export function hasReplyEmojiOrTilde(text = '') {
@@ -90,7 +102,7 @@ export function buildCommentPrompt(context = {}) {
 }
 
 export function buildReplyPrompt(context = {}) {
-  const maxLength = Number(context?.requirements?.maxLength || getCommentMaxLength());
+  const maxLength = Number(context?.requirements?.maxLength || getReplyMaxLength());
   const minLength = Number(context?.requirements?.minLength || getReplyMinLength());
   const requireAgentDisclosure = context?.requirements?.requireAgentDisclosure !== false;
   const safetyRules = loadCommentSafetyRules();
@@ -135,7 +147,7 @@ export function buildReplyBatchPrompt(contexts = []) {
     const work = context.work || {};
     const comment = context.comment || {};
     const minLength = Number(context?.requirements?.minLength || getReplyMinLength());
-    const maxLength = Number(context?.requirements?.maxLength || getCommentMaxLength());
+    const maxLength = Number(context?.requirements?.maxLength || getReplyMaxLength());
     const requireAgentDisclosure = context?.requirements?.requireAgentDisclosure !== false;
 
     return {
@@ -207,12 +219,17 @@ export function validateComment(comment, { maxLength = getCommentMaxLength() } =
   return text;
 }
 
-export function validateReply(reply, { minLength = getReplyMinLength(), maxLength = getCommentMaxLength(), requireAgentDisclosure = true } = {}) {
+export function validateReply(reply, { minLength = getReplyMinLength(), maxLength = getReplyMaxLength(), requireAgentDisclosure = true, lengthTolerance = getReplyLengthTolerance() } = {}) {
   const text = String(reply || '').trim();
   const visibleLength = countVisibleChars(text);
+  const tolerance = Number.isFinite(Number(lengthTolerance)) ? Number(lengthTolerance) : getReplyLengthTolerance();
+  const minTarget = Number.isFinite(Number(minLength)) ? Number(minLength) : getReplyMinLength();
+  const maxTarget = Number.isFinite(Number(maxLength)) ? Number(maxLength) : getReplyMaxLength();
+  const minAllowed = Math.max(1, minTarget - tolerance);
+  const maxAllowed = maxTarget + tolerance;
   if (!text) throw new Error('reply 为空');
-  if (visibleLength < minLength) throw new Error(`reply 过短: ${visibleLength}/${minLength}`);
-  if (visibleLength > maxLength) throw new Error(`reply 超长: ${visibleLength}/${maxLength}`);
+  if (visibleLength < minAllowed) throw new Error(`reply 过短: ${visibleLength}/${minAllowed}`);
+  if (visibleLength > maxAllowed) throw new Error(`reply 超长: ${visibleLength}/${maxAllowed}`);
   if (requireAgentDisclosure && !hasAgentDisclosure(text)) throw new Error('reply 缺少 Agent 身份提示');
   if (requireAgentDisclosure && hasForbiddenReplyPersona(text)) throw new Error('reply 使用了泛化或伪装身份提示');
   if (hasLowQualityReplyText(text)) throw new Error('reply 使用了低质套话或复读内容');
@@ -246,9 +263,10 @@ export function validateReplyBatch(parsed, contexts = []) {
 
     const context = expected.get(taskId);
     const minLength = Number(context?.requirements?.minLength || getReplyMinLength());
-    const maxLength = Number(context?.requirements?.maxLength || getCommentMaxLength());
+    const maxLength = Number(context?.requirements?.maxLength || getReplyMaxLength());
+    const lengthTolerance = Number(context?.requirements?.lengthTolerance ?? getReplyLengthTolerance());
     const requireAgentDisclosure = context?.requirements?.requireAgentDisclosure !== false;
-    byTaskId.set(taskId, validateReply(item?.reply, { minLength, maxLength, requireAgentDisclosure }));
+    byTaskId.set(taskId, validateReply(item?.reply, { minLength, maxLength, requireAgentDisclosure, lengthTolerance }));
   }
 
   const missing = [...expected.keys()].filter(taskId => !byTaskId.has(taskId));
@@ -347,7 +365,7 @@ export async function generateCommentWithHermes(context, options = {}) {
 }
 
 export async function generateReplyWithHermes(context, options = {}) {
-  const maxLength = Number(context?.requirements?.maxLength || options.maxLength || getCommentMaxLength());
+  const maxLength = Number(context?.requirements?.maxLength || options.maxLength || getReplyMaxLength());
   const minLength = Number(context?.requirements?.minLength || options.minLength || getReplyMinLength());
   const requireAgentDisclosure = context?.requirements?.requireAgentDisclosure !== false;
   const basePrompt = buildReplyPrompt({
@@ -389,7 +407,7 @@ export async function generateRepliesWithHermes(contexts = [], options = {}) {
   if (items.length === 0) return [];
 
   const normalized = items.map(context => {
-    const maxLength = Number(context?.requirements?.maxLength || options.maxLength || getCommentMaxLength());
+    const maxLength = Number(context?.requirements?.maxLength || options.maxLength || getReplyMaxLength());
     const minLength = Number(context?.requirements?.minLength || options.minLength || getReplyMinLength());
     const requireAgentDisclosure = context?.requirements?.requireAgentDisclosure !== false;
     return {

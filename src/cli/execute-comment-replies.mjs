@@ -41,7 +41,7 @@ import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
 import { normalizeNoticeApiItem } from '../domain/notice-api-normalization.mjs';
-import { countVisibleChars, getReplyMinLength, hasAgentDisclosure, hasForbiddenReplyPersona, hasLowQualityReplyText, hasReplyEmojiOrTilde } from '../agent/comment-agent-server.mjs';
+import { countVisibleChars, getReplyLengthTolerance, getReplyMaxLength, getReplyMinLength, hasAgentDisclosure, hasForbiddenReplyPersona, hasLowQualityReplyText, hasReplyEmojiOrTilde } from '../agent/comment-agent-server.mjs';
 
 export function parseArgs(argv) {
   const args = {
@@ -99,8 +99,8 @@ export function buildWorkCommentItemsFromDbRows(rows = []) {
 }
 
 export function buildReplyContext(item = {}) {
-  const maxLength = Number(process.env.COMMENT_MAX_LENGTH || 30);
-  const minLength = Number(process.env.REPLY_MIN_LENGTH || process.env.COMMENT_MIN_LENGTH || getReplyMinLength());
+  const maxLength = getReplyMaxLength();
+  const minLength = getReplyMinLength();
   return {
     taskId: `work_comment_${item.commentId}`,
     work: {
@@ -124,10 +124,14 @@ export function buildReplyContext(item = {}) {
   };
 }
 
-export function isReplyTextInvalid(replyText, { minLength = getReplyMinLength(), requireAgentDisclosure = true } = {}) {
+export function isReplyTextInvalid(replyText, { minLength = getReplyMinLength(), maxLength = getReplyMaxLength(), requireAgentDisclosure = true, lengthTolerance = getReplyLengthTolerance() } = {}) {
   const text = String(replyText || '').trim();
   if (!text) return false;
-  if (countVisibleChars(text) < minLength) return true;
+  const visibleLength = countVisibleChars(text);
+  const minAllowed = Math.max(1, Number(minLength) - Number(lengthTolerance));
+  const maxAllowed = Number(maxLength) + Number(lengthTolerance);
+  if (visibleLength < minAllowed) return true;
+  if (visibleLength > maxAllowed) return true;
   if (requireAgentDisclosure && !hasAgentDisclosure(text)) return true;
   if (requireAgentDisclosure && hasForbiddenReplyPersona(text)) return true;
   if (hasLowQualityReplyText(text)) return true;
@@ -344,10 +348,14 @@ export function validateWorkCommentItem(item) {
     return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, status: 'skipped_empty_reply' };
   }
   if (isReplyTextInvalid(replyText)) {
-    const minLength = Number(process.env.REPLY_MIN_LENGTH || process.env.COMMENT_MIN_LENGTH || getReplyMinLength());
-    const reason = countVisibleChars(replyText) < minLength
-      ? `reply_text_too_short:${countVisibleChars(replyText)}/${minLength}`
-      : 'reply_text_missing_agent_disclosure';
+    const visibleLength = countVisibleChars(replyText);
+    const minAllowed = Math.max(1, getReplyMinLength() - getReplyLengthTolerance());
+    const maxAllowed = getReplyMaxLength() + getReplyLengthTolerance();
+    const reason = visibleLength < minAllowed
+      ? `reply_text_too_short:${visibleLength}/${minAllowed}`
+      : visibleLength > maxAllowed
+        ? `reply_text_too_long:${visibleLength}/${maxAllowed}`
+        : 'reply_text_missing_agent_disclosure';
     markCommentPending(row.id, reason);
     console.error(`[comments:execute] commentId=${item.commentId} reply_text 不符合发送要求，跳过执行 reason=${reason}`);
     return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, status: 'skipped', error: reason };

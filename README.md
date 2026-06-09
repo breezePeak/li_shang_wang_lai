@@ -146,7 +146,10 @@ $env:AGENT_PROVIDER="openclaw"; npm run comments:execute -- --days 7 --limit 50
 | `HERMES_ARGS` | `chat -Q -q {prompt}` | Hermes 参数模板，`{prompt}` 会替换为提示词 |
 | `OPENCLAW_ARGS` | `chat -Q -q {prompt}` | OpenClaw 参数模板，`{prompt}` 会替换为提示词 |
 | `AGENT_SERVER_PORT` | `3001` | agent-server 端口 |
-| `COMMENT_MAX_LENGTH` | `30` | 默认评论/回复最大长度 |
+| `COMMENT_MAX_LENGTH` | `30` | 默认回访评论最大长度 |
+| `REPLY_MIN_LENGTH` | `15` | 默认回评回复最小长度 |
+| `REPLY_MAX_LENGTH` | `60` | 默认回评回复最大长度 |
+| `REPLY_LENGTH_TOLERANCE` | `5` | 回评回复校验允许的上下浮动字符数 |
 | `AGENT_TIMEOUT_MS` | `60000` | 通用超时，优先级低于 provider 专用超时 |
 | `HERMES_TIMEOUT_MS` | `60000` | Hermes 超时 |
 | `OPENCLAW_TIMEOUT_MS` | `60000` | OpenClaw 超时 |

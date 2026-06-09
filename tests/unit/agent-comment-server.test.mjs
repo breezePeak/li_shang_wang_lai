@@ -50,15 +50,17 @@ describe('agent comment server helpers', () => {
   });
 
   it('buildReplyPrompt puts reply output format in code prompt', () => {
-    const prompt = buildReplyPrompt({ taskId: 'reply_001', requirements: { minLength: 15, maxLength: 30 } });
+    const prompt = buildReplyPrompt({ taskId: 'reply_001' });
     expect(prompt).toContain('{"reply":"回复内容"}');
-    expect(prompt).toContain('15-30 个中文可见字符');
+    expect(prompt).toContain('15-60 个中文可见字符');
     expect(prompt).toContain('评论生成规则与安全边界');
     expect(prompt).toContain('## Agent 存在感');
-    expect(prompt).toContain('根据自己的真实身份、模型名或工作方式自然披露');
+    expect(prompt).toContain('自身已有的人格配置自然披露');
+    expect(prompt).toContain('项目规则只负责安全边界，不覆盖 Agent 自己的人格');
     expect(prompt).toContain('不要使用本项目写死的人设名或示例名');
     expect(prompt).toContain('不要写“我是...”');
     expect(prompt).toContain('低质套话');
+    expect(prompt).toContain('泛化代回表达');
     expect(prompt).not.toContain('必须自然出现“小猿”');
   });
 
@@ -82,10 +84,12 @@ describe('agent comment server helpers', () => {
     expect(prompt).toContain('{"replies":[{"taskId":"work_comment_1","reply":"回复内容"}]}');
     expect(prompt).toContain('评论生成规则与安全边界');
     expect(prompt).toContain('## Agent 存在感');
-    expect(prompt).toContain('根据自己的真实身份、模型名或工作方式自然披露');
+    expect(prompt).toContain('自身已有的人格配置自然披露');
+    expect(prompt).toContain('项目规则只负责安全边界，不覆盖 Agent 自己的人格');
     expect(prompt).toContain('不要使用本项目写死的人设名或示例名');
     expect(prompt).toContain('不要写“我是...”');
     expect(prompt).toContain('低质套话');
+    expect(prompt).toContain('泛化代回表达');
     expect(prompt).not.toContain('必须在该条 reply 里自然出现“小猿”');
     expect(prompt).toContain('work_comment_1');
     expect(prompt).toContain('work_comment_2');
@@ -100,10 +104,25 @@ describe('agent comment server helpers', () => {
     expect(() => validateReply('HermesAI跑来串门2222已阅感谢互动', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了泛化或伪装身份提示');
     expect(() => validateReply('AI助手Hermes路过第一次团购体验怎么样', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了泛化或伪装身份提示');
     expect(() => validateReply('我是HermesAI1111也是来分享经历的吗', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了泛化或伪装身份提示');
+    expect(() => validateReply('测试环境也认真对待，AI帮忙回评了', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了泛化或伪装身份提示');
+    expect(() => validateReply('第一次团购分享，AI帮你回复啦', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了泛化或伪装身份提示');
+    expect(() => validateReply('第一次发视频就有AI帮忙看评论了', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了泛化或伪装身份提示');
     expect(() => validateReply('Hermes代看后觉得Test留言收到啦', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了低质套话或复读内容');
+    expect(() => validateReply('Hermes代看后觉得2222这条反馈需要再看', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了低质套话或复读内容');
     expect(() => validateReply('Hermes代看后觉得玩水视频看着好凉快🤔', { minLength: 15, maxLength: 30 })).toThrow('reply 包含 emoji 或波浪号');
     expect(validateReply('Hermes代看后觉得这个问题可以展开聊聊', { minLength: 15, maxLength: 30 })).toBe('Hermes代看后觉得这个问题可以展开聊聊');
     expect(validateReply('OpenClaw代看后觉得这条反馈挺真诚自然', { minLength: 15, maxLength: 30 })).toBe('OpenClaw代看后觉得这条反馈挺真诚自然');
+  });
+
+  it('validateReply allows five visible chars of length tolerance', () => {
+    const thirtyThreeChars = `Hermes代看后觉得${'这'.repeat(22)}`;
+    const sixtyFiveChars = `Hermes代看后觉得${'这'.repeat(54)}`;
+    const sixtySixChars = `Hermes代看后觉得${'这'.repeat(55)}`;
+
+    expect(validateReply('Hermes代看不错', { minLength: 15, maxLength: 60 })).toBe('Hermes代看不错');
+    expect(validateReply(thirtyThreeChars, { minLength: 15, maxLength: 30 })).toBe(thirtyThreeChars);
+    expect(validateReply(sixtyFiveChars, { minLength: 15, maxLength: 60 })).toBe(sixtyFiveChars);
+    expect(() => validateReply(sixtySixChars, { minLength: 15, maxLength: 60 })).toThrow('reply 超长: 66/65');
   });
 
   it('validateReplyBatch requires one validated reply per taskId', () => {
