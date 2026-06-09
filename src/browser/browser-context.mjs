@@ -102,10 +102,10 @@ export async function createBrowserContext(options = {}) {
   if (enableReuse) {
     if (await checkPort()) {
       try {
-        const { context } = await connectReusableBrowser();
+        const { browser, context } = await connectReusableBrowser();
         console.error('[browser] 复用已有浏览器（CDP 连接）');
         return {
-          browser: { close: async () => {} },
+          browser: { close: async () => {}, disconnect: async () => { await browser.close().catch(() => {}); } },
           context,
           reused: true,
         };
@@ -116,9 +116,9 @@ export async function createBrowserContext(options = {}) {
 
     console.error('[browser] 启动独立可复用浏览器...');
     await launchDetachedReusableBrowser({ profileDir, headless });
-    const { context } = await connectReusableBrowser();
+    const { browser, context } = await connectReusableBrowser();
     return {
-      browser: { close: async () => {} },
+      browser: { close: async () => {}, disconnect: async () => { await browser.close().catch(() => {}); } },
       context,
       reused: false,
       detached: true,

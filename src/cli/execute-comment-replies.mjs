@@ -958,6 +958,7 @@ async function executeWorkCommentItems(items, args) {
     saveRunSummary(run);
     const shouldClose = resolveBrowserClose(run);
     if (browser && shouldClose) await browser.close();
+    else if (browser && typeof browser.disconnect === 'function') await browser.disconnect();
   }
 
   return results;
