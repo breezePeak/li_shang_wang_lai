@@ -3,6 +3,7 @@ import {
   buildWorkReplyTarget,
   extractModalIdFromUrl,
   fillWorkReplyText,
+  pickVisibleModalCandidate,
   parseDouyinTimeText,
   pickWorkCommentCandidate,
   postWorkModalComment,
@@ -35,6 +36,48 @@ describe('extractModalIdFromUrl', () => {
     expect(modalId).toBe('7643770606596888954');
     const workId = modalId;
     expect(workId).toBe('7643770606596888954');
+  });
+});
+
+describe('pickVisibleModalCandidate', () => {
+  it('页面残留多个 modal 时选择当前可见面积最大的作品容器', () => {
+    const selected = pickVisibleModalCandidate([
+      {
+        index: 0,
+        hidden: false,
+        title: '第一个作品标题',
+        rect: { left: -1200, top: 80, right: -800, bottom: 780, width: 400, height: 700 },
+      },
+      {
+        index: 1,
+        hidden: false,
+        title: '第二个作品标题',
+        rect: { left: 260, top: 80, right: 1260, bottom: 780, width: 1000, height: 700 },
+      },
+    ], { width: 1440, height: 900 });
+
+    expect(selected.index).toBe(1);
+    expect(selected.title).toBe('第二个作品标题');
+  });
+
+  it('隐藏的第一个 modal 不会压过当前可见作品', () => {
+    const selected = pickVisibleModalCandidate([
+      {
+        index: 0,
+        hidden: true,
+        title: '第一个作品标题',
+        rect: { left: 220, top: 80, right: 1220, bottom: 780, width: 1000, height: 700 },
+      },
+      {
+        index: 1,
+        hidden: false,
+        title: '第二个作品标题',
+        rect: { left: 260, top: 80, right: 1260, bottom: 780, width: 1000, height: 700 },
+      },
+    ], { width: 1440, height: 900 });
+
+    expect(selected.index).toBe(1);
+    expect(selected.title).toBe('第二个作品标题');
   });
 });
 

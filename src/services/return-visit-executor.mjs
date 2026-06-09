@@ -330,6 +330,13 @@ async function refreshVisibleWorkForComment(page, task, resolvedWork, maxReferen
   const visibleWork = current.work || {};
   const currentWorkId = normalizeWorkId(visibleWork.workId || '');
   const expectedWorkId = normalizeWorkId(resolvedWork.workId || '');
+  console.error(
+    `[visit:probe] visible_work_context phase=${phase}` +
+      ` expected=${expectedWorkId || '(missing)'}` +
+      ` actual=${currentWorkId || '(missing)'}` +
+      ` title="${String(visibleWork.workTitle || '').slice(0, 40)}"` +
+      ` fingerprint="${normalizeVisibleFingerprint(visibleWork.visibleFingerprint).slice(0, 80)}"`
+  );
   if (expectedWorkId && currentWorkId && currentWorkId !== expectedWorkId) {
     return { ok: false, error: 'opened_work_id_mismatch', expectedWorkId, actualWorkId: visibleWork.workId };
   }

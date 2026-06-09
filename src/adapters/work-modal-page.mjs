@@ -358,6 +358,39 @@ export function extractModalIdFromUrl(url) {
   return match ? match[1] : null;
 }
 
+export function pickVisibleModalCandidate(candidates = [], viewport = {}) {
+  const width = Number(viewport.width || 0);
+  const height = Number(viewport.height || 0);
+  let best = null;
+
+  for (const candidate of candidates) {
+    const rect = candidate?.rect || {};
+    const left = Number(rect.left || 0);
+    const top = Number(rect.top || 0);
+    const right = Number(rect.right ?? (left + Number(rect.width || 0)));
+    const bottom = Number(rect.bottom ?? (top + Number(rect.height || 0)));
+    const rectWidth = Number(rect.width || Math.max(0, right - left));
+    const rectHeight = Number(rect.height || Math.max(0, bottom - top));
+    const visibleWidth = Math.max(0, Math.min(right, width || right) - Math.max(left, 0));
+    const visibleHeight = Math.max(0, Math.min(bottom, height || bottom) - Math.max(top, 0));
+    const visibleArea = visibleWidth * visibleHeight;
+    const centerX = left + rectWidth / 2;
+    const centerY = top + rectHeight / 2;
+    const viewportCenterX = (width || rectWidth) / 2;
+    const viewportCenterY = (height || rectHeight) / 2;
+    const centerDistance = Math.hypot(centerX - viewportCenterX, centerY - viewportCenterY);
+    const hiddenPenalty = candidate?.hidden ? 1000000000 : 0;
+    const score = visibleArea - centerDistance - hiddenPenalty;
+
+    if (rectWidth < 100 || rectHeight < 100 || visibleArea <= 0) continue;
+    if (!best || score > best.score) {
+      best = { ...candidate, visibleArea, score };
+    }
+  }
+
+  return best || null;
+}
+
 async function isWorkModalVisible(page) {
   return await page.evaluate(() => {
     const modals = document.querySelectorAll('[data-e2e="modal-video-container"], .modal-video-container');
@@ -382,7 +415,29 @@ export async function extractWorkModalContext(page) {
   let workText = '';
   try {
     const textData = await page.evaluate(() => {
-      const modal = document.querySelector('.modal-video-container');
+      function pickVisibleModal() {
+        const modals = Array.from(document.querySelectorAll('[data-e2e="modal-video-container"], .modal-video-container'));
+        let best = null;
+        for (let index = 0; index < modals.length; index++) {
+          const node = modals[index];
+          const rect = node.getBoundingClientRect();
+          const style = window.getComputedStyle ? window.getComputedStyle(node) : {};
+          const hidden = style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) === 0;
+          const visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
+          const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+          const visibleArea = visibleWidth * visibleHeight;
+          const centerX = rect.left + rect.width / 2;
+          const centerY = rect.top + rect.height / 2;
+          const centerDistance = Math.hypot(centerX - window.innerWidth / 2, centerY - window.innerHeight / 2);
+          const score = visibleArea - centerDistance - (hidden ? 1000000000 : 0);
+          if (rect.width < 100 || rect.height < 100 || visibleArea <= 0) continue;
+          if (!best || score > best.score) best = { node, index, score, visibleArea, rect };
+        }
+        return best || null;
+      }
+
+      const selected = pickVisibleModal();
+      const modal = selected?.node || document.querySelector('.modal-video-container');
       const scope = modal || document.body;
 
       const specificSelectors = [
@@ -422,10 +477,26 @@ export async function extractWorkModalContext(page) {
 
       const titleText = unique[0] || '';
       const bodyText = unique.join('\n').slice(0, 1200);
-      return { titleText, bodyText };
+      return {
+        titleText,
+        bodyText,
+        probe: {
+          modalCount: document.querySelectorAll('[data-e2e="modal-video-container"], .modal-video-container').length,
+          selectedModalIndex: selected?.index ?? -1,
+          selectedVisibleArea: Math.round(selected?.visibleArea || 0),
+        },
+      };
     });
     workTitle = textData.titleText || '';
     workText = textData.bodyText || workTitle || '';
+    if (textData.probe?.modalCount > 1 || process.env.LISHANGWANGLAI_CONTEXT_PROBE === '1') {
+      console.error(
+        `[work-modal:probe] context modalCount=${textData.probe.modalCount}` +
+          ` selected=${textData.probe.selectedModalIndex}` +
+          ` area=${textData.probe.selectedVisibleArea}` +
+          ` title="${String(workTitle || '').slice(0, 40)}"`
+      );
+    }
   } catch {}
 
   const videoMatch = currentUrl.match(/\/video\/([^/?#]+)/);
