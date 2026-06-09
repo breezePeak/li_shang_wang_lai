@@ -12,45 +12,45 @@ const TYPE_PATTERNS = {
   tech: /技术|代码|开发|编程|前端|后端|算法|架构|调试|工程|AI|模型/,
 };
 
-// 全小猿人格模板金句库 (字数均在 28-34 之间，符合 14-36 字符强要求)
+// 安全回访评论模板库，保持中性，不写死任何 Agent 人设名。
 const COMMENT_LIBRARY = {
   tutorial: [
-    '小猿觉得这个视频步骤拆解得挺清楚的，后面可以再多展开一些细节。',
-    '小猿看完觉得这个方法很落地，正好解决了很多新手遇到的实际问题。',
-    '小猿觉得这种实用的技术技巧讲解，细节部分还是挺有参考意义的。',
+    '这个步骤拆得挺清楚，细节也比较好跟。',
+    '这个方法讲得挺落地，新手跟着也容易理解。',
+    '这类技巧讲得很实用，关键点挺有参考感。',
   ],
   viewpoint: [
-    '小猿看完觉得这个思考角度挺有启发，读完以后确实带来了一些新思路。',
-    '小猿觉得这种观点表达得很清晰自然，看完之后内心产生了挺多共鸣的。',
-    '小猿看完觉得这段技术复盘很扎实到位，有很多点值得再反复琢磨一下。',
+    '这个思考角度挺有启发，表达也比较清楚。',
+    '这类观点说得挺自然，看完挺容易共鸣。',
+    '这段复盘挺扎实，里面的问题意识很清楚。',
   ],
   life: [
-    '小猿看完感觉内容挺用心的，日常记录的很多场景看着特别有接地气代入感。',
-    '小猿觉得这种真实日常碎碎念挺有代入感的，生活感被拿捏得挺不错的。',
-    '小猿觉得这种自然的日常分享很真实，很多地方看着特别容易让人产生共鸣。',
+    '这段日常记录挺真实，生活感也很自然。',
+    '这种生活片段很有代入感，看着挺舒服。',
+    '这个分享很自然，细节里有真实感。',
   ],
   tool: [
-    '小猿看完觉得这套工具的思路和应用场景讲得非常明白，很能解决实际痛点。',
-    '小猿觉得这套落地方法思路特别清晰，日常工作里很多地方都能应用起来。',
-    '小猿觉得这个工具分享思路挺落地实用的，抽空一定要好好研究一下。',
+    '这个工具场景讲得清楚，实际用起来会更顺。',
+    '这套方法挺落地，应用场景也说明白了。',
+    '这个工具分享挺实用，思路也比较清楚。',
   ],
   tech: [
-    '小猿看完觉得这个方案拆解得挺到位的，底层的代码与工程思路非常清晰。',
-    '小猿觉得这次的技术开发分享质量很高，很多关键的硬核技术点都讲明白了。',
-    '小猿看完觉得思路梳理得挺清楚的，技术实现的细节描述很有参考借鉴价值。',
+    '这个技术思路挺稳，关键细节也讲明白了。',
+    '这次开发分享质量挺高，问题切得很清楚。',
+    '技术实现细节挺有参考价值，思路也顺。',
   ],
   generic: [
-    '小猿看完觉得这个内容梳理得很清晰自然，读完以后确实有一些不错的启发。',
-    '小猿觉得这个用心的分享非常有参考价值，很多观点和方法都讲得很明白。',
-    '小猿觉得这篇精心整理的内容逻辑挺通顺的，许多建议都给得很诚恳到位。',
+    '这个内容梳理得挺清楚，看完有些启发。',
+    '这个分享挺用心，很多点讲得比较明白。',
+    '这篇内容逻辑挺顺，建议也给得挺诚恳。',
   ],
 };
 
-// 绝对安全的小猿泛化兜底库，用于无合适候选或内容严重不足时的安全返回
+// 内容不足或候选全部被过滤时的安全兜底。
 const ABSOLUTE_GENERIC_SAFETY = [
-  '小猿看完觉得这个内容梳理得很清晰自然，读完以后确实有一些不错的启发。',
-  '小猿觉得这个用心的分享非常有参考价值，很多观点和方法都讲得很明白。',
-  '小猿觉得这篇精心整理的内容逻辑挺通顺的，许多建议都给得很诚恳到位。',
+  '这个内容梳理得挺清楚，看完有些启发。',
+  '这个分享挺用心，很多点讲得比较明白。',
+  '这篇内容逻辑挺顺，建议也给得挺诚恳。',
 ];
 
 function normalizeText(text) {
@@ -163,53 +163,50 @@ function buildAgentCandidates(analysis) {
   const candidates = [];
 
   for (const signal of sceneSignals || []) {
-    candidates.push(`小猿看完觉得${signal.subject}很有现场感，${signal.detail}。`);
-    candidates.push(`小猿觉得这段${signal.subject}挺真实，${signal.detail}。`);
+    candidates.push(`${signal.subject}这个点很有现场感，${signal.detail}。`);
+    candidates.push(`这段${signal.subject}挺真实，${signal.detail}。`);
   }
 
   if (commentFocus === 'light') {
-    candidates.push('小猿看完觉得氛围很轻松，评论区也挺有共鸣。');
+    candidates.push('氛围很轻松，评论区也挺有共鸣。');
   } else if (commentFocus === 'real') {
-    candidates.push('小猿看完觉得内容挺真实，评论区的感受也很自然。');
+    candidates.push('内容挺真实，评论区的感受也很自然。');
   } else if (commentFocus === 'useful') {
-    candidates.push('小猿看完觉得细节挺实用，评论区关注点也很准。');
+    candidates.push('细节挺实用，评论区关注点也很准。');
   } else if (commentFocus === 'thinking') {
-    candidates.push('小猿看完觉得思路挺顺，评论区的共鸣点也很真。');
+    candidates.push('思路挺顺，评论区的共鸣点也很真。');
   } else if (commentFocus === 'visual') {
-    candidates.push('小猿看完觉得画面挺有质感，整体氛围也很舒服。');
+    candidates.push('画面挺有质感，整体氛围也很舒服。');
   }
 
   const byType = {
-    tutorial: '小猿看完觉得步骤挺清楚，细节拆得很实用。',
-    viewpoint: '小猿看完觉得观点很顺，表达里的思考也挺真。',
-    life: '小猿看完觉得氛围很自然，生活感拿捏得挺好。',
-    tool: '小猿看完觉得场景讲得清楚，实际用起来会很顺。',
-    tech: '小猿看完觉得技术思路挺稳，关键细节也讲明白了。',
-    generic: '小猿看完觉得内容挺用心，评论区反馈也很真实。',
+    tutorial: '步骤挺清楚，细节拆得很实用。',
+    viewpoint: '观点很顺，表达里的思考也挺真。',
+    life: '氛围很自然，生活感拿捏得挺好。',
+    tool: '场景讲得清楚，实际用起来会很顺。',
+    tech: '技术思路挺稳，关键细节也讲明白了。',
+    generic: '内容挺用心，评论区反馈也很真实。',
   };
   candidates.push(byType[contentType] || byType.generic);
-  candidates.push('小猿看完觉得这个分享挺自然，细节处理也很用心。');
+  candidates.push('这个分享挺自然，细节处理也很用心。');
 
   return [...new Set(candidates)];
 }
 
 /**
- * 校验评论是否符合小猿人格和强约束规范
+ * 校验回访评论是否符合安全边界。
  * @param {string} text 待校验的评论内容
  * @param {string[]} referenceComments 已有的参考评论，防抄袭
  * @param {string} workTitle 被访作品标题，防复读
  * @returns {boolean} 是否合规
  */
-export function validateXiaoyuanComment(text, referenceComments = [], workTitle = '') {
+export function validateReturnVisitComment(text, referenceComments = [], workTitle = '') {
   if (!text || typeof text !== 'string') return false;
 
-  // 1. 评论必须包含“小猿”二字
-  if (!text.includes('小猿')) return false;
-
-  // 2. 评论对外不能出现“主人”
+  // 评论对外不能出现“主人”
   if (text.includes('主人')) return false;
 
-  // 3. 评论长度严格控制在 14 到 36 个中文字符之间
+  // 评论长度严格控制在 14 到 36 个中文字符之间
   if (text.length < MIN_COMMENT_LENGTH || text.length > MAX_COMMENT_LENGTH) return false;
 
   // 4. 不要 emoji 表情
@@ -254,11 +251,11 @@ export function validateXiaoyuanComment(text, referenceComments = [], workTitle 
 }
 
 /**
- * 核心生成机制：基于输入信息生成符合小猿人格和强约束规范的评论
+ * 核心生成机制：基于输入信息生成符合安全边界的回访评论。
  * @param {object} input 输入视频信息对象
  * @returns {object} 生成结果对象 { ok, reason, contentType, comment, candidates }
  */
-export function generateXiaoyuanReturnVisitComment(input = {}) {
+export function generateContextualReturnVisitComment(input = {}) {
   const analysis = analyzeReturnVisitContext(input);
   const { workTitle, workText, contentSummary, referenceComments, contentType } = analysis;
 
@@ -272,13 +269,13 @@ export function generateXiaoyuanReturnVisitComment(input = {}) {
   // 内容充足时优先走上下文分析候选，避免固定模板感。
   if (!analysis.contentDeficient) {
     for (const candidate of candidates) {
-      if (validateXiaoyuanComment(candidate, referenceComments, workTitle)) {
+      if (validateReturnVisitComment(candidate, referenceComments, workTitle)) {
         accepted.push(candidate);
       }
     }
   }
 
-  // 2. 第一轮匹配为空或内容不足时，平滑降级至绝对安全的小猿泛化评论池
+  // 2. 第一轮匹配为空或内容不足时，平滑降级至安全泛化评论池
   if (accepted.length === 0) {
     const rotatedGeneric = [];
     const shift = seed % ABSOLUTE_GENERIC_SAFETY.length;
@@ -287,7 +284,7 @@ export function generateXiaoyuanReturnVisitComment(input = {}) {
     }
 
     for (const cand of rotatedGeneric) {
-      if (validateXiaoyuanComment(cand, referenceComments, workTitle)) {
+      if (validateReturnVisitComment(cand, referenceComments, workTitle)) {
         accepted.push(cand);
       }
     }
@@ -295,11 +292,11 @@ export function generateXiaoyuanReturnVisitComment(input = {}) {
 
   // 3. 终极兜底策略，在极其极端的被抄袭参考评论全覆盖去重情况下
   if (accepted.length === 0) {
-    const base = '小猿看完觉得这个分享的思路真的挺不错的。'; // 20字
-    if (validateXiaoyuanComment(base, referenceComments, workTitle)) {
+    const base = '这个分享的思路挺不错，整体看着很自然。';
+    if (validateReturnVisitComment(base, referenceComments, workTitle)) {
       accepted.push(base);
     } else {
-      accepted.push('小猿觉得用心记录分享的内容真的感觉挺实在的。'); // 22字
+      accepted.push('用心记录的内容挺实在，表达也比较自然。');
     }
   }
 
@@ -320,5 +317,5 @@ export function generateXiaoyuanReturnVisitComment(input = {}) {
  * 维持向前兼容的回访评论生成标准入口
  */
 export function generateReturnVisitComment(input = {}) {
-  return generateXiaoyuanReturnVisitComment(input);
+  return generateContextualReturnVisitComment(input);
 }

@@ -41,7 +41,7 @@ import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
 import { normalizeNoticeApiItem } from '../domain/notice-api-normalization.mjs';
-import { countVisibleChars, getReplyLengthTolerance, getReplyMaxLength, getReplyMinLength, hasAgentDisclosure, hasForbiddenReplyPersona, hasLowQualityReplyText, hasReplyEmojiOrTilde } from '../agent/comment-agent-server.mjs';
+import { countVisibleChars, getReplyLengthTolerance, getReplyMaxLength, getReplyMinLength, hasForbiddenReplyPersona, hasLowQualityReplyText, hasReplyEmojiOrTilde } from '../agent/comment-agent-server.mjs';
 
 export function parseArgs(argv) {
   const args = {
@@ -118,13 +118,12 @@ export function buildReplyContext(item = {}) {
     requirements: {
       minLength,
       maxLength,
-      requireAgentDisclosure: true,
       tone: '自然、简短、像真人',
     },
   };
 }
 
-export function isReplyTextInvalid(replyText, { minLength = getReplyMinLength(), maxLength = getReplyMaxLength(), requireAgentDisclosure = true, lengthTolerance = getReplyLengthTolerance() } = {}) {
+export function isReplyTextInvalid(replyText, { minLength = getReplyMinLength(), maxLength = getReplyMaxLength(), lengthTolerance = getReplyLengthTolerance() } = {}) {
   const text = String(replyText || '').trim();
   if (!text) return false;
   const visibleLength = countVisibleChars(text);
@@ -132,8 +131,7 @@ export function isReplyTextInvalid(replyText, { minLength = getReplyMinLength(),
   const maxAllowed = Number(maxLength) + Number(lengthTolerance);
   if (visibleLength < minAllowed) return true;
   if (visibleLength > maxAllowed) return true;
-  if (requireAgentDisclosure && !hasAgentDisclosure(text)) return true;
-  if (requireAgentDisclosure && hasForbiddenReplyPersona(text)) return true;
+  if (hasForbiddenReplyPersona(text)) return true;
   if (hasLowQualityReplyText(text)) return true;
   if (hasReplyEmojiOrTilde(text)) return true;
   return false;

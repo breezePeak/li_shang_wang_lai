@@ -168,12 +168,12 @@ npm run return-visit:comment -- --task-id <taskId> --comment "<评论内容>" --
 
 **可选单任务辅助入口，不属于推荐主流程。** 推荐主流程由 `visit:run` 在执行阶段实时调用 Hermes/OpenClaw 生成回访评论。
 
-本命令用于单条写入：将生成的回访评论写入指定任务，校验评论是否符合小猿人格规范，校验通过后任务状态变为 `pending_execute`。
+本命令用于单条写入：将生成的回访评论写入指定任务，校验评论是否符合回访评论安全规则，校验通过后任务状态变为 `pending_execute`。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `--task-id` | `''` | 必填。`return_visit_tasks.task_id` |
-| `--comment` | `''` | 必填。回访评论内容，需通过小猿人格校验 |
+| `--comment` | `''` | 必填。回访评论内容，需通过回访评论安全校验 |
 | `--json` | `false` | JSON 输出 |
 
 ## 7. return-visit:execute

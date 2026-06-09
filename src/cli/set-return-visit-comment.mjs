@@ -7,7 +7,7 @@ import {
   getReturnVisitTask,
   updateReturnVisitTask,
 } from '../services/return-visit-task-service.mjs';
-import { validateXiaoyuanComment } from '../services/return-visit-comment-generator.mjs';
+import { validateReturnVisitComment } from '../services/return-visit-comment-generator.mjs';
 
 function parseArgs(argv) {
   const args = { json: false, taskId: '', comment: '' };
@@ -70,13 +70,13 @@ async function main() {
 
   const refComments = Array.isArray(task.referenceComments) ? task.referenceComments : [];
   const workTitle = (task.targetWork && task.targetWork.workTitle) || '';
-  if (!validateXiaoyuanComment(args.comment, refComments, workTitle)) {
+  if (!validateReturnVisitComment(args.comment, refComments, workTitle)) {
     if (args.json) {
       printJsonError('return-visit:comment', RESULT_CODES.BLOCKED,
-        '评论未通过小猿人格校验', { recoverable: true });
+        '评论未通过回访评论安全校验', { recoverable: true });
       return;
     }
-    console.error('[return-visit:comment] error: 评论未通过小猿人格校验');
+    console.error('[return-visit:comment] error: 评论未通过回访评论安全校验');
     process.exit(1);
   }
 

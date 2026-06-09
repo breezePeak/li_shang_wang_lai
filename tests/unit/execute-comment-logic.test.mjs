@@ -218,10 +218,10 @@ describe('comments:execute refactored logic', () => {
     expect(groups.find(group => group.length === 2)?.map(item => item.commentId)).toEqual([1, 2]);
   });
 
-  it('isReplyTextTooShort 会按最小字数和 Agent 披露判断已有回复是否需要重写', () => {
+  it('isReplyTextTooShort 会按长度和安全规则判断已有回复是否需要重写', () => {
     expect(isReplyTextTooShort('收到啦', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('Hermes代看不错', { minLength: 15, maxLength: 60 })).toBe(false);
-    expect(isReplyTextTooShort('这个问题后面可以单独展开讲讲呀', { minLength: 15 })).toBe(true);
+    expect(isReplyTextTooShort('这个问题后面可以单独展开讲讲呀', { minLength: 15 })).toBe(false);
     expect(isReplyTextTooShort('Hermes替主人看完觉得这个问题挺真实', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('HermesAI跑来串门2222已阅感谢互动', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('AI助手Hermes路过第一次团购体验怎么样', { minLength: 15 })).toBe(true);

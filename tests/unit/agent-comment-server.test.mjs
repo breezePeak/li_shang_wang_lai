@@ -55,7 +55,7 @@ describe('agent comment server helpers', () => {
     expect(prompt).toContain('15-60 个中文可见字符');
     expect(prompt).toContain('评论生成规则与安全边界');
     expect(prompt).toContain('## Agent 存在感');
-    expect(prompt).toContain('自身已有的人格配置自然披露');
+    expect(prompt).toContain('可以自然沿用这套自身配置');
     expect(prompt).toContain('项目规则只负责安全边界，不覆盖 Agent 自己的人格');
     expect(prompt).toContain('不要使用本项目写死的人设名或示例名');
     expect(prompt).toContain('不要写“我是...”');
@@ -70,13 +70,13 @@ describe('agent comment server helpers', () => {
         taskId: 'work_comment_1',
         work: { workId: 'w1', title: '作品1' },
         comment: { commentId: 1, actorName: '用户1', text: '评论1' },
-        requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true },
+        requirements: { minLength: 15, maxLength: 30 },
       },
       {
         taskId: 'work_comment_2',
         work: { workId: 'w2', title: '作品2' },
         comment: { commentId: 2, actorName: '用户2', text: '评论2' },
-        requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true },
+        requirements: { minLength: 15, maxLength: 30 },
       },
     ]);
 
@@ -84,7 +84,7 @@ describe('agent comment server helpers', () => {
     expect(prompt).toContain('{"replies":[{"taskId":"work_comment_1","reply":"回复内容"}]}');
     expect(prompt).toContain('评论生成规则与安全边界');
     expect(prompt).toContain('## Agent 存在感');
-    expect(prompt).toContain('自身已有的人格配置自然披露');
+    expect(prompt).toContain('可以自然沿用这套自身配置');
     expect(prompt).toContain('项目规则只负责安全边界，不覆盖 Agent 自己的人格');
     expect(prompt).toContain('不要使用本项目写死的人设名或示例名');
     expect(prompt).toContain('不要写“我是...”');
@@ -97,9 +97,8 @@ describe('agent comment server helpers', () => {
     expect(prompt).toContain('评论2');
   });
 
-  it('validateReply rejects replies shorter than minLength or missing agent disclosure', () => {
+  it('validateReply rejects unsafe replies without requiring agent disclosure', () => {
     expect(() => validateReply('收到啦', { minLength: 15, maxLength: 30 })).toThrow('reply 过短');
-    expect(() => validateReply('这个问题后面可以单独展开讲讲呀', { minLength: 15, maxLength: 30 })).toThrow('reply 缺少 Agent 身份提示');
     expect(() => validateReply('Hermes替主人看完觉得这个问题挺真实', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了泛化或伪装身份提示');
     expect(() => validateReply('HermesAI跑来串门2222已阅感谢互动', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了泛化或伪装身份提示');
     expect(() => validateReply('AI助手Hermes路过第一次团购体验怎么样', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了泛化或伪装身份提示');
@@ -110,6 +109,7 @@ describe('agent comment server helpers', () => {
     expect(() => validateReply('Hermes代看后觉得Test留言收到啦', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了低质套话或复读内容');
     expect(() => validateReply('Hermes代看后觉得2222这条反馈需要再看', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了低质套话或复读内容');
     expect(() => validateReply('Hermes代看后觉得玩水视频看着好凉快🤔', { minLength: 15, maxLength: 30 })).toThrow('reply 包含 emoji 或波浪号');
+    expect(validateReply('这个问题后面可以单独展开讲讲呀', { minLength: 15, maxLength: 30 })).toBe('这个问题后面可以单独展开讲讲呀');
     expect(validateReply('Hermes代看后觉得这个问题可以展开聊聊', { minLength: 15, maxLength: 30 })).toBe('Hermes代看后觉得这个问题可以展开聊聊');
     expect(validateReply('OpenClaw代看后觉得这条反馈挺真诚自然', { minLength: 15, maxLength: 30 })).toBe('OpenClaw代看后觉得这条反馈挺真诚自然');
   });
@@ -127,8 +127,8 @@ describe('agent comment server helpers', () => {
 
   it('validateReplyBatch requires one validated reply per taskId', () => {
     const contexts = [
-      { taskId: 'work_comment_1', requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true } },
-      { taskId: 'work_comment_2', requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true } },
+      { taskId: 'work_comment_1', requirements: { minLength: 15, maxLength: 30 } },
+      { taskId: 'work_comment_2', requirements: { minLength: 15, maxLength: 30 } },
     ];
 
     expect(validateReplyBatch({
@@ -186,8 +186,8 @@ describe('agent comment server helpers', () => {
     });
 
     await expect(provider.generateReplies([
-      { taskId: 'work_comment_1', requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true } },
-      { taskId: 'work_comment_2', requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true } },
+      { taskId: 'work_comment_1', requirements: { minLength: 15, maxLength: 30 } },
+      { taskId: 'work_comment_2', requirements: { minLength: 15, maxLength: 30 } },
     ])).resolves.toEqual([
       { taskId: 'work_comment_1', reply: 'Hermes代看后觉得1号评论挺真诚自然' },
       { taskId: 'work_comment_2', reply: 'Hermes代看后觉得2号评论挺真诚自然' },

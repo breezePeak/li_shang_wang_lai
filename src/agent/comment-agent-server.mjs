@@ -46,11 +46,6 @@ export function countVisibleChars(text = '') {
   return Array.from(String(text || '').replace(/\s+/g, '')).length;
 }
 
-export function hasAgentDisclosure(text = '') {
-  const value = String(text || '').trim();
-  return /(Agent|AI|助手|智能体|Hermes|OpenClaw|Claude|ChatGPT|代回|帮回|替.*回)/i.test(value);
-}
-
 export function hasForbiddenReplyPersona(text = '') {
   return /主人|主家|替.*主|帮.*主|自动回复|系统生成|系统提示|我是|这边是|这里是|AI助手|智能助手|小助手|[A-Za-z]+AI|AI[A-Za-z]+|AI.{0,6}(帮忙|帮你|代|替).{0,6}(回|回复|回评|看评论)|AI.{0,6}(回了|回复啦|回评啦|看评论了)|帮你守着评论区/.test(String(text || ''));
 }
@@ -104,7 +99,6 @@ export function buildCommentPrompt(context = {}) {
 export function buildReplyPrompt(context = {}) {
   const maxLength = Number(context?.requirements?.maxLength || getReplyMaxLength());
   const minLength = Number(context?.requirements?.minLength || getReplyMinLength());
-  const requireAgentDisclosure = context?.requirements?.requireAgentDisclosure !== false;
   const safetyRules = loadCommentSafetyRules();
   const work = context.work || {};
   const comment = context.comment || {};
@@ -133,7 +127,6 @@ export function buildReplyPrompt(context = {}) {
       requirements: {
         minLength,
         maxLength,
-        requireAgentDisclosure,
         tone: context?.requirements?.tone || '自然、简短、像真人',
       },
     }, null, 2),
@@ -148,7 +141,6 @@ export function buildReplyBatchPrompt(contexts = []) {
     const comment = context.comment || {};
     const minLength = Number(context?.requirements?.minLength || getReplyMinLength());
     const maxLength = Number(context?.requirements?.maxLength || getReplyMaxLength());
-    const requireAgentDisclosure = context?.requirements?.requireAgentDisclosure !== false;
 
     return {
       taskId: context.taskId || '',
@@ -167,7 +159,6 @@ export function buildReplyBatchPrompt(contexts = []) {
       requirements: {
         minLength,
         maxLength,
-        requireAgentDisclosure,
         tone: context?.requirements?.tone || '自然、简短、像真人',
       },
     };
@@ -219,7 +210,7 @@ export function validateComment(comment, { maxLength = getCommentMaxLength() } =
   return text;
 }
 
-export function validateReply(reply, { minLength = getReplyMinLength(), maxLength = getReplyMaxLength(), requireAgentDisclosure = true, lengthTolerance = getReplyLengthTolerance() } = {}) {
+export function validateReply(reply, { minLength = getReplyMinLength(), maxLength = getReplyMaxLength(), lengthTolerance = getReplyLengthTolerance() } = {}) {
   const text = String(reply || '').trim();
   const visibleLength = countVisibleChars(text);
   const tolerance = Number.isFinite(Number(lengthTolerance)) ? Number(lengthTolerance) : getReplyLengthTolerance();
@@ -230,8 +221,7 @@ export function validateReply(reply, { minLength = getReplyMinLength(), maxLengt
   if (!text) throw new Error('reply 为空');
   if (visibleLength < minAllowed) throw new Error(`reply 过短: ${visibleLength}/${minAllowed}`);
   if (visibleLength > maxAllowed) throw new Error(`reply 超长: ${visibleLength}/${maxAllowed}`);
-  if (requireAgentDisclosure && !hasAgentDisclosure(text)) throw new Error('reply 缺少 Agent 身份提示');
-  if (requireAgentDisclosure && hasForbiddenReplyPersona(text)) throw new Error('reply 使用了泛化或伪装身份提示');
+  if (hasForbiddenReplyPersona(text)) throw new Error('reply 使用了泛化或伪装身份提示');
   if (hasLowQualityReplyText(text)) throw new Error('reply 使用了低质套话或复读内容');
   if (hasReplyEmojiOrTilde(text)) throw new Error('reply 包含 emoji 或波浪号');
   if (/```|\{\s*"reply"|^\s*\[/.test(text)) throw new Error('reply 必须是纯文本');
@@ -265,8 +255,7 @@ export function validateReplyBatch(parsed, contexts = []) {
     const minLength = Number(context?.requirements?.minLength || getReplyMinLength());
     const maxLength = Number(context?.requirements?.maxLength || getReplyMaxLength());
     const lengthTolerance = Number(context?.requirements?.lengthTolerance ?? getReplyLengthTolerance());
-    const requireAgentDisclosure = context?.requirements?.requireAgentDisclosure !== false;
-    byTaskId.set(taskId, validateReply(item?.reply, { minLength, maxLength, requireAgentDisclosure, lengthTolerance }));
+    byTaskId.set(taskId, validateReply(item?.reply, { minLength, maxLength, lengthTolerance }));
   }
 
   const missing = [...expected.keys()].filter(taskId => !byTaskId.has(taskId));
@@ -367,14 +356,12 @@ export async function generateCommentWithHermes(context, options = {}) {
 export async function generateReplyWithHermes(context, options = {}) {
   const maxLength = Number(context?.requirements?.maxLength || options.maxLength || getReplyMaxLength());
   const minLength = Number(context?.requirements?.minLength || options.minLength || getReplyMinLength());
-  const requireAgentDisclosure = context?.requirements?.requireAgentDisclosure !== false;
   const basePrompt = buildReplyPrompt({
     ...context,
     requirements: {
       ...(context?.requirements || {}),
       minLength,
       maxLength,
-      requireAgentDisclosure,
     },
   });
 
@@ -385,7 +372,7 @@ export async function generateReplyWithHermes(context, options = {}) {
       '上一次返回格式错误。你只能返回 JSON，例如：',
       '{"reply":"回复内容"}',
       `回复必须是 ${minLength}-${maxLength} 个中文可见字符，不要解释，不要 Markdown。`,
-      requireAgentDisclosure ? '回复仍必须遵守项目评论生成规则与安全边界里的回评身份披露要求。' : '',
+      '回复仍必须遵守项目评论生成规则与安全边界，不要解释，不要 Markdown。',
     ].join('\n');
     try {
       const output = await callAgentCli(`${basePrompt}${retryHint}`, options);
@@ -393,7 +380,7 @@ export async function generateReplyWithHermes(context, options = {}) {
       if (typeof parsed.reply !== 'string') {
         throw new Error('Agent 返回格式错误: reply 必须是 string');
       }
-      return validateReply(parsed.reply, { minLength, maxLength, requireAgentDisclosure });
+      return validateReply(parsed.reply, { minLength, maxLength });
     } catch (err) {
       lastError = err;
     }
@@ -409,14 +396,12 @@ export async function generateRepliesWithHermes(contexts = [], options = {}) {
   const normalized = items.map(context => {
     const maxLength = Number(context?.requirements?.maxLength || options.maxLength || getReplyMaxLength());
     const minLength = Number(context?.requirements?.minLength || options.minLength || getReplyMinLength());
-    const requireAgentDisclosure = context?.requirements?.requireAgentDisclosure !== false;
     return {
       ...context,
       requirements: {
         ...(context?.requirements || {}),
         minLength,
         maxLength,
-        requireAgentDisclosure,
       },
     };
   });
