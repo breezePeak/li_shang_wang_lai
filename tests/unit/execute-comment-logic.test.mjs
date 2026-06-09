@@ -190,7 +190,7 @@ describe('comments:execute refactored logic', () => {
   });
 
   it('待回评查询只按 pending 状态查询，已有 reply_text 也会被查到', () => {
-    const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: 10, days: 7 });
+    const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: 10 });
     const ids = rows.map(row => row.id);
 
     expect(ids).toContain(1);
@@ -267,7 +267,7 @@ describe('comments:execute refactored logic', () => {
     db.prepare("UPDATE work_comments SET reply_text = 'Hermes代看后觉得这个问题可以展开聊聊' WHERE id = 1").run();
     db.close();
 
-    const items = buildWorkCommentItemsFromDbRows(listPendingCommentsGroupedByHomepageAndWork({ limit: 10, days: 7 }));
+    const items = buildWorkCommentItemsFromDbRows(listPendingCommentsGroupedByHomepageAndWork({ limit: 10 }));
     const provider = {
       generateReply: vi.fn(),
       generateReplies: vi.fn(async (contexts) => contexts.map(context => ({
@@ -302,7 +302,7 @@ describe('comments:execute refactored logic', () => {
     db.prepare("UPDATE work_comments SET reply_text = '' WHERE id = 1").run();
     db.close();
 
-    const items = buildWorkCommentItemsFromDbRows(listPendingCommentsGroupedByHomepageAndWork({ limit: 10, days: 7 }));
+    const items = buildWorkCommentItemsFromDbRows(listPendingCommentsGroupedByHomepageAndWork({ limit: 10 }));
     const provider = {
       generateReplies: vi.fn(async () => ([
         { taskId: 'work_comment_1', reply: 'Hermes代看后觉得1号评论挺真诚自然' },
