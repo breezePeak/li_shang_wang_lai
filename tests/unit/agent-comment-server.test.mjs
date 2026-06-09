@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildReplyBatchPrompt,
   extractJson,
   validateComment,
   validateReply,
+  validateReplyBatch,
   buildCommentPrompt,
   buildReplyPrompt,
   loadCommentSafetyRules,
@@ -57,10 +59,62 @@ describe('agent comment server helpers', () => {
     expect(prompt).toContain('评论生成规则与安全边界');
   });
 
+  it('buildReplyBatchPrompt gives agent the full pending reply list', () => {
+    const prompt = buildReplyBatchPrompt([
+      {
+        taskId: 'work_comment_1',
+        work: { workId: 'w1', title: '作品1' },
+        comment: { commentId: 1, actorName: '用户1', text: '评论1' },
+        requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true },
+      },
+      {
+        taskId: 'work_comment_2',
+        work: { workId: 'w2', title: '作品2' },
+        comment: { commentId: 2, actorName: '用户2', text: '评论2' },
+        requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true },
+      },
+    ]);
+
+    expect(prompt).toContain('批量生成对评论的回复');
+    expect(prompt).toContain('{"replies":[{"taskId":"work_comment_1","reply":"回复内容"}]}');
+    expect(prompt).toContain('work_comment_1');
+    expect(prompt).toContain('work_comment_2');
+    expect(prompt).toContain('评论1');
+    expect(prompt).toContain('评论2');
+  });
+
   it('validateReply rejects replies shorter than minLength or missing agent disclosure', () => {
     expect(() => validateReply('收到啦', { minLength: 15, maxLength: 30 })).toThrow('reply 过短');
     expect(() => validateReply('这个问题后面可以单独展开讲讲呀', { minLength: 15, maxLength: 30 })).toThrow('reply 缺少 Agent 身份提示');
     expect(validateReply('AI助手觉得这个问题可以后面展开讲讲', { minLength: 15, maxLength: 30 })).toBe('AI助手觉得这个问题可以后面展开讲讲');
+  });
+
+  it('validateReplyBatch requires one validated reply per taskId', () => {
+    const contexts = [
+      { taskId: 'work_comment_1', requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true } },
+      { taskId: 'work_comment_2', requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true } },
+    ];
+
+    expect(validateReplyBatch({
+      replies: [
+        { taskId: 'work_comment_2', reply: 'AI助手代回：这个细节确实值得继续展开' },
+        { taskId: 'work_comment_1', reply: 'AI助手代回：收到你的反馈啦感谢支持' },
+      ],
+    }, contexts)).toEqual([
+      { taskId: 'work_comment_1', reply: 'AI助手代回：收到你的反馈啦感谢支持' },
+      { taskId: 'work_comment_2', reply: 'AI助手代回：这个细节确实值得继续展开' },
+    ]);
+
+    expect(() => validateReplyBatch({
+      replies: [{ taskId: 'work_comment_1', reply: 'AI助手代回：收到你的反馈啦感谢支持' }],
+    }, contexts)).toThrow('数量不匹配');
+
+    expect(() => validateReplyBatch({
+      replies: [
+        { taskId: 'work_comment_1', reply: 'AI助手代回：收到你的反馈啦感谢支持' },
+        { taskId: 'work_comment_x', reply: 'AI助手代回：这个细节确实值得继续展开' },
+      ],
+    }, contexts)).toThrow('未知 taskId');
   });
 
   it('resolveAgentCliConfig supports hermes and openclaw providers', () => {
@@ -86,5 +140,21 @@ describe('agent comment server helpers', () => {
 
     await expect(provider.generateComment({ taskId: 'visit_1' })).resolves.toBe('挺真实');
     await expect(provider.generateReply({ taskId: 'reply_1' })).resolves.toBe('AI助手觉得这个问题可以后面展开讲讲');
+  });
+
+  it('LocalAgentProvider can generate replies in one batch', async () => {
+    const provider = new LocalAgentProvider({
+      provider: 'hermes',
+      bin: process.execPath,
+      argsTemplate: ['-e', 'const prompt = process.argv[1]; console.log(JSON.stringify({ replies: Array.from(prompt.matchAll(/"taskId": "([^"]+)"/g)).map(m => ({ taskId: m[1], reply: `AI助手代回：${m[1].slice(-1)}号评论已经收到啦` })) }))', '{prompt}'],
+    });
+
+    await expect(provider.generateReplies([
+      { taskId: 'work_comment_1', requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true } },
+      { taskId: 'work_comment_2', requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true } },
+    ])).resolves.toEqual([
+      { taskId: 'work_comment_1', reply: 'AI助手代回：1号评论已经收到啦' },
+      { taskId: 'work_comment_2', reply: 'AI助手代回：2号评论已经收到啦' },
+    ]);
   });
 });

@@ -8,6 +8,7 @@ import {
   classifyStoredWorkCommentRaw,
   executeSinglePassForWorkGroup,
   extractTargetCommentId,
+  generateMissingReplies,
   groupExecutableItemsByWork,
   isDoneWithoutRetryResult,
   isReplyTextTooShort,
@@ -220,6 +221,74 @@ describe('comments:execute refactored logic', () => {
     expect(isReplyTextTooShort('收到啦', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('这个问题后面可以单独展开讲讲呀', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('AI助手觉得这个问题可以后面展开讲讲', { minLength: 15 })).toBe(false);
+  });
+
+  it('generateMissingReplies 把所有待生成回评一次性交给 Agent，并按 taskId 写回', async () => {
+    const db = new Database(testDb);
+    db.prepare("UPDATE work_comments SET reply_text = 'AI助手觉得这个问题可以后面展开讲讲' WHERE id = 1").run();
+    db.close();
+
+    const items = buildWorkCommentItemsFromDbRows(listPendingCommentsGroupedByHomepageAndWork({ limit: 10, days: 7 }));
+    const provider = {
+      generateReply: vi.fn(),
+      generateReplies: vi.fn(async (contexts) => contexts.map(context => ({
+        taskId: context.taskId,
+        reply: `AI助手代回：${context.comment.commentId}号评论已经收到啦`,
+      }))),
+    };
+
+    const results = await generateMissingReplies(items, { agentProvider: provider });
+
+    expect(provider.generateReply).not.toHaveBeenCalled();
+    expect(provider.generateReplies).toHaveBeenCalledTimes(1);
+    expect(provider.generateReplies.mock.calls[0][0].map(context => context.taskId)).toEqual(['work_comment_2']);
+    expect(results).toEqual([
+      { commentId: 1, ok: true, skipped: true, reason: 'reply_text_exists' },
+      { commentId: 2, ok: true, reply: 'AI助手代回：2号评论已经收到啦' },
+    ]);
+
+    const verifyDb = new Database(testDb);
+    expect(verifyDb.prepare('SELECT reply_text, reply_reason FROM work_comments WHERE id = 1').get()).toMatchObject({
+      reply_text: 'AI助手觉得这个问题可以后面展开讲讲',
+    });
+    expect(verifyDb.prepare('SELECT reply_text, reply_reason FROM work_comments WHERE id = 2').get()).toMatchObject({
+      reply_text: 'AI助手代回：2号评论已经收到啦',
+      reply_reason: null,
+    });
+    verifyDb.close();
+  });
+
+  it('generateMissingReplies 批量返回不完整时不写回半批结果', async () => {
+    const db = new Database(testDb);
+    db.prepare("UPDATE work_comments SET reply_text = '' WHERE id = 1").run();
+    db.close();
+
+    const items = buildWorkCommentItemsFromDbRows(listPendingCommentsGroupedByHomepageAndWork({ limit: 10, days: 7 }));
+    const provider = {
+      generateReplies: vi.fn(async () => ([
+        { taskId: 'work_comment_1', reply: 'AI助手代回：1号评论已经收到啦' },
+      ])),
+    };
+
+    const results = await generateMissingReplies(items, { agentProvider: provider });
+
+    expect(provider.generateReplies).toHaveBeenCalledTimes(1);
+    expect(results).toHaveLength(2);
+    expect(results.every(result => result.ok === false)).toBe(true);
+    expect(results[0].error).toContain('数量不匹配');
+
+    const verifyDb = new Database(testDb);
+    expect(verifyDb.prepare('SELECT reply_text, reply_status, reply_reason FROM work_comments WHERE id = 1').get()).toMatchObject({
+      reply_text: '',
+      reply_status: 'pending',
+    });
+    expect(verifyDb.prepare('SELECT reply_text, reply_status, reply_reason FROM work_comments WHERE id = 2').get()).toMatchObject({
+      reply_text: '',
+      reply_status: 'pending',
+    });
+    expect(verifyDb.prepare('SELECT reply_reason FROM work_comments WHERE id = 1').get().reply_reason).toContain('agent_generate_failed:Agent 返回回复数量不匹配');
+    expect(verifyDb.prepare('SELECT reply_reason FROM work_comments WHERE id = 2').get().reply_reason).toContain('agent_generate_failed:Agent 返回回复数量不匹配');
+    verifyDb.close();
   });
 
   it('parseArgs 支持 --keep-open，避免回评执行结束立刻关闭浏览器', () => {

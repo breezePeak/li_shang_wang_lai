@@ -135,34 +135,81 @@ export function isReplyTextInvalid(replyText, { minLength = getReplyMinLength(),
 export const isReplyTextTooShort = isReplyTextInvalid;
 
 export async function generateMissingReplies(items = [], { agentProvider = new LocalAgentProvider() } = {}) {
-  const results = [];
+  const decisions = [];
+  const pendingContexts = [];
+
   for (const item of items) {
     const commentId = Number(item.commentId || 0);
     const existing = String(item.replyText || '').trim();
     if (!commentId) {
-      results.push({ commentId, ok: true, skipped: true, reason: 'missing_comment_id' });
+      decisions.push({ result: { commentId, ok: true, skipped: true, reason: 'missing_comment_id' } });
       continue;
     }
     if (existing && !isReplyTextInvalid(existing)) {
-      results.push({ commentId, ok: true, skipped: true, reason: 'reply_text_exists' });
+      decisions.push({ result: { commentId, ok: true, skipped: true, reason: 'reply_text_exists' } });
       continue;
     }
 
-    try {
-      console.error(`[agent] commentId=${commentId} ${existing ? '已有回复不符合长度/Agent披露要求，重新生成' : '请求生成回复'}`);
-      const reply = await agentProvider.generateReply(buildReplyContext(item));
-      saveReplyText(commentId, reply);
-      item.replyText = reply;
-      console.error(`[agent] commentId=${commentId} 回复生成成功 reply=${reply}`);
-      results.push({ commentId, ok: true, reply });
-    } catch (err) {
-      const message = err?.message || String(err);
-      markCommentPending(commentId, `agent_generate_failed:${message}`);
-      console.error(`[agent] commentId=${commentId} failed reason=${message}`);
-      results.push({ commentId, ok: false, error: message });
+    const context = buildReplyContext(item);
+    pendingContexts.push(context);
+    decisions.push({ type: 'generate', item, commentId, taskId: context.taskId });
+  }
+
+  if (pendingContexts.length === 0) return decisions.map(decision => decision.result);
+
+  if (typeof agentProvider.generateReplies !== 'function') {
+    const message = 'agentProvider.generateReplies 不存在，无法一次性生成待回评列表';
+    for (const decision of decisions.filter(item => item.type === 'generate')) {
+      markCommentPending(decision.commentId, `agent_generate_failed:${message}`);
+      decision.result = { commentId: decision.commentId, ok: false, error: message };
+    }
+    return decisions.map(decision => decision.result);
+  }
+
+  try {
+    console.error(`[agent] batch 请求生成回复 count=${pendingContexts.length}`);
+    const replies = await agentProvider.generateReplies(pendingContexts);
+    if (!Array.isArray(replies)) throw new Error('Agent 返回格式错误: replies 必须是数组');
+    if (replies.length !== pendingContexts.length) {
+      throw new Error(`Agent 返回回复数量不匹配: ${replies.length}/${pendingContexts.length}`);
+    }
+
+    const expectedTaskIds = new Set(pendingContexts.map(context => String(context.taskId || '').trim()));
+    const byTaskId = new Map();
+    for (const item of replies) {
+      const taskId = String(item?.taskId || '').trim();
+      const reply = String(item?.reply || '').trim();
+      if (!expectedTaskIds.has(taskId)) throw new Error(`Agent 返回未知 taskId: ${taskId || '(empty)'}`);
+      if (byTaskId.has(taskId)) throw new Error(`Agent 返回重复 taskId: ${taskId}`);
+      if (taskId) byTaskId.set(taskId, reply);
+    }
+
+    for (const context of pendingContexts) {
+      const taskId = String(context.taskId || '').trim();
+      if (!byTaskId.has(taskId)) throw new Error(`Agent 缺少回复 taskId: ${taskId}`);
+      const reply = byTaskId.get(taskId);
+      if (!reply || isReplyTextInvalid(reply, context.requirements)) {
+        throw new Error(`Agent 返回回复不符合发送要求 taskId=${taskId}`);
+      }
+    }
+
+    for (const decision of decisions.filter(item => item.type === 'generate')) {
+      const reply = byTaskId.get(decision.taskId);
+      saveReplyText(decision.commentId, reply);
+      decision.item.replyText = reply;
+      console.error(`[agent] commentId=${decision.commentId} 回复生成成功 reply=${reply}`);
+      decision.result = { commentId: decision.commentId, ok: true, reply };
+    }
+  } catch (err) {
+    const message = err?.message || String(err);
+    for (const decision of decisions.filter(item => item.type === 'generate')) {
+      markCommentPending(decision.commentId, `agent_generate_failed:${message}`);
+      console.error(`[agent] commentId=${decision.commentId} failed reason=${message}`);
+      decision.result = { commentId: decision.commentId, ok: false, error: message };
     }
   }
-  return results;
+
+  return decisions.map(decision => decision.result);
 }
 
 function saveRetryablePending(item, reason) {

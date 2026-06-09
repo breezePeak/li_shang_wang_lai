@@ -1,4 +1,4 @@
-import { generateCommentWithHermes, generateReplyWithHermes } from './comment-agent-server.mjs';
+import { generateCommentWithHermes, generateRepliesWithHermes, generateReplyWithHermes } from './comment-agent-server.mjs';
 
 export class LocalAgentProvider {
   constructor(options = {}) {
@@ -11,5 +11,9 @@ export class LocalAgentProvider {
 
   async generateReply(context) {
     return generateReplyWithHermes(context, this.options);
+  }
+
+  async generateReplies(contexts) {
+    return generateRepliesWithHermes(contexts, this.options);
   }
 }

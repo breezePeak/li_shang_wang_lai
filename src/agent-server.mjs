@@ -1,5 +1,5 @@
 import express from 'express';
-import { generateCommentWithHermes, generateReplyWithHermes, getCommentMaxLength, resolveAgentCliConfig } from './agent/comment-agent-server.mjs';
+import { generateCommentWithHermes, generateRepliesWithHermes, generateReplyWithHermes, getCommentMaxLength, resolveAgentCliConfig } from './agent/comment-agent-server.mjs';
 
 const app = express();
 const port = Number(process.env.AGENT_SERVER_PORT || 3001);
@@ -46,6 +46,20 @@ app.post('/generate-reply', async (req, res) => {
   } catch (err) {
     const message = err?.message || String(err);
     console.error(`[agent] task=${taskId} failed reason=${message}`);
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.post('/generate-replies', async (req, res) => {
+  const contexts = Array.isArray(req.body?.items) ? req.body.items : [];
+  try {
+    console.error(`[agent] batch 请求生成回复 count=${contexts.length}`);
+    const replies = await generateRepliesWithHermes(contexts);
+    console.error(`[agent] batch 回复生成成功 count=${replies.length}`);
+    res.json({ ok: true, replies });
+  } catch (err) {
+    const message = err?.message || String(err);
+    console.error(`[agent] batch failed reason=${message}`);
     res.status(500).json({ ok: false, error: message });
   }
 });
