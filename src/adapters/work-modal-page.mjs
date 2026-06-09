@@ -288,24 +288,59 @@ async function clickReplySendControl(page) {
       return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
     }
 
-    const container = document.querySelector('.comment-input-container');
-    if (!visible(container)) return { ok: false, reason: 'comment_input_container_not_found' };
+    function clickAllWays(target) {
+      target.click?.();
+      target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }
 
-    const sendArea = container.querySelector('.commentInput-right-ct');
+    const containerSelectors = [
+      '.comment-input-container',
+      '[class*="comment-input-container"]',
+      '[class*="commentInputContainer"]',
+    ];
+    let container = null;
+    for (const sel of containerSelectors) {
+      const el = document.querySelector(sel);
+      if (visible(el)) { container = el; break; }
+    }
+    if (!container) return { ok: false, reason: 'comment_input_container_not_found' };
+
+    const sendArea = container.querySelector('.commentInput-right-ct')
+      || container.querySelector('[class*="commentInput-right"]')
+      || container.querySelector('[class*="right-ct"]');
     if (!visible(sendArea)) return { ok: false, reason: 'comment_send_area_not_found' };
 
-    const iconTargets = ['.FbVIhLlK'];
+    const iconTargets = [
+      '.FbVIhLlK',
+      'svg',
+      'img',
+      '[class*="icon"]',
+      '[class*="send"]',
+      'span',
+      'div',
+      'button',
+      '[role="button"]',
+    ];
     for (const selector of iconTargets) {
       const matches = Array.from(sendArea.querySelectorAll(selector)).filter(visible);
       for (const el of matches) {
-        const target = el.closest('button,[role="button"],span,div') || el;
+        if (el.tagName === 'SPAN' || el.tagName === 'DIV') {
+          const text = (el.innerText || '').trim();
+          if (text && text.length > 6) continue;
+        }
+        const target = el.closest('button,[role="button"]') || el;
         if (!visible(target)) continue;
-        target.click?.();
-        target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-        target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-        target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-        return { ok: true, method: 'send_control_click', label: selector };
+        clickAllWays(target);
+        return { ok: true, method: 'send_control_click', selector };
       }
+    }
+
+    const directChildren = Array.from(sendArea.children).filter(visible);
+    for (const child of directChildren) {
+      clickAllWays(child);
+      return { ok: true, method: 'send_area_direct_child', tag: child.tagName.toLowerCase() };
     }
 
     return { ok: false, reason: 'strict_send_control_not_found' };
@@ -1822,6 +1857,8 @@ export async function collectVisibleWorkCommentCandidates(page) {
         '[class*="commentContent"]',
         '[class*="comment-text"]',
         '[class*="commentText"]',
+        '.Sbe6bqNb',
+        '.LqTo7UJT',
       ];
       let best = '';
       for (const selector of selectors) {
@@ -1941,6 +1978,8 @@ export async function expandVisibleWorkCommentReplies(page, { maxClicks = 6 } = 
     const commentArea = findContainer();
     if (!commentArea) return { ok: false, clicked: 0, reason: 'comment_area_not_found' };
 
+    const expandedAttr = 'data-reply-expanded';
+
     const nodes = Array.from(commentArea.querySelectorAll('button, [role="button"], span, div'));
     let clicked = 0;
     const clickedTexts = [];
@@ -1957,12 +1996,16 @@ export async function expandVisibleWorkCommentReplies(page, { maxClicks = 6 } = 
       if (!isExpand) continue;
       if (normalized.includes('收起')) continue;
 
+      const commentItem = node.closest('[data-e2e="comment-item"], [class*="comment-item"], [class*="commentItem"]');
+      if (commentItem && commentItem.hasAttribute(expandedAttr)) continue;
+
       const target = node.closest('button,[role="button"]') || node;
       target.scrollIntoView({ block: 'center', behavior: 'instant' });
       target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
       target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
       target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
       target.click?.();
+      if (commentItem) commentItem.setAttribute(expandedAttr, 'true');
       clicked++;
       clickedTexts.push(text.slice(0, 80));
     }
@@ -2459,12 +2502,30 @@ export async function scrollCommentAreaOnce(page) {
     };
   }
 
-  return scrollContainerByWheel(page, {
+  const wheelResult = await scrollContainerByWheel(page, {
     box: found.box,
     profile: 'commentArea',
     domScrollFallback: true,
     logPrefix: '[work-modal]',
   });
+
+  const atEnd = await page.evaluate((selector) => {
+    const containers = document.querySelectorAll(selector);
+    for (const el of containers) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      const maxScroll = el.scrollHeight - el.clientHeight;
+      if (maxScroll <= 0) return true;
+      if (el.scrollTop >= maxScroll - 5) return true;
+      el.scrollTop = maxScroll;
+      return false;
+    }
+    return false;
+  }, found.box.selector).catch(() => false);
+
+  await page.waitForTimeout(600).catch(() => {});
+
+  return { ok: wheelResult.ok, scrolled: wheelResult.scrolled, atEnd, jitter: wheelResult.jitter, deltaY: wheelResult.deltaY };
 }
 
 export async function openWorkPageForReply(page, workUrl, { timeoutMs = 30000 } = {}) {
