@@ -23,6 +23,10 @@ export function upsertWorkComment(comment) {
       }
       const updates = [];
       const params = [];
+      if (existing.reply_status !== 'pending' && existing.reply_status !== 'prepared') {
+        updates.push("reply_status = 'pending'");
+        updates.push('reply_reason = NULL');
+      }
       if (actorProfileUrl && !existing.actor_profile_url) { updates.push('actor_profile_url = ?'); params.push(actorProfileUrl); }
       if (actorProfileKey && !existing.actor_profile_key) { updates.push('actor_profile_key = ?'); params.push(actorProfileKey); }
       if (rawCommentJson) { updates.push('raw_comment_json = ?'); params.push(rawCommentJson); }
@@ -30,7 +34,7 @@ export function upsertWorkComment(comment) {
       params.push(now);
       params.push(existing.id);
       db.prepare(`UPDATE work_comments SET ${updates.join(', ')} WHERE id = ?`).run(...params);
-      return { action: 'enriched', id: existing.id };
+      return { action: existing.reply_status !== 'pending' ? 'reopened' : 'enriched', id: existing.id };
     }
   }
 
