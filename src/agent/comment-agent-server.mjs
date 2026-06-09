@@ -51,7 +51,7 @@ export function hasForbiddenReplyPersona(text = '') {
 }
 
 export function hasLowQualityReplyText(text = '') {
-  return /代班|已阅|留言收到|感谢互动|test留言|测试留言|[0-9]{3,}/i.test(String(text || ''));
+  return /代班|已阅|留言收到|感谢互动|test留言|测试留言/i.test(String(text || '')) || /^\s*\d{3,}\s*$/.test(String(text || ''));
 }
 
 export function buildCommentPrompt(context = {}) {

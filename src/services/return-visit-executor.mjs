@@ -14,10 +14,12 @@ import {
   postWorkModalComment,
   waitForWorkModal,
 } from '../adapters/work-modal-page.mjs';
+import { RESULT_CODES } from '../domain/result-codes.mjs';
 import { canMarkDone } from './return-visit-task-service.mjs';
 import {
   collectCurrentOpenedWork,
   collectFirstNonTopAwemeFromProfile,
+  extractWorkIdFromUrl,
   openProfileWorkByAwemeId,
 } from './return-visit-work-collector.mjs';
 import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
@@ -84,7 +86,7 @@ export async function handleVideoWatch(page, watchPolicy = 'seconds', watchSecon
       return;
     }
 
-    const duration = videoInfo.duration;
+    const duration = Number(videoInfo.duration || 0);
     // 若视频处于暂停状态，自动尝试唤醒播放
     await page.evaluate(() => {
       const video = document.querySelector('video');
@@ -120,10 +122,15 @@ export async function handleVideoWatch(page, watchPolicy = 'seconds', watchSecon
       let targetSeconds = randomInRange(min, max);
 
       if (duration > 0 && targetSeconds > duration) {
-        targetSeconds = Math.ceil(duration);
-        console.log(`[return-visit:watch] 视频总时长 (${duration.toFixed(1)}s) 短于设定的秒数。调整为完播，等待 ${targetSeconds} 秒...`);
-      } else {
+        targetSeconds = Math.max(1, Math.floor(Math.max(duration - 1, duration * 0.75)));
+        console.log(`[return-visit:watch] 视频总时长 (${duration.toFixed(1)}s) 短于设定的秒数。避免触发连播，等待 ${targetSeconds} 秒...`);
+      } else if (duration > 0 && targetSeconds >= Math.max(1, duration - 0.5)) {
+        targetSeconds = Math.max(1, Math.floor(Math.max(duration - 1, duration * 0.75)));
+        console.log(`[return-visit:watch] 目标观看时长接近完播 (${duration.toFixed(1)}s)。避免触发连播，调整为 ${targetSeconds} 秒...`);
+      } else if (duration > 0) {
         console.log(`[return-visit:watch] 观看指定时长模式。视频时长: ${duration.toFixed(1)}s，正在等待观看 ${targetSeconds} 秒...`);
+      } else {
+        console.log(`[return-visit:watch] 观看指定时长模式。视频时长未知，正在等待观看 ${targetSeconds} 秒...`);
       }
 
       await page.waitForTimeout(targetSeconds * 1000);
@@ -162,7 +169,57 @@ function isWorkUrl(value) {
   return /\/(?:video|note)\/\d+|[?&]modal_id=\d+/.test(String(value || ''));
 }
 
-export async function postReturnVisitComment(page, text, presentation = {}, { execute = false } = {}) {
+function normalizeWorkId(value) {
+  return String(value || '').trim().replace(/^(video|note|modal)-/, '');
+}
+
+export function getCurrentWorkIdFromUrl(url = '') {
+  return normalizeWorkId(extractWorkIdFromUrl(url) || '');
+}
+
+export async function verifyCurrentReturnVisitWork(page, resolvedWork = {}, phase = 'unknown') {
+  const expectedWorkId = normalizeWorkId(resolvedWork.workId || extractWorkIdFromUrl(resolvedWork.workUrl || '') || '');
+  const currentUrl = typeof page?.url === 'function' ? page.url() : '';
+  const currentWorkId = getCurrentWorkIdFromUrl(currentUrl);
+
+  if (!expectedWorkId) {
+    return { ok: true, expectedWorkId, currentWorkId, currentUrl, reason: 'expected_work_id_missing' };
+  }
+
+  if (currentWorkId !== expectedWorkId) {
+    return {
+      ok: false,
+      reason: currentWorkId ? 'current_work_mismatch' : 'current_work_id_missing',
+      phase,
+      expectedWorkId,
+      currentWorkId,
+      currentUrl,
+    };
+  }
+
+  return { ok: true, expectedWorkId, currentWorkId, currentUrl };
+}
+
+async function blockIfCurrentWorkChanged(page, task, resolvedWork, phase, statuses = {}) {
+  const check = await verifyCurrentReturnVisitWork(page, resolvedWork, phase);
+  if (check.ok) return null;
+
+  console.error(
+    `[visit] task=${task.taskId} 当前作品已变化 phase=${phase} expected=${check.expectedWorkId}` +
+      ` current=${check.currentWorkId || '(missing)'} url=${check.currentUrl}`
+  );
+  await saveDebugScreenshot(page, task.taskId, `wrong_work_${phase}`);
+  return {
+    ok: false,
+    status: 'failed_collect',
+    error: `wrong_work_${phase}`,
+    likeStatus: statuses.likeStatus || task.likeStatus || 'pending',
+    commentStatus: statuses.commentStatus || task.commentStatus || 'pending',
+    resolvedWork,
+  };
+}
+
+export async function postReturnVisitComment(page, text, presentation = {}, { execute = false, expectedWorkId = '' } = {}) {
   if (presentation?.isModalPage) {
     console.error(`[comment] 发评论: modal页, 先打开评论区...`);
     const modalReady = await waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true });
@@ -170,8 +227,33 @@ export async function postReturnVisitComment(page, text, presentation = {}, { ex
       console.error(`[comment] [FAIL] modal未就绪: ${modalReady?.message || modalReady?.code}`);
       return { ok: false, code: modalReady?.code, message: modalReady?.message || 'work_modal_not_ready', data: modalReady?.data };
     }
+    if (expectedWorkId) {
+      const workCheck = await verifyCurrentReturnVisitWork(page, { workId: expectedWorkId }, 'inside_comment_send');
+      if (!workCheck.ok) {
+        console.error(`[comment] [FAIL] 发送前作品变化 expected=${workCheck.expectedWorkId} current=${workCheck.currentWorkId || '(missing)'} url=${workCheck.currentUrl}`);
+        return {
+          ok: false,
+          code: RESULT_CODES.WRONG_PAGE,
+          message: 'wrong_work_inside_comment_send',
+          data: workCheck,
+        };
+      }
+    }
     console.error(`[comment] modal就绪, 发送评论...`);
     return postWorkModalComment(page, text);
+  }
+
+  if (expectedWorkId) {
+    const workCheck = await verifyCurrentReturnVisitWork(page, { workId: expectedWorkId }, 'inside_comment_send');
+    if (!workCheck.ok) {
+      console.error(`[comment] [FAIL] 发送前作品变化 expected=${workCheck.expectedWorkId} current=${workCheck.currentWorkId || '(missing)'} url=${workCheck.currentUrl}`);
+      return {
+        ok: false,
+        code: RESULT_CODES.WRONG_PAGE,
+        message: 'wrong_work_inside_comment_send',
+        data: workCheck,
+      };
+    }
   }
 
   console.error(`[comment] 发评论: 视频页...`);
@@ -212,8 +294,8 @@ export function buildCommentContext(task, resolvedWork = {}) {
       profileUrl: task.userProfileUrl || '',
     },
     work: {
-      workId: resolvedWork.workId || task?.targetWork?.workId || '',
-      desc: resolvedWork.workText || resolvedWork.desc || resolvedWork.contentSummary || task?.targetWork?.workText || task?.targetWork?.desc || '',
+      workId: resolvedWork.workId || '',
+      desc: resolvedWork.workText || resolvedWork.desc || resolvedWork.contentSummary || '',
       authorNickname: task.userName || task.actorName || '',
     },
     interaction: {
@@ -223,6 +305,66 @@ export function buildCommentContext(task, resolvedWork = {}) {
     requirements: {
       maxLength,
       tone: '自然、简短、像真人',
+    },
+  };
+}
+
+function normalizeVisibleFingerprint(value) {
+  return String(value || '').trim();
+}
+
+function workContextHasVisibleContent(work = {}) {
+  const text = [work.workTitle, work.workText, work.contentSummary, ...(Array.isArray(work.referenceComments) ? work.referenceComments : [])]
+    .filter(Boolean)
+    .join('')
+    .replace(/\s+/g, '');
+  return text.length >= 8;
+}
+
+async function refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, phase = 'before_agent') {
+  const current = await collectCurrentOpenedWork(page, { maxReferenceComments });
+  if (!current.ok) {
+    return { ok: false, error: 'current_work_collect_failed', reason: current.reason || 'current_work_collect_failed' };
+  }
+
+  const visibleWork = current.work || {};
+  const currentWorkId = normalizeWorkId(visibleWork.workId || '');
+  const expectedWorkId = normalizeWorkId(resolvedWork.workId || '');
+  if (expectedWorkId && currentWorkId && currentWorkId !== expectedWorkId) {
+    return { ok: false, error: 'opened_work_id_mismatch', expectedWorkId, actualWorkId: visibleWork.workId };
+  }
+
+  const originalFingerprint = normalizeVisibleFingerprint(resolvedWork.visibleFingerprint);
+  const currentFingerprint = normalizeVisibleFingerprint(visibleWork.visibleFingerprint);
+  if (originalFingerprint && currentFingerprint && originalFingerprint !== currentFingerprint) {
+    return {
+      ok: false,
+      error: `visible_work_changed_${phase}`,
+      originalFingerprint,
+      currentFingerprint,
+      expectedWorkId,
+      actualWorkId: visibleWork.workId,
+    };
+  }
+
+  if (!current.sufficient || !workContextHasVisibleContent(visibleWork)) {
+    return {
+      ok: false,
+      error: `current_work_context_insufficient_${phase}`,
+      reason: current.reason || 'content_too_short',
+      expectedWorkId,
+      actualWorkId: visibleWork.workId,
+      visibleFingerprint: currentFingerprint,
+    };
+  }
+
+  return {
+    ok: true,
+    work: {
+      ...resolvedWork,
+      ...visibleWork,
+      workId: visibleWork.workId || resolvedWork.workId,
+      workUrl: isWorkUrl(visibleWork.workUrl) ? visibleWork.workUrl : resolvedWork.workUrl,
     },
   };
 }
@@ -264,9 +406,29 @@ async function resolveWorkForExecution(page, task, options = {}) {
       return { ok: false, status: 'failed_collect', reason: opened.reason || 'open_fallback_profile_work_failed' };
     }
 
+    let autoPlayChecked = false;
+    if (String(page.url?.() || '').includes('modal_id=')) {
+      const modalReady = await waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true, openCommentArea: false });
+      if (!modalReady?.ok) {
+        return { ok: false, status: 'failed_collect', reason: modalReady?.message || modalReady?.code || 'work_modal_not_ready' };
+      }
+      autoPlayChecked = true;
+    }
+
     const fromCurrent = await collectCurrentOpenedWork(page, { maxReferenceComments });
     if (!fromCurrent.ok) {
       return { ok: false, status: 'failed_collect', reason: 'fallback_work_collect_failed' };
+    }
+
+    const currentWorkId = normalizeWorkId(fromCurrent.work?.workId || '');
+    if (currentWorkId && currentWorkId !== normalizeWorkId(fallbackWorkId)) {
+      return {
+        ok: false,
+        status: 'failed_collect',
+        reason: 'opened_work_id_mismatch',
+        expectedWorkId: fallbackWorkId,
+        actualWorkId: fromCurrent.work.workId,
+      };
     }
 
     console.error(`[resolve] 回访作品收集完成: title="${String(fromCurrent.work.workTitle || selected.aweme?.workTitle || '').slice(0, 30)}"`);
@@ -280,6 +442,7 @@ async function resolveWorkForExecution(page, task, options = {}) {
       },
       fromFallback: true,
       openedFromProfile: true,
+      autoPlayChecked,
     };
   }
 
@@ -298,14 +461,34 @@ async function resolveWorkForExecution(page, task, options = {}) {
       console.error(`[visit] task=${task.taskId} 匹配作品成功 workId=${knownWorkId} index=${opened.index}`);
       console.error(`[visit] task=${task.taskId} 已点击目标作品`);
       console.error(`[visit] task=${task.taskId} 已进入作品页`);
+      let autoPlayChecked = false;
+      if (String(page.url?.() || '').includes('modal_id=')) {
+        const modalReady = await waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true, openCommentArea: false });
+        if (!modalReady?.ok) {
+          return { ok: false, status: 'failed_collect', reason: modalReady?.message || modalReady?.code || 'work_modal_not_ready' };
+        }
+        autoPlayChecked = true;
+      }
       const fromCurrent = await collectCurrentOpenedWork(page, { maxReferenceComments });
       if (fromCurrent.ok) {
+        const currentWorkId = normalizeWorkId(fromCurrent.work?.workId || '');
+        if (currentWorkId && currentWorkId !== normalizeWorkId(knownWorkId)) {
+          return {
+            ok: false,
+            status: 'failed_collect',
+            reason: 'opened_work_id_mismatch',
+            expectedWorkId: knownWorkId,
+            actualWorkId: fromCurrent.work.workId,
+          };
+        }
+
         console.error(`[resolve] 作品收集完成: title="${String(fromCurrent.work.workTitle || '').slice(0, 30)}"`);
         return {
           ok: true,
           work: { ...fromCurrent.work, workId: fromCurrent.work.workId || knownWorkId },
           fromFallback: false,
           openedFromProfile: true,
+          autoPlayChecked,
         };
       }
       console.error(`[resolve] [FAIL] 当前页收集失败`);
@@ -362,12 +545,24 @@ export async function executeReturnVisitTask(page, task, options = {}) {
 
   const resolvedWork = resolved.work;
   console.error(`${logTag} [1/5] 作品解析完成: workId=${resolvedWork.workId} title="${String(resolvedWork.workTitle || '').slice(0, 30)}"`);
+  const openedWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_open');
+  if (openedWorkCheck) return openedWorkCheck;
 
   // [2/5] 检测页面类型 + 观看视频
   const presentation = await detectWorkPresentationKind(page, resolvedWork);
   const currentUrl = presentation.currentUrl;
   const isNotePage = presentation.isNotePage;
   console.error(`${logTag} [2/5] 页面类型: isModal=${presentation.isModalPage} isNote=${isNotePage} hasVideo=${presentation.hasVideoElement}`);
+
+  if (presentation.isModalPage && !resolved.autoPlayChecked) {
+    const modalReady = await waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true, openCommentArea: false });
+    if (!modalReady?.ok) {
+      console.error(`${logTag} [2/5] [FAIL] modal未就绪: ${modalReady?.message || modalReady?.code}`);
+      return { ok: false, status: 'failed_collect', error: modalReady?.message || 'work_modal_not_ready', likeStatus: task.likeStatus || 'pending', commentStatus: task.commentStatus || 'pending', resolvedWork };
+    }
+    const beforeWatchWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_watch');
+    if (beforeWatchWorkCheck) return beforeWatchWorkCheck;
+  }
 
   if (!isNotePage) {
     console.error(`${logTag} [2/5] 观看视频中... policy=${watchPolicy} seconds=${watchSeconds}`);
@@ -377,11 +572,19 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     console.error(`${logTag} [2/5] 图文/note，跳过观看`);
   }
 
+  const afterWatchWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_watch');
+  if (afterWatchWorkCheck) return afterWatchWorkCheck;
+
   const nextLikeStatus = { value: task.likeStatus || 'pending' };
   const nextCommentStatus = { value: task.commentStatus || 'pending' };
 
   // [3/5] 点赞
   console.error(`${logTag} [3/5] 检测点赞状态... execute=${execute}`);
+  const beforeLikeWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_like', {
+    likeStatus: nextLikeStatus.value,
+    commentStatus: nextCommentStatus.value,
+  });
+  if (beforeLikeWorkCheck) return beforeLikeWorkCheck;
   const likeState = await checkLikeState(page);
   if (!likeState.ok || likeState.data?.confidence !== 'confirmed') {
     console.error(`${logTag} [3/5] [FAIL] 点赞状态无法确认 confidence=${likeState.data?.confidence}`);
@@ -450,6 +653,12 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   console.error(`${logTag} [4/5] 等待发评论... delay=${waitBetweenLikeAndCommentMs}ms`);
   await waitRandom(page, waitBetweenLikeAndCommentMs, 2000, 6000);
 
+  const beforeCommentBoxWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_comment_box', {
+    likeStatus: nextLikeStatus.value,
+    commentStatus: nextCommentStatus.value,
+  });
+  if (beforeCommentBoxWorkCheck) return beforeCommentBoxWorkCheck;
+
   const boxReady = await ensureReturnVisitCommentBoxReady(page, presentation);
   if (!boxReady.ok) {
     console.error(`[visit] task=${taskId} failed reason=评论框不存在 detail=${boxReady.reason || ''}`);
@@ -464,7 +673,22 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     if (commentText) {
       console.error(`[agent] task=${taskId} 复用已生成评论 comment=${commentText}`);
     } else {
-      const commentContext = buildCommentContext(task, resolvedWork);
+      const visibleForAgent = await refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, 'before_agent');
+      if (!visibleForAgent.ok) {
+        console.error(`[visit] task=${taskId} failed reason=${visibleForAgent.error} detail=${visibleForAgent.reason || ''}`);
+        await saveDebugScreenshot(page, task.taskId, visibleForAgent.error || 'visible_work_before_agent');
+        return {
+          ok: false,
+          status: 'failed_generate_comment',
+          error: visibleForAgent.error,
+          likeStatus: nextLikeStatus.value,
+          commentStatus: nextCommentStatus.value,
+          resolvedWork,
+          data: visibleForAgent,
+        };
+      }
+
+      const commentContext = buildCommentContext(task, visibleForAgent.work);
       console.error(`[agent] task=${taskId} 请求生成评论`);
       commentText = await agentProvider.generateComment(commentContext);
       console.error(`[agent] task=${taskId} 评论生成成功 comment=${commentText}`);
@@ -475,7 +699,27 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   }
 
   console.error(`${logTag} [5/5] 发送评论: "${commentText.slice(0, 40)}"`);
-  const commentResult = await postReturnVisitComment(page, commentText, presentation, { execute: true });
+  const beforeCommentSendWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_comment_send', {
+    likeStatus: nextLikeStatus.value,
+    commentStatus: nextCommentStatus.value,
+  });
+  if (beforeCommentSendWorkCheck) return beforeCommentSendWorkCheck;
+  const visibleBeforeSend = await refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, 'before_comment_send');
+  if (!visibleBeforeSend.ok) {
+    console.error(`[visit] task=${taskId} failed reason=${visibleBeforeSend.error} detail=${visibleBeforeSend.reason || ''}`);
+    await saveDebugScreenshot(page, task.taskId, visibleBeforeSend.error || 'visible_work_before_comment_send');
+    return {
+      ok: false,
+      status: 'failed_comment',
+      error: visibleBeforeSend.error,
+      likeStatus: nextLikeStatus.value,
+      commentStatus: 'failed',
+      resolvedWork,
+      generatedComment: commentText,
+      data: visibleBeforeSend,
+    };
+  }
+  const commentResult = await postReturnVisitComment(page, commentText, presentation, { execute: true, expectedWorkId: resolvedWork.workId });
   if (!commentResult.ok) {
     console.error(`${logTag} [5/5] [FAIL] 评论失败: ${commentResult.message} url=${page.url()}`);
     console.error(`${logTag} 评论失败详情:`, JSON.stringify(commentResult.data || {}));

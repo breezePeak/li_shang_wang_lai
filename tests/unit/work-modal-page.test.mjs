@@ -5,6 +5,7 @@ import {
   fillWorkReplyText,
   parseDouyinTimeText,
   pickWorkCommentCandidate,
+  postWorkModalComment,
   resolveReplyTypingOptions,
   scrollCommentAreaOnce,
   typeReplyTextWithEffect,
@@ -127,6 +128,47 @@ describe('回复输入打字效果', () => {
       expect(result.ok).toBe(true);
       expect(result.data.method).toBe('keyboard_insert_text');
       expect(page.keyboard.insertText).toHaveBeenCalledWith('收到啦');
+    } finally {
+      if (originalTyping === undefined) delete process.env.LISHANGWANGLAI_REPLY_TYPING;
+      else process.env.LISHANGWANGLAI_REPLY_TYPING = originalTyping;
+    }
+  });
+
+  it('postWorkModalComment 输入框清空时按页面已接受发送处理', async () => {
+    const originalTyping = process.env.LISHANGWANGLAI_REPLY_TYPING;
+    process.env.LISHANGWANGLAI_REPLY_TYPING = '0';
+
+    let phase = 'prepare';
+    const page = {
+      evaluate: vi.fn(async (fn, arg) => {
+        if (arg?.text && arg?.method) {
+          phase = 'filled';
+          return { ok: true, method: arg.method, sendButtonVisible: true };
+        }
+        if (arg?.replyNeedle && arg?.replyPrefix) {
+          return { visible: false, inputCleared: true, commentPreview: '' };
+        }
+        return { ok: true, phase };
+      }),
+      locator: vi.fn(() => ({
+        last: () => ({
+          waitFor: vi.fn(async () => {}),
+          click: vi.fn(async () => {}),
+        }),
+      })),
+      keyboard: {
+        press: vi.fn(async () => {}),
+        insertText: vi.fn(async () => {}),
+      },
+      waitForTimeout: vi.fn(async () => {}),
+    };
+
+    try {
+      const result = await postWorkModalComment(page, '程序员快乐时刻：脚本跑通了');
+      expect(result.ok).toBe(true);
+      expect(result.data.unconfirmed).toBe(false);
+      expect(result.data.verified).toBe(true);
+      expect(result.data.method).toBe('editor_cleared_after_send');
     } finally {
       if (originalTyping === undefined) delete process.env.LISHANGWANGLAI_REPLY_TYPING;
       else process.env.LISHANGWANGLAI_REPLY_TYPING = originalTyping;

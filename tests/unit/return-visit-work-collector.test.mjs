@@ -101,7 +101,7 @@ describe('return-visit work collector url normalization', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.reason).toBe('profile_card_index_out_of_range');
+    expect(result.reason).toBe('target_work_card_not_found_in_dom');
   });
 
   it('openProfileWorkByAwemeIdFromPostApi 在卡片 id 不匹配时失败，不误点', async () => {
@@ -131,8 +131,68 @@ describe('return-visit work collector url normalization', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.reason).toBe('profile_card_id_mismatch');
+    expect(result.reason).toBe('target_work_card_not_found_in_dom');
     expect(clicked).toBe(false);
+  });
+
+  it('openProfileWorkByAwemeIdFromPostApi 点击返回的 href 不匹配目标时失败', async () => {
+    const fakePage = {
+      waitForTimeout: async () => {},
+      url: () => 'https://www.douyin.com/user/author-a',
+    };
+
+    const result = await openProfileWorkByAwemeIdFromPostApi(fakePage, 'https://www.douyin.com/user/author-a', '222', {
+      collectorFactory: () => ({
+        getAwemes: () => [{ aweme_id: '222' }],
+        getStats: () => ({ responseCount: 1, awemeCount: 1 }),
+        waitForAwemes: async () => true,
+        stop: () => {},
+      }),
+      gotoProfile: async () => ({ ok: true }),
+      detectPrivate: async () => false,
+      listCards: async () => [{ href: 'https://www.douyin.com/video/222' }],
+      clickCard: async () => ({ ok: true, href: 'https://www.douyin.com/video/999' }),
+      scrollProfile: async () => {},
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('profile_clicked_card_id_mismatch');
+    expect(result.clickedAwemeId).toBe('999');
+  });
+
+  it('openProfileWorkByAwemeIdFromPostApi 优先点击 DOM 中明确匹配目标 workId 的卡片', async () => {
+    const fakePage = {
+      waitForTimeout: async () => {},
+      url: () => 'https://www.douyin.com/user/author-a?modal_id=222',
+    };
+    let clickedIndex = null;
+    let clickedExpected = null;
+
+    const result = await openProfileWorkByAwemeIdFromPostApi(fakePage, 'https://www.douyin.com/user/author-a', '222', {
+      collectorFactory: () => ({
+        getAwemes: () => [{ aweme_id: '111' }, { aweme_id: '222' }],
+        getStats: () => ({ responseCount: 1, awemeCount: 2 }),
+        waitForAwemes: async () => true,
+        stop: () => {},
+      }),
+      gotoProfile: async () => ({ ok: true }),
+      detectPrivate: async () => false,
+      listCards: async () => [
+        { href: 'https://www.douyin.com/video/222' },
+        { href: 'https://www.douyin.com/video/111' },
+      ],
+      clickCard: async (_page, index, expectedAwemeId) => {
+        clickedIndex = index;
+        clickedExpected = expectedAwemeId;
+        return { ok: true, href: 'https://www.douyin.com/video/222' };
+      },
+      scrollProfile: async () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.index).toBe(0);
+    expect(clickedIndex).toBe(0);
+    expect(clickedExpected).toBe('222');
   });
 
   it('openProfileWorkByAwemeIdFromPostApi 找不到目标作品时失败', async () => {

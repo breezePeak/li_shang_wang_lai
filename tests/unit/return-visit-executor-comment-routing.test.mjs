@@ -16,6 +16,18 @@ vi.mock('../../src/adapters/video-page.mjs', () => ({
   postVideoComment: postVideoCommentMock,
 }));
 
+vi.mock('../../src/services/return-visit-work-collector.mjs', () => ({
+  collectCurrentOpenedWork: vi.fn(),
+  collectFirstNonTopAwemeFromProfile: vi.fn(),
+  openProfileWorkByAwemeId: vi.fn(),
+  extractWorkIdFromUrl: (url) => {
+    const text = String(url || '');
+    return text.match(/[?&]modal_id=(\d+)/)?.[1]
+      || text.match(/\/(?:video|note)\/(\d+)/)?.[1]
+      || null;
+  },
+}));
+
 const { postReturnVisitComment } = await import('../../src/services/return-visit-executor.mjs');
 
 describe('return-visit executor comment routing', () => {

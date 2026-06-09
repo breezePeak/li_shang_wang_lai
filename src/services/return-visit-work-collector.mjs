@@ -5,6 +5,7 @@ import {
   getVideoTitle,
   extractVideoCommentContext,
 } from '../adapters/video-page.mjs';
+import { extractWorkModalContext } from '../adapters/work-modal-page.mjs';
 
 function createProfilePostApiCollector(page) {
   const awemes = [];
@@ -133,14 +134,23 @@ async function readProfileWorkCards(page) {
   });
 }
 
-async function clickProfileCardByIndex(page, index) {
-  return page.evaluate((targetIndex) => {
+async function clickProfileCardByIndex(page, index, expectedAwemeId = '') {
+  return page.evaluate(({ targetIndex, expectedAwemeId }) => {
     function visible(el) {
       if (!el) return false;
       const rect = el.getBoundingClientRect();
       if (rect.width < 20 || rect.height < 20) return false;
       const style = window.getComputedStyle(el);
       return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    }
+
+    function normalizeAwemeId(value) {
+      return String(value || '').trim().replace(/^(video|note|modal)-/, '');
+    }
+
+    function extractAwemeId(href = '') {
+      const match = String(href || '').match(/\/(?:video|note)\/(\d+)|[?&]modal_id=(\d+)/);
+      return match?.[1] || match?.[2] || '';
     }
 
     const cards = [];
@@ -155,7 +165,10 @@ async function clickProfileCardByIndex(page, index) {
     }
 
     cards.sort((a, b) => a.y - b.y || a.x - b.x);
-    const target = cards[targetIndex];
+    const normalizedExpected = normalizeAwemeId(expectedAwemeId);
+    const target = normalizedExpected
+      ? cards.find(card => normalizeAwemeId(extractAwemeId(card.href)) === normalizedExpected)
+      : cards[targetIndex];
     if (!target) return { ok: false };
 
     const candidate = Array.from(links).find(link => (link.getAttribute('href') || '') === target.href && visible(link));
@@ -163,7 +176,7 @@ async function clickProfileCardByIndex(page, index) {
     candidate.scrollIntoView({ block: 'center', behavior: 'instant' });
     candidate.click();
     return { ok: true, href: target.href };
-  }, index);
+  }, { targetIndex: index, expectedAwemeId });
 }
 
 async function scrollProfileOnce(page) {
@@ -400,7 +413,7 @@ export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awem
     let foundIndex = findAwemeIndexInList(collector.getAwemes(), targetAwemeId);
     let domFoundIndex = findCardIndexByAwemeId(cards, targetAwemeId);
     let scrollCount = 0;
-    while (foundIndex < 0 && domFoundIndex < 0 && scrollCount < maxScrollCount) {
+    while (domFoundIndex < 0 && scrollCount < maxScrollCount) {
       await scrollProfile(page);
       scrollCount++;
       const currentCount = collector.getAwemes().length;
@@ -427,8 +440,11 @@ export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awem
     if (foundIndex < 0 && domFoundIndex < 0) {
       return { ok: false, reason: 'target_work_not_found_in_profile_post_api', stats };
     }
+    if (domFoundIndex < 0) {
+      return { ok: false, reason: 'target_work_card_not_found_in_dom', stats };
+    }
 
-    const targetIndex = foundIndex >= 0 ? foundIndex : domFoundIndex;
+    const targetIndex = domFoundIndex;
     console.error(`[comments:execute] profile_dom_card_count=${cards.length} click_card_index=${targetIndex}`);
     if (cards.length <= targetIndex) {
       return { ok: false, reason: 'profile_card_index_out_of_range', stats: { ...stats, domCardCount: cards.length } };
@@ -446,9 +462,19 @@ export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awem
       };
     }
 
-    const clicked = await clickCard(page, targetIndex);
+    const clicked = await clickCard(page, targetIndex, targetAwemeId);
     if (!clicked?.ok) {
-      return { ok: false, reason: 'profile_card_index_out_of_range', stats: { ...stats, domCardCount: cards.length } };
+      return { ok: false, reason: clicked?.reason || 'profile_card_index_out_of_range', stats: { ...stats, domCardCount: cards.length } };
+    }
+    const clickedAwemeId = normalizeAwemeIdForMatching(extractAwemeIdFromHref(clicked.href || ''));
+    if (clickedAwemeId && clickedAwemeId !== targetAwemeId) {
+      return {
+        ok: false,
+        reason: 'profile_clicked_card_id_mismatch',
+        stats: { ...stats, domCardCount: cards.length },
+        clickedHref: clicked.href || '',
+        clickedAwemeId,
+      };
     }
     console.error(`[comments:execute] opened_profile_card_href=${clicked.href || candidateCard?.href || ''}`);
 
@@ -495,6 +521,22 @@ function buildSummary({ title, text }) {
   const merged = [title, text].filter(Boolean).join('。').trim();
   if (!merged) return null;
   return merged.length > 100 ? `${merged.slice(0, 100)}...` : merged;
+}
+
+function normalizeVisibleFingerprintText(value) {
+  return String(value || '')
+    .replace(/\s+/g, '')
+    .replace(/[\u200b-\u200f\ufeff]/g, '')
+    .trim()
+    .slice(0, 160);
+}
+
+export function buildVisibleWorkFingerprint(work = {}) {
+  const title = normalizeVisibleFingerprintText(work.workTitle);
+  const text = normalizeVisibleFingerprintText(work.workText || work.contentSummary);
+  const media = String(work.thumbnailSrc || '').trim().slice(0, 160);
+  const parts = [title, text, media].filter(part => part && part.length >= 4);
+  return parts.join('|');
 }
 
 function normalizeCommentText(raw) {
@@ -563,16 +605,19 @@ export async function collectWorkFromUrl(page, workUrl, options = {}) {
     return { ok: false, reason: 'video_navigation_failed', error: lastErr || 'video_navigation_failed' };
   }
 
-  const [titleResult, contextResult, likeResult, referenceComments] = await Promise.all([
+  const isModalPage = String(page.url?.() || workUrl || '').includes('modal_id=');
+  const [titleResult, contextResult, likeResult, referenceComments, modalContextResult] = await Promise.all([
     getVideoTitle(page),
     extractVideoCommentContext(page),
     checkLikeState(page),
     extractReferenceComments(page, maxReferenceComments),
+    isModalPage ? extractWorkModalContext(page).catch(() => null) : Promise.resolve(null),
   ]);
 
-  const workTitle = titleResult.ok ? (titleResult.data?.title || '') : '';
+  const modalContext = modalContextResult?.ok ? (modalContextResult.data || {}) : {};
+  const workTitle = modalContext.workTitle || (titleResult.ok ? (titleResult.data?.title || '') : '');
   const context = contextResult.data || {};
-  const workText = context.captionText || context.visibleTextSample || '';
+  const workText = modalContext.workText || context.captionText || context.visibleTextSample || '';
   const contentSummary = buildSummary({ title: workTitle, text: workText });
   const publishTime = extractPublishTime(`${context.visibleTextSample || ''} ${workText}`);
 
@@ -590,7 +635,9 @@ export async function collectWorkFromUrl(page, workUrl, options = {}) {
     publishTime,
     likeState,
     referenceComments,
+    thumbnailSrc: modalContext.thumbnailSrc || null,
   };
+  work.visibleFingerprint = buildVisibleWorkFingerprint(work);
 
   const sufficient = isWorkContentSufficient({
     workTitle: work.workTitle,
@@ -609,16 +656,20 @@ export async function collectWorkFromUrl(page, workUrl, options = {}) {
 export async function collectCurrentOpenedWork(page, options = {}) {
   const { maxReferenceComments = 5 } = options;
 
-  const [titleResult, contextResult, likeResult, referenceComments] = await Promise.all([
+  const currentUrl = page.url();
+  const isModalPage = String(currentUrl || '').includes('modal_id=');
+  const [titleResult, contextResult, likeResult, referenceComments, modalContextResult] = await Promise.all([
     getVideoTitle(page),
     extractVideoCommentContext(page),
     checkLikeState(page),
     extractReferenceComments(page, maxReferenceComments),
+    isModalPage ? extractWorkModalContext(page).catch(() => null) : Promise.resolve(null),
   ]);
 
-  const workTitle = titleResult.ok ? (titleResult.data?.title || '') : '';
+  const modalContext = modalContextResult?.ok ? (modalContextResult.data || {}) : {};
+  const workTitle = modalContext.workTitle || (titleResult.ok ? (titleResult.data?.title || '') : '');
   const context = contextResult.data || {};
-  const workText = context.captionText || context.visibleTextSample || '';
+  const workText = modalContext.workText || context.captionText || context.visibleTextSample || '';
   const contentSummary = buildSummary({ title: workTitle, text: workText });
   const publishTime = extractPublishTime(`${context.visibleTextSample || ''} ${workText}`);
 
@@ -627,7 +678,6 @@ export async function collectCurrentOpenedWork(page, options = {}) {
     likeState = likeResult.data.alreadyLiked ? 'already_liked' : 'pending';
   }
 
-  const currentUrl = page.url();
   const work = {
     workId: extractWorkIdFromUrl(currentUrl),
     workUrl: normalizeDouyinUrl(currentUrl) || currentUrl,
@@ -637,7 +687,9 @@ export async function collectCurrentOpenedWork(page, options = {}) {
     publishTime,
     likeState,
     referenceComments,
+    thumbnailSrc: modalContext.thumbnailSrc || null,
   };
+  work.visibleFingerprint = buildVisibleWorkFingerprint(work);
 
   const sufficient = isWorkContentSufficient({
     workTitle: work.workTitle,

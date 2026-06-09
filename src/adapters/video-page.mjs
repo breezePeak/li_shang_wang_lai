@@ -171,6 +171,51 @@ export async function checkLikeState(page) {
         return true;
       }
 
+      function intersectsViewport(el) {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+      }
+
+      function pickVisibleActionBar(selector, requiredSelector = '') {
+        const viewportCenterY = window.innerHeight / 2;
+        const candidates = Array.from(document.querySelectorAll(selector))
+          .map(el => {
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            const visible = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+            const intersects = rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+            const centerY = rect.top + rect.height / 2;
+            return {
+              el,
+              visible,
+              intersects,
+              hasRequired: requiredSelector ? Boolean(el.querySelector(requiredSelector)) : true,
+              distanceToViewportCenter: Math.abs(centerY - viewportCenterY),
+              top: rect.top,
+            };
+          })
+          .filter(item => item.visible && item.hasRequired);
+
+        candidates.sort((a, b) => {
+          if (a.intersects !== b.intersects) return a.intersects ? -1 : 1;
+          return a.distanceToViewportCenter - b.distanceToViewportCenter || a.top - b.top;
+        });
+        return candidates[0]?.el || null;
+      }
+
+      function pickVisibleElement(selector) {
+        const viewportCenterY = window.innerHeight / 2;
+        const candidates = Array.from(document.querySelectorAll(selector))
+          .filter(el => isVisibleEl(el) && intersectsViewport(el))
+          .map(el => {
+            const rect = el.getBoundingClientRect();
+            return { el, distanceToViewportCenter: Math.abs(rect.top + rect.height / 2 - viewportCenterY), top: rect.top };
+          });
+        candidates.sort((a, b) => a.distanceToViewportCenter - b.distanceToViewportCenter || a.top - b.top);
+        return candidates[0]?.el || null;
+      }
+
       function hasLikedClass(cls) {
         return /active|liked|selected|checked|hasLiked|\bf7caOKG9\b/i.test(cls);
       }
@@ -375,7 +420,10 @@ export async function checkLikeState(page) {
       //   data-e2e="feed-comment-icon"
       //   data-e2e="video-player-collect"
       //   data-e2e="video-player-share"
-      const playerDigg = document.querySelector('[data-e2e="video-player-digg"]');
+      const playerActionBar = pickVisibleActionBar('.hOcDRkbZ.WcVcXqQb', '[data-e2e="video-player-digg"]');
+      const playerDigg = Array.from(playerActionBar?.querySelectorAll('[data-e2e="video-player-digg"]') || [])
+        .find(el => isVisibleEl(el) && intersectsViewport(el))
+        || pickVisibleElement('[data-e2e="video-player-digg"]');
       if (playerDigg) {
         const rect = playerDigg.getBoundingClientRect();
         const style = window.getComputedStyle(playerDigg);
@@ -398,8 +446,8 @@ export async function checkLikeState(page) {
             ...assessed,
             diag,
             actionBarFound: true,
-            actionItemCount: document.querySelectorAll('[data-e2e="video-player-digg"], [data-e2e="feed-comment-icon"], [data-e2e="video-player-collect"], [data-e2e="video-player-share"]').length,
-            actionItemsDiag: Array.from(document.querySelectorAll('[data-e2e="video-player-digg"], [data-e2e="feed-comment-icon"], [data-e2e="video-player-collect"], [data-e2e="video-player-share"]')).map((el, i) => ({
+            actionItemCount: (playerActionBar || document).querySelectorAll('[data-e2e="video-player-digg"], [data-e2e="feed-comment-icon"], [data-e2e="video-player-collect"], [data-e2e="video-player-share"]').length,
+            actionItemsDiag: Array.from((playerActionBar || document).querySelectorAll('[data-e2e="video-player-digg"], [data-e2e="feed-comment-icon"], [data-e2e="video-player-collect"], [data-e2e="video-player-share"]')).map((el, i) => ({
               index: i,
               dataE2e: el.getAttribute('data-e2e') || '',
               dataE2eState: el.getAttribute('data-e2e-state') || '',
@@ -415,7 +463,7 @@ export async function checkLikeState(page) {
       // No aria/title/data-e2e=like/digg. Count in span.Z4B2hGGG.
       // Liked state: class f7caOKG9 appears on the like container.
       const actionBarCheck = (() => {
-        const container = document.querySelector('.t5VMknM2 .MinpposV');
+        const container = pickVisibleActionBar('.t5VMknM2 .MinpposV');
         if (!container) return null;
         const items = Array.from(container.querySelectorAll(':scope > .AOWKbsTg'));
         if (items.length === 0) return null;
@@ -928,13 +976,22 @@ export async function clickLike(page, { execute = false } = {}) {
       ];
 
       for (const selector of exactLikeSelectors) {
-        const targetBtn = page.locator(selector).first();
-        const count = await targetBtn.count();
+        const matches = page.locator(selector);
+        const count = await matches.count();
         console.error(`[like-click] 尝试选择器: ${selector} count=${count}`);
         if (count === 0) continue;
-        const vis = await targetBtn.isVisible().catch(() => false);
-        if (!vis) {
-          console.error(`[like-click] ${selector} 不可见, 跳过`);
+
+        let targetBtn = null;
+        for (let i = 0; i < count; i++) {
+          const candidate = matches.nth(i);
+          const vis = await candidate.isVisible().catch(() => false);
+          if (vis) {
+            targetBtn = candidate;
+            break;
+          }
+        }
+        if (!targetBtn) {
+          console.error(`[like-click] ${selector} 没有可见匹配项, 跳过`);
           continue;
         }
 

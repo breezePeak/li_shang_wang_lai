@@ -411,20 +411,6 @@ export async function extractWorkModalContext(page) {
         if (text.length > 2 && text.length < 500 && !text.includes('回复') && !text.includes('评论')) descriptions.push(text);
       }
 
-      const metaDescription = document.querySelector('meta[name="description"], meta[property="og:description"]');
-      const metaText = (metaDescription?.getAttribute('content') || '').trim();
-      if (metaText.length > 2) descriptions.push(metaText);
-
-      const ogTitle = document.querySelector('meta[property="og:title"]');
-      if (ogTitle) {
-        const content = (ogTitle.getAttribute('content') || '').trim();
-        if (content.length > 2) descriptions.push(content);
-      }
-
-      const title = document.title || '';
-      const cleaned = title.replace(/ - 抖音$/, '').replace(/的抖音.*$/, '').trim();
-      if (cleaned.length > 2) descriptions.push(cleaned);
-
       const unique = [];
       const seen = new Set();
       for (const item of descriptions) {
@@ -573,7 +559,7 @@ export async function extractWorkModalContext(page) {
   });
 }
 
-export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay = false } = {}) {
+export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay = false, openCommentArea = true } = {}) {
   try {
     const removed = await detectVideoRemoved(page).catch(() => null);
     if (removed) {
@@ -640,6 +626,10 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           break;
         }
       }
+    }
+
+    if (!openCommentArea) {
+      return success({ modalVisible: true, commentAreaOpened: false });
     }
 
     const isCommentAreaVisible = async () => await page.evaluate(() => {
@@ -2381,6 +2371,11 @@ export async function postWorkModalComment(page, commentText) {
     if (state.visible) {
       console.error('[work-modal] 顶层评论已在评论区可见');
       return success({ ...sent.data, verified: true, unconfirmed: false });
+    }
+
+    if (state.inputCleared) {
+      console.error('[work-modal] 顶层评论未立即可见，但输入框已清空，按页面已接受发送处理');
+      return success({ ...sent.data, verified: true, unconfirmed: false, method: 'editor_cleared_after_send' });
     }
 
     await page.waitForTimeout(400).catch(() => {});
