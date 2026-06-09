@@ -480,7 +480,7 @@ export async function extractWorkModalContext(page) {
       return {
         titleText,
         bodyText,
-        probe: {
+        diagnostics: {
           modalCount: document.querySelectorAll('[data-e2e="modal-video-container"], .modal-video-container').length,
           selectedModalIndex: selected?.index ?? -1,
           selectedVisibleArea: Math.round(selected?.visibleArea || 0),
@@ -489,11 +489,11 @@ export async function extractWorkModalContext(page) {
     });
     workTitle = textData.titleText || '';
     workText = textData.bodyText || workTitle || '';
-    if (textData.probe?.modalCount > 1 || process.env.LISHANGWANGLAI_CONTEXT_PROBE === '1') {
+    if (textData.diagnostics?.modalCount > 1) {
       console.error(
-        `[work-modal:probe] context modalCount=${textData.probe.modalCount}` +
-          ` selected=${textData.probe.selectedModalIndex}` +
-          ` area=${textData.probe.selectedVisibleArea}` +
+        `[work-modal:context] modalCount=${textData.diagnostics.modalCount}` +
+          ` selected=${textData.diagnostics.selectedModalIndex}` +
+          ` area=${textData.diagnostics.selectedVisibleArea}` +
           ` title="${String(workTitle || '').slice(0, 40)}"`
       );
     }
@@ -992,7 +992,7 @@ export async function ensureWorkModalCommentBoxReady(page) {
     const editor = container.querySelector('.public-DraftEditor-content[contenteditable="true"], [contenteditable="true"], [role="textbox"]');
     if (visible(editor)) return { ok: true, method: 'editor_visible' };
     return { ok: true, method: 'container_visible' };
-  }).catch(() => ({ ok: false, reason: 'comment_box_probe_failed' }));
+  }).catch(() => ({ ok: false, reason: 'comment_box_check_failed' }));
 
   return ready;
 }
