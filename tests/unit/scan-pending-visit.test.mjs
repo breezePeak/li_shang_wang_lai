@@ -156,8 +156,8 @@ describe('summarizePendingReplies', () => {
     });
 
     const db = getDb();
-    const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString();
-    db.prepare('UPDATE work_comments SET first_seen_at = ? WHERE reply_status = ? AND id != ?').run(twoDaysAgo, 'pending', old.id);
+    const oldSeenAt = new Date(Date.now() - 3 * 86400000).toISOString();
+    db.prepare('UPDATE work_comments SET last_seen_at = ? WHERE id = ?').run(oldSeenAt, old.id);
 
     const summary = summarizePendingReplies({ days: 1, maxCount: 10 });
 

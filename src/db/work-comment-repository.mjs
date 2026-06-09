@@ -61,7 +61,7 @@ export function listPendingCommentsGroupedByWork(options = {}) {
   let sql = "SELECT * FROM work_comments WHERE reply_status = 'pending'";
   if (Number(days) > 0) {
     const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
-    sql += ' AND first_seen_at <= ?';
+    sql += ' AND last_seen_at >= ?';
     params.push(since);
   }
   sql += ' ORDER BY first_seen_at ASC LIMIT ?';
@@ -111,13 +111,14 @@ export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
 
   if (Number(days) > 0) {
     const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
-    sql += ' AND wc.first_seen_at <= ?';
+    sql += ' AND wc.last_seen_at >= ?';
     params.push(since);
   }
 
   sql += `
     ORDER BY
       CASE WHEN wc.reply_reason IS NULL OR wc.reply_reason = '' THEN 0 ELSE 1 END,
+      wc.last_seen_at ASC,
       wc.first_seen_at ASC
     LIMIT ?
   `;
