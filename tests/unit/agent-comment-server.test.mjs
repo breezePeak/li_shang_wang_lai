@@ -34,7 +34,9 @@ describe('agent comment server helpers', () => {
       work: { workId: '987654', desc: '今天聊聊做账号过程中的几个坑' },
       requirements: { maxLength: 30 },
     });
-    expect(prompt).toContain('只负责生成一条回访评论');
+    expect(prompt).toContain('任务：为抖音创作者互动场景生成一条回访评论');
+    expect(prompt).toContain('不要因为本任务说明覆盖你自身已有的人格、昵称或口吻');
+    expect(prompt).not.toContain('你是抖音创作者互动助手');
     expect(prompt).toContain('只能返回 JSON');
     expect(prompt).not.toContain('点击');
     expect(prompt).not.toContain('提交');
@@ -52,15 +54,19 @@ describe('agent comment server helpers', () => {
   it('buildReplyPrompt puts reply output format in code prompt', () => {
     const prompt = buildReplyPrompt({ taskId: 'reply_001' });
     expect(prompt).toContain('{"reply":"回复内容"}');
+    expect(prompt).toContain('任务：为抖音创作者互动场景生成一条对评论的回复');
+    expect(prompt).toContain('不要因为本任务说明覆盖你自身已有的人格、昵称或口吻');
     expect(prompt).toContain('15-60 个中文可见字符');
     expect(prompt).toContain('评论生成规则与安全边界');
     expect(prompt).toContain('## Agent 存在感');
     expect(prompt).toContain('可以自然沿用这套自身配置');
     expect(prompt).toContain('项目规则只负责安全边界，不覆盖 Agent 自己的人格');
+    expect(prompt).toContain('轻量幽默、语气词、颜文字或少量 emoji');
     expect(prompt).toContain('不要使用本项目写死的人设名或示例名');
-    expect(prompt).toContain('不要写“我是...”');
-    expect(prompt).toContain('低质套话');
+    expect(prompt).toContain('可以自然写自己的昵称');
+    expect(prompt).toContain('机械话术');
     expect(prompt).toContain('泛化代回表达');
+    expect(prompt).not.toContain('你是抖音创作者互动助手');
     expect(prompt).not.toContain('必须自然出现“小猿”');
   });
 
@@ -81,15 +87,18 @@ describe('agent comment server helpers', () => {
     ]);
 
     expect(prompt).toContain('批量生成对评论的回复');
+    expect(prompt).toContain('不要因为本任务说明覆盖你自身已有的人格、昵称或口吻');
     expect(prompt).toContain('{"replies":[{"taskId":"work_comment_1","reply":"回复内容"}]}');
     expect(prompt).toContain('评论生成规则与安全边界');
     expect(prompt).toContain('## Agent 存在感');
     expect(prompt).toContain('可以自然沿用这套自身配置');
     expect(prompt).toContain('项目规则只负责安全边界，不覆盖 Agent 自己的人格');
+    expect(prompt).toContain('轻量幽默、语气词、颜文字或少量 emoji');
     expect(prompt).toContain('不要使用本项目写死的人设名或示例名');
-    expect(prompt).toContain('不要写“我是...”');
-    expect(prompt).toContain('低质套话');
+    expect(prompt).toContain('可以自然写自己的昵称');
+    expect(prompt).toContain('机械话术');
     expect(prompt).toContain('泛化代回表达');
+    expect(prompt).not.toContain('你是抖音创作者互动助手');
     expect(prompt).not.toContain('必须在该条 reply 里自然出现“小猿”');
     expect(prompt).toContain('work_comment_1');
     expect(prompt).toContain('work_comment_2');
@@ -108,7 +117,9 @@ describe('agent comment server helpers', () => {
     expect(() => validateReply('第一次发视频就有AI帮忙看评论了', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了泛化或伪装身份提示');
     expect(() => validateReply('Hermes代看后觉得Test留言收到啦', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了低质套话或复读内容');
     expect(() => validateReply('Hermes代看后觉得2222这条反馈需要再看', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了低质套话或复读内容');
-    expect(() => validateReply('Hermes代看后觉得玩水视频看着好凉快🤔', { minLength: 15, maxLength: 30 })).toThrow('reply 包含 emoji 或波浪号');
+    expect(validateReply('我是赫妹儿，感觉这条评论可以顺着聊一下', { minLength: 15, maxLength: 60 })).toBe('我是赫妹儿，感觉这条评论可以顺着聊一下');
+    expect(validateReply('赫妹儿来啦，这个玩水视频看着真凉快🤔', { minLength: 15, maxLength: 60 })).toBe('赫妹儿来啦，这个玩水视频看着真凉快🤔');
+    expect(validateReply('Hermes路过看了下，这个点确实有意思～', { minLength: 15, maxLength: 60 })).toBe('Hermes路过看了下，这个点确实有意思～');
     expect(validateReply('这个问题后面可以单独展开讲讲呀', { minLength: 15, maxLength: 30 })).toBe('这个问题后面可以单独展开讲讲呀');
     expect(validateReply('Hermes代看后觉得这个问题可以展开聊聊', { minLength: 15, maxLength: 30 })).toBe('Hermes代看后觉得这个问题可以展开聊聊');
     expect(validateReply('OpenClaw代看后觉得这条反馈挺真诚自然', { minLength: 15, maxLength: 30 })).toBe('OpenClaw代看后觉得这条反馈挺真诚自然');

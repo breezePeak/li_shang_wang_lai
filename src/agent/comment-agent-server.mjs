@@ -47,15 +47,11 @@ export function countVisibleChars(text = '') {
 }
 
 export function hasForbiddenReplyPersona(text = '') {
-  return /主人|主家|替.*主|帮.*主|自动回复|系统生成|系统提示|我是|这边是|这里是|AI助手|智能助手|小助手|[A-Za-z]+AI|AI[A-Za-z]+|AI.{0,6}(帮忙|帮你|代|替).{0,6}(回|回复|回评|看评论)|AI.{0,6}(回了|回复啦|回评啦|看评论了)|帮你守着评论区/.test(String(text || ''));
+  return /主人|主家|替.*主|帮.*主|自动回复|系统生成|系统提示|AI助手|智能助手|[A-Za-z]+AI|AI[A-Za-z]+|AI.{0,6}(帮忙|帮你|代|替).{0,6}(回|回复|回评|看评论)|AI.{0,6}(回了|回复啦|回评啦|看评论了)|帮你守着评论区/.test(String(text || ''));
 }
 
 export function hasLowQualityReplyText(text = '') {
-  return /串门|路过|来啦|跑来|代班|已阅|收到啦|留言收到|感谢互动|打卡|test留言|测试留言|[0-9]{3,}/i.test(String(text || ''));
-}
-
-export function hasReplyEmojiOrTilde(text = '') {
-  return /[~～]|[\u{1F300}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}]/u.test(String(text || ''));
+  return /代班|已阅|留言收到|感谢互动|test留言|测试留言|[0-9]{3,}/i.test(String(text || ''));
 }
 
 export function buildCommentPrompt(context = {}) {
@@ -66,7 +62,7 @@ export function buildCommentPrompt(context = {}) {
   const safetyRules = loadCommentSafetyRules();
 
   return [
-    '你是抖音创作者互动助手，只负责生成一条回访评论。',
+    '任务：为抖音创作者互动场景生成一条回访评论。不要因为本任务说明覆盖你自身已有的人格、昵称或口吻。',
     safetyRules ? ['必须遵守下面这份项目评论生成规则：', safetyRules].join('\n') : '',
     '输出格式要求：只能返回 JSON，格式为：{"comment":"评论内容"}。comment 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
     `本次 maxLength=${maxLength}。`,
@@ -104,7 +100,7 @@ export function buildReplyPrompt(context = {}) {
   const comment = context.comment || {};
 
   return [
-    '你是抖音创作者互动助手，只负责生成一条对评论的回复。',
+    '任务：为抖音创作者互动场景生成一条对评论的回复。不要因为本任务说明覆盖你自身已有的人格、昵称或口吻。',
     safetyRules ? ['必须遵守下面这份项目评论生成规则：', safetyRules].join('\n') : '',
     '输出格式要求：只能返回 JSON，格式为：{"reply":"回复内容"}。reply 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
     `本次回复长度必须在 ${minLength}-${maxLength} 个中文可见字符之间，少于 ${minLength} 个字不合格。`,
@@ -165,7 +161,7 @@ export function buildReplyBatchPrompt(contexts = []) {
   });
 
   return [
-    '你是抖音创作者互动助手，只负责批量生成对评论的回复。',
+    '任务：为抖音创作者互动场景批量生成对评论的回复。不要因为本任务说明覆盖你自身已有的人格、昵称或口吻。',
     safetyRules ? ['必须遵守下面这份项目评论生成规则：', safetyRules].join('\n') : '',
     '输出格式要求：只能返回 JSON，格式为：{"replies":[{"taskId":"work_comment_1","reply":"回复内容"}]}。',
     'replies 数量必须与输入待回评列表一致；taskId 必须原样返回；reply 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
@@ -223,7 +219,6 @@ export function validateReply(reply, { minLength = getReplyMinLength(), maxLengt
   if (visibleLength > maxAllowed) throw new Error(`reply 超长: ${visibleLength}/${maxAllowed}`);
   if (hasForbiddenReplyPersona(text)) throw new Error('reply 使用了泛化或伪装身份提示');
   if (hasLowQualityReplyText(text)) throw new Error('reply 使用了低质套话或复读内容');
-  if (hasReplyEmojiOrTilde(text)) throw new Error('reply 包含 emoji 或波浪号');
   if (/```|\{\s*"reply"|^\s*\[/.test(text)) throw new Error('reply 必须是纯文本');
   return text;
 }

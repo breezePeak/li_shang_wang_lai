@@ -12,11 +12,13 @@ describe('return visit comment safety validation', () => {
     expect(validateReturnVisitComment('这个思路梳理得挺清楚，表达也自然。')).not.toBe(false);
   });
 
-  it('rejects unsafe identity, length, emoji, and punctuation patterns', () => {
+  it('rejects unsafe identity, length, and punctuation patterns without banning light style', () => {
     expect(validateReturnVisitComment('主人分享的思路挺清楚的。')).toBe(false);
     expect(validateReturnVisitComment('思路清楚')).toBe(false);
     expect(validateReturnVisitComment('这个思路梳理得挺清楚的我们后面一定要非常认真地把它完全落实在我们的业务系统里。')).toBe(false);
-    expect(validateReturnVisitComment('这个思路挺好的😊。')).toBe(false);
+    expect(validateReturnVisitComment('这个思路挺清楚，笑点也自然😊')).toBe(true);
+    expect(validateReturnVisitComment('路过看完觉得这个细节挺有意思。')).toBe(true);
+    expect(validateReturnVisitComment('这个剪辑节奏有点炸裂，转场也很顺。')).toBe(true);
     expect(validateReturnVisitComment('这个思路挺清楚！')).toBe(false);
     expect(validateReturnVisitComment('这个思路挺清楚..')).toBe(false);
   });

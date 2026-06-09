@@ -209,10 +209,6 @@ export function validateReturnVisitComment(text, referenceComments = [], workTit
   // 评论长度严格控制在 14 到 36 个中文字符之间
   if (text.length < MIN_COMMENT_LENGTH || text.length > MAX_COMMENT_LENGTH) return false;
 
-  // 4. 不要 emoji 表情
-  const emojiRegex = /[\u{1F300}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1F1E6}-\u{1F1FF}\u{1F004}\u{1F0CF}\u{1F170}-\u{1F251}\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F900}-\u{1F9FF}]/u;
-  if (emojiRegex.test(text)) return false;
-
   // 不要感叹号
   if (/[!！]/.test(text)) return false;
 
@@ -221,9 +217,9 @@ export function validateReturnVisitComment(text, referenceComments = [], workTit
 
   // 5. 自动化痕迹黑名单拦截
   const BLACKLIST = [
-    '回访', '互关', '求关注', '已关注', '来看看你', '支持一下', '路过', '打卡', 
+    '回访', '互关', '求关注', '已关注', '来看看你', '支持一下', '打卡',
     '引流', '私信', '加微信', '加V', '广告', '推广', '系统生成', '自动回复', '任务', 
-    '采集', '根据上下文', '炸裂', '封神', '绝了', '无敌', '顶级'
+    '采集', '根据上下文'
   ];
   for (const word of BLACKLIST) {
     if (text.includes(word)) return false;
