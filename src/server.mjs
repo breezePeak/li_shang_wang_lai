@@ -329,7 +329,7 @@ app.get('/api/pending-comments', (req, res) => {
         AND wc.modal_id IS NOT NULL
         AND wc.modal_id != ''
         AND w_by_modal.modal_id = wc.modal_id
-      WHERE wc.reply_status IN ('pending', 'blocked', 'sent_unverified')
+      WHERE wc.reply_status IN ('pending', 'blocked', 'sent_unverified', 'skipped')
       ORDER BY CASE wc.reply_status
         WHEN 'blocked' THEN 0
         WHEN 'sent_unverified' THEN 1

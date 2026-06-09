@@ -1831,6 +1831,37 @@ body {
   background: rgba(255, 250, 238, 0.66);
 }
 
+.cabin-workspace .pending-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.cabin-workspace .pending-status-row label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(76, 99, 83, 0.7);
+  white-space: nowrap;
+}
+
+.cabin-workspace .status-select {
+  padding: 4px 8px;
+  font-size: 0.82rem;
+  border: 1px solid rgba(76, 99, 83, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.85);
+  color: rgba(31, 30, 28, 0.85);
+  cursor: pointer;
+  outline: none;
+  max-width: 140px;
+}
+
+.cabin-workspace .status-select:focus {
+  border-color: rgba(47, 143, 115, 0.4);
+  box-shadow: 0 0 0 2px rgba(47, 143, 115, 0.12);
+}
+
 .cabin-workspace .pending-main {
   flex: 1;
   overflow: hidden;
@@ -1889,6 +1920,16 @@ body {
 .cabin-workspace .reply-badge-unverified {
   background: rgba(211, 155, 52, 0.16);
   color: #8e5808;
+}
+
+.cabin-workspace .reply-badge-skipped {
+  background: rgba(108, 117, 125, 0.14);
+  color: #494d51;
+}
+
+.cabin-workspace .reply-badge-succeeded {
+  background: rgba(47, 143, 115, 0.10);
+  color: #1e5946;
 }
 
 .cabin-workspace .pending-text {

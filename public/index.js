@@ -915,6 +915,15 @@ function renderPendingCommentsHtml(commentSource = 'all') {
             </div>
             <div class="pending-text"><strong>原留言：</strong>${escapeHtml(comment.comment_text || '')}</div>
             ${reason ? `<div class="pending-reason"><strong>异常：</strong>${escapeHtml(reason)}</div>` : ''}
+            <div class="pending-status-row">
+              <label for="status-${comment.id}">状态</label>
+              <select id="status-${comment.id}" class="status-select" onchange="updateCommentStatus(${comment.id}, this.value)" data-current="${escapeHtml(comment.reply_status || 'pending')}">
+                <option value="pending" ${comment.reply_status === 'pending' ? 'selected' : ''}>待回评</option>
+                <option value="blocked" ${comment.reply_status === 'blocked' ? 'selected' : ''}>已阻塞</option>
+                <option value="sent_unverified" ${comment.reply_status === 'sent_unverified' ? 'selected' : ''}>发送未确认</option>
+                <option value="skipped" ${comment.reply_status === 'skipped' ? 'selected' : ''}>已跳过</option>
+              </select>
+            </div>
             <div class="pending-reply-editor">
               <label for="${textareaId}">回评文本</label>
               <textarea id="${textareaId}" class="comment-textarea" placeholder="可手动填写或修改回评文本...">${escapeHtml(comment.reply_text || '')}</textarea>
@@ -937,6 +946,8 @@ function renderPendingCommentsHtml(commentSource = 'all') {
 function getReplyBadge(status) {
   if (status === 'blocked') return { text: '已阻塞', className: 'reply-badge-blocked' };
   if (status === 'sent_unverified') return { text: '发送未确认', className: 'reply-badge-unverified' };
+  if (status === 'skipped') return { text: '已跳过', className: 'reply-badge-skipped' };
+  if (status === 'succeeded') return { text: '已成功', className: 'reply-badge-succeeded' };
   return { text: '待回评', className: 'reply-badge-pending' };
 }
 
@@ -1308,6 +1319,33 @@ window.ignoreComment = async function(id) {
     await refreshAll();
   } catch (err) {
     showToast('操作失败', 'error');
+  }
+};
+
+window.updateCommentStatus = async function(id, newStatus) {
+  try {
+    const selectEl = document.getElementById(`status-${id}`);
+    const currentStatus = selectEl ? selectEl.dataset.current : 'pending';
+    if (newStatus === currentStatus) return;
+
+    const res = await fetch(`/api/pending-comments/${id}/update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ replyStatus: newStatus }),
+    });
+    const json = await res.json();
+    if (!json.ok) {
+      showToast(json.error || '状态更新失败', 'error');
+      if (selectEl) selectEl.value = currentStatus;
+      return;
+    }
+    if (selectEl) selectEl.dataset.current = newStatus;
+    showToast(`评论 ${id} 状态已更新为 ${newStatus}`, 'success');
+    await refreshAll();
+  } catch (err) {
+    showToast('状态更新失败', 'error');
+    const selectEl = document.getElementById(`status-${id}`);
+    if (selectEl) selectEl.value = selectEl.dataset.current || 'pending';
   }
 };
 
