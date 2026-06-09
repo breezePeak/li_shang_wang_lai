@@ -417,6 +417,66 @@ app.post('/api/pending-comments/:id/update', (req, res) => {
   }
 });
 
+// 6c. POST /api/pending-comments/:id/clear-reply: 清空单条回评文本
+app.post('/api/pending-comments/:id/clear-reply', (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const db = getDb();
+    const now = new Date().toISOString();
+
+    const result = db.prepare(`
+      UPDATE work_comments
+      SET reply_text = NULL, last_seen_at = ?
+      WHERE id = ?
+        AND reply_status IN ('pending', 'blocked', 'sent_unverified')
+    `).run(now, id);
+
+    if (result.changes === 0) {
+      return res.status(404).json({ ok: false, error: '未找到该评论' });
+    }
+
+    res.json({ ok: true, message: '回评文本已清空' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 6d. POST /api/pending-comments/bulk-clear-reply: 批量清空回评文本
+app.post('/api/pending-comments/bulk-clear-reply', (req, res) => {
+  const { ids } = req.body || {};
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ ok: false, error: '清空的评论 ID 列表不能为空' });
+  }
+
+  try {
+    const db = getDb();
+    const now = new Date().toISOString();
+
+    const bulkClear = db.transaction((idList) => {
+      const updateStmt = db.prepare(`
+        UPDATE work_comments
+        SET reply_text = NULL, last_seen_at = ?
+        WHERE id = ?
+          AND reply_status IN ('pending', 'blocked', 'sent_unverified')
+      `);
+
+      let updatedCount = 0;
+      for (const id of idList) {
+        const result = updateStmt.run(now, id);
+        if (result.changes > 0) updatedCount++;
+      }
+      return updatedCount;
+    });
+
+    const count = bulkClear(ids);
+    res.json({ ok: true, message: `成功清空 ${count} 条回评文本` });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // 7. POST /api/pending-comments/:id/ignore: 忽略某挂起评论
 app.post('/api/pending-comments/:id/ignore', (req, res) => {
   const { id } = req.params;

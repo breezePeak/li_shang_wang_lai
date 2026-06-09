@@ -7,6 +7,7 @@ let reviewTasks = [];
 let pendingComments = [];
 let currentViewMode = localStorage.getItem('viewMode') || 'grid';
 let selectedTaskIds = new Set();
+let selectedCommentIds = new Set();
 let selectedStageId = 'collect';
 let selectedDetailBranchIndex = null;
 
@@ -658,6 +659,7 @@ function renderStageWorkspace() {
     toolbar.style.display = 'none';
     workspace.className = 'workspace-body';
     workspace.innerHTML = renderPendingCommentsHtml(detailData.commentSource || 'all');
+    updateReplyBulkToolbar();
     updateBulkBar();
     return;
   }
@@ -860,20 +862,49 @@ function renderPendingCommentsHtml(commentSource = 'all') {
     comments = comments.filter(comment => comment.reply_status !== 'pending');
   }
 
+  const visibleIds = new Set(comments.map(comment => comment.id));
+  selectedCommentIds = new Set([...selectedCommentIds].filter(id => visibleIds.has(id)));
+
   if (!comments.length) {
     return renderEmptyState('fa-face-smile-beam', '当前没有待处理或异常回评。');
   }
 
+  const allChecked = comments.length > 0 && comments.every(comment => selectedCommentIds.has(comment.id)) ? 'checked' : '';
+
   return `
-    <div class="pending-list">
+    <div class="reply-workbench">
+      <div class="reply-bulk-toolbar">
+        <label class="custom-checkbox reply-select-all">
+          <input type="checkbox" ${allChecked} onchange="toggleSelectAllComments(this)">
+          <span class="checkbox-checkmark"></span>
+          <span>全选当前 ${comments.length} 条</span>
+        </label>
+        <span class="reply-selected-count" id="reply-selected-count">已选 ${selectedCommentIds.size} 条</span>
+        <div class="reply-bulk-actions">
+          <button class="btn btn-danger" ${selectedCommentIds.size ? '' : 'disabled'} onclick="bulkClearSelectedComments()">
+            <i class="fa-solid fa-eraser"></i> 清空选中评论
+          </button>
+          <button class="btn btn-secondary" ${selectedCommentIds.size ? '' : 'disabled'} onclick="clearSelectedComments()">
+            取消选择
+          </button>
+        </div>
+      </div>
+      <div class="pending-list">
       ${comments.map((comment) => {
         const badge = getReplyBadge(comment.reply_status);
         const textareaId = `reply-text-${comment.id}`;
         const workUrl = comment.joined_work_url || comment.work_url || '';
         const workTitle = comment.joined_work_title || comment.work_id || comment.modal_id || '原作品';
         const reason = comment.reply_reason || '';
+        const isChecked = selectedCommentIds.has(comment.id) ? 'checked' : '';
         return `
-        <article class="pending-card reply-${escapeHtml(comment.reply_status || 'pending')}">
+        <article class="pending-card reply-${escapeHtml(comment.reply_status || 'pending')} ${isChecked ? 'is-selected' : ''}">
+          <div class="card-checkbox-wrapper pending-checkbox-wrapper">
+            <label class="custom-checkbox">
+              <input type="checkbox" class="reply-checkbox" data-id="${comment.id}" ${isChecked} onchange="toggleSelectComment(${comment.id})">
+              <span class="checkbox-checkmark"></span>
+            </label>
+          </div>
           <div class="pending-main">
             <div class="pending-user">
               <div class="pending-user-avatar">${escapeHtml((comment.actor_name || '?').charAt(0))}</div>
@@ -893,10 +924,12 @@ function renderPendingCommentsHtml(commentSource = 'all') {
           <div class="pending-actions">
             <button class="btn btn-primary" onclick="retryComment(${comment.id})"><i class="fa-solid fa-rotate-right"></i>重试</button>
             <button class="btn btn-secondary" onclick="saveCommentReply(${comment.id})"><i class="fa-solid fa-floppy-disk"></i>保存</button>
+            <button class="btn btn-secondary" onclick="clearCommentReply(${comment.id})"><i class="fa-solid fa-eraser"></i>清空</button>
             <button class="btn btn-danger" onclick="ignoreComment(${comment.id})"><i class="fa-solid fa-trash-can"></i>忽略</button>
           </div>
         </article>
       `;}).join('')}
+      </div>
     </div>
   `;
 }
@@ -1007,6 +1040,60 @@ window.toggleSelectAll = function(masterCheckbox) {
   else tasks.forEach((task) => selectedTaskIds.delete(task.id));
   renderStageWorkspace();
 };
+
+function getVisiblePendingComments(commentSource = 'all') {
+  let comments = pendingComments.slice();
+  if (commentSource === 'pending') {
+    comments = comments.filter(comment => comment.reply_status === 'pending');
+  } else if (commentSource === 'exceptions') {
+    comments = comments.filter(comment => comment.reply_status !== 'pending');
+  }
+  return comments;
+}
+
+window.toggleSelectComment = function(id) {
+  if (selectedCommentIds.has(id)) selectedCommentIds.delete(id);
+  else selectedCommentIds.add(id);
+  const checkbox = document.querySelector(`.reply-checkbox[data-id="${id}"]`);
+  const card = checkbox?.closest('.pending-card');
+  if (checkbox) checkbox.checked = selectedCommentIds.has(id);
+  if (card) card.classList.toggle('is-selected', selectedCommentIds.has(id));
+  updateReplyBulkToolbar();
+};
+
+window.toggleSelectAllComments = function(masterCheckbox) {
+  const detailData = buildStageDetailData()[selectedStageId] || {};
+  const comments = getVisiblePendingComments(detailData.commentSource || 'all');
+  if (masterCheckbox.checked) comments.forEach(comment => selectedCommentIds.add(comment.id));
+  else comments.forEach(comment => selectedCommentIds.delete(comment.id));
+  updateReplySelectionDom();
+  updateReplyBulkToolbar();
+};
+
+function updateReplySelectionDom() {
+  document.querySelectorAll('.reply-checkbox').forEach((checkbox) => {
+    const id = Number(checkbox.dataset.id);
+    const checked = selectedCommentIds.has(id);
+    checkbox.checked = checked;
+    checkbox.closest('.pending-card')?.classList.toggle('is-selected', checked);
+  });
+}
+
+function updateReplyBulkToolbar() {
+  const size = selectedCommentIds.size;
+  const countEl = document.getElementById('reply-selected-count');
+  if (countEl) countEl.textContent = `已选 ${size} 条`;
+  document.querySelectorAll('.reply-bulk-actions .btn').forEach((button) => {
+    button.disabled = size === 0;
+  });
+  const visibleIds = Array.from(document.querySelectorAll('.reply-checkbox')).map((checkbox) => Number(checkbox.dataset.id));
+  const master = document.querySelector('.reply-select-all input[type="checkbox"]');
+  if (master) {
+    const checkedCount = visibleIds.filter((id) => selectedCommentIds.has(id)).length;
+    master.checked = visibleIds.length > 0 && checkedCount === visibleIds.length;
+    master.indeterminate = checkedCount > 0 && checkedCount < visibleIds.length;
+  }
+}
 
 function updateBulkBar() {
   const bar = document.getElementById('bulk-action-bar');
@@ -1123,6 +1210,12 @@ function clearSelectedTasks() {
   renderStageWorkspace();
 }
 
+window.clearSelectedComments = function() {
+  selectedCommentIds.clear();
+  updateReplySelectionDom();
+  updateReplyBulkToolbar();
+};
+
 window.retryComment = async function(id) {
   const input = document.getElementById(`reply-text-${id}`);
   const replyText = input ? input.value.trim() : '';
@@ -1162,6 +1255,44 @@ window.saveCommentReply = async function(id) {
     await refreshAll();
   } catch (err) {
     showToast('保存失败', 'error');
+  }
+};
+
+window.clearCommentReply = async function(id) {
+  try {
+    const res = await fetch(`/api/pending-comments/${id}/clear-reply`, { method: 'POST' });
+    const json = await res.json();
+    if (!json.ok) {
+      showToast(json.error || '清空失败', 'error');
+      return;
+    }
+    selectedCommentIds.delete(id);
+    showToast(json.message || '回评文本已清空', 'success');
+    await refreshAll();
+  } catch (err) {
+    showToast('清空失败', 'error');
+  }
+};
+
+window.bulkClearSelectedComments = async function() {
+  if (!selectedCommentIds.size) return;
+  const ids = Array.from(selectedCommentIds);
+  try {
+    const res = await fetch('/api/pending-comments/bulk-clear-reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    const json = await res.json();
+    if (!json.ok) {
+      showToast(json.error || '批量清空失败', 'error');
+      return;
+    }
+    selectedCommentIds.clear();
+    showToast(json.message || '已清空选中评论', 'success');
+    await refreshAll();
+  } catch (err) {
+    showToast('批量清空失败', 'error');
   }
 };
 
