@@ -138,7 +138,7 @@ export function isReplyTextInvalid(replyText, { minLength = getReplyMinLength(),
 
 export const isReplyTextTooShort = isReplyTextInvalid;
 
-export async function generateMissingReplies(items = [], { agentProvider = new LocalAgentProvider() } = {}) {
+export async function generateMissingReplies(items = [], { agentProvider = new LocalAgentProvider(), batchSize = 8 } = {}) {
   const decisions = [];
   const pendingContexts = [];
 
@@ -170,46 +170,58 @@ export async function generateMissingReplies(items = [], { agentProvider = new L
     return decisions.map(decision => decision.result);
   }
 
-  try {
-    console.error(`[agent] batch 请求生成回复 count=${pendingContexts.length}`);
-    const replies = await agentProvider.generateReplies(pendingContexts);
-    if (!Array.isArray(replies)) throw new Error('Agent 返回格式错误: replies 必须是数组');
-    if (replies.length !== pendingContexts.length) {
-      throw new Error(`Agent 返回回复数量不匹配: ${replies.length}/${pendingContexts.length}`);
-    }
+  const resolvedBatchSize = Math.max(1, Math.min(Number(batchSize) || 8, 20));
+  const batchCount = Math.ceil(pendingContexts.length / resolvedBatchSize);
 
-    const expectedTaskIds = new Set(pendingContexts.map(context => String(context.taskId || '').trim()));
-    const byTaskId = new Map();
-    for (const item of replies) {
-      const taskId = String(item?.taskId || '').trim();
-      const reply = String(item?.reply || '').trim();
-      if (!expectedTaskIds.has(taskId)) throw new Error(`Agent 返回未知 taskId: ${taskId || '(empty)'}`);
-      if (byTaskId.has(taskId)) throw new Error(`Agent 返回重复 taskId: ${taskId}`);
-      if (taskId) byTaskId.set(taskId, reply);
-    }
+  console.error(`[agent] batch 分 ${batchCount} 批生成回复, 每批最多 ${resolvedBatchSize} 条, 共 ${pendingContexts.length} 条`);
 
-    for (const context of pendingContexts) {
-      const taskId = String(context.taskId || '').trim();
-      if (!byTaskId.has(taskId)) throw new Error(`Agent 缺少回复 taskId: ${taskId}`);
-      const reply = byTaskId.get(taskId);
-      if (!reply || isReplyTextInvalid(reply, context.requirements)) {
-        throw new Error(`Agent 返回回复不符合发送要求 taskId=${taskId}`);
+  for (let batchIndex = 0; batchIndex < pendingContexts.length; batchIndex += resolvedBatchSize) {
+    const batchContexts = pendingContexts.slice(batchIndex, batchIndex + resolvedBatchSize);
+    const batchDecisions = decisions.filter(decision => {
+      return decision.type === 'generate' && batchContexts.some(context => context.taskId === decision.taskId);
+    });
+
+    try {
+      console.error(`[agent] batch ${Math.floor(batchIndex / resolvedBatchSize) + 1}/${batchCount} 请求生成回复 count=${batchContexts.length}`);
+      const replies = await agentProvider.generateReplies(batchContexts);
+      if (!Array.isArray(replies)) throw new Error('Agent 返回格式错误: replies 必须是数组');
+      if (replies.length !== batchContexts.length) {
+        throw new Error(`Agent 返回回复数量不匹配: ${replies.length}/${batchContexts.length}`);
       }
-    }
 
-    for (const decision of decisions.filter(item => item.type === 'generate')) {
-      const reply = byTaskId.get(decision.taskId);
-      saveReplyText(decision.commentId, reply);
-      decision.item.replyText = reply;
-      console.error(`[agent] commentId=${decision.commentId} 回复生成成功 reply=${reply}`);
-      decision.result = { commentId: decision.commentId, ok: true, reply };
-    }
-  } catch (err) {
-    const message = err?.message || String(err);
-    for (const decision of decisions.filter(item => item.type === 'generate')) {
-      markCommentPending(decision.commentId, `agent_generate_failed:${message}`);
-      console.error(`[agent] commentId=${decision.commentId} failed reason=${message}`);
-      decision.result = { commentId: decision.commentId, ok: false, error: message };
+      const expectedTaskIds = new Set(batchContexts.map(context => String(context.taskId || '').trim()));
+      const byTaskId = new Map();
+      for (const item of replies) {
+        const taskId = String(item?.taskId || '').trim();
+        const reply = String(item?.reply || '').trim();
+        if (!expectedTaskIds.has(taskId)) throw new Error(`Agent 返回未知 taskId: ${taskId || '(empty)'}`);
+        if (byTaskId.has(taskId)) throw new Error(`Agent 返回重复 taskId: ${taskId}`);
+        if (taskId) byTaskId.set(taskId, reply);
+      }
+
+      for (const context of batchContexts) {
+        const taskId = String(context.taskId || '').trim();
+        if (!byTaskId.has(taskId)) throw new Error(`Agent 缺少回复 taskId: ${taskId}`);
+        const reply = byTaskId.get(taskId);
+        if (!reply || isReplyTextInvalid(reply, context.requirements)) {
+          throw new Error(`Agent 返回回复不符合发送要求 taskId=${taskId}`);
+        }
+      }
+
+      for (const decision of batchDecisions) {
+        const reply = byTaskId.get(decision.taskId);
+        saveReplyText(decision.commentId, reply);
+        decision.item.replyText = reply;
+        console.error(`[agent] commentId=${decision.commentId} 回复生成成功 reply=${reply}`);
+        decision.result = { commentId: decision.commentId, ok: true, reply };
+      }
+    } catch (err) {
+      const message = err?.message || String(err);
+      for (const decision of batchDecisions) {
+        markCommentPending(decision.commentId, `agent_generate_failed:${message}`);
+        console.error(`[agent] commentId=${decision.commentId} failed reason=${message}`);
+        decision.result = { commentId: decision.commentId, ok: false, error: message };
+      }
     }
   }
 
