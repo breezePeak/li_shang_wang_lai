@@ -1789,6 +1789,25 @@ body {
   cursor: not-allowed;
 }
 
+.cabin-workspace .reply-bulk-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cabin-workspace .reply-bulk-status .status-select {
+  height: 28px;
+  font-size: 11px;
+  padding: 0 6px;
+}
+
+.cabin-workspace .reply-bulk-status .btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
 .cabin-workspace .pending-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

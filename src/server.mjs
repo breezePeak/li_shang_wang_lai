@@ -477,6 +477,41 @@ app.post('/api/pending-comments/bulk-clear-reply', (req, res) => {
   }
 });
 
+// 6e. POST /api/pending-comments/bulk-update-status: 批量修改回评状态
+app.post('/api/pending-comments/bulk-update-status', (req, res) => {
+  const { ids, replyStatus } = req.body || {};
+  const allowedStatuses = new Set(['pending', 'blocked', 'sent_unverified', 'skipped']);
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ ok: false, error: '评论 ID 列表不能为空' });
+  }
+  if (!allowedStatuses.has(replyStatus)) {
+    return res.status(400).json({ ok: false, error: '不支持的回评状态' });
+  }
+
+  try {
+    const db = getDb();
+    const now = new Date().toISOString();
+
+    const bulkUpdate = db.transaction((idList) => {
+      const updateStmt = db.prepare(
+        'UPDATE work_comments SET reply_status = ?, reply_reason = NULL, last_seen_at = ? WHERE id = ?'
+      );
+      let count = 0;
+      for (const id of idList) {
+        const result = updateStmt.run(replyStatus, now, id);
+        if (result.changes > 0) count++;
+      }
+      return count;
+    });
+
+    const count = bulkUpdate(ids);
+    res.json({ ok: true, message: `已将 ${count} 条评论状态更新为 ${replyStatus}` });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // 7. POST /api/pending-comments/:id/ignore: 忽略某挂起评论
 app.post('/api/pending-comments/:id/ignore', (req, res) => {
   const { id } = req.params;

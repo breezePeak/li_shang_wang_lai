@@ -881,6 +881,18 @@ function renderPendingCommentsHtml(commentSource = 'all') {
         </label>
         <span class="reply-selected-count" id="reply-selected-count">已选 ${selectedCommentIds.size} 条</span>
         <div class="reply-bulk-actions">
+          <div class="reply-bulk-status">
+            <select id="bulk-status-select" class="status-select">
+              <option value="">批量设状态...</option>
+              <option value="pending">待回评</option>
+              <option value="blocked">已阻塞</option>
+              <option value="sent_unverified">发送未确认</option>
+              <option value="skipped">已跳过</option>
+            </select>
+            <button class="btn btn-primary" ${selectedCommentIds.size ? '' : 'disabled'} onclick="bulkUpdateCommentStatus()">
+              <i class="fa-solid fa-check"></i> 应用
+            </button>
+          </div>
           <button class="btn btn-danger" ${selectedCommentIds.size ? '' : 'disabled'} onclick="bulkClearSelectedComments()">
             <i class="fa-solid fa-eraser"></i> 清空选中评论
           </button>
@@ -1304,6 +1316,35 @@ window.bulkClearSelectedComments = async function() {
     await refreshAll();
   } catch (err) {
     showToast('批量清空失败', 'error');
+  }
+};
+
+window.bulkUpdateCommentStatus = async function() {
+  if (!selectedCommentIds.size) return;
+  const selectEl = document.getElementById('bulk-status-select');
+  const newStatus = selectEl ? selectEl.value : '';
+  if (!newStatus) {
+    showToast('请选择目标状态', 'error');
+    return;
+  }
+
+  const ids = Array.from(selectedCommentIds);
+  try {
+    const res = await fetch('/api/pending-comments/bulk-update-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, replyStatus: newStatus }),
+    });
+    const json = await res.json();
+    if (!json.ok) {
+      showToast(json.error || '批量状态更新失败', 'error');
+      return;
+    }
+    showToast(json.message || '批量状态已更新', 'success');
+    if (selectEl) selectEl.value = '';
+    await refreshAll();
+  } catch (err) {
+    showToast('批量状态更新失败', 'error');
   }
 };
 
