@@ -415,23 +415,48 @@ export async function extractWorkModalContext(page) {
   let workText = '';
   try {
     const textData = await page.evaluate(() => {
+      function rectData(el) {
+        const rect = el.getBoundingClientRect();
+        return {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+        };
+      }
+
+      function visibleArea(rect) {
+        const visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
+        const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+        return visibleWidth * visibleHeight;
+      }
+
+      function hiddenByStyle(el) {
+        const style = window.getComputedStyle ? window.getComputedStyle(el) : {};
+        return style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) === 0;
+      }
+
+      function scoreElement(el) {
+        const rect = rectData(el);
+        const area = visibleArea(rect);
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const centerDistance = Math.hypot(centerX - window.innerWidth / 2, centerY - window.innerHeight / 2);
+        const hiddenPenalty = hiddenByStyle(el) ? 1000000000 : 0;
+        const offscreenPenalty = area <= 0 ? 100000000 : 0;
+        return { rect, area, score: area - centerDistance - hiddenPenalty - offscreenPenalty };
+      }
+
       function pickVisibleModal() {
         const modals = Array.from(document.querySelectorAll('[data-e2e="modal-video-container"], .modal-video-container'));
         let best = null;
         for (let index = 0; index < modals.length; index++) {
           const node = modals[index];
-          const rect = node.getBoundingClientRect();
-          const style = window.getComputedStyle ? window.getComputedStyle(node) : {};
-          const hidden = style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) === 0;
-          const visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
-          const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
-          const visibleArea = visibleWidth * visibleHeight;
-          const centerX = rect.left + rect.width / 2;
-          const centerY = rect.top + rect.height / 2;
-          const centerDistance = Math.hypot(centerX - window.innerWidth / 2, centerY - window.innerHeight / 2);
-          const score = visibleArea - centerDistance - (hidden ? 1000000000 : 0);
-          if (rect.width < 100 || rect.height < 100 || visibleArea <= 0) continue;
-          if (!best || score > best.score) best = { node, index, score, visibleArea, rect };
+          const scored = scoreElement(node);
+          if (scored.rect.width < 100 || scored.rect.height < 100 || scored.area <= 0) continue;
+          if (!best || scored.score > best.score) best = { node, index, score: scored.score, visibleArea: scored.area, rect: scored.rect };
         }
         return best || null;
       }
@@ -451,32 +476,44 @@ export async function extractWorkModalContext(page) {
         '[class*="video-info"] [class*="desc"]',
         '[class*="detail-desc"]',
       ];
-      const descriptions = [];
-      for (const sel of specificSelectors) {
-        const el = scope.querySelector(sel);
-        if (el) {
-          const text = (el.innerText || '').trim();
-          if (text.length > 2 && text.length < 500 && !text.includes('回复') && !text.includes('评论')) descriptions.push(text);
-        }
+      const candidates = [];
+      function pushDescription(el, selector) {
+        if (!el) return;
+        const text = (el.innerText || '').trim();
+        if (text.length <= 2 || text.length >= 500 || text.includes('回复') || text.includes('评论')) return;
+        const normalized = text.replace(/\s+/g, ' ').trim();
+        if (!normalized) return;
+        const scored = scoreElement(el);
+        candidates.push({
+          text: normalized,
+          selector,
+          rect: scored.rect,
+          visibleArea: scored.area,
+          score: scored.score,
+        });
       }
 
-      const genericDesc = scope.querySelector('[class*="desc"], [class*="caption"], [class*="mark"]');
-      if (genericDesc) {
-        const text = (genericDesc.innerText || '').trim();
-        if (text.length > 2 && text.length < 500 && !text.includes('回复') && !text.includes('评论')) descriptions.push(text);
+      for (const sel of specificSelectors) {
+        scope.querySelectorAll(sel).forEach(el => pushDescription(el, sel));
       }
+
+      scope.querySelectorAll('[class*="desc"], [class*="caption"], [class*="mark"]').forEach(el => pushDescription(el, 'generic-desc'));
 
       const unique = [];
       const seen = new Set();
-      for (const item of descriptions) {
-        const normalized = item.replace(/\s+/g, ' ').trim();
-        if (!normalized || seen.has(normalized)) continue;
-        seen.add(normalized);
-        unique.push(normalized);
+      for (const item of candidates) {
+        if (!item.text || seen.has(item.text)) continue;
+        seen.add(item.text);
+        unique.push(item);
       }
+      unique.sort((a, b) => b.score - a.score);
 
-      const titleText = unique[0] || '';
-      const bodyText = unique.join('\n').slice(0, 1200);
+      const titleText = unique[0]?.text || '';
+      const bodyCandidates = unique.filter(item => item.visibleArea > 0);
+      const bodyText = (bodyCandidates.length > 0 ? bodyCandidates : unique.slice(0, 1))
+        .map(item => item.text)
+        .join('\n')
+        .slice(0, 1200);
       return {
         titleText,
         bodyText,
@@ -484,16 +521,22 @@ export async function extractWorkModalContext(page) {
           modalCount: document.querySelectorAll('[data-e2e="modal-video-container"], .modal-video-container').length,
           selectedModalIndex: selected?.index ?? -1,
           selectedVisibleArea: Math.round(selected?.visibleArea || 0),
+          descriptionCandidateCount: unique.length,
+          selectedDescriptionTop: Math.round(unique[0]?.rect?.top || 0),
+          selectedDescriptionVisibleArea: Math.round(unique[0]?.visibleArea || 0),
         },
       };
     });
     workTitle = textData.titleText || '';
     workText = textData.bodyText || workTitle || '';
-    if (textData.diagnostics?.modalCount > 1) {
+    if (textData.diagnostics?.modalCount > 1 || textData.diagnostics?.descriptionCandidateCount > 1) {
       console.error(
         `[work-modal:context] modalCount=${textData.diagnostics.modalCount}` +
           ` selected=${textData.diagnostics.selectedModalIndex}` +
           ` area=${textData.diagnostics.selectedVisibleArea}` +
+          ` descCandidates=${textData.diagnostics.descriptionCandidateCount}` +
+          ` descTop=${textData.diagnostics.selectedDescriptionTop}` +
+          ` descArea=${textData.diagnostics.selectedDescriptionVisibleArea}` +
           ` title="${String(workTitle || '').slice(0, 40)}"`
       );
     }
@@ -509,18 +552,35 @@ export async function extractWorkModalContext(page) {
   let authorName = '', authorProfileKey = '', authorProfileUrl = '', workTypeFromDom = '';
   try {
     const authorData = await page.evaluate(() => {
-      const modal = document.querySelector('.modal-video-container');
+      function pickVisibleElement(selector, root = document) {
+        const candidates = Array.from(root.querySelectorAll(selector))
+          .map(el => {
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle ? window.getComputedStyle(el) : {};
+            const visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
+            const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+            const visibleArea = visibleWidth * visibleHeight;
+            const centerY = rect.top + rect.height / 2;
+            const hidden = style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) === 0;
+            return { el, visibleArea, hidden, distance: Math.abs(centerY - window.innerHeight / 2), top: rect.top };
+          })
+          .filter(item => !item.hidden && item.visibleArea > 0);
+        candidates.sort((a, b) => b.visibleArea - a.visibleArea || a.distance - b.distance || a.top - b.top);
+        return candidates[0]?.el || null;
+      }
+
+      const modal = pickVisibleElement('[data-e2e="modal-video-container"], .modal-video-container') || document.querySelector('.modal-video-container');
       const scope = modal || document.body;
       let name = '', key = '', url = '', typeText = '';
 
-      const nicknameEl = scope.querySelector('[data-e2e="feed-video-nickname"]');
+      const nicknameEl = pickVisibleElement('[data-e2e="feed-video-nickname"]', scope) || scope.querySelector('[data-e2e="feed-video-nickname"]');
       if (nicknameEl) {
         const text = (nicknameEl.innerText || '').trim().replace(/^@/, '');
         if (text.length > 0 && text.length < 50) name = text;
       }
 
       if (!name) {
-        const authorLink = scope.querySelector('a[href*="/user/"]');
+        const authorLink = pickVisibleElement('a[href*="/user/"]', scope) || scope.querySelector('a[href*="/user/"]');
         if (authorLink) {
           const href = authorLink.getAttribute('href') || '';
           const match = href.match(/\/user\/([A-Za-z0-9_.-]+)/);
@@ -531,7 +591,7 @@ export async function extractWorkModalContext(page) {
       }
 
       if (!name) {
-        const authorEl = scope.querySelector('[class*="author"], [class*="nickname"], [class*="userName"]');
+        const authorEl = pickVisibleElement('[class*="author"], [class*="nickname"], [class*="userName"]', scope) || scope.querySelector('[class*="author"], [class*="nickname"], [class*="userName"]');
         if (authorEl) {
           const text = (authorEl.innerText || '').trim().replace(/^@/, '');
           if (text.length > 0 && text.length < 50) name = text;
@@ -539,7 +599,7 @@ export async function extractWorkModalContext(page) {
       }
 
       if (!key) {
-        const authorLink = scope.querySelector('a[href*="/user/"]');
+        const authorLink = pickVisibleElement('a[href*="/user/"]', scope) || scope.querySelector('a[href*="/user/"]');
         if (authorLink) {
           const href = authorLink.getAttribute('href') || '';
           const match = href.match(/\/user\/([A-Za-z0-9_.-]+)/);
@@ -569,7 +629,24 @@ export async function extractWorkModalContext(page) {
   let publishedAtText = '';
   try {
     publishedAtText = await page.evaluate(() => {
-      const modal = document.querySelector('.modal-video-container');
+      function pickVisibleElement(selector, root = document) {
+        const candidates = Array.from(root.querySelectorAll(selector))
+          .map(el => {
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle ? window.getComputedStyle(el) : {};
+            const visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
+            const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+            const visibleArea = visibleWidth * visibleHeight;
+            const centerY = rect.top + rect.height / 2;
+            const hidden = style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) === 0;
+            return { el, visibleArea, hidden, distance: Math.abs(centerY - window.innerHeight / 2), top: rect.top };
+          })
+          .filter(item => !item.hidden && item.visibleArea > 0);
+        candidates.sort((a, b) => b.visibleArea - a.visibleArea || a.distance - b.distance || a.top - b.top);
+        return candidates[0]?.el || null;
+      }
+
+      const modal = pickVisibleElement('[data-e2e="modal-video-container"], .modal-video-container') || document.querySelector('.modal-video-container');
       const scope = modal || document.body;
       const directSelectors = [
         '.video-create-time span.time',
@@ -577,7 +654,7 @@ export async function extractWorkModalContext(page) {
         'span.time',
       ];
       for (const sel of directSelectors) {
-        const el = scope.querySelector(sel);
+        const el = pickVisibleElement(sel, scope) || scope.querySelector(sel);
         if (el) {
           const text = (el.innerText || '').trim().replace(/^·\s*/, '');
           if (text.length > 0 && text.length < 30) return text;
@@ -591,7 +668,7 @@ export async function extractWorkModalContext(page) {
         '[class*="date-text"]',
       ];
       for (const sel of timeSelectors) {
-        const el = scope.querySelector(sel);
+        const el = pickVisibleElement(sel, scope) || scope.querySelector(sel);
         if (el) {
           const text = (el.innerText || '').trim().replace(/^·\s*/, '');
           if (text.length > 0 && text.length < 30) return text;
@@ -604,9 +681,26 @@ export async function extractWorkModalContext(page) {
   let thumbnailSrc = '';
   try {
     thumbnailSrc = await page.evaluate(() => {
-      const modal = document.querySelector('.modal-video-container');
+      function pickVisibleElement(selector, root = document) {
+        const candidates = Array.from(root.querySelectorAll(selector))
+          .map(el => {
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle ? window.getComputedStyle(el) : {};
+            const visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
+            const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+            const visibleArea = visibleWidth * visibleHeight;
+            const centerY = rect.top + rect.height / 2;
+            const hidden = style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) === 0;
+            return { el, visibleArea, hidden, distance: Math.abs(centerY - window.innerHeight / 2), top: rect.top };
+          })
+          .filter(item => !item.hidden && item.visibleArea > 0);
+        candidates.sort((a, b) => b.visibleArea - a.visibleArea || a.distance - b.distance || a.top - b.top);
+        return candidates[0]?.el || null;
+      }
+
+      const modal = pickVisibleElement('[data-e2e="modal-video-container"], .modal-video-container') || document.querySelector('.modal-video-container');
       const scope = modal || document.body;
-      const img = scope.querySelector('img[class*="poster"], img[class*="cover"], video');
+      const img = pickVisibleElement('img[class*="poster"], img[class*="cover"], video', scope) || scope.querySelector('img[class*="poster"], img[class*="cover"], video');
       if (img) return img.src || img.poster || '';
       return '';
     });

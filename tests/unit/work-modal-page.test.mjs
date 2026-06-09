@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
+import { chromium } from 'playwright';
 import {
   buildWorkReplyTarget,
+  extractWorkModalContext,
   extractModalIdFromUrl,
   fillWorkReplyText,
   pickVisibleModalCandidate,
@@ -78,6 +80,47 @@ describe('pickVisibleModalCandidate', () => {
 
     expect(selected.index).toBe(1);
     expect(selected.title).toBe('第二个作品标题');
+  });
+});
+
+describe('extractWorkModalContext', () => {
+  it('同一 modal 残留上下相邻作品时选择视口内当前作品文案', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1266, height: 651 } });
+      await page.route('https://www.douyin.com/user/demo?modal_id=7648591042014994938', route => route.fulfill({
+        status: 200,
+        contentType: 'text/html; charset=utf-8',
+        body: `
+          <html>
+            <head><meta charset="utf-8"></head>
+            <body style="margin:0">
+              <div class="modal-video-container" data-e2e="modal-video-container" style="position:relative;width:1266px;height:1300px">
+                <div class="title cursorPointer" data-e2e="video-desc" style="position:absolute;left:16px;top:-166px;width:456px;height:66px">
+                  为了龙虾口粮，魔改可以下网上下的脚本，居然成功了#程序员日常
+                </div>
+                <div class="title cursorPointer" data-e2e="video-desc" style="position:absolute;left:16px;top:530px;width:456px;height:66px">
+                  Thank max.听说DeepSeek V4的「Think Max」模式，本质上就是给提示词加了句：“你必须把每一步都想清楚，不许走捷径！”
+                </div>
+                <div class="title cursorPointer" data-e2e="video-desc" style="position:absolute;left:16px;top:1182px;width:456px;height:66px">
+                  无限team席位。真就想知道OpenAI的代码到底谁写的？
+                </div>
+              </div>
+            </body>
+          </html>
+        `,
+      }));
+
+      await page.goto('https://www.douyin.com/user/demo?modal_id=7648591042014994938');
+      const result = await extractWorkModalContext(page);
+
+      expect(result.ok).toBe(true);
+      expect(result.data.workText).toContain('Think Max');
+      expect(result.data.workText).not.toContain('龙虾');
+      expect(result.data.workText).not.toContain('无限team');
+    } finally {
+      await browser.close();
+    }
   });
 });
 
