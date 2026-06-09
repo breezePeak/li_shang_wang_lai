@@ -220,15 +220,14 @@ describe('comments:execute refactored logic', () => {
   it('isReplyTextTooShort 会按最小字数和 Agent 披露判断已有回复是否需要重写', () => {
     expect(isReplyTextTooShort('收到啦', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('这个问题后面可以单独展开讲讲呀', { minLength: 15 })).toBe(true);
-    expect(isReplyTextTooShort('AI助手觉得这个问题可以后面展开讲讲', { minLength: 15 })).toBe(true);
-    expect(isReplyTextTooShort('AI小助手来串门看看感谢你的评论', { minLength: 15 })).toBe(true);
-    expect(isReplyTextTooShort('小猿替主人看完觉得这个问题挺真实', { minLength: 15 })).toBe(true);
-    expect(isReplyTextTooShort('小猿看完觉得这个问题可以后面展开讲讲', { minLength: 15 })).toBe(false);
+    expect(isReplyTextTooShort('Hermes替主人看完觉得这个问题挺真实', { minLength: 15 })).toBe(true);
+    expect(isReplyTextTooShort('Hermes代看后觉得这个问题可以展开聊聊', { minLength: 15 })).toBe(false);
+    expect(isReplyTextTooShort('OpenClaw代看后觉得这条反馈挺真诚自然', { minLength: 15 })).toBe(false);
   });
 
   it('generateMissingReplies 把所有待生成回评一次性交给 Agent，并按 taskId 写回', async () => {
     const db = new Database(testDb);
-    db.prepare("UPDATE work_comments SET reply_text = '小猿看完觉得这个问题可以后面展开讲讲' WHERE id = 1").run();
+    db.prepare("UPDATE work_comments SET reply_text = 'Hermes代看后觉得这个问题可以展开聊聊' WHERE id = 1").run();
     db.close();
 
     const items = buildWorkCommentItemsFromDbRows(listPendingCommentsGroupedByHomepageAndWork({ limit: 10, days: 7 }));
@@ -236,7 +235,7 @@ describe('comments:execute refactored logic', () => {
       generateReply: vi.fn(),
       generateReplies: vi.fn(async (contexts) => contexts.map(context => ({
         taskId: context.taskId,
-        reply: `小猿看完觉得${context.comment.commentId}号评论挺真诚自然`,
+        reply: `Hermes代看后觉得${context.comment.commentId}号评论挺真诚自然`,
       }))),
     };
 
@@ -247,15 +246,15 @@ describe('comments:execute refactored logic', () => {
     expect(provider.generateReplies.mock.calls[0][0].map(context => context.taskId)).toEqual(['work_comment_2']);
     expect(results).toEqual([
       { commentId: 1, ok: true, skipped: true, reason: 'reply_text_exists' },
-      { commentId: 2, ok: true, reply: '小猿看完觉得2号评论挺真诚自然' },
+      { commentId: 2, ok: true, reply: 'Hermes代看后觉得2号评论挺真诚自然' },
     ]);
 
     const verifyDb = new Database(testDb);
     expect(verifyDb.prepare('SELECT reply_text, reply_reason FROM work_comments WHERE id = 1').get()).toMatchObject({
-      reply_text: '小猿看完觉得这个问题可以后面展开讲讲',
+      reply_text: 'Hermes代看后觉得这个问题可以展开聊聊',
     });
     expect(verifyDb.prepare('SELECT reply_text, reply_reason FROM work_comments WHERE id = 2').get()).toMatchObject({
-      reply_text: '小猿看完觉得2号评论挺真诚自然',
+      reply_text: 'Hermes代看后觉得2号评论挺真诚自然',
       reply_reason: null,
     });
     verifyDb.close();
@@ -269,7 +268,7 @@ describe('comments:execute refactored logic', () => {
     const items = buildWorkCommentItemsFromDbRows(listPendingCommentsGroupedByHomepageAndWork({ limit: 10, days: 7 }));
     const provider = {
       generateReplies: vi.fn(async () => ([
-        { taskId: 'work_comment_1', reply: '小猿看完觉得1号评论挺真诚自然' },
+        { taskId: 'work_comment_1', reply: 'Hermes代看后觉得1号评论挺真诚自然' },
       ])),
     };
 
@@ -371,7 +370,7 @@ describe('comments:execute refactored logic', () => {
       ) VALUES (
         10, '7639733344284064741', 'https://www.douyin.com/video/7639733344284064741',
         '7639733344284064741', 'fallback-user', 'fallback comment',
-        '1天前', 'cid-fallback', '小猿看完觉得这是用于验证的合格回复内容', 'pending',
+        '1天前', 'cid-fallback', 'Hermes代看后觉得这是用于验证的合格回复内容', 'pending',
         '{"comment":{"comment":{"cid":"cid-fallback"}}}'
       )
     `).run();
@@ -380,7 +379,7 @@ describe('comments:execute refactored logic', () => {
     const validated = validateWorkCommentItem({
       itemIndex: 0,
       commentId: 999,
-      replyText: '小猿看完觉得这是用于验证的合格回复内容',
+      replyText: 'Hermes代看后觉得这是用于验证的合格回复内容',
       workId: '7639733344284064741',
       modalId: '7639733344284064741',
       actorName: 'fallback-user',
@@ -399,7 +398,7 @@ describe('comments:execute refactored logic', () => {
       INSERT INTO work_comments (
         id, work_id, modal_id, actor_name, comment_text, comment_key, reply_text, reply_status
       ) VALUES (
-        11, '7639733344284064741', '7639733344284064741', '验证用户', '验证评论', 'cid-11', '小猿看完觉得这是用于验证的合格回复内容', 'pending'
+        11, '7639733344284064741', '7639733344284064741', '验证用户', '验证评论', 'cid-11', 'Hermes代看后觉得这是用于验证的合格回复内容', 'pending'
       )
     `).run();
     db.close();
@@ -407,7 +406,7 @@ describe('comments:execute refactored logic', () => {
     const validated = validateWorkCommentItem({
       itemIndex: 0,
       commentId: 11,
-      replyText: '小猿看完觉得这是用于验证的合格回复内容',
+      replyText: 'Hermes代看后觉得这是用于验证的合格回复内容',
       homepageUrl: 'https://www.douyin.com/user/author-a',
       workId: '7639733344284064741',
     });
@@ -423,7 +422,7 @@ describe('comments:execute refactored logic', () => {
       INSERT INTO work_comments (
         id, work_id, modal_id, actor_name, comment_text, comment_key, reply_text, reply_status
       ) VALUES (
-        12, 'no-homepage-work', 'no-homepage-work', '验证用户2', '验证评论2', 'cid-12', '小猿看完觉得这是用于验证的合格回复内容二', 'pending'
+        12, 'no-homepage-work', 'no-homepage-work', '验证用户2', '验证评论2', 'cid-12', 'OpenClaw代看后觉得这是用于验证的合格回复内容', 'pending'
       )
     `).run();
     db.prepare(`
@@ -437,7 +436,7 @@ describe('comments:execute refactored logic', () => {
       INSERT INTO work_comments (
         id, work_id, modal_id, actor_name, comment_text, comment_key, reply_text, reply_status
       ) VALUES (
-        13, 'fallback-homepage-work', 'fallback-homepage-work', '验证用户3', '验证评论3', 'cid-13', '小猿看完觉得这是用于验证的合格回复内容三', 'pending'
+        13, 'fallback-homepage-work', 'fallback-homepage-work', '验证用户3', '验证评论3', 'cid-13', 'Agent代看后觉得这是用于验证的合格回复内容', 'pending'
       )
     `).run();
     db.close();
@@ -445,7 +444,7 @@ describe('comments:execute refactored logic', () => {
     const directWork = validateWorkCommentItem({
       itemIndex: 0,
       commentId: 12,
-      replyText: '小猿看完觉得这是用于验证的合格回复内容二',
+      replyText: 'OpenClaw代看后觉得这是用于验证的合格回复内容',
       workId: 'no-homepage-work',
     });
     expect(directWork.ok).toBe(true);
@@ -455,7 +454,7 @@ describe('comments:execute refactored logic', () => {
     const fallback = validateWorkCommentItem({
       itemIndex: 1,
       commentId: 13,
-      replyText: '小猿看完觉得这是用于验证的合格回复内容三',
+      replyText: 'Agent代看后觉得这是用于验证的合格回复内容',
       workId: 'fallback-homepage-work',
     });
     expect(fallback.ok).toBe(true);
@@ -468,7 +467,7 @@ describe('comments:execute refactored logic', () => {
       INSERT INTO work_comments (
         id, actor_name, comment_text, comment_key, reply_text, reply_status
       ) VALUES (
-        14, '验证用户4', '验证评论4', 'cid-14', '小猿看完觉得这是用于验证的合格回复内容四', 'pending'
+        14, '验证用户4', '验证评论4', 'cid-14', 'Hermes代看后觉得这是用于验证的合格回复内容', 'pending'
       )
     `).run();
     db.close();
@@ -476,7 +475,7 @@ describe('comments:execute refactored logic', () => {
     const failed = validateWorkCommentItem({
       itemIndex: 0,
       commentId: 14,
-      replyText: '小猿看完觉得这是用于验证的合格回复内容四',
+      replyText: 'Hermes代看后觉得这是用于验证的合格回复内容',
       homepageUrl: 'https://www.douyin.com/user/author-a',
     });
     expect(failed.ok).toBe(false);

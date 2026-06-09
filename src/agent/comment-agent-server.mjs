@@ -7,7 +7,6 @@ const execFileAsync = promisify(execFile);
 
 export const DEFAULT_COMMENT_MAX_LENGTH = 30;
 export const DEFAULT_REPLY_MIN_LENGTH = 15;
-export const REPLY_AGENT_PERSONA_NAME = '小猿';
 const COMMENT_RULES_PATH = resolve('references', 'comment-safety-rules.md');
 let cachedCommentRules = null;
 
@@ -37,15 +36,11 @@ export function countVisibleChars(text = '') {
 
 export function hasAgentDisclosure(text = '') {
   const value = String(text || '').trim();
-  return /(小猿|Agent|AI|助手|智能体|代回|帮回|替.*回|自动回复|自动回)/i.test(value);
-}
-
-export function hasReplyAgentPersona(text = '') {
-  return String(text || '').includes(REPLY_AGENT_PERSONA_NAME);
+  return /(Agent|AI|助手|智能体|Hermes|OpenClaw|Claude|ChatGPT|代回|帮回|替.*回)/i.test(value);
 }
 
 export function hasForbiddenReplyPersona(text = '') {
-  return /AI小助手|AI助手|智能助手|小助手|机器人|主人|主家|替.*主|帮.*主|自动回复|系统生成/.test(String(text || ''));
+  return /主人|主家|替.*主|帮.*主|自动回复|系统生成|系统提示/.test(String(text || ''));
 }
 
 export function buildCommentPrompt(context = {}) {
@@ -100,9 +95,9 @@ export function buildReplyPrompt(context = {}) {
     '输出格式要求：只能返回 JSON，格式为：{"reply":"回复内容"}。reply 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
     `本次回复长度必须在 ${minLength}-${maxLength} 个中文可见字符之间，少于 ${minLength} 个字不合格。`,
     requireAgentDisclosure ? [
-      '本次是项目 Agent 代回评。你的对外人格叫“小猿”，这是本项目真实使用的 Agent 身份。',
-      '回复里必须自然出现“小猿”，用小猿自己的观察和口吻说话，例如“小猿看完觉得...”“小猿也觉得...”。',
-      '不要写“AI小助手”“AI助手代回”“智能助手”“主人/主家”“替主人回”等泛化或伪装身份，也不要写成系统提示。',
+      '本次是 Agent 代回评。必须由你根据自己的真实身份、模型名或工作方式自然披露，让对方知道不是作者本人直接回复。',
+      '不要使用本项目写死的人设名或示例名；不要为了迎合项目而固定自称“小猿”。如果你本身叫 Hermes、OpenClaw、Claude、ChatGPT 或其他名称，可自然使用自己的身份。',
+      '要让回复有你自己的 Agent 特点和观察，不要只机械加“代回”。不要写“主人/主家”“替主人回”“系统生成”“自动回复”等伪装身份或系统提示。',
     ].join('\n') : '',
     '',
     '上下文：',
@@ -169,9 +164,9 @@ export function buildReplyBatchPrompt(contexts = []) {
     '输出格式要求：只能返回 JSON，格式为：{"replies":[{"taskId":"work_comment_1","reply":"回复内容"}]}。',
     'replies 数量必须与输入待回评列表一致；taskId 必须原样返回；reply 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
     '每条回复都要结合对应评论独立生成，避免机械重复；不要合并多条评论，不要漏掉任何 taskId。',
-    '如果某条要求 requireAgentDisclosure=true，必须在该条 reply 里自然出现“小猿”。小猿是本项目真实使用的 Agent 对外人格，不是示例名。',
-    '用小猿自己的观察和口吻结合评论内容回复，例如“小猿看完觉得...”“小猿也觉得...”。不要只机械加“代回”。',
-    '不要写“AI小助手”“AI助手代回”“智能助手”“主人/主家”“替主人回”等泛化或伪装身份，也不要写成系统提示。',
+    '如果某条要求 requireAgentDisclosure=true，必须由你根据自己的真实身份、模型名或工作方式自然披露，让对方知道不是作者本人直接回复。',
+    '不要使用本项目写死的人设名或示例名；不要为了迎合项目而固定自称“小猿”。如果你本身叫 Hermes、OpenClaw、Claude、ChatGPT 或其他名称，可自然使用自己的身份。',
+    '要让每条回复有你自己的 Agent 特点和观察，不要只机械加“代回”。不要写“主人/主家”“替主人回”“系统生成”“自动回复”等伪装身份或系统提示。',
     '',
     '待回评列表：',
     JSON.stringify(normalized, null, 2),
@@ -219,7 +214,6 @@ export function validateReply(reply, { minLength = getReplyMinLength(), maxLengt
   if (visibleLength < minLength) throw new Error(`reply 过短: ${visibleLength}/${minLength}`);
   if (visibleLength > maxLength) throw new Error(`reply 超长: ${visibleLength}/${maxLength}`);
   if (requireAgentDisclosure && !hasAgentDisclosure(text)) throw new Error('reply 缺少 Agent 身份提示');
-  if (requireAgentDisclosure && !hasReplyAgentPersona(text)) throw new Error('reply 缺少小猿身份特征');
   if (requireAgentDisclosure && hasForbiddenReplyPersona(text)) throw new Error('reply 使用了泛化或伪装身份提示');
   if (/```|\{\s*"reply"|^\s*\[/.test(text)) throw new Error('reply 必须是纯文本');
   return text;
@@ -371,7 +365,7 @@ export async function generateReplyWithHermes(context, options = {}) {
       '上一次返回格式错误。你只能返回 JSON，例如：',
       '{"reply":"回复内容"}',
       `回复必须是 ${minLength}-${maxLength} 个中文可见字符，不要解释，不要 Markdown。`,
-      requireAgentDisclosure ? '回复里必须自然出现“小猿”，这是项目 Agent 的真实对外人格；不要写 AI小助手、AI助手代回、主人/主家或系统提示。' : '',
+      requireAgentDisclosure ? '回复里必须由你根据自己的真实身份或工作方式自然披露这是 Agent 代回；不要写主人/主家、自动回复或系统提示。' : '',
     ].join('\n');
     try {
       const output = await callAgentCli(`${basePrompt}${retryHint}`, options);
@@ -413,7 +407,7 @@ export async function generateRepliesWithHermes(contexts = [], options = {}) {
     const retryHint = attempt === 1 ? '' : [
       '',
       '上一次返回格式错误。你只能返回 JSON，例如：',
-      '{"replies":[{"taskId":"work_comment_1","reply":"小猿看完觉得这个问题后面可以展开聊聊"}]}',
+      '{"replies":[{"taskId":"work_comment_1","reply":"Hermes代看后觉得这个问题后面可以展开聊聊"}]}',
       `必须返回 ${normalized.length} 条 replies，taskId 必须和输入完全一致，不要解释，不要 Markdown。`,
     ].join('\n');
     try {

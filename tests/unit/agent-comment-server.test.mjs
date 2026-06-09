@@ -53,9 +53,9 @@ describe('agent comment server helpers', () => {
     const prompt = buildReplyPrompt({ taskId: 'reply_001', requirements: { minLength: 15, maxLength: 30 } });
     expect(prompt).toContain('{"reply":"回复内容"}');
     expect(prompt).toContain('15-30 个中文可见字符');
-    expect(prompt).toContain('项目 Agent 代回评');
-    expect(prompt).toContain('对外人格叫“小猿”');
-    expect(prompt).toContain('不要写“AI小助手”');
+    expect(prompt).toContain('根据自己的真实身份、模型名或工作方式自然披露');
+    expect(prompt).toContain('不要使用本项目写死的人设名或示例名');
+    expect(prompt).not.toContain('必须自然出现“小猿”');
     expect(prompt).toContain('评论生成规则与安全边界');
   });
 
@@ -77,8 +77,9 @@ describe('agent comment server helpers', () => {
 
     expect(prompt).toContain('批量生成对评论的回复');
     expect(prompt).toContain('{"replies":[{"taskId":"work_comment_1","reply":"回复内容"}]}');
-    expect(prompt).toContain('必须在该条 reply 里自然出现“小猿”');
-    expect(prompt).toContain('不要写“AI小助手”');
+    expect(prompt).toContain('根据自己的真实身份、模型名或工作方式自然披露');
+    expect(prompt).toContain('不要使用本项目写死的人设名或示例名');
+    expect(prompt).not.toContain('必须在该条 reply 里自然出现“小猿”');
     expect(prompt).toContain('work_comment_1');
     expect(prompt).toContain('work_comment_2');
     expect(prompt).toContain('评论1');
@@ -88,10 +89,9 @@ describe('agent comment server helpers', () => {
   it('validateReply rejects replies shorter than minLength or missing agent disclosure', () => {
     expect(() => validateReply('收到啦', { minLength: 15, maxLength: 30 })).toThrow('reply 过短');
     expect(() => validateReply('这个问题后面可以单独展开讲讲呀', { minLength: 15, maxLength: 30 })).toThrow('reply 缺少 Agent 身份提示');
-    expect(() => validateReply('AI助手觉得这个问题可以后面展开讲讲', { minLength: 15, maxLength: 30 })).toThrow('reply 缺少小猿身份特征');
-    expect(() => validateReply('AI小助手来串门看看感谢你的评论', { minLength: 15, maxLength: 30 })).toThrow('reply 缺少小猿身份特征');
-    expect(() => validateReply('小猿替主人看完觉得这个问题挺真实', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了泛化或伪装身份提示');
-    expect(validateReply('小猿看完觉得这个问题可以后面展开讲讲', { minLength: 15, maxLength: 30 })).toBe('小猿看完觉得这个问题可以后面展开讲讲');
+    expect(() => validateReply('Hermes替主人看完觉得这个问题挺真实', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了泛化或伪装身份提示');
+    expect(validateReply('Hermes代看后觉得这个问题可以展开聊聊', { minLength: 15, maxLength: 30 })).toBe('Hermes代看后觉得这个问题可以展开聊聊');
+    expect(validateReply('OpenClaw代看后觉得这条反馈挺真诚自然', { minLength: 15, maxLength: 30 })).toBe('OpenClaw代看后觉得这条反馈挺真诚自然');
   });
 
   it('validateReplyBatch requires one validated reply per taskId', () => {
@@ -102,22 +102,22 @@ describe('agent comment server helpers', () => {
 
     expect(validateReplyBatch({
       replies: [
-        { taskId: 'work_comment_2', reply: '小猿看完觉得这个细节确实值得再展开' },
-        { taskId: 'work_comment_1', reply: '小猿也觉得这条反馈挺真诚自然的' },
+        { taskId: 'work_comment_2', reply: 'Agent代看后觉得这个细节确实值得再展开' },
+        { taskId: 'work_comment_1', reply: 'Hermes代看后觉得这条反馈挺真诚自然' },
       ],
     }, contexts)).toEqual([
-      { taskId: 'work_comment_1', reply: '小猿也觉得这条反馈挺真诚自然的' },
-      { taskId: 'work_comment_2', reply: '小猿看完觉得这个细节确实值得再展开' },
+      { taskId: 'work_comment_1', reply: 'Hermes代看后觉得这条反馈挺真诚自然' },
+      { taskId: 'work_comment_2', reply: 'Agent代看后觉得这个细节确实值得再展开' },
     ]);
 
     expect(() => validateReplyBatch({
-      replies: [{ taskId: 'work_comment_1', reply: '小猿也觉得这条反馈挺真诚自然的' }],
+      replies: [{ taskId: 'work_comment_1', reply: 'Hermes代看后觉得这条反馈挺真诚自然' }],
     }, contexts)).toThrow('数量不匹配');
 
     expect(() => validateReplyBatch({
       replies: [
-        { taskId: 'work_comment_1', reply: '小猿也觉得这条反馈挺真诚自然的' },
-        { taskId: 'work_comment_x', reply: '小猿看完觉得这个细节确实值得再展开' },
+        { taskId: 'work_comment_1', reply: 'Hermes代看后觉得这条反馈挺真诚自然' },
+        { taskId: 'work_comment_x', reply: 'Agent代看后觉得这个细节确实值得再展开' },
       ],
     }, contexts)).toThrow('未知 taskId');
   });
@@ -140,26 +140,26 @@ describe('agent comment server helpers', () => {
     const provider = new LocalAgentProvider({
       provider: 'hermes',
       bin: process.execPath,
-      argsTemplate: ['-e', 'const prompt = process.argv[1]; console.log(prompt.includes("{\\"reply\\":\\"回复内容\\"}") ? JSON.stringify({ reply: "小猿看完觉得这个问题可以后面展开讲讲" }) : JSON.stringify({ comment: "挺真实" }))', '{prompt}'],
+      argsTemplate: ['-e', 'const prompt = process.argv[1]; console.log(prompt.includes("{\\"reply\\":\\"回复内容\\"}") ? JSON.stringify({ reply: "Hermes代看后觉得这个问题可以展开聊聊" }) : JSON.stringify({ comment: "挺真实" }))', '{prompt}'],
     });
 
     await expect(provider.generateComment({ taskId: 'visit_1' })).resolves.toBe('挺真实');
-    await expect(provider.generateReply({ taskId: 'reply_1' })).resolves.toBe('小猿看完觉得这个问题可以后面展开讲讲');
+    await expect(provider.generateReply({ taskId: 'reply_1' })).resolves.toBe('Hermes代看后觉得这个问题可以展开聊聊');
   });
 
   it('LocalAgentProvider can generate replies in one batch', async () => {
     const provider = new LocalAgentProvider({
       provider: 'hermes',
       bin: process.execPath,
-      argsTemplate: ['-e', 'const prompt = process.argv[1]; console.log(JSON.stringify({ replies: Array.from(prompt.matchAll(/"taskId": "([^"]+)"/g)).map(m => ({ taskId: m[1], reply: `小猿看完觉得${m[1].slice(-1)}号评论挺真诚自然` })) }))', '{prompt}'],
+      argsTemplate: ['-e', 'const prompt = process.argv[1]; console.log(JSON.stringify({ replies: Array.from(prompt.matchAll(/"taskId": "([^"]+)"/g)).map(m => ({ taskId: m[1], reply: `Hermes代看后觉得${m[1].slice(-1)}号评论挺真诚自然` })) }))', '{prompt}'],
     });
 
     await expect(provider.generateReplies([
       { taskId: 'work_comment_1', requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true } },
       { taskId: 'work_comment_2', requirements: { minLength: 15, maxLength: 30, requireAgentDisclosure: true } },
     ])).resolves.toEqual([
-      { taskId: 'work_comment_1', reply: '小猿看完觉得1号评论挺真诚自然' },
-      { taskId: 'work_comment_2', reply: '小猿看完觉得2号评论挺真诚自然' },
+      { taskId: 'work_comment_1', reply: 'Hermes代看后觉得1号评论挺真诚自然' },
+      { taskId: 'work_comment_2', reply: 'Hermes代看后觉得2号评论挺真诚自然' },
     ]);
   });
 });
