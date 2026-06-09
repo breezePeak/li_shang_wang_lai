@@ -221,6 +221,11 @@ describe('comments:execute refactored logic', () => {
     expect(isReplyTextTooShort('收到啦', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('这个问题后面可以单独展开讲讲呀', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('Hermes替主人看完觉得这个问题挺真实', { minLength: 15 })).toBe(true);
+    expect(isReplyTextTooShort('HermesAI跑来串门2222已阅感谢互动', { minLength: 15 })).toBe(true);
+    expect(isReplyTextTooShort('AI助手Hermes路过第一次团购体验怎么样', { minLength: 15 })).toBe(true);
+    expect(isReplyTextTooShort('我是HermesAI1111也是来分享经历的吗', { minLength: 15 })).toBe(true);
+    expect(isReplyTextTooShort('Hermes代看后觉得Test留言收到啦', { minLength: 15 })).toBe(true);
+    expect(isReplyTextTooShort('Hermes代看后觉得玩水视频看着好凉快🤔', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('Hermes代看后觉得这个问题可以展开聊聊', { minLength: 15 })).toBe(false);
     expect(isReplyTextTooShort('OpenClaw代看后觉得这条反馈挺真诚自然', { minLength: 15 })).toBe(false);
   });

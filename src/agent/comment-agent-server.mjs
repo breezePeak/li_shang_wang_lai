@@ -40,7 +40,15 @@ export function hasAgentDisclosure(text = '') {
 }
 
 export function hasForbiddenReplyPersona(text = '') {
-  return /主人|主家|替.*主|帮.*主|自动回复|系统生成|系统提示/.test(String(text || ''));
+  return /主人|主家|替.*主|帮.*主|自动回复|系统生成|系统提示|我是|这边是|这里是|AI助手|智能助手|小助手|[A-Za-z]+AI|AI[A-Za-z]+/.test(String(text || ''));
+}
+
+export function hasLowQualityReplyText(text = '') {
+  return /串门|路过|来啦|跑来|代班|已阅|收到啦|留言收到|感谢互动|打卡|test留言|测试留言|[0-9]{3,}已阅/i.test(String(text || ''));
+}
+
+export function hasReplyEmojiOrTilde(text = '') {
+  return /[~～]|[\u{1F300}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}]/u.test(String(text || ''));
 }
 
 export function buildCommentPrompt(context = {}) {
@@ -94,11 +102,6 @@ export function buildReplyPrompt(context = {}) {
     safetyRules ? ['必须遵守下面这份项目评论生成规则：', safetyRules].join('\n') : '',
     '输出格式要求：只能返回 JSON，格式为：{"reply":"回复内容"}。reply 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
     `本次回复长度必须在 ${minLength}-${maxLength} 个中文可见字符之间，少于 ${minLength} 个字不合格。`,
-    requireAgentDisclosure ? [
-      '本次是 Agent 代回评。必须由你根据自己的真实身份、模型名或工作方式自然披露，让对方知道不是作者本人直接回复。',
-      '不要使用本项目写死的人设名或示例名；不要为了迎合项目而固定自称“小猿”。如果你本身叫 Hermes、OpenClaw、Claude、ChatGPT 或其他名称，可自然使用自己的身份。',
-      '要让回复有你自己的 Agent 特点和观察，不要只机械加“代回”。不要写“主人/主家”“替主人回”“系统生成”“自动回复”等伪装身份或系统提示。',
-    ].join('\n') : '',
     '',
     '上下文：',
     JSON.stringify({
@@ -164,9 +167,6 @@ export function buildReplyBatchPrompt(contexts = []) {
     '输出格式要求：只能返回 JSON，格式为：{"replies":[{"taskId":"work_comment_1","reply":"回复内容"}]}。',
     'replies 数量必须与输入待回评列表一致；taskId 必须原样返回；reply 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
     '每条回复都要结合对应评论独立生成，避免机械重复；不要合并多条评论，不要漏掉任何 taskId。',
-    '如果某条要求 requireAgentDisclosure=true，必须由你根据自己的真实身份、模型名或工作方式自然披露，让对方知道不是作者本人直接回复。',
-    '不要使用本项目写死的人设名或示例名；不要为了迎合项目而固定自称“小猿”。如果你本身叫 Hermes、OpenClaw、Claude、ChatGPT 或其他名称，可自然使用自己的身份。',
-    '要让每条回复有你自己的 Agent 特点和观察，不要只机械加“代回”。不要写“主人/主家”“替主人回”“系统生成”“自动回复”等伪装身份或系统提示。',
     '',
     '待回评列表：',
     JSON.stringify(normalized, null, 2),
@@ -215,6 +215,8 @@ export function validateReply(reply, { minLength = getReplyMinLength(), maxLengt
   if (visibleLength > maxLength) throw new Error(`reply 超长: ${visibleLength}/${maxLength}`);
   if (requireAgentDisclosure && !hasAgentDisclosure(text)) throw new Error('reply 缺少 Agent 身份提示');
   if (requireAgentDisclosure && hasForbiddenReplyPersona(text)) throw new Error('reply 使用了泛化或伪装身份提示');
+  if (hasLowQualityReplyText(text)) throw new Error('reply 使用了低质套话或复读内容');
+  if (hasReplyEmojiOrTilde(text)) throw new Error('reply 包含 emoji 或波浪号');
   if (/```|\{\s*"reply"|^\s*\[/.test(text)) throw new Error('reply 必须是纯文本');
   return text;
 }
@@ -365,7 +367,7 @@ export async function generateReplyWithHermes(context, options = {}) {
       '上一次返回格式错误。你只能返回 JSON，例如：',
       '{"reply":"回复内容"}',
       `回复必须是 ${minLength}-${maxLength} 个中文可见字符，不要解释，不要 Markdown。`,
-      requireAgentDisclosure ? '回复里必须由你根据自己的真实身份或工作方式自然披露这是 Agent 代回；不要写主人/主家、自动回复或系统提示。' : '',
+      requireAgentDisclosure ? '回复仍必须遵守项目评论生成规则与安全边界里的回评身份披露要求。' : '',
     ].join('\n');
     try {
       const output = await callAgentCli(`${basePrompt}${retryHint}`, options);
