@@ -215,9 +215,10 @@ describe('comments:execute refactored logic', () => {
     expect(groups.find(group => group.length === 2)?.map(item => item.commentId)).toEqual([1, 2]);
   });
 
-  it('isReplyTextTooShort 按最小可见字数判断已有回复是否需要重写', () => {
+  it('isReplyTextTooShort 会按最小字数和 Agent 披露判断已有回复是否需要重写', () => {
     expect(isReplyTextTooShort('收到啦', { minLength: 15 })).toBe(true);
-    expect(isReplyTextTooShort('这个问题后面可以单独展开讲讲呀', { minLength: 15 })).toBe(false);
+    expect(isReplyTextTooShort('这个问题后面可以单独展开讲讲呀', { minLength: 15 })).toBe(true);
+    expect(isReplyTextTooShort('AI助手觉得这个问题可以后面展开讲讲', { minLength: 15 })).toBe(false);
   });
 
   it('extractTargetCommentId 能从 raw_comment_json 回推 cid', () => {
@@ -290,7 +291,7 @@ describe('comments:execute refactored logic', () => {
       ) VALUES (
         10, '7639733344284064741', 'https://www.douyin.com/video/7639733344284064741',
         '7639733344284064741', 'fallback-user', 'fallback comment',
-        '1天前', 'cid-fallback', '这是用于回评验证且满足十五字以上的回复内容', 'pending',
+        '1天前', 'cid-fallback', 'AI助手觉得这是用于验证的合格回复内容', 'pending',
         '{"comment":{"comment":{"cid":"cid-fallback"}}}'
       )
     `).run();
@@ -299,7 +300,7 @@ describe('comments:execute refactored logic', () => {
     const validated = validateWorkCommentItem({
       itemIndex: 0,
       commentId: 999,
-      replyText: '这是用于回评验证且满足十五字以上的回复内容',
+      replyText: 'AI助手觉得这是用于验证的合格回复内容',
       workId: '7639733344284064741',
       modalId: '7639733344284064741',
       actorName: 'fallback-user',
@@ -318,7 +319,7 @@ describe('comments:execute refactored logic', () => {
       INSERT INTO work_comments (
         id, work_id, modal_id, actor_name, comment_text, comment_key, reply_text, reply_status
       ) VALUES (
-        11, '7639733344284064741', '7639733344284064741', '验证用户', '验证评论', 'cid-11', '这是用于验证且满足十五字以上的回复内容', 'pending'
+        11, '7639733344284064741', '7639733344284064741', '验证用户', '验证评论', 'cid-11', 'AI助手觉得这是用于验证的合格回复内容', 'pending'
       )
     `).run();
     db.close();
@@ -326,7 +327,7 @@ describe('comments:execute refactored logic', () => {
     const validated = validateWorkCommentItem({
       itemIndex: 0,
       commentId: 11,
-      replyText: '这是用于验证且满足十五字以上的回复内容',
+      replyText: 'AI助手觉得这是用于验证的合格回复内容',
       homepageUrl: 'https://www.douyin.com/user/author-a',
       workId: '7639733344284064741',
     });
@@ -342,7 +343,7 @@ describe('comments:execute refactored logic', () => {
       INSERT INTO work_comments (
         id, work_id, modal_id, actor_name, comment_text, comment_key, reply_text, reply_status
       ) VALUES (
-        12, 'no-homepage-work', 'no-homepage-work', '验证用户2', '验证评论2', 'cid-12', '这是用于验证且满足十五字以上的回复内容二', 'pending'
+        12, 'no-homepage-work', 'no-homepage-work', '验证用户2', '验证评论2', 'cid-12', 'AI助手觉得这是用于验证的合格回复内容二', 'pending'
       )
     `).run();
     db.prepare(`
@@ -356,7 +357,7 @@ describe('comments:execute refactored logic', () => {
       INSERT INTO work_comments (
         id, work_id, modal_id, actor_name, comment_text, comment_key, reply_text, reply_status
       ) VALUES (
-        13, 'fallback-homepage-work', 'fallback-homepage-work', '验证用户3', '验证评论3', 'cid-13', '这是用于验证且满足十五字以上的回复内容三', 'pending'
+        13, 'fallback-homepage-work', 'fallback-homepage-work', '验证用户3', '验证评论3', 'cid-13', 'AI助手觉得这是用于验证的合格回复内容三', 'pending'
       )
     `).run();
     db.close();
@@ -364,7 +365,7 @@ describe('comments:execute refactored logic', () => {
     const directWork = validateWorkCommentItem({
       itemIndex: 0,
       commentId: 12,
-      replyText: '这是用于验证且满足十五字以上的回复内容二',
+      replyText: 'AI助手觉得这是用于验证的合格回复内容二',
       workId: 'no-homepage-work',
     });
     expect(directWork.ok).toBe(true);
@@ -374,7 +375,7 @@ describe('comments:execute refactored logic', () => {
     const fallback = validateWorkCommentItem({
       itemIndex: 1,
       commentId: 13,
-      replyText: '这是用于验证且满足十五字以上的回复内容三',
+      replyText: 'AI助手觉得这是用于验证的合格回复内容三',
       workId: 'fallback-homepage-work',
     });
     expect(fallback.ok).toBe(true);
@@ -387,7 +388,7 @@ describe('comments:execute refactored logic', () => {
       INSERT INTO work_comments (
         id, actor_name, comment_text, comment_key, reply_text, reply_status
       ) VALUES (
-        14, '验证用户4', '验证评论4', 'cid-14', '这是用于验证且满足十五字以上的回复内容四', 'pending'
+        14, '验证用户4', '验证评论4', 'cid-14', 'AI助手觉得这是用于验证的合格回复内容四', 'pending'
       )
     `).run();
     db.close();
@@ -395,7 +396,7 @@ describe('comments:execute refactored logic', () => {
     const failed = validateWorkCommentItem({
       itemIndex: 0,
       commentId: 14,
-      replyText: '这是用于验证且满足十五字以上的回复内容四',
+      replyText: 'AI助手觉得这是用于验证的合格回复内容四',
       homepageUrl: 'https://www.douyin.com/user/author-a',
     });
     expect(failed.ok).toBe(false);

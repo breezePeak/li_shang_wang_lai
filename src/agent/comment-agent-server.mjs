@@ -34,6 +34,11 @@ export function countVisibleChars(text = '') {
   return Array.from(String(text || '').replace(/\s+/g, '')).length;
 }
 
+export function hasAgentDisclosure(text = '') {
+  const value = String(text || '').trim();
+  return /(Agent|AI|助手|智能体|代回|帮回|替.*回|自动回复|自动回)/i.test(value);
+}
+
 export function buildCommentPrompt(context = {}) {
   const maxLength = Number(context?.requirements?.maxLength || getCommentMaxLength());
   const targetUser = context.targetUser || {};
@@ -75,6 +80,7 @@ export function buildCommentPrompt(context = {}) {
 export function buildReplyPrompt(context = {}) {
   const maxLength = Number(context?.requirements?.maxLength || getCommentMaxLength());
   const minLength = Number(context?.requirements?.minLength || getReplyMinLength());
+  const requireAgentDisclosure = context?.requirements?.requireAgentDisclosure !== false;
   const safetyRules = loadCommentSafetyRules();
   const work = context.work || {};
   const comment = context.comment || {};
@@ -84,6 +90,7 @@ export function buildReplyPrompt(context = {}) {
     safetyRules ? ['必须遵守下面这份项目评论生成规则：', safetyRules].join('\n') : '',
     '输出格式要求：只能返回 JSON，格式为：{"reply":"回复内容"}。reply 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
     `本次回复长度必须在 ${minLength}-${maxLength} 个中文可见字符之间，少于 ${minLength} 个字不合格。`,
+    requireAgentDisclosure ? '本次是 Agent 代回评。你必须自己用真实身份自然披露这是 Agent/AI/助手代回，让对方知道不是作者本人直接回复；不要使用示例名、占位名或伪造名字，不要写成系统提示。' : '',
     '',
     '上下文：',
     JSON.stringify({
@@ -103,6 +110,7 @@ export function buildReplyPrompt(context = {}) {
       requirements: {
         minLength,
         maxLength,
+        requireAgentDisclosure,
         tone: context?.requirements?.tone || '自然、简短、像真人',
       },
     }, null, 2),
@@ -137,12 +145,13 @@ export function validateComment(comment, { maxLength = getCommentMaxLength() } =
   return text;
 }
 
-export function validateReply(reply, { minLength = getReplyMinLength(), maxLength = getCommentMaxLength() } = {}) {
+export function validateReply(reply, { minLength = getReplyMinLength(), maxLength = getCommentMaxLength(), requireAgentDisclosure = true } = {}) {
   const text = String(reply || '').trim();
   const visibleLength = countVisibleChars(text);
   if (!text) throw new Error('reply 为空');
   if (visibleLength < minLength) throw new Error(`reply 过短: ${visibleLength}/${minLength}`);
   if (visibleLength > maxLength) throw new Error(`reply 超长: ${visibleLength}/${maxLength}`);
+  if (requireAgentDisclosure && !hasAgentDisclosure(text)) throw new Error('reply 缺少 Agent 身份提示');
   if (/```|\{\s*"reply"|^\s*\[/.test(text)) throw new Error('reply 必须是纯文本');
   return text;
 }
@@ -234,12 +243,14 @@ export async function generateCommentWithHermes(context, options = {}) {
 export async function generateReplyWithHermes(context, options = {}) {
   const maxLength = Number(context?.requirements?.maxLength || options.maxLength || getCommentMaxLength());
   const minLength = Number(context?.requirements?.minLength || options.minLength || getReplyMinLength());
+  const requireAgentDisclosure = context?.requirements?.requireAgentDisclosure !== false;
   const basePrompt = buildReplyPrompt({
     ...context,
     requirements: {
       ...(context?.requirements || {}),
       minLength,
       maxLength,
+      requireAgentDisclosure,
     },
   });
 
@@ -250,6 +261,7 @@ export async function generateReplyWithHermes(context, options = {}) {
       '上一次返回格式错误。你只能返回 JSON，例如：',
       '{"reply":"回复内容"}',
       `回复必须是 ${minLength}-${maxLength} 个中文可见字符，不要解释，不要 Markdown。`,
+      requireAgentDisclosure ? '回复里必须由你自己自然披露这是 Agent/AI/助手代回，不要使用示例名或伪造名字。' : '',
     ].join('\n');
     try {
       const output = await callAgentCli(`${basePrompt}${retryHint}`, options);
@@ -257,7 +269,7 @@ export async function generateReplyWithHermes(context, options = {}) {
       if (typeof parsed.reply !== 'string') {
         throw new Error('Agent 返回格式错误: reply 必须是 string');
       }
-      return validateReply(parsed.reply, { minLength, maxLength });
+      return validateReply(parsed.reply, { minLength, maxLength, requireAgentDisclosure });
     } catch (err) {
       lastError = err;
     }

@@ -51,12 +51,16 @@ describe('agent comment server helpers', () => {
     const prompt = buildReplyPrompt({ taskId: 'reply_001', requirements: { minLength: 15, maxLength: 30 } });
     expect(prompt).toContain('{"reply":"回复内容"}');
     expect(prompt).toContain('15-30 个中文可见字符');
+    expect(prompt).toContain('Agent 代回评');
+    expect(prompt).toContain('自己用真实身份自然披露');
+    expect(prompt).not.toContain('小礼');
     expect(prompt).toContain('评论生成规则与安全边界');
   });
 
-  it('validateReply rejects replies shorter than minLength', () => {
+  it('validateReply rejects replies shorter than minLength or missing agent disclosure', () => {
     expect(() => validateReply('收到啦', { minLength: 15, maxLength: 30 })).toThrow('reply 过短');
-    expect(validateReply('这个问题后面可以单独展开讲讲呀', { minLength: 15, maxLength: 30 })).toBe('这个问题后面可以单独展开讲讲呀');
+    expect(() => validateReply('这个问题后面可以单独展开讲讲呀', { minLength: 15, maxLength: 30 })).toThrow('reply 缺少 Agent 身份提示');
+    expect(validateReply('AI助手觉得这个问题可以后面展开讲讲', { minLength: 15, maxLength: 30 })).toBe('AI助手觉得这个问题可以后面展开讲讲');
   });
 
   it('resolveAgentCliConfig supports hermes and openclaw providers', () => {
@@ -77,10 +81,10 @@ describe('agent comment server helpers', () => {
     const provider = new LocalAgentProvider({
       provider: 'hermes',
       bin: process.execPath,
-      argsTemplate: ['-e', 'const prompt = process.argv[1]; console.log(prompt.includes("{\\"reply\\":\\"回复内容\\"}") ? JSON.stringify({ reply: "这个问题后面可以单独展开讲讲呀" }) : JSON.stringify({ comment: "挺真实" }))', '{prompt}'],
+      argsTemplate: ['-e', 'const prompt = process.argv[1]; console.log(prompt.includes("{\\"reply\\":\\"回复内容\\"}") ? JSON.stringify({ reply: "AI助手觉得这个问题可以后面展开讲讲" }) : JSON.stringify({ comment: "挺真实" }))', '{prompt}'],
     });
 
     await expect(provider.generateComment({ taskId: 'visit_1' })).resolves.toBe('挺真实');
-    await expect(provider.generateReply({ taskId: 'reply_1' })).resolves.toBe('这个问题后面可以单独展开讲讲呀');
+    await expect(provider.generateReply({ taskId: 'reply_1' })).resolves.toBe('AI助手觉得这个问题可以后面展开讲讲');
   });
 });

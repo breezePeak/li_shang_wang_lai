@@ -41,7 +41,7 @@ import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
 import { normalizeNoticeApiItem } from '../domain/notice-api-normalization.mjs';
-import { countVisibleChars, getReplyMinLength } from '../agent/comment-agent-server.mjs';
+import { countVisibleChars, getReplyMinLength, hasAgentDisclosure } from '../agent/comment-agent-server.mjs';
 
 function parseArgs(argv) {
   const args = {
@@ -116,16 +116,21 @@ export function buildReplyContext(item = {}) {
     requirements: {
       minLength,
       maxLength,
+      requireAgentDisclosure: true,
       tone: '自然、简短、像真人',
     },
   };
 }
 
-export function isReplyTextTooShort(replyText, { minLength = getReplyMinLength() } = {}) {
+export function isReplyTextInvalid(replyText, { minLength = getReplyMinLength(), requireAgentDisclosure = true } = {}) {
   const text = String(replyText || '').trim();
   if (!text) return false;
-  return countVisibleChars(text) < minLength;
+  if (countVisibleChars(text) < minLength) return true;
+  if (requireAgentDisclosure && !hasAgentDisclosure(text)) return true;
+  return false;
 }
+
+export const isReplyTextTooShort = isReplyTextInvalid;
 
 export async function generateMissingReplies(items = [], { agentProvider = new LocalAgentProvider() } = {}) {
   const results = [];
@@ -136,13 +141,13 @@ export async function generateMissingReplies(items = [], { agentProvider = new L
       results.push({ commentId, ok: true, skipped: true, reason: 'missing_comment_id' });
       continue;
     }
-    if (existing && !isReplyTextTooShort(existing)) {
+    if (existing && !isReplyTextInvalid(existing)) {
       results.push({ commentId, ok: true, skipped: true, reason: 'reply_text_exists' });
       continue;
     }
 
     try {
-      console.error(`[agent] commentId=${commentId} ${existing ? '已有回复过短，重新生成' : '请求生成回复'}`);
+      console.error(`[agent] commentId=${commentId} ${existing ? '已有回复不符合长度/Agent披露要求，重新生成' : '请求生成回复'}`);
       const reply = await agentProvider.generateReply(buildReplyContext(item));
       saveReplyText(commentId, reply);
       item.replyText = reply;
@@ -286,11 +291,13 @@ export function validateWorkCommentItem(item) {
     console.error(`[comments:execute] commentId=${item.commentId} reply_text 为空，跳过执行`);
     return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, status: 'skipped_empty_reply' };
   }
-  if (isReplyTextTooShort(replyText)) {
+  if (isReplyTextInvalid(replyText)) {
     const minLength = Number(process.env.REPLY_MIN_LENGTH || process.env.COMMENT_MIN_LENGTH || getReplyMinLength());
-    const reason = `reply_text_too_short:${countVisibleChars(replyText)}/${minLength}`;
+    const reason = countVisibleChars(replyText) < minLength
+      ? `reply_text_too_short:${countVisibleChars(replyText)}/${minLength}`
+      : 'reply_text_missing_agent_disclosure';
     markCommentPending(row.id, reason);
-    console.error(`[comments:execute] commentId=${item.commentId} reply_text 过短，跳过执行 reason=${reason}`);
+    console.error(`[comments:execute] commentId=${item.commentId} reply_text 不符合发送要求，跳过执行 reason=${reason}`);
     return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, status: 'skipped', error: reason };
   }
 
