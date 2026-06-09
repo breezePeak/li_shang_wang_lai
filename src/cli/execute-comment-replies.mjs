@@ -43,11 +43,12 @@ import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
 import { normalizeNoticeApiItem } from '../domain/notice-api-normalization.mjs';
 import { countVisibleChars, getReplyMinLength, hasAgentDisclosure } from '../agent/comment-agent-server.mjs';
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = {
     unsupportedItemsFile: false,
     json: false,
     diagnosePosition: false,
+    keepOpen: false,
     limit: null,
     days: null,
     agentOnly: false,
@@ -60,6 +61,7 @@ function parseArgs(argv) {
     }
     if (argv[i] === '--json') args.json = true;
     if (argv[i] === '--diagnose-position') args.diagnosePosition = true;
+    if (argv[i] === '--keep-open') args.keepOpen = true;
     if ((argv[i] === '--limit' || argv[i] === '--max-count') && argv[i + 1]) args.limit = Number(argv[++i] || 0) || null;
     if (argv[i] === '--days' && argv[i + 1]) args.days = Number(argv[++i] || 0) || null;
     if (argv[i] === '--agent-only') args.agentOnly = true;
@@ -771,7 +773,7 @@ async function executeWorkCommentItems(items, args) {
     dryRun: false,
     execute: !diagnosePosition,
     json: args.json,
-    keepOpen: false,
+    keepOpen: Boolean(args.keepOpen) && !args.json,
     keepOpenOnError: !args.json && !diagnosePosition,
     pauseOnError: !args.json && !diagnosePosition,
     writeRunFiles: false,
@@ -828,7 +830,7 @@ async function executeWorkCommentItems(items, args) {
       return results;
     }
 
-    ctx = await createBrowserContext({ headless: false, enableReuse: false });
+    ctx = await createBrowserContext({ headless: false, enableReuse: Boolean(args.keepOpen) && !args.json });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();

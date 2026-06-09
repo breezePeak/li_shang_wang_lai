@@ -11,6 +11,7 @@ import {
   groupExecutableItemsByWork,
   isDoneWithoutRetryResult,
   isReplyTextTooShort,
+  parseArgs,
   planViewportPendingMatches,
   resolveWorkUrlFromItem,
   validateWorkCommentItem,
@@ -219,6 +220,13 @@ describe('comments:execute refactored logic', () => {
     expect(isReplyTextTooShort('收到啦', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('这个问题后面可以单独展开讲讲呀', { minLength: 15 })).toBe(true);
     expect(isReplyTextTooShort('AI助手觉得这个问题可以后面展开讲讲', { minLength: 15 })).toBe(false);
+  });
+
+  it('parseArgs 支持 --keep-open，避免回评执行结束立刻关闭浏览器', () => {
+    const args = parseArgs(['--days', '7', '--limit', '2', '--keep-open']);
+    expect(args.keepOpen).toBe(true);
+    expect(args.days).toBe(7);
+    expect(args.limit).toBe(2);
   });
 
   it('extractTargetCommentId 能从 raw_comment_json 回推 cid', () => {
