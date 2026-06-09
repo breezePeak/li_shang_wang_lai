@@ -292,4 +292,58 @@ describe('return-visit executor like/comment regressions', () => {
     expect(context.work.workId).toBe('7647191897097693115');
     expect(context.work.desc).toBe('');
   });
+
+  it('regenerates cached comment when target context changed and uses matched post API aweme text', async () => {
+    openProfileWorkByAwemeIdMock.mockResolvedValueOnce({
+      ok: true,
+      aweme: {
+        workId: '7648591042014994938',
+        workTitle: 'Think Max 模式',
+        workText: '听说DeepSeek V4的 Think Max 模式，本质上就是给提示词加了句必须想清楚。',
+        contentSummary: 'Think Max 模式。听说DeepSeek V4的 Think Max 模式。',
+      },
+    });
+    collectCurrentOpenedWorkMock.mockResolvedValue({
+      ok: true,
+      sufficient: true,
+      work: {
+        workId: '7648591042014994938',
+        workTitle: '旧 DOM 误读标题',
+        workText: '为了龙虾口粮，魔改可以下载网上的脚本',
+        contentSummary: '旧 DOM 误读标题。为了龙虾口粮，魔改可以下载网上的脚本',
+        visibleFingerprint: '旧 DOM 误读标题|为了龙虾口粮，魔改可以下载网上的脚本',
+      },
+    });
+    const agentProvider = {
+      generateComment: vi.fn(async (context) => {
+        expect(context.work.desc).toContain('DeepSeek V4');
+        expect(context.work.desc).not.toContain('龙虾');
+        return 'Think Max 这个说法挺形象的😂';
+      }),
+    };
+    const page = {
+      url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo?modal_id=7648591042014994938'),
+      evaluate: vi.fn().mockResolvedValue({ hasVideoElement: false }),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      screenshot: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await executeReturnVisitTask(page, {
+      taskId: 't9',
+      userProfileUrl: 'https://www.douyin.com/user/demo',
+      targetWork: {
+        workId: '7648591042014994938',
+        workTitle: '为了龙虾口粮，魔改可以下载网上的脚本',
+        workText: '为了龙虾口粮，魔改可以下载网上的脚本',
+      },
+      generatedComment: '魔改脚本抓龙虾，赫妹儿直呼内行😂',
+      likeStatus: 'pending',
+      commentStatus: 'generated',
+    }, { execute: true, agentProvider });
+
+    expect(result.ok).toBe(true);
+    expect(agentProvider.generateComment).toHaveBeenCalledTimes(1);
+    expect(postWorkModalCommentMock).toHaveBeenCalledWith(page, 'Think Max 这个说法挺形象的😂');
+    expect(result.generatedComment).toBe('Think Max 这个说法挺形象的😂');
+  });
 });

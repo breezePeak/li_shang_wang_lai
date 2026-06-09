@@ -195,6 +195,38 @@ describe('return-visit work collector url normalization', () => {
     expect(clickedExpected).toBe('222');
   });
 
+  it('openProfileWorkByAwemeIdFromPostApi 返回 post API 命中的目标作品内容', async () => {
+    const fakePage = {
+      waitForTimeout: async () => {},
+      url: () => 'https://www.douyin.com/user/author-a?modal_id=222',
+    };
+
+    const result = await openProfileWorkByAwemeIdFromPostApi(fakePage, 'https://www.douyin.com/user/author-a', '222', {
+      collectorFactory: () => ({
+        getAwemes: () => [
+          { aweme_id: '111', desc: '第一个作品' },
+          { aweme_id: '222', desc: 'DeepSeek V4 Think Max 模式', aweme_type: 68 },
+        ],
+        getStats: () => ({ responseCount: 1, awemeCount: 2 }),
+        waitForAwemes: async () => true,
+        stop: () => {},
+      }),
+      gotoProfile: async () => ({ ok: true }),
+      detectPrivate: async () => false,
+      listCards: async () => [
+        { href: 'https://www.douyin.com/video/111' },
+        { href: 'https://www.douyin.com/note/222' },
+      ],
+      clickCard: async (_page, index) => ({ ok: true, href: index === 1 ? 'https://www.douyin.com/note/222' : '' }),
+      scrollProfile: async () => {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.aweme.workId).toBe('222');
+    expect(result.aweme.workText).toBe('DeepSeek V4 Think Max 模式');
+    expect(result.aweme.workUrl).toBe('https://www.douyin.com/note/222');
+  });
+
   it('openProfileWorkByAwemeIdFromPostApi 找不到目标作品时失败', async () => {
     const fakePage = {
       waitForTimeout: async () => {},

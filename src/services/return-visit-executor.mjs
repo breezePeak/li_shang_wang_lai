@@ -321,6 +321,77 @@ function workContextHasVisibleContent(work = {}) {
   return text.length >= 8;
 }
 
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (text) return value;
+  }
+  return null;
+}
+
+function normalizeContextText(value) {
+  return String(value || '')
+    .replace(/\s+/g, '')
+    .replace(/[\u200b-\u200f\ufeff]/g, '')
+    .trim();
+}
+
+function buildWorkContextSignature(work = {}) {
+  return [
+    work.workTitle,
+    work.workText,
+    work.contentSummary,
+    work.desc,
+    work.itemTitle,
+  ]
+    .map(normalizeContextText)
+    .filter(text => text.length >= 4)
+    .join('|')
+    .slice(0, 240);
+}
+
+function mergeWorkContext(preferredWork = {}, visibleWork = {}, expectedWorkId = '') {
+  const preferred = preferredWork || {};
+  const visible = visibleWork || {};
+  const workId = visible.workId || preferred.workId || expectedWorkId || '';
+  const workUrl = isWorkUrl(visible.workUrl) ? visible.workUrl : preferred.workUrl;
+  const workTitle = firstNonEmpty(preferred.workTitle, preferred.itemTitle, preferred.desc, visible.workTitle, visible.contentSummary);
+  const workText = firstNonEmpty(preferred.workText, preferred.desc, preferred.contentSummary, visible.workText, visible.contentSummary);
+  const contentSummary = firstNonEmpty(preferred.contentSummary, workText, visible.contentSummary);
+
+  return {
+    ...visible,
+    ...preferred,
+    workId,
+    workUrl,
+    workTitle,
+    workText,
+    contentSummary,
+    publishTime: preferred.publishTime || visible.publishTime || null,
+    likeState: visible.likeState || preferred.likeState || 'unknown',
+    referenceComments: Array.isArray(visible.referenceComments) ? visible.referenceComments : (preferred.referenceComments || []),
+    thumbnailSrc: visible.thumbnailSrc || preferred.thumbnailSrc || null,
+    visibleFingerprint: visible.visibleFingerprint || preferred.visibleFingerprint || '',
+  };
+}
+
+function canReuseGeneratedCommentForWork(task = {}, resolvedWork = {}) {
+  const comment = String(task.generatedComment || '').trim();
+  if (!comment) return false;
+
+  const taskWorkId = normalizeWorkId(task.targetWork?.workId || '');
+  const resolvedWorkId = normalizeWorkId(resolvedWork.workId || '');
+  if (taskWorkId && resolvedWorkId && taskWorkId !== resolvedWorkId) return false;
+
+  const oldSignature = buildWorkContextSignature(task.targetWork || {});
+  const currentSignature = buildWorkContextSignature(resolvedWork || {});
+  if (!oldSignature || !currentSignature) return true;
+
+  return oldSignature === currentSignature
+    || oldSignature.includes(currentSignature)
+    || currentSignature.includes(oldSignature);
+}
+
 async function refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, phase = 'before_agent') {
   const current = await collectCurrentOpenedWork(page, { maxReferenceComments });
   if (!current.ok) {
@@ -367,12 +438,7 @@ async function refreshVisibleWorkForComment(page, task, resolvedWork, maxReferen
 
   return {
     ok: true,
-    work: {
-      ...resolvedWork,
-      ...visibleWork,
-      workId: visibleWork.workId || resolvedWork.workId,
-      workUrl: isWorkUrl(visibleWork.workUrl) ? visibleWork.workUrl : resolvedWork.workUrl,
-    },
+    work: mergeWorkContext(resolvedWork, visibleWork, expectedWorkId),
   };
 }
 
@@ -438,15 +504,11 @@ async function resolveWorkForExecution(page, task, options = {}) {
       };
     }
 
-    console.error(`[resolve] 回访作品收集完成: title="${String(fromCurrent.work.workTitle || selected.aweme?.workTitle || '').slice(0, 30)}"`);
+    const resolvedVisibleWork = mergeWorkContext(selected.aweme || {}, fromCurrent.work, fallbackWorkId);
+    console.error(`[resolve] 回访作品收集完成: title="${String(resolvedVisibleWork.workTitle || '').slice(0, 30)}"`);
     return {
       ok: true,
-      work: {
-        ...selected.aweme,
-        ...fromCurrent.work,
-        workId: fromCurrent.work.workId || fallbackWorkId,
-        workUrl: isWorkUrl(fromCurrent.work.workUrl) ? fromCurrent.work.workUrl : selected.aweme?.workUrl,
-      },
+      work: resolvedVisibleWork,
       fromFallback: true,
       openedFromProfile: true,
       autoPlayChecked,
@@ -489,10 +551,11 @@ async function resolveWorkForExecution(page, task, options = {}) {
           };
         }
 
-        console.error(`[resolve] 作品收集完成: title="${String(fromCurrent.work.workTitle || '').slice(0, 30)}"`);
+        const resolvedVisibleWork = mergeWorkContext(opened.aweme || {}, fromCurrent.work, knownWorkId);
+        console.error(`[resolve] 作品收集完成: title="${String(resolvedVisibleWork.workTitle || '').slice(0, 30)}"`);
         return {
           ok: true,
-          work: { ...fromCurrent.work, workId: fromCurrent.work.workId || knownWorkId },
+          work: resolvedVisibleWork,
           fromFallback: false,
           openedFromProfile: true,
           autoPlayChecked,
@@ -677,9 +740,13 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   let commentText = '';
   try {
     commentText = String(task.generatedComment || '').trim();
-    if (commentText) {
+    if (commentText && canReuseGeneratedCommentForWork(task, resolvedWork)) {
       console.error(`[agent] task=${taskId} 复用已生成评论 comment=${commentText}`);
     } else {
+      if (commentText) {
+        console.error(`[agent] task=${taskId} 丢弃已生成评论: 当前作品上下文已变化`);
+        commentText = '';
+      }
       const visibleForAgent = await refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, 'before_agent');
       if (!visibleForAgent.ok) {
         console.error(`[visit] task=${taskId} failed reason=${visibleForAgent.error} detail=${visibleForAgent.reason || ''}`);

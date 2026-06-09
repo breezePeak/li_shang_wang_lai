@@ -423,6 +423,8 @@ export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awem
       domFoundIndex = findCardIndexByAwemeId(cards, targetAwemeId);
     }
 
+    const awemes = collector.getAwemes();
+    const matchedAweme = foundIndex >= 0 ? normalizeAwemeForVisit(awemes[foundIndex]) : null;
     const stats = {
       ...(collector.getStats?.() || {}),
       scrollCount,
@@ -483,7 +485,7 @@ export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awem
       const url = page.url();
       if (url.includes(`/video/${targetAwemeId}`) || url.includes(`/note/${targetAwemeId}`) || url.includes(`modal_id=${targetAwemeId}`)) {
         await page.waitForTimeout(1200);
-        return { ok: true, url, awemeId: targetAwemeId, index: targetIndex, stats };
+        return { ok: true, url, awemeId: targetAwemeId, index: targetIndex, stats, aweme: matchedAweme };
       }
       await page.waitForTimeout(250);
     }
