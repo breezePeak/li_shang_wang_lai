@@ -1,8 +1,9 @@
 import { chromium } from 'playwright';
+import { spawn } from 'child_process';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
-import { existsSync, unlinkSync, writeFileSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PROFILE_DIR = resolve(__dirname, '../../.playwright/douyin-profile');
@@ -20,12 +21,60 @@ function checkPort() {
   });
 }
 
+async function waitForPort({ timeoutMs = 10000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await checkPort()) return true;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
 function isBrowserAlive() {
   if (!existsSync(LOCK_FILE)) return false;
   try {
     const pid = parseInt(readFileSync(LOCK_FILE, 'utf-8').trim());
     try { process.kill(pid, 0); return true; } catch { return false; }
   } catch { return false; }
+}
+
+async function connectReusableBrowser() {
+  const browser = await chromium.connectOverCDP(CDP_ENDPOINT);
+  const contexts = browser.contexts();
+  const context = contexts.find(c => {
+    try { return c.pages().length > 0; } catch { return false; }
+  }) || contexts[0];
+  if (!context) {
+    await browser.close().catch(() => {});
+    throw new Error('CDP 浏览器没有可用 context');
+  }
+  return { browser, context };
+}
+
+async function launchDetachedReusableBrowser({ profileDir, headless }) {
+  mkdirSync(profileDir, { recursive: true });
+  const executablePath = chromium.executablePath();
+  const args = [
+    `--remote-debugging-port=${CDP_PORT}`,
+    `--user-data-dir=${profileDir}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-dev-shm-usage',
+    '--no-sandbox',
+    '--window-size=1280,800',
+    ...(headless ? ['--headless=new'] : []),
+    'about:blank',
+  ];
+
+  const child = spawn(executablePath, args, {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+  writeFileSync(LOCK_FILE, String(child.pid));
+  const ready = await waitForPort({ timeoutMs: 12000 });
+  if (!ready) throw new Error('独立浏览器 CDP 端口启动超时');
+  return child.pid;
 }
 
 /**
@@ -50,28 +99,30 @@ export async function createBrowserContext(options = {}) {
   } = options;
 
   // CDP reuse is only attempted when explicitly enabled (e.g. keep-open mode).
-  if (enableReuse && isBrowserAlive()) {
-    const portOpen = await checkPort();
-    if (portOpen) {
+  if (enableReuse) {
+    if (await checkPort()) {
       try {
-        const browser = await chromium.connectOverCDP(CDP_ENDPOINT);
-        const contexts = browser.contexts();
-        const context = contexts.find(c => {
-          try { return c.pages().length > 0; } catch { return false; }
-        }) || contexts[0];
-        if (context) {
-          console.error('[browser] 复用已有浏览器（CDP 连接）');
-          return {
-            browser: { close: async () => {} },
-            context,
-            reused: true,
-          };
-        }
-        await browser.close().catch(() => {});
+        const { context } = await connectReusableBrowser();
+        console.error('[browser] 复用已有浏览器（CDP 连接）');
+        return {
+          browser: { close: async () => {} },
+          context,
+          reused: true,
+        };
       } catch {
-        // Fall through to fresh launch
+        // Fall through to detached launch.
       }
     }
+
+    console.error('[browser] 启动独立可复用浏览器...');
+    await launchDetachedReusableBrowser({ profileDir, headless });
+    const { context } = await connectReusableBrowser();
+    return {
+      browser: { close: async () => {} },
+      context,
+      reused: false,
+      detached: true,
+    };
   }
 
   // Launch new browser
@@ -104,14 +155,6 @@ export async function createBrowserContext(options = {}) {
     } else {
       throw launchErr;
     }
-  }
-
-  // Only write lock file and expose CDP when reuse is explicitly enabled
-  if (enableReuse) {
-    writeFileSync(LOCK_FILE, String(process.pid));
-    process.on('exit', () => {
-      try { if (existsSync(LOCK_FILE)) unlinkSync(LOCK_FILE); } catch {}
-    });
   }
 
   return {
