@@ -12,8 +12,8 @@ describe('return visit comment safety validation', () => {
     expect(validateReturnVisitComment('这个思路梳理得挺清楚，表达也自然。')).not.toBe(false);
   });
 
-  it('rejects unsafe identity, length, and punctuation patterns without banning light style', () => {
-    expect(validateReturnVisitComment('主人分享的思路挺清楚的。')).toBe(false);
+  it('rejects unsafe length and punctuation patterns without banning light style', () => {
+    expect(validateReturnVisitComment('主人分享的思路挺清楚，细节也自然。')).toBe(true);
     expect(validateReturnVisitComment('思路清楚')).toBe(false);
     expect(validateReturnVisitComment('这个思路梳理得挺清楚的我们后面一定要非常认真地把它完全落实在我们的业务系统里。')).toBe(false);
     expect(validateReturnVisitComment('这个思路挺清楚，笑点也自然😊')).toBe(true);
@@ -47,7 +47,6 @@ describe('return visit comment generator', () => {
     expect(result.comment.length).toBeGreaterThanOrEqual(14);
     expect(result.comment.length).toBeLessThanOrEqual(36);
     expect(result.comment).not.toContain('小猿');
-    expect(result.comment).not.toContain('主人');
   });
 
   it('generates a valid neutral comment for tutorial-like content', () => {
@@ -63,7 +62,7 @@ describe('return visit comment generator', () => {
     expect(result.comment.length).toBeLessThanOrEqual(36);
     expect(result.comment).not.toContain('小猿');
     expect(result.comment).not.toMatch(/[!！]/);
-    expect(result.comment).not.toMatch(/互关|回访|主人|支持一下|收藏了/);
+    expect(result.comment).not.toMatch(/互关|回访|支持一下|收藏了/);
   });
 
   it('does not duplicate reference comments', () => {

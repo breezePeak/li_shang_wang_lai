@@ -203,9 +203,6 @@ function buildAgentCandidates(analysis) {
 export function validateReturnVisitComment(text, referenceComments = [], workTitle = '') {
   if (!text || typeof text !== 'string') return false;
 
-  // 评论对外不能出现“主人”
-  if (text.includes('主人')) return false;
-
   // 评论长度严格控制在 14 到 36 个中文字符之间
   if (text.length < MIN_COMMENT_LENGTH || text.length > MAX_COMMENT_LENGTH) return false;
 

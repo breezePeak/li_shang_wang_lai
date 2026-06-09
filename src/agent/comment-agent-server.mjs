@@ -47,7 +47,7 @@ export function countVisibleChars(text = '') {
 }
 
 export function hasForbiddenReplyPersona(text = '') {
-  return /主人|主家|替.*主|帮.*主|自动回复|系统生成|系统提示|AI助手|智能助手|[A-Za-z]+AI|AI[A-Za-z]+|AI.{0,6}(帮忙|帮你|代|替).{0,6}(回|回复|回评|看评论)|AI.{0,6}(回了|回复啦|回评啦|看评论了)|帮你守着评论区/.test(String(text || ''));
+  return /自动回复|系统生成|系统提示|AI助手|智能助手|[A-Za-z]+AI|AI[A-Za-z]+|AI.{0,6}(帮忙|帮你|代|替).{0,6}(回|回复|回评|看评论)|AI.{0,6}(回了|回复啦|回评啦|看评论了)|帮你守着评论区/.test(String(text || ''));
 }
 
 export function hasLowQualityReplyText(text = '') {

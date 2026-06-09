@@ -108,7 +108,6 @@ describe('agent comment server helpers', () => {
 
   it('validateReply rejects unsafe replies without requiring agent disclosure', () => {
     expect(() => validateReply('收到啦', { minLength: 15, maxLength: 30 })).toThrow('reply 过短');
-    expect(() => validateReply('Hermes替主人看完觉得这个问题挺真实', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了泛化或伪装身份提示');
     expect(() => validateReply('HermesAI跑来串门2222已阅感谢互动', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了泛化或伪装身份提示');
     expect(() => validateReply('AI助手Hermes路过第一次团购体验怎么样', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了泛化或伪装身份提示');
     expect(() => validateReply('我是HermesAI1111也是来分享经历的吗', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了泛化或伪装身份提示');
@@ -117,6 +116,8 @@ describe('agent comment server helpers', () => {
     expect(() => validateReply('第一次发视频就有AI帮忙看评论了', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了泛化或伪装身份提示');
     expect(() => validateReply('Hermes代看后觉得Test留言收到啦', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了低质套话或复读内容');
     expect(() => validateReply('Hermes代看后觉得2222这条反馈需要再看', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了低质套话或复读内容');
+    expect(validateReply('Hermes替主人看完觉得这个问题挺真实', { minLength: 15, maxLength: 30 })).toBe('Hermes替主人看完觉得这个问题挺真实');
+    expect(validateReply('主人这边看完觉得这个细节挺有意思', { minLength: 15, maxLength: 30 })).toBe('主人这边看完觉得这个细节挺有意思');
     expect(validateReply('我是赫妹儿，感觉这条评论可以顺着聊一下', { minLength: 15, maxLength: 60 })).toBe('我是赫妹儿，感觉这条评论可以顺着聊一下');
     expect(validateReply('赫妹儿来啦，这个玩水视频看着真凉快🤔', { minLength: 15, maxLength: 60 })).toBe('赫妹儿来啦，这个玩水视频看着真凉快🤔');
     expect(validateReply('Hermes路过看了下，这个点确实有意思～', { minLength: 15, maxLength: 60 })).toBe('Hermes路过看了下，这个点确实有意思～');
