@@ -41,7 +41,7 @@ import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
 import { normalizeNoticeApiItem } from '../domain/notice-api-normalization.mjs';
-import { countVisibleChars, getReplyMinLength, hasAgentDisclosure } from '../agent/comment-agent-server.mjs';
+import { countVisibleChars, getReplyMinLength, hasAgentDisclosure, hasForbiddenReplyPersona, hasReplyAgentPersona } from '../agent/comment-agent-server.mjs';
 
 export function parseArgs(argv) {
   const args = {
@@ -129,6 +129,8 @@ export function isReplyTextInvalid(replyText, { minLength = getReplyMinLength(),
   if (!text) return false;
   if (countVisibleChars(text) < minLength) return true;
   if (requireAgentDisclosure && !hasAgentDisclosure(text)) return true;
+  if (requireAgentDisclosure && !hasReplyAgentPersona(text)) return true;
+  if (requireAgentDisclosure && hasForbiddenReplyPersona(text)) return true;
   return false;
 }
 

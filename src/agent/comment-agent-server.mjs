@@ -7,6 +7,7 @@ const execFileAsync = promisify(execFile);
 
 export const DEFAULT_COMMENT_MAX_LENGTH = 30;
 export const DEFAULT_REPLY_MIN_LENGTH = 15;
+export const REPLY_AGENT_PERSONA_NAME = '小猿';
 const COMMENT_RULES_PATH = resolve('references', 'comment-safety-rules.md');
 let cachedCommentRules = null;
 
@@ -36,7 +37,15 @@ export function countVisibleChars(text = '') {
 
 export function hasAgentDisclosure(text = '') {
   const value = String(text || '').trim();
-  return /(Agent|AI|助手|智能体|代回|帮回|替.*回|自动回复|自动回)/i.test(value);
+  return /(小猿|Agent|AI|助手|智能体|代回|帮回|替.*回|自动回复|自动回)/i.test(value);
+}
+
+export function hasReplyAgentPersona(text = '') {
+  return String(text || '').includes(REPLY_AGENT_PERSONA_NAME);
+}
+
+export function hasForbiddenReplyPersona(text = '') {
+  return /AI小助手|AI助手|智能助手|小助手|机器人|主人|主家|替.*主|帮.*主|自动回复|系统生成/.test(String(text || ''));
 }
 
 export function buildCommentPrompt(context = {}) {
@@ -90,7 +99,11 @@ export function buildReplyPrompt(context = {}) {
     safetyRules ? ['必须遵守下面这份项目评论生成规则：', safetyRules].join('\n') : '',
     '输出格式要求：只能返回 JSON，格式为：{"reply":"回复内容"}。reply 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
     `本次回复长度必须在 ${minLength}-${maxLength} 个中文可见字符之间，少于 ${minLength} 个字不合格。`,
-    requireAgentDisclosure ? '本次是 Agent 代回评。你必须自己用真实身份自然披露这是 Agent/AI/助手代回，让对方知道不是作者本人直接回复；不要使用示例名、占位名或伪造名字，不要写成系统提示。' : '',
+    requireAgentDisclosure ? [
+      '本次是项目 Agent 代回评。你的对外人格叫“小猿”，这是本项目真实使用的 Agent 身份。',
+      '回复里必须自然出现“小猿”，用小猿自己的观察和口吻说话，例如“小猿看完觉得...”“小猿也觉得...”。',
+      '不要写“AI小助手”“AI助手代回”“智能助手”“主人/主家”“替主人回”等泛化或伪装身份，也不要写成系统提示。',
+    ].join('\n') : '',
     '',
     '上下文：',
     JSON.stringify({
@@ -156,7 +169,9 @@ export function buildReplyBatchPrompt(contexts = []) {
     '输出格式要求：只能返回 JSON，格式为：{"replies":[{"taskId":"work_comment_1","reply":"回复内容"}]}。',
     'replies 数量必须与输入待回评列表一致；taskId 必须原样返回；reply 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
     '每条回复都要结合对应评论独立生成，避免机械重复；不要合并多条评论，不要漏掉任何 taskId。',
-    '如果某条要求 requireAgentDisclosure=true，必须在该条 reply 里自然披露这是 Agent/AI/助手代回；不要使用示例名、占位名或伪造名字。',
+    '如果某条要求 requireAgentDisclosure=true，必须在该条 reply 里自然出现“小猿”。小猿是本项目真实使用的 Agent 对外人格，不是示例名。',
+    '用小猿自己的观察和口吻结合评论内容回复，例如“小猿看完觉得...”“小猿也觉得...”。不要只机械加“代回”。',
+    '不要写“AI小助手”“AI助手代回”“智能助手”“主人/主家”“替主人回”等泛化或伪装身份，也不要写成系统提示。',
     '',
     '待回评列表：',
     JSON.stringify(normalized, null, 2),
@@ -204,6 +219,8 @@ export function validateReply(reply, { minLength = getReplyMinLength(), maxLengt
   if (visibleLength < minLength) throw new Error(`reply 过短: ${visibleLength}/${minLength}`);
   if (visibleLength > maxLength) throw new Error(`reply 超长: ${visibleLength}/${maxLength}`);
   if (requireAgentDisclosure && !hasAgentDisclosure(text)) throw new Error('reply 缺少 Agent 身份提示');
+  if (requireAgentDisclosure && !hasReplyAgentPersona(text)) throw new Error('reply 缺少小猿身份特征');
+  if (requireAgentDisclosure && hasForbiddenReplyPersona(text)) throw new Error('reply 使用了泛化或伪装身份提示');
   if (/```|\{\s*"reply"|^\s*\[/.test(text)) throw new Error('reply 必须是纯文本');
   return text;
 }
@@ -354,7 +371,7 @@ export async function generateReplyWithHermes(context, options = {}) {
       '上一次返回格式错误。你只能返回 JSON，例如：',
       '{"reply":"回复内容"}',
       `回复必须是 ${minLength}-${maxLength} 个中文可见字符，不要解释，不要 Markdown。`,
-      requireAgentDisclosure ? '回复里必须由你自己自然披露这是 Agent/AI/助手代回，不要使用示例名或伪造名字。' : '',
+      requireAgentDisclosure ? '回复里必须自然出现“小猿”，这是项目 Agent 的真实对外人格；不要写 AI小助手、AI助手代回、主人/主家或系统提示。' : '',
     ].join('\n');
     try {
       const output = await callAgentCli(`${basePrompt}${retryHint}`, options);
@@ -396,7 +413,7 @@ export async function generateRepliesWithHermes(contexts = [], options = {}) {
     const retryHint = attempt === 1 ? '' : [
       '',
       '上一次返回格式错误。你只能返回 JSON，例如：',
-      '{"replies":[{"taskId":"work_comment_1","reply":"AI助手代回：这个问题后面可以展开聊聊"}]}',
+      '{"replies":[{"taskId":"work_comment_1","reply":"小猿看完觉得这个问题后面可以展开聊聊"}]}',
       `必须返回 ${normalized.length} 条 replies，taskId 必须和输入完全一致，不要解释，不要 Markdown。`,
     ].join('\n');
     try {
