@@ -354,14 +354,20 @@ body {
 
 .river-nodes-container {
   height: 100%;
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  grid-template-rows: 1fr 1fr;
-  column-gap: 26px;
-  row-gap: 8px;
-  align-items: stretch;
-  padding: 6px 10px 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 26px;
+  padding: 16px 10px 10px;
   box-sizing: border-box;
+  overflow-x: auto;
+}
+
+.tree-root {
+  display: flex;
+  align-items: flex-start;
+  gap: 26px;
+  flex: 1;
+  min-width: 0;
 }
 
 .timeline-overview,
@@ -552,156 +558,104 @@ body {
   z-index: 0;
 }
 
-/* ── 分支时间线（回评线） ── */
-.timeline-lane-branch .lane-branch-layout {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto auto auto;
-  gap: 0;
-  padding: 8px 6px 6px;
-  flex: 1;
-  align-items: start;
-}
-
-.lane-trunk-row {
-  grid-column: 1 / -1;
-  grid-row: 1;
+/* ── 树形时间线布局 ── */
+.tree-node {
   position: relative;
   display: flex;
   align-items: flex-start;
   gap: 0;
-  padding: 10px 4px 6px;
-  z-index: 2;
 }
 
-.lane-trunk-row .timeline-point {
+.tree-node.has-children {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.tree-node .timeline-point {
   flex-shrink: 0;
   width: 98px !important;
 }
 
-.trunk-connector {
+.tree-children {
   display: flex;
   align-items: flex-start;
-  flex-shrink: 0;
-  width: 40px;
-  padding-top: 13px;
-}
-
-.connector-line {
-  flex: 1;
-  height: 2px;
-  background: rgba(31, 109, 120, 0.22);
-}
-
-.connector-arrow {
-  width: 14px;
-  height: 14px;
-  display: grid;
-  place-items: center;
-  color: rgba(31, 109, 120, 0.30);
-  font-size: 9px;
-  margin-top: -6px;
-  margin-left: -2px;
-}
-
-.trunk-split {
-  display: flex;
-  align-items: flex-start;
-  flex-shrink: 0;
-  width: 40px;
-  padding-top: 13px;
+  gap: 0;
+  margin-left: 98px;
   position: relative;
 }
 
-.split-line {
-  flex: 1;
-  height: 2px;
-  background: rgba(31, 109, 120, 0.22);
-}
-
-.trunk-split::after {
-  content: '';
+.tree-branch-lines {
   position: absolute;
-  top: 13px;
-  left: 2px;
-  width: 2px;
-  height: calc(100% + 200px);
-  background: rgba(31, 109, 120, 0.18);
-  border-radius: 1px;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 40px;
+  pointer-events: none;
   z-index: 0;
 }
 
-.branch-row {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: flex-start;
-  gap: 0;
-  padding: 0 4px 2px;
-  z-index: 1;
+.branch-vertical {
+  position: absolute;
+  left: 20px;
+  top: 36px;
+  bottom: 36px;
+  width: 2px;
+  background: rgba(31, 109, 120, 0.18);
 }
 
-.branch-row-stem {
-  display: flex;
-  align-items: flex-start;
-  flex-shrink: 0;
-  width: 138px;
-  padding-top: 13px;
-  position: relative;
-}
-
-.branch-row-line {
-  flex: 1;
+.branch-horizontal {
+  position: absolute;
+  left: 20px;
+  width: 20px;
   height: 2px;
   background: rgba(31, 109, 120, 0.18);
 }
 
-.branch-row-arrow {
-  width: 14px;
-  height: 14px;
-  display: grid;
-  place-items: center;
-  color: rgba(31, 109, 120, 0.25);
-  font-size: 9px;
-  margin-top: -6px;
-  margin-left: -2px;
-}
-
-.branch-row-stem::before {
+.branch-horizontal::after {
   content: '';
   position: absolute;
-  top: 0;
-  left: 2px;
-  width: 2px;
-  height: 14px;
-  background: rgba(31, 109, 120, 0.18);
-  border-radius: 1px;
+  right: -2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-left: 4px solid rgba(31, 109, 120, 0.18);
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
 }
 
-.branch-row .timeline-point {
+.tree-children-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 0 0 40px;
+  flex: 1;
+}
+
+.tree-children-list .tree-node {
+  align-items: flex-start;
+}
+
+.tree-children-list .tree-children {
+  margin-left: 98px;
+}
+
+.tree-children-list .timeline-point {
   width: 98px !important;
   min-height: 72px !important;
-  opacity: 0.82;
-  transition: opacity 180ms ease, transform 180ms ease;
 }
 
-.branch-row .timeline-point:hover,
-.branch-row .timeline-point.is-active {
-  transform: translateY(-1px);
-  opacity: 1;
-}
-
-.branch-row .point-dot {
+.tree-children-list .point-dot {
   width: 30px !important;
   height: 30px !important;
   font-size: 12px !important;
 }
 
-.branch-row .point-copy strong {
+.tree-children-list .point-copy strong {
   font-size: 11px !important;
 }
 
-.branch-row .point-count {
+.tree-children-list .point-count {
   top: -4px !important;
   left: 22px !important;
   min-width: 22px !important;

@@ -141,43 +141,95 @@ function renderRiverTimeline() {
   const stageMap = buildStageMap();
   const activeStageId = selectedStageId;
   const replyExceptionsTotal = (statsData.blockedReplies || 0) + (statsData.sentUnverifiedReplies || 0);
+  const visitErrorCount = reviewTasks.filter((task) => ['failed_like', 'failed_comment', 'failed'].includes(task.status)).length;
+  const visitSkippedCount = statsData.skippedVisitTasks || 0;
 
-  const replyTrunk = [
-    timelinePoint('replies', '回评入口', 'fa-comments', stageMap.replies?.count || 0, '评论入库后进入 reply_status 队列', 'main'),
-    timelinePoint('replyPending', '待回评', 'fa-reply', statsData.pendingReplies || 0, 'pending 会被 comments:execute 处理', 'work'),
-  ];
+  const treeData = {
+    id: 'collect',
+    label: '扫描入库',
+    icon: 'fa-database',
+    count: statsData.collectedTotal || 0,
+    tone: 'main',
+    helper: '通知先入库，再分流处理',
+    children: [
+      {
+        id: 'replies',
+        label: '评论我的',
+        icon: 'fa-comments',
+        count: stageMap.replies?.count || 0,
+        tone: 'work',
+        helper: '评论进入回评线',
+        children: [
+          { id: 'replyExceptions', label: '回评异常', icon: 'fa-triangle-exclamation', count: replyExceptionsTotal, tone: 'warning', helper: 'blocked / sent_unverified' },
+          { id: 'replyDone', label: '回评成功', icon: 'fa-circle-check', count: statsData.succeededReplies || 0, tone: 'done', helper: '已回复成功' },
+          { id: 'replySkipped', label: '忽略回评', icon: 'fa-ban', count: statsData.skippedReplies || 0, tone: 'muted', helper: '人工忽略' },
+        ],
+      },
+      {
+        id: 'replyPending',
+        label: '回复我的',
+        icon: 'fa-reply',
+        count: statsData.pendingReplies || 0,
+        tone: 'work',
+        helper: '待回评处理',
+      },
+      {
+        id: 'visitUnhandled',
+        label: '关注',
+        icon: 'fa-user-plus',
+        count: statsData.unhandledFollows || 0,
+        tone: 'work',
+        helper: '关注通知',
+      },
+      {
+        id: 'visits',
+        label: '待回访',
+        icon: 'fa-route',
+        count: stageMap.visits?.count || 0,
+        tone: 'work',
+        helper: '回访线索',
+        children: [
+          { id: 'executeErrors', label: '回访异常', icon: 'fa-circle-xmark', count: visitErrorCount, tone: 'danger', helper: '执行失败' },
+          { id: 'done', label: '回访成功', icon: 'fa-flag-checkered', count: statsData.completedTasks || 0, tone: 'done', helper: '回访完成' },
+          { id: 'visitSkipped', label: '其他', icon: 'fa-user-slash', count: visitSkippedCount, tone: 'muted', helper: '跳过/无法回访' },
+        ],
+      },
+    ],
+  };
 
-  const replyBranches = [
-    timelinePoint('replyExceptions', '回评异常', 'fa-triangle-exclamation', replyExceptionsTotal, 'blocked / sent_unverified 需人工介入', 'warning'),
-    timelinePoint('replySkipped', '忽略回评', 'fa-ban', statsData.skippedReplies || 0, '人工忽略或不再处理', 'muted'),
-    timelinePoint('replyDone', '回评成功', 'fa-circle-check', statsData.succeededReplies || 0, '已回复成功写入 DB', 'done'),
-  ];
+  container.innerHTML = `<div class="tree-root">${renderTree(treeData, activeStageId)}</div>`;
+}
 
-  const visitLane = [
-    timelinePoint('visits', '回访入口', 'fa-route', stageMap.visits?.count || 0, '点赞/评论/关注/回复沉淀为回访线索', 'main'),
-    timelinePoint('visitUnhandled', '未处理线索', 'fa-inbox', getUnhandledEventCount(), 'new 状态的关注、回复、点赞、评论', 'work'),
-    timelinePoint('visitRetry', '匹配/生成重试', 'fa-rotate-left', stageMap.visitRetry?.count || 0, '作品收集或评论生成失败，可重试', 'warning'),
-    timelinePoint('execute', '执行回访', 'fa-bolt', stageMap.execute?.count || 0, 'visit:run --execute 真实点赞/评论', 'work'),
-    timelinePoint('executeErrors', '执行异常', 'fa-circle-xmark', stageMap.executeErrors?.count || 0, '点赞、评论或状态确认失败', 'danger'),
-    timelinePoint('visitSkipped', '无法回访', 'fa-user-slash', statsData.skippedVisitTasks || 0, '私密、无作品、无合适作品等跳过', 'muted'),
-    timelinePoint('done', '回访完成', 'fa-circle-check', statsData.completedTasks || 0, '回访任务 done', 'done'),
-  ];
+function renderTree(node, activeStageId) {
+  const hasChildren = node.children && node.children.length > 0;
+  const isActive = activeStageId === node.id;
+  const pointClass = `timeline-point ${node.tone || 'work'} ${isActive ? 'is-active' : ''} ${node.count > 0 ? 'has-count' : ''}`;
 
-  container.innerHTML = `
-    <div class="timeline-overview">
-      <button class="timeline-origin ${activeStageId === 'collect' ? 'is-active' : ''}" onclick="selectStage('collect', this)">
-        <span class="origin-icon"><i class="fa-solid fa-database"></i></span>
-        <span class="origin-copy">
-          <strong>扫描入库</strong>
-          <small>通知先入库，再分成回评 / 回访两条线</small>
-        </span>
-        <span class="origin-count">${statsData.collectedTotal || 0}</span>
-      </button>
-      <div class="timeline-splitter" aria-hidden="true"></div>
-    </div>
-    ${renderReplyBranchLane({ activeStageId, trunk: replyTrunk, branches: replyBranches })}
-    ${renderTimelineLane({ id: 'visit', title: '回访时间线', subtitle: '回访点赞/评论/关注/回复线索', icon: 'fa-route', points: visitLane, activeStageId })}
-  `;
+  let html = `<div class="tree-node ${hasChildren ? 'has-children' : ''}">`;
+  html += `<button class="${pointClass}" onclick="selectStage('${node.id}', this)" title="${escapeAttribute(node.helper || node.label)}">`;
+  html += `<span class="point-dot"><i class="fa-solid ${node.icon}"></i></span>`;
+  html += `<span class="point-copy"><strong>${node.label}</strong></span>`;
+  html += `<span class="point-count">${node.count || 0}</span>`;
+  html += `</button>`;
+
+  if (hasChildren) {
+    html += `<div class="tree-children">`;
+    html += `<div class="tree-branch-lines" aria-hidden="true">`;
+    html += `<span class="branch-vertical"></span>`;
+    node.children.forEach((child, i) => {
+      html += `<span class="branch-horizontal" style="--child-index:${i};--child-total:${node.children.length}"></span>`;
+    });
+    html += `</div>`;
+    html += `<div class="tree-children-list">`;
+    node.children.forEach(child => {
+      html += renderTree(child, activeStageId);
+    });
+    html += `</div>`;
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  return html;
 }
 
 function timelinePoint(id, label, icon, count, helper, tone = 'work') {
