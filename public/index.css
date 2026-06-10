@@ -1690,6 +1690,20 @@ body {
   font-weight: 800;
 }
 
+.cabin-workspace .work-block-time {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.table-time-cell {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .cabin-workspace .comment-input-area {
   display: flex;
   flex-direction: column;
@@ -1866,6 +1880,15 @@ body {
   font-weight: 700;
   color: var(--muted);
   white-space: nowrap;
+}
+
+.work-group-time {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(102, 117, 106, 0.06);
 }
 
 .work-group-comments {

@@ -183,6 +183,7 @@ app.get('/api/revisit-tasks', (req, res) => {
       commentStatus: row.comment_status,
       retryCount: row.retry_count,
       lastError: row.last_error,
+      createdAt: row.created_at,
       updatedAt: row.updated_at
     }));
 
@@ -342,7 +343,8 @@ app.get('/api/pending-comments', (req, res) => {
         COALESCE(w_by_work.work_url, w_by_modal.work_url, wc.work_url) AS joined_work_url,
         COALESCE(w_by_work.work_title, w_by_modal.work_title) AS joined_work_title,
         COALESCE(w_by_work.work_desc, w_by_modal.work_desc) AS joined_work_desc,
-        COALESCE(w_by_work.author_profile_url, w_by_modal.author_profile_url) AS joined_author_profile_url
+        COALESCE(w_by_work.author_profile_url, w_by_modal.author_profile_url) AS joined_author_profile_url,
+        COALESCE(w_by_work.published_at, w_by_modal.published_at) AS joined_work_published_at
       FROM work_comments wc
       LEFT JOIN works w_by_work
         ON wc.work_id IS NOT NULL
@@ -354,11 +356,7 @@ app.get('/api/pending-comments', (req, res) => {
         AND wc.modal_id != ''
         AND w_by_modal.modal_id = wc.modal_id
       WHERE wc.reply_status IN ('pending', 'blocked', 'sent_unverified', 'skipped')
-      ORDER BY CASE wc.reply_status
-        WHEN 'blocked' THEN 0
-        WHEN 'sent_unverified' THEN 1
-        ELSE 2
-      END, wc.last_seen_at DESC
+      ORDER BY wc.last_seen_at DESC
       LIMIT ? OFFSET ?
     `).all(...params);
 

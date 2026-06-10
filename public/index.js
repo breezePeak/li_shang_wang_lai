@@ -784,7 +784,7 @@ function renderTaskCardsHtml(tasks) {
             <div class="user-avatar">${firstChar}</div>
             <div class="user-meta">
               <h4>${escapeHtml(task.userName || '未知用户')}</h4>
-              <span>来源: ${task.sourceType === 'follow' ? '互关' : '朋友/粉丝'} · 重试 ${task.retryCount || 0} 次</span>
+              <span>来源: ${task.sourceType === 'follow' ? '互关' : '朋友/粉丝'} · 重试 ${task.retryCount || 0} 次 · ${formatTime(task.createdAt)}</span>
             </div>
           </div>
           <span class="task-badge ${badgeClass}">${badgeText}</span>
@@ -792,6 +792,7 @@ function renderTaskCardsHtml(tasks) {
         <div class="work-block">
           <h5><i class="fa-solid fa-video"></i> ${escapeHtml(task.targetWork?.workTitle || '等待作品识别')}</h5>
           <p>${escapeHtml((task.targetWork?.contentSummary || task.targetWork?.workText || task.lastError || '暂无摘要').slice(0, 120))}</p>
+          ${task.targetWork?.publishTime ? `<span class="work-block-time"><i class="fa-regular fa-clock"></i> ${formatTime(task.targetWork.publishTime)}</span>` : ''}
           ${task.targetWork?.workUrl ? `<a class="work-link" target="_blank" href="${task.targetWork.workUrl}">打开作品 <i class="fa-solid fa-arrow-up-right-from-square"></i></a>` : ''}
         </div>
         <div class="comment-input-area">
@@ -826,6 +827,7 @@ function renderTaskTableHtml(tasks) {
             </th>
             <th>用户</th>
             <th>作品</th>
+            <th>发布时间</th>
             <th>草稿</th>
             <th>状态</th>
             <th>操作</th>
@@ -848,11 +850,12 @@ function renderTaskTableHtml(tasks) {
                     <div class="table-avatar">${escapeHtml((task.userName || '?').charAt(0))}</div>
                     <div class="table-user-meta">
                       <h5>${escapeHtml(task.userName || '未知用户')}</h5>
-                      <span>${task.sourceType === 'follow' ? '互关' : '朋友/粉丝'}</span>
+                      <span>${task.sourceType === 'follow' ? '互关' : '朋友/粉丝'} · ${formatTime(task.createdAt)}</span>
                     </div>
                   </div>
                 </td>
                 <td>${task.targetWork?.workUrl ? `<a class="work-link" target="_blank" href="${task.targetWork.workUrl}">${escapeHtml(task.targetWork?.workTitle || '打开作品')}</a>` : escapeHtml(task.targetWork?.workTitle || '等待识别')}</td>
+                <td class="table-time-cell">${task.targetWork?.publishTime ? formatTime(task.targetWork.publishTime) : '-'}</td>
                 <td><input id="textarea-${task.id}" class="table-comment-input" value="${escapeAttribute(task.generatedComment || '')}" placeholder="输入评论内容..."></td>
                 <td><div class="status-dot-wrapper"><span class="status-dot ${dotClass}"></span>${badgeText}</div></td>
                 <td>
@@ -936,6 +939,7 @@ function groupCommentsByWork(comments) {
         workUrl: comment.joined_work_url || comment.work_url || '',
         workTitle: comment.joined_work_title || comment.work_id || comment.modal_id || '未知作品',
         workDesc: comment.joined_work_desc || '',
+        workPublishedAt: comment.joined_work_published_at || '',
         comments: [],
       });
     }
@@ -943,16 +947,28 @@ function groupCommentsByWork(comments) {
     if (!groups.get(workKey).workUrl && (comment.joined_work_url || comment.work_url)) {
       groups.get(workKey).workUrl = comment.joined_work_url || comment.work_url;
     }
+    if (!groups.get(workKey).workPublishedAt && comment.joined_work_published_at) {
+      groups.get(workKey).workPublishedAt = comment.joined_work_published_at;
+    }
   }
-  return Array.from(groups.values());
+  return Array.from(groups.values()).sort((a, b) => {
+    const ta = a.workPublishedAt || '';
+    const tb = b.workPublishedAt || '';
+    if (ta && tb) return tb.localeCompare(ta);
+    if (ta) return -1;
+    if (tb) return 1;
+    return 0;
+  });
 }
 
 function renderWorkCommentGroup(group) {
+  const workTime = formatTime(group.workPublishedAt);
   return `
     <div class="work-group">
       <div class="work-group-header">
         <i class="fa-solid fa-video"></i>
         <span class="work-group-title">${escapeHtml(group.workTitle)}</span>
+        ${workTime ? `<span class="work-group-time">${workTime}</span>` : ''}
         <span class="work-group-count">${group.comments.length} 条评论</span>
         ${group.workUrl ? `<a class="work-link" target="_blank" href="${escapeAttribute(group.workUrl)}"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>` : ''}
       </div>
@@ -962,6 +978,7 @@ function renderWorkCommentGroup(group) {
         const textareaId = `reply-text-${comment.id}`;
         const reason = comment.reply_reason || '';
         const isChecked = selectedCommentIds.has(comment.id) ? 'checked' : '';
+        const commentTime = formatTime(comment.last_seen_at || comment.first_seen_at);
         return `
         <article class="pending-card reply-${escapeHtml(comment.reply_status || 'pending')} ${isChecked ? 'is-selected' : ''}">
           <div class="card-checkbox-wrapper pending-checkbox-wrapper">
@@ -975,7 +992,7 @@ function renderWorkCommentGroup(group) {
               <div class="pending-user-avatar">${escapeHtml((comment.actor_name || '?').charAt(0))}</div>
               <div>
                 <h4>${escapeHtml(comment.actor_name || '未知用户')}</h4>
-                <span>${escapeHtml(comment.event_time_text || '不久前')} · <span class="reply-badge ${badge.className}">${badge.text}</span></span>
+                <span>${escapeHtml(comment.event_time_text || '')}${commentTime ? ` · ${commentTime}` : ''} · <span class="reply-badge ${badge.className}">${badge.text}</span></span>
               </div>
             </div>
             <div class="pending-text"><strong>原留言：</strong>${escapeHtml(comment.comment_text || '')}</div>
@@ -1511,4 +1528,16 @@ function escapeHtml(value) {
 
 function escapeAttribute(value) {
   return escapeHtml(value).replace(/\n/g, '&#10;');
+}
+
+function formatTime(isoString) {
+  if (!isoString) return '';
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return isoString;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch {
+    return isoString;
+  }
 }
