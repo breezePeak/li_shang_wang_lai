@@ -242,10 +242,8 @@ async function main() {
     process.exit(1);
   }
 
-  const profileUrl = normalizeDouyinUrl(args.profileUrl) || args.profileUrl;
+  let profileUrl = normalizeDouyinUrl(args.profileUrl) || args.profileUrl;
   runMigrations();
-
-  console.error(`[check] 主页: ${profileUrl}  范围: ${args.days}天  上限: ${args.count}个作品\n`);
 
   const run = createRunContext('check-manual-replies', {
     debug: true, execute: true, json: args.json,
@@ -261,6 +259,16 @@ async function main() {
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
+
+    if (!profileUrl && args.auto) {
+      profileUrl = await detectOwnProfileUrl(page);
+      if (!profileUrl) {
+        console.error('[check] 未能自动检测主页 URL，请手动指定 --profile');
+        process.exit(1);
+      }
+    }
+
+    console.error(`[check] 主页: ${profileUrl}  范围: ${args.days}天  上限: ${args.count}个作品\n`);
 
     const works = await collectProfileWorks(page, profileUrl, { days: args.days });
     if (works.length === 0) {
