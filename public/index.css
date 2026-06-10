@@ -1919,6 +1919,13 @@ body {
   padding: 10px;
 }
 
+.work-group-tasks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 6px;
+  padding: 10px;
+}
+
 .cabin-workspace .pending-card {
   position: relative;
   padding: 8px 12px;

@@ -782,47 +782,94 @@ function renderTaskCardsHtml(tasks) {
     return renderEmptyState('fa-water', '当前阶段没有可展示的任务。');
   }
 
-  return tasks.map((task) => {
-    const { badgeClass, badgeText } = getTaskBadge(task);
-    const firstChar = task.userName ? task.userName.charAt(0) : '?';
-    const isChecked = selectedTaskIds.has(task.id) ? 'checked' : '';
-    const refTexts = formatReferenceComments(task.referenceComments);
-    return `
-      <article class="task-card">
-        <div class="card-checkbox-wrapper">
-          <label class="custom-checkbox">
-            <input type="checkbox" class="task-checkbox" data-id="${task.id}" ${isChecked} onchange="toggleSelect(${task.id})">
-            <span class="checkbox-checkmark"></span>
-          </label>
-        </div>
-        <div class="card-header">
-          <div class="user-info">
-            <div class="user-avatar">${firstChar}</div>
-            <div class="user-meta">
-              <h4>${escapeHtml(task.userName || '未知用户')}</h4>
-              <span>来源: ${task.sourceType === 'follow' ? '互关' : '朋友/粉丝'} · 重试 ${task.retryCount || 0} 次 · ${formatTime(task.createdAt)}</span>
-            </div>
+  const grouped = groupTasksByWork(tasks);
+  return `<div class="work-group-list">${grouped.map(group => renderTaskWorkGroup(group)).join('')}</div>`;
+}
+
+function groupTasksByWork(tasks) {
+  const groups = new Map();
+  for (const task of tasks) {
+    const workKey = task.targetWork?.workId || task.targetWork?.workUrl || '__unknown__';
+    if (!groups.has(workKey)) {
+      groups.set(workKey, {
+        workId: task.targetWork?.workId || '',
+        workUrl: task.targetWork?.workUrl || '',
+        workTitle: task.targetWork?.workTitle || '等待作品识别',
+        workText: task.targetWork?.workText || '',
+        publishTime: task.targetWork?.publishTime || '',
+        tasks: [],
+      });
+    }
+    groups.get(workKey).tasks.push(task);
+    if (!groups.get(workKey).workUrl && task.targetWork?.workUrl) {
+      groups.get(workKey).workUrl = task.targetWork.workUrl;
+    }
+    if (!groups.get(workKey).publishTime && task.targetWork?.publishTime) {
+      groups.get(workKey).publishTime = task.targetWork.publishTime;
+    }
+  }
+  return Array.from(groups.values()).sort((a, b) => {
+    const ta = a.publishTime || '';
+    const tb = b.publishTime || '';
+    if (ta && tb) return tb.localeCompare(ta);
+    if (ta) return -1;
+    if (tb) return 1;
+    return 0;
+  });
+}
+
+function renderTaskWorkGroup(group) {
+  const workTime = formatTime(group.publishTime);
+  return `
+    <div class="work-group">
+      <div class="work-group-header">
+        <i class="fa-solid fa-video"></i>
+        <span class="work-group-title">${escapeHtml(group.workTitle)}</span>
+        ${workTime ? `<span class="work-group-time">${workTime}</span>` : ''}
+        <span class="work-group-count">${group.tasks.length} 条任务</span>
+        ${group.workUrl ? `<a class="work-link" target="_blank" href="${escapeAttribute(group.workUrl)}"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>` : ''}
+      </div>
+      <div class="work-group-tasks">
+      ${group.tasks.map((task) => {
+        const { badgeClass, badgeText } = getTaskBadge(task);
+        const firstChar = task.userName ? task.userName.charAt(0) : '?';
+        const isChecked = selectedTaskIds.has(task.id) ? 'checked' : '';
+        const refTexts = formatReferenceComments(task.referenceComments);
+        return `
+        <article class="task-card">
+          <div class="card-checkbox-wrapper">
+            <label class="custom-checkbox">
+              <input type="checkbox" class="task-checkbox" data-id="${task.id}" ${isChecked} onchange="toggleSelect(${task.id})">
+              <span class="checkbox-checkmark"></span>
+            </label>
           </div>
-          <span class="task-badge ${badgeClass}">${badgeText}</span>
-        </div>
-        <div class="work-block">
-          <h5><i class="fa-solid fa-video"></i> ${escapeHtml(task.targetWork?.workTitle || '等待作品识别')}</h5>
-          <p>${escapeHtml((task.targetWork?.contentSummary || task.targetWork?.workText || task.lastError || '暂无摘要').slice(0, 120))}</p>
-          ${task.targetWork?.publishTime ? `<span class="work-block-time"><i class="fa-regular fa-clock"></i> ${formatTime(task.targetWork.publishTime)}</span>` : ''}
-          ${task.targetWork?.workUrl ? `<a class="work-link" target="_blank" href="${task.targetWork.workUrl}">打开作品 <i class="fa-solid fa-arrow-up-right-from-square"></i></a>` : ''}
-        </div>
-        ${refTexts ? `<div class="ref-comments-block">${refTexts}</div>` : ''}
-        <div class="comment-input-area">
-          <label>回访评论草稿</label>
-          <textarea class="comment-textarea" id="textarea-${task.id}" placeholder="输入评论内容...">${escapeHtml(task.generatedComment || '')}</textarea>
-        </div>
-        <div class="card-actions">
-          <button class="btn btn-primary" onclick="approveTask(${task.id})"><i class="fa-solid fa-floppy-disk"></i>保存待执行</button>
-          <button class="btn btn-secondary" onclick="skipTask(${task.id})"><i class="fa-solid fa-circle-xmark"></i>跳过</button>
-        </div>
-      </article>
-    `;
-  }).join('');
+          <div class="card-header">
+            <div class="user-info">
+              <div class="user-avatar">${firstChar}</div>
+              <div class="user-meta">
+                <h4>${escapeHtml(task.userName || '未知用户')}</h4>
+                <span>来源: ${task.sourceType === 'follow' ? '互关' : '朋友/粉丝'} · 重试 ${task.retryCount || 0} 次 · ${formatTime(task.createdAt)}</span>
+              </div>
+            </div>
+            <span class="task-badge ${badgeClass}">${badgeText}</span>
+          </div>
+          <div class="work-block">
+            <p>${escapeHtml((task.targetWork?.contentSummary || task.targetWork?.workText || task.lastError || '暂无摘要').slice(0, 120))}</p>
+          </div>
+          ${refTexts ? `<div class="ref-comments-block">${refTexts}</div>` : ''}
+          <div class="comment-input-area">
+            <label>回访评论草稿</label>
+            <textarea class="comment-textarea" id="textarea-${task.id}" placeholder="输入评论内容...">${escapeHtml(task.generatedComment || '')}</textarea>
+          </div>
+          <div class="card-actions">
+            <button class="btn btn-primary" onclick="approveTask(${task.id})"><i class="fa-solid fa-floppy-disk"></i>保存待执行</button>
+            <button class="btn btn-secondary" onclick="skipTask(${task.id})"><i class="fa-solid fa-circle-xmark"></i>跳过</button>
+          </div>
+        </article>
+      `;}).join('')}
+      </div>
+    </div>
+  `;
 }
 
 function renderTaskTableHtml(tasks) {
