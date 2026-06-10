@@ -12,11 +12,12 @@ let selectedCommentIds = new Set();
 let selectedStageId = 'collect';
 let selectedDetailBranchIndex = null;
 let selectedCategory = null;
+let selectedWorkKey = null;
 
 let commentPage = 1;
 let commentTotalPages = 1;
 let commentTotal = 0;
-let commentLimit = 12;
+let commentLimit = 9999;
 
 let taskPage = 1;
 let taskTotalPages = 1;
@@ -795,14 +796,24 @@ function renderStageDetail() {
   setText('workspace-subtitle', detailData.workspaceSubtitle);
 
   const metricsEl = document.getElementById('detail-metrics');
-  metricsEl.innerHTML = detailData.metrics.map((metric) => `
-    <div class="metric-card">
-      <span>${metric.label}</span>
-      <strong>${metric.value}</strong>
-    </div>
-  `).join('');
 
-  renderDetailCategories();
+  if (selectedStageId === 'replies' && !selectedCategory) {
+    metricsEl.innerHTML = renderReplySummary();
+    metricsEl.classList.add('reply-summary-container');
+    document.getElementById('detail-categories-head').style.display = 'none';
+    document.getElementById('detail-categories').style.display = 'none';
+  } else {
+    metricsEl.classList.remove('reply-summary-container');
+    document.getElementById('detail-categories-head').style.display = '';
+    document.getElementById('detail-categories').style.display = '';
+    metricsEl.innerHTML = detailData.metrics.map((metric) => `
+      <div class="metric-card">
+        <span>${metric.label}</span>
+        <strong>${metric.value}</strong>
+      </div>
+    `).join('');
+    renderDetailCategories();
+  }
 
   renderStageWorkspace();
 }
@@ -1057,7 +1068,11 @@ function renderStageWorkspace() {
   if (detailData.workspaceType === 'reply-overview') {
     toolbar.style.display = 'none';
     workspace.className = 'workspace-body';
-    workspace.innerHTML = renderReplyOverview(detailData.commentSource || 'all');
+    if (selectedStageId === 'replies' && !selectedCategory) {
+      workspace.innerHTML = renderReplyWorkDetail();
+    } else {
+      workspace.innerHTML = renderReplyOverview(detailData.commentSource || 'all');
+    }
     updateBulkBar();
     return;
   }
@@ -1378,7 +1393,6 @@ function renderPendingCommentsHtml(commentSource = 'all') {
       <div class="work-group-list">
       ${grouped.map(group => renderWorkCommentGroup(group)).join('')}
       </div>
-      ${renderPagination(commentPage, commentTotalPages, commentTotal, 'comment')}
     </div>
   `;
 }
@@ -1627,7 +1641,105 @@ function renderReplyOverview(commentSource = 'all') {
           </div>
         `;
       }).join('')}
-      ${renderPagination(commentPage, commentTotalPages, commentTotal, 'comment')}
+    </div>
+  `;
+}
+
+window.selectReplyWork = function(workKey) {
+  selectedWorkKey = selectedWorkKey === workKey ? null : workKey;
+  renderStageDetail();
+};
+
+window.clearReplyWork = function() {
+  selectedWorkKey = null;
+  renderStageDetail();
+};
+
+function renderReplySummary() {
+  const pendingCount = statsData.pendingReplies || 0;
+  const blockedCount = statsData.blockedReplies || 0;
+  const unverifiedCount = statsData.sentUnverifiedReplies || 0;
+  const succeededCount = statsData.succeededReplies || 0;
+  const skippedCount = statsData.skippedReplies || 0;
+
+  const grouped = groupCommentsByWork(pendingComments.slice());
+
+  let html = `
+    <div class="reply-summary-head">
+      <strong>评论我的作品</strong>
+      <span class="reply-summary-detail">
+        待回评 <em>${pendingCount}</em>
+        ${blockedCount + unverifiedCount ? `· 异常 <em>${blockedCount + unverifiedCount}</em>` : ''}
+        ${succeededCount ? `· 已成功 <em>${succeededCount}</em>` : ''}
+        ${skippedCount ? `· 已忽略 <em>${skippedCount}</em>` : ''}
+      </span>
+    </div>
+  `;
+
+  if (!grouped.length) {
+    html += `<div class="reply-summary-empty">暂无评论数据</div>`;
+  } else {
+    html += grouped.map(group => {
+      const isSelected = selectedWorkKey === (group.workUrl || group.workTitle);
+      return `
+      <button class="reply-work-card ${isSelected ? 'is-active' : ''}" onclick="selectReplyWork('${escapeAttribute(group.workUrl || group.workTitle)}')">
+        <span class="reply-work-card-title">${escapeHtml(group.workTitle)}</span>
+        <span class="reply-work-card-count">${group.comments.length}</span>
+      </button>
+    `;}).join('');
+  }
+
+  return html;
+}
+
+function renderReplyWorkDetail() {
+  if (!selectedWorkKey) {
+    return `
+      <div class="reply-detail-empty">
+        <i class="fa-solid fa-hand-pointer"></i>
+        <p>点击左侧作品卡片<br>查看对应评论</p>
+      </div>
+    `;
+  }
+
+  const grouped = groupCommentsByWork(pendingComments.slice());
+  const group = grouped.find(g => (g.workUrl || g.workTitle) === selectedWorkKey);
+
+  if (!group) {
+    return `
+      <div class="reply-detail-empty">
+        <i class="fa-solid fa-circle-question"></i>
+        <p>未找到对应作品的评论</p>
+      </div>
+    `;
+  }
+
+  const workTime = formatTime(group.workPublishedAt);
+
+  return `
+    <div class="reply-detail">
+      <div class="reply-detail-header">
+        <i class="fa-solid fa-video"></i>
+        <span class="reply-detail-work-title">${escapeHtml(group.workTitle)}</span>
+        ${workTime ? `<span class="reply-detail-work-time">${workTime}</span>` : ''}
+        <span class="reply-detail-work-count">${group.comments.length} 条评论</span>
+        ${group.workUrl ? `<a class="work-link" target="_blank" href="${escapeAttribute(group.workUrl)}"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>` : ''}
+      </div>
+      <div class="reply-detail-list">
+        ${group.comments.map(comment => {
+          const badge = getReplyBadge(comment.reply_status);
+          const commentTime = formatTime(comment.last_seen_at || comment.first_seen_at);
+          const actorName = comment.actor_name || '?';
+          return `
+          <div class="reply-detail-item reply-${escapeHtml(comment.reply_status || 'pending')}">
+            <span class="reply-detail-label ${badge.className}">${badge.text}</span>
+            <div class="reply-detail-avatar">${escapeHtml(actorName.charAt(0))}</div>
+            <span class="reply-detail-name">${escapeHtml(actorName)}</span>
+            <span class="reply-detail-text">${escapeHtml(comment.comment_text || '')}</span>
+            ${commentTime ? `<span class="reply-detail-time">${commentTime}</span>` : ''}
+          </div>
+        `;}).join('')}
+      </div>
     </div>
   `;
 }
@@ -1726,6 +1838,7 @@ window.selectStage = function(stageId, sourceElement) {
   selectedStageId = stageId;
   selectedDetailBranchIndex = null;
   selectedCategory = null;
+  selectedWorkKey = null;
   commentPage = 1;
   taskPage = 1;
   eventPage = 1;
