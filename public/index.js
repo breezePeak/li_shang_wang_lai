@@ -217,7 +217,7 @@ function renderTree(node, activeStageId) {
     html += `<div class="tree-branch-lines" aria-hidden="true">`;
     html += `<span class="branch-vertical"></span>`;
     node.children.forEach((child, i) => {
-      const topPos = 36 + i * 80;
+      const topPos = 28 + i * 60;
       html += `<span class="branch-horizontal" style="top:${topPos}px"></span>`;
     });
     html += `</div>`;
