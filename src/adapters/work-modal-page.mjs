@@ -1835,6 +1835,18 @@ export async function collectVisibleWorkCommentCandidates(page) {
       return '';
     }
 
+    function hasAuthorReplyInItem(item, actorName) {
+      if (!item) return false;
+      const badges = item.querySelectorAll('span, div');
+      for (const badge of badges) {
+        const text = (badge.innerText || badge.textContent || '').trim();
+        if (text === '作者' && actorName !== '作者') {
+          return true;
+        }
+      }
+      return false;
+    }
+
     function extractActorName(item, lines) {
       const selectors = [
         '[data-e2e*="nickname"]',
@@ -1933,6 +1945,7 @@ export async function collectVisibleWorkCommentCandidates(page) {
         containerText,
         containerTextLength: containerText.length,
         hasReplyButton: !!replyButton,
+        hasAuthorReply: hasAuthorReplyInItem(item, actorName),
       };
     }).filter(candidate => candidate.commentText || candidate.cid || candidate.hasReplyButton);
 

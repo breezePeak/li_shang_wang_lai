@@ -220,22 +220,23 @@ function renderReplyBranchLane({ activeStageId, trunk, branches }) {
         </div>
       </div>
       <div class="lane-branch-layout">
-        <div class="lane-trunk">
+        <div class="lane-trunk-row">
           ${trunk.map((point, i) => {
             const connector = i < trunk.length - 1
               ? '<span class="trunk-connector"><span class="connector-line"></span><span class="connector-arrow"><i class="fa-solid fa-chevron-right"></i></span></span>'
-              : '';
+              : '<span class="trunk-split"><span class="split-line"></span></span>';
             return `${renderTimelinePoint(point, activeStageId)}${connector}`;
           }).join('')}
         </div>
-        <div class="lane-branch-off">
-          <div class="branch-stem" aria-hidden="true">
-            <span class="stem-line"></span>
+        ${branches.map((point, i) => `
+          <div class="branch-row">
+            <div class="branch-row-stem" aria-hidden="true">
+              <span class="branch-row-line"></span>
+              <span class="branch-row-arrow"><i class="fa-solid fa-chevron-right"></i></span>
+            </div>
+            ${renderTimelinePoint(point, activeStageId)}
           </div>
-          <div class="branch-nodes">
-            ${branches.map(point => renderTimelinePoint(point, activeStageId)).join('')}
-          </div>
-        </div>
+        `).join('')}
       </div>
     </section>
   `;

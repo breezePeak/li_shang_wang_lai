@@ -18,7 +18,7 @@ export function upsertWorkComment(comment) {
     ).get(workId, commentKey);
 
     if (existing) {
-      if (existing.reply_status === 'succeeded') {
+      if (existing.reply_status === 'succeeded' || existing.reply_status === 'manually_replied') {
         return { action: 'duplicate', id: existing.id };
       }
       const updates = [];
@@ -170,6 +170,24 @@ export function markCommentBlocked(commentId, reason) {
   ).run(reason || null, new Date().toISOString(), commentId);
 }
 
+export function markCommentManuallyReplied(commentId, reason = null) {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const row = db.prepare('SELECT * FROM work_comments WHERE id = ?').get(commentId);
+  if (!row) return false;
+
+  db.prepare(
+    "UPDATE work_comments SET reply_status = 'manually_replied', reply_reason = ?, replied_at = ?, last_seen_at = ? WHERE id = ?"
+  ).run(reason || 'author already replied', now, now, commentId);
+
+  if (row.source_event_id) {
+    db.prepare(
+      "UPDATE interaction_events SET status = 'replied', updated_at = ? WHERE id = ?"
+    ).run(now, row.source_event_id);
+  }
+  return true;
+}
+
 export function markCommentPending(commentId, reason = null) {
   const db = getDb();
   db.prepare(
@@ -261,7 +279,7 @@ export function listReplyTrackedCommentKeysForWork({ workId, modalId } = {}) {
     SELECT actor_name, comment_text, comment_key
     FROM work_comments
     WHERE (${clauses.join(' OR ')})
-      AND reply_status IN ('succeeded','sent_unverified')
+      AND reply_status IN ('succeeded','sent_unverified','manually_replied')
   `).all(...params).map(row => row.comment_key || `${row.actor_name || ''}::${String(row.comment_text || '').slice(0, 60)}`);
 }
 

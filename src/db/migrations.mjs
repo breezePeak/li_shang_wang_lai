@@ -195,7 +195,7 @@ export function runMigrations(dbPath = DB_PATH) {
       comment_key TEXT NOT NULL,
       source_event_id INTEGER,
       source_notification_key TEXT,
-      reply_status TEXT NOT NULL DEFAULT 'pending' CHECK (reply_status IN ('pending','prepared','succeeded','sent_unverified','blocked','skipped')),
+      reply_status TEXT NOT NULL DEFAULT 'pending' CHECK (reply_status IN ('pending','prepared','succeeded','sent_unverified','blocked','skipped','manually_replied')),
       reply_text TEXT,
       reply_reason TEXT,
       raw_comment_json TEXT,
@@ -402,6 +402,62 @@ export function runMigrations(dbPath = DB_PATH) {
       db.exec(`ALTER TABLE interaction_events ADD COLUMN ${col} TEXT`);
       console.error(`[db:init] ${col} 列已添加`);
     }
+  }
+
+  // Migrate: rebuild work_comments to add manually_replied to reply_status CHECK constraint
+  const checkWcConstraint = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='work_comments'"
+  ).get();
+  const wcConstraintSql = checkWcConstraint ? (checkWcConstraint.sql || '') : '';
+  const needsWcConstraintMigration =
+    wcConstraintSql &&
+    wcConstraintSql.includes("reply_status") &&
+    !wcConstraintSql.includes("'manually_replied'");
+
+  if (needsWcConstraintMigration) {
+    console.error('[db:init] 检测到旧版 work_comments reply_status 约束（缺少 manually_replied），重建中...');
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS work_comments_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        work_id TEXT,
+        work_url TEXT,
+        modal_id TEXT,
+        actor_name TEXT,
+        actor_profile_url TEXT,
+        actor_profile_key TEXT,
+        comment_text TEXT NOT NULL,
+        event_time_text TEXT,
+        comment_key TEXT NOT NULL,
+        source_event_id INTEGER,
+        source_notification_key TEXT,
+        reply_status TEXT NOT NULL DEFAULT 'pending' CHECK (reply_status IN ('pending','prepared','succeeded','sent_unverified','blocked','skipped','manually_replied')),
+        reply_text TEXT,
+        reply_reason TEXT,
+        raw_comment_json TEXT,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        replied_at TEXT
+      )
+    `);
+
+    db.exec(`
+      INSERT INTO work_comments_new
+        (id, work_id, work_url, modal_id, actor_name, actor_profile_url, actor_profile_key,
+          comment_text, event_time_text, comment_key, source_event_id, source_notification_key,
+          reply_status, reply_text, reply_reason, raw_comment_json, first_seen_at, last_seen_at, replied_at)
+        SELECT id, work_id, work_url, modal_id, actor_name, actor_profile_url, actor_profile_key,
+          comment_text, event_time_text, comment_key, source_event_id, source_notification_key,
+          reply_status, reply_text, reply_reason, raw_comment_json, first_seen_at, last_seen_at, replied_at
+        FROM work_comments ORDER BY id
+    `);
+
+    db.exec('DROP TABLE work_comments');
+    db.exec('ALTER TABLE work_comments_new RENAME TO work_comments');
+
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_work_comments_unique ON work_comments(work_id, comment_key) WHERE work_id IS NOT NULL AND work_id != ''`);
+
+    console.error('[db:init] work_comments 表已重建（reply_status 约束已更新）');
   }
 
   // Migrate: backfill relation=friend for events where rawText shows 在线 after username

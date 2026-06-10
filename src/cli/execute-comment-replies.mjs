@@ -11,7 +11,7 @@
 //   命令默认真实执行回复，不再需要 --execute。
 
 import { runMigrations } from '../db/migrations.mjs';
-import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentPending, markCommentSentUnverified, markCommentSkipped, findCommentByWorkActorAndText, listPendingCommentsGroupedByHomepageAndWork } from '../db/work-comment-repository.mjs';
+import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentPending, markCommentSentUnverified, markCommentSkipped, markCommentManuallyReplied, findCommentByWorkActorAndText, listPendingCommentsGroupedByHomepageAndWork } from '../db/work-comment-repository.mjs';
 import { findWorkByIdentity } from '../db/work-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
@@ -378,6 +378,10 @@ export function validateWorkCommentItem(item) {
     console.error(`[comments:execute] commentId=${item.commentId} 已发送但未确认，跳过重复执行`);
     return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, status: 'sent_unverified', fromAlready: true };
   }
+  if (row.reply_status === 'manually_replied') {
+    console.error(`[comments:execute] commentId=${item.commentId} 作者已手动回复，跳过执行`);
+    return { itemIndex: item.itemIndex, inputCommentId, commentId: row.id, rowId: row.id, ok: false, status: 'manually_replied' };
+  }
 
   const rawClass = classifyStoredWorkCommentRaw(row.raw_comment_json || item.raw_comment_json || '');
   if (!rawClass.ok) {
@@ -491,8 +495,13 @@ export function planViewportPendingMatches(pendingItems, visibleCandidates, {
     const picked = pickCandidate(availableCandidates, target);
 
     if (picked.ok && picked.candidate) {
-      usedDomIndexes.add(picked.candidate.domIndex);
-      actionable.push({ item: pendingItem, target, picked });
+      if (picked.candidate.hasAuthorReply) {
+        picked.reason = 'manually_replied';
+        blocked.push({ item: pendingItem, target, picked, blockedReason: 'manually_replied' });
+      } else {
+        usedDomIndexes.add(picked.candidate.domIndex);
+        actionable.push({ item: pendingItem, target, picked });
+      }
       continue;
     }
 
@@ -505,6 +514,9 @@ export function planViewportPendingMatches(pendingItems, visibleCandidates, {
 }
 
 function formatBlockedReason(blockedEntry) {
+  if (blockedEntry?.blockedReason === 'manually_replied') {
+    return 'manually_replied:author_already_replied';
+  }
   const picked = blockedEntry?.picked || {};
   const target = blockedEntry?.target || {};
   if (picked.reason === 'not_unique') {
@@ -645,6 +657,9 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
   saveSentUnverified = (item, reason) => {
     markCommentSentUnverified(item.commentId, reason);
   },
+  saveManuallyReplied = (item, reason) => {
+    markCommentManuallyReplied(item.commentId, reason);
+  },
   onResult = () => {},
 } = {}) {
   const currentWork = group[0] || {};
@@ -683,14 +698,25 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
         for (const blockedEntry of plan.blocked) {
           if (!pendingMap.has(blockedEntry.item.commentId)) continue;
           const reason = formatBlockedReason(blockedEntry);
-          saveBlocked(blockedEntry.item, reason);
-          pendingMap.delete(blockedEntry.item.commentId);
-          blockedCount++;
-          progressedInViewport = true;
-          const result = { ...blockedEntry.item, ok: false, status: 'blocked', error: reason };
-          localResults.push(result);
-          onResult(result);
-          console.log(`[comments:execute] blocked commentId=${blockedEntry.item.commentId} reason=${pickedReasonLabel(blockedEntry.picked.reason)} pending=${pendingMap.size}`);
+          if (blockedEntry.blockedReason === 'manually_replied') {
+            saveManuallyReplied(blockedEntry.item, reason);
+            pendingMap.delete(blockedEntry.item.commentId);
+            blockedCount++;
+            progressedInViewport = true;
+            const result = { ...blockedEntry.item, ok: false, status: 'manually_replied', error: reason };
+            localResults.push(result);
+            onResult(result);
+            console.log(`[comments:execute] manually_replied commentId=${blockedEntry.item.commentId} pending=${pendingMap.size}`);
+          } else {
+            saveBlocked(blockedEntry.item, reason);
+            pendingMap.delete(blockedEntry.item.commentId);
+            blockedCount++;
+            progressedInViewport = true;
+            const result = { ...blockedEntry.item, ok: false, status: 'blocked', error: reason };
+            localResults.push(result);
+            onResult(result);
+            console.log(`[comments:execute] blocked commentId=${blockedEntry.item.commentId} reason=${pickedReasonLabel(blockedEntry.picked.reason)} pending=${pendingMap.size}`);
+          }
         }
         continue;
       }
@@ -981,6 +1007,7 @@ async function executeWorkCommentItems(items, args) {
               saveBlocked: () => {},
               saveRetryable: () => {},
               saveSentUnverified: () => {},
+              saveManuallyReplied: () => {},
             } : {}),
             onResult(result) {
               results.push(result);
@@ -1034,6 +1061,7 @@ async function executeWorkCommentItems(items, args) {
 function isSkippedResult(result) {
   return result.status === 'skipped_empty_reply'
     || result.status === 'skipped'
+    || result.status === 'manually_replied'
     || (!result.ok && result.status === 'succeeded')
     || (!result.ok && result.status === 'sent_unverified');
 }
@@ -1105,6 +1133,7 @@ async function main() {
     for (const item of results) {
       const tag = item.status === 'skipped_empty_reply' ? ' [empty-reply]'
         : item.status === 'skipped' ? ' [skipped]'
+        : item.status === 'manually_replied' ? ' [manually-replied]'
         : (!item.ok && item.status === 'succeeded') ? ' [already-done]'
         : (!item.ok && item.status === 'sent_unverified') ? ' [already-sent]'
         : '';
