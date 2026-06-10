@@ -1104,6 +1104,16 @@ function getEventTypeBadge(type) {
   return { text: type, className: 'reply-badge-pending' };
 }
 
+function getEventActionText(event) {
+  const type = event.event_type;
+  const text = event.comment_text || '';
+  if (type === 'like') return '赞了你的作品';
+  if (type === 'follow') return '关注了你';
+  if (type === 'comment') return text ? `评论：${escapeHtml(text)}` : '评论了你的作品';
+  if (type === 'reply') return text ? `回复：${escapeHtml(text)}` : '回复了你';
+  return text ? escapeHtml(text) : '';
+}
+
 function renderUnhandledEventsHtml() {
   if (!unhandledEvents.length) {
     return renderEmptyState('fa-inbox', '当前没有未处理的互动事件。');
@@ -1153,6 +1163,7 @@ function renderEventWorkGroup(group) {
       ${group.events.map((event) => {
         const badge = getEventTypeBadge(event.event_type);
         const eventTime = formatTime(event.created_at);
+        const actionText = getEventActionText(event);
         return `
         <article class="pending-card">
           <div class="pending-main">
@@ -1163,7 +1174,7 @@ function renderEventWorkGroup(group) {
                 <span><span class="reply-badge ${badge.className}">${badge.text}</span> · ${escapeHtml(event.event_time_text || '')}${eventTime ? ` · ${eventTime}` : ''}${event.relation === 'follow' ? ' · 互关' : ''}</span>
               </div>
             </div>
-            ${event.comment_text ? `<div class="pending-text"><strong>内容：</strong>${escapeHtml(event.comment_text)}</div>` : ''}
+            <div class="pending-text">${actionText}</div>
           </div>
         </article>
       `;}).join('')}
