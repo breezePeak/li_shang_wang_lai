@@ -11,6 +11,16 @@ let selectedCommentIds = new Set();
 let selectedStageId = 'collect';
 let selectedDetailBranchIndex = null;
 
+let commentPage = 1;
+let commentTotalPages = 1;
+let commentTotal = 0;
+let commentLimit = 12;
+
+let taskPage = 1;
+let taskTotalPages = 1;
+let taskTotal = 0;
+let taskLimit = 12;
+
 const REPLY_STAGE_IDS = new Set(['replies', 'replyPending', 'replyExceptions', 'replySkipped', 'replyDone']);
 const VISIT_STAGE_IDS = new Set(['visits', 'visitUnhandled', 'visitRetry', 'execute', 'executeErrors', 'visitSkipped', 'done', 'archive']);
 
@@ -66,10 +76,13 @@ async function fetchStats() {
 
 async function fetchReviewTasks() {
   try {
-    const res = await fetch('/api/revisit-tasks');
+    const url = `/api/revisit-tasks?page=${taskPage}&limit=${taskLimit}`;
+    const res = await fetch(url);
     const json = await res.json();
     if (json.ok) {
       reviewTasks = json.data;
+      taskTotal = json.total || 0;
+      taskTotalPages = json.totalPages || 1;
     }
   } catch (err) {
     console.error('获取回访任务失败:', err);
@@ -79,10 +92,13 @@ async function fetchReviewTasks() {
 
 async function fetchPendingComments() {
   try {
-    const res = await fetch('/api/pending-comments');
+    const url = `/api/pending-comments?page=${commentPage}&limit=${commentLimit}`;
+    const res = await fetch(url);
     const json = await res.json();
     if (json.ok) {
       pendingComments = json.data;
+      commentTotal = json.total || 0;
+      commentTotalPages = json.totalPages || 1;
     }
   } catch (err) {
     console.error('获取回评评论失败:', err);
@@ -679,10 +695,10 @@ function renderStageWorkspace() {
 
   if (currentViewMode === 'table') {
     workspace.className = 'workspace-body view-table';
-    workspace.innerHTML = renderTaskTableHtml(filteredTasks);
+    workspace.innerHTML = renderTaskTableHtml(filteredTasks) + renderPagination(taskPage, taskTotalPages, taskTotal, 'task');
   } else {
     workspace.className = 'workspace-body view-grid';
-    workspace.innerHTML = renderTaskCardsHtml(filteredTasks);
+    workspace.innerHTML = renderTaskCardsHtml(filteredTasks) + renderPagination(taskPage, taskTotalPages, taskTotal, 'task');
   }
 
   updateBulkBar();
@@ -906,6 +922,7 @@ function renderPendingCommentsHtml(commentSource = 'all') {
       <div class="work-group-list">
       ${grouped.map(group => renderWorkCommentGroup(group)).join('')}
       </div>
+      ${renderPagination(commentPage, commentTotalPages, commentTotal, 'comment')}
     </div>
   `;
 }
@@ -1038,11 +1055,49 @@ function getTaskBadge(task) {
   return { badgeClass: 'badge-pending', badgeText: '处理中', dotClass: 'pending' };
 }
 
-window.closeDetailCabin = function() {};
+window.goCommentPage = async function(page) {
+  commentPage = page;
+  await fetchPendingComments();
+  renderStageDetail();
+};
+
+window.goTaskPage = async function(page) {
+  taskPage = page;
+  await fetchReviewTasks();
+  renderStageDetail();
+};
+
+function renderPagination(page, totalPages, total, type) {
+  if (totalPages <= 1) return '';
+  const fnName = type === 'task' ? 'goTaskPage' : 'goCommentPage';
+  let html = '<div class="pagination-bar">';
+  html += `<span class="pagination-info">共 ${total} 条，第 ${page}/${totalPages} 页</span>`;
+  html += '<div class="pagination-btns">';
+  html += `<button class="pagination-btn" onclick="${fnName}(1)" ${page <= 1 ? 'disabled' : ''} title="首页"><i class="fa-solid fa-angles-left"></i></button>`;
+  html += `<button class="pagination-btn" onclick="${fnName}(${page - 1})" ${page <= 1 ? 'disabled' : ''} title="上一页"><i class="fa-solid fa-angle-left"></i></button>`;
+
+  const maxVisible = 7;
+  let start = Math.max(1, page - Math.floor(maxVisible / 2));
+  let end = Math.min(totalPages, start + maxVisible - 1);
+  if (end - start + 1 < maxVisible) {
+    start = Math.max(1, end - maxVisible + 1);
+  }
+
+  for (let i = start; i <= end; i++) {
+    html += `<button class="pagination-btn ${i === page ? 'active' : ''}" onclick="${fnName}(${i})">${i}</button>`;
+  }
+
+  html += `<button class="pagination-btn" onclick="${fnName}(${page + 1})" ${page >= totalPages ? 'disabled' : ''} title="下一页"><i class="fa-solid fa-angle-right"></i></button>`;
+  html += `<button class="pagination-btn" onclick="${fnName}(${totalPages})" ${page >= totalPages ? 'disabled' : ''} title="末页"><i class="fa-solid fa-angles-right"></i></button>`;
+  html += '</div></div>';
+  return html;
+}
 
 window.selectStage = function(stageId, sourceElement) {
   selectedStageId = stageId;
   selectedDetailBranchIndex = null;
+  commentPage = 1;
+  taskPage = 1;
   playStageEffect(stageId, sourceElement);
   renderRiverTimeline();
   renderStageDetail();

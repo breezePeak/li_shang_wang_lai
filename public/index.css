@@ -2093,6 +2093,61 @@ body {
   margin: 0;
 }
 
+/* 分页 */
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 4px 0;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.pagination-info {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.pagination-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.pagination-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(76, 99, 83, 0.14);
+  background: rgba(255, 255, 255, 0.70);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.18s ease;
+}
+
+.pagination-btn:hover:not(:disabled):not(.active) {
+  background: rgba(47, 143, 115, 0.10);
+  border-color: rgba(47, 143, 115, 0.30);
+  color: var(--river-a);
+}
+
+.pagination-btn.active {
+  background: linear-gradient(135deg, var(--river-a), var(--river-b));
+  border-color: transparent;
+  color: white;
+}
+
+.pagination-btn:disabled {
+  opacity: 0.36;
+  cursor: not-allowed;
+}
+
 .toast-container {
   position: fixed;
   top: 26px;

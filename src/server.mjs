@@ -141,15 +141,26 @@ app.get('/api/stats', (req, res) => {
   }
 });
 
-// 2. GET /api/revisit-tasks: 获取可执行/可重试/异常回访任务
+// 2. GET /api/revisit-tasks: 获取可执行/可重试/异常回访任务（支持分页）
 app.get('/api/revisit-tasks', (req, res) => {
   try {
     const db = getDb();
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+
+    const [countRow] = db.prepare(`
+      SELECT COUNT(*) as total FROM return_visit_tasks 
+      WHERE status IN ('pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment', 'failed')
+    `).all();
+    const total = countRow.total;
+
     const tasks = db.prepare(`
       SELECT * FROM return_visit_tasks 
       WHERE status IN ('pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment', 'failed')
       ORDER BY updated_at DESC
-    `).all();
+      LIMIT ? OFFSET ?
+    `).all(limit, offset);
 
     const formatted = tasks.map(row => ({
       id: row.id,
@@ -175,7 +186,7 @@ app.get('/api/revisit-tasks', (req, res) => {
       updatedAt: row.updated_at
     }));
 
-    res.json({ ok: true, data: formatted });
+    res.json({ ok: true, data: formatted, page, limit, total, totalPages: Math.ceil(total / limit) });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -309,10 +320,22 @@ app.post('/api/revisit-tasks/bulk-skip', (req, res) => {
   }
 });
 
-// 5. GET /api/pending-comments: 获取待处理/异常回评评论列表
+// 5. GET /api/pending-comments: 获取待处理/异常回评评论列表（支持分页）
 app.get('/api/pending-comments', (req, res) => {
   try {
     const db = getDb();
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+
+    const params = [limit, offset];
+
+    const [countRow] = db.prepare(`
+      SELECT COUNT(*) as total FROM work_comments wc
+      WHERE wc.reply_status IN ('pending', 'blocked', 'sent_unverified', 'skipped')
+    `).all();
+    const total = countRow.total;
+
     const comments = db.prepare(`
       SELECT
         wc.*,
@@ -336,9 +359,10 @@ app.get('/api/pending-comments', (req, res) => {
         WHEN 'sent_unverified' THEN 1
         ELSE 2
       END, wc.last_seen_at DESC
-    `).all();
+      LIMIT ? OFFSET ?
+    `).all(...params);
 
-    res.json({ ok: true, data: comments });
+    res.json({ ok: true, data: comments, page, limit, total, totalPages: Math.ceil(total / limit) });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
