@@ -524,22 +524,18 @@ function buildStageDetailData() {
     },
     replies: {
       kicker: '回评',
-      title: '回评时间线入口',
-      description: '回评和回访是同级流程。回评线只处理别人评论我的作品，comments:execute 会读取 reply_status=pending，并把异常留在人工节点。',
+      title: '评论我的作品',
+      description: '别人评论了你的作品，需要回评。按状态分为四类：待回评、回评异常、回评成功、忽略回评。',
       metrics: [
         { label: '待回评', value: statsData.pendingReplies || 0 },
-        { label: '异常回评', value: statsData.replyExceptions || 0 },
+        { label: '回评异常', value: statsData.replyExceptions || 0 },
+        { label: '回评成功', value: statsData.succeededReplies || 0 },
         { label: '忽略回评', value: statsData.skippedReplies || 0 },
-        { label: '已完成回评', value: statsData.succeededReplies || 0 },
       ],
-      branches: [
-        buildBranchCard('待回评', 'pending 状态会进入下一次 comments:execute。', statsData.pendingReplies || 0),
-        buildBranchCard('异常处理', 'blocked / sent_unverified 需要人工确认后再重试或忽略。', replyExceptionComments.length),
-        buildBranchCard('完成与忽略', 'succeeded 和 skipped 是回评线的终点。', (statsData.succeededReplies || 0) + (statsData.skippedReplies || 0)),
-      ],
-      workspaceTitle: '所有待回评评论',
-      workspaceSubtitle: '入口默认展示所有评论（待处理 + 异常 + 已完成 + 已跳过）。',
-      workspaceType: 'pending-comments',
+      branches: [],
+      workspaceTitle: '评论我的',
+      workspaceSubtitle: '按作品分组展示所有评论，点击左侧分类可筛选。',
+      workspaceType: 'reply-overview',
       commentSource: 'all',
     },
     replyPending: {
@@ -905,13 +901,13 @@ function renderCategoryContent(categoryKey) {
           ['回评成功', statsData.succeededReplies || 0, 'fa-circle-check'],
         ]);
     case 'reply-pending':
-      return renderPendingCommentsHtml('pending');
+      return renderReplyOverview('pending');
     case 'reply-exceptions':
-      return renderPendingCommentsHtml('exceptions');
+      return renderReplyOverview('exceptions');
     case 'reply-skipped':
-      return renderPendingCommentsHtml('skipped');
+      return renderReplyOverview('skipped');
     case 'reply-done':
-      return renderPendingCommentsHtml('done');
+      return renderReplyOverview('done');
     case 'visit-entry':
       return renderCategoryOverview('回访入口',
         `回访线全部 ${statsData.totalTasks || 0} 条任务，从线索到执行到归档。`,
@@ -1054,6 +1050,14 @@ function renderStageWorkspace() {
     toolbar.style.display = 'none';
     workspace.className = 'workspace-body';
     workspace.innerHTML = renderUnhandledEventsHtml();
+    updateBulkBar();
+    return;
+  }
+
+  if (detailData.workspaceType === 'reply-overview') {
+    toolbar.style.display = 'none';
+    workspace.className = 'workspace-body';
+    workspace.innerHTML = renderReplyOverview(detailData.commentSource || 'all');
     updateBulkBar();
     return;
   }
@@ -1564,6 +1568,66 @@ function renderEventWorkGroup(group) {
         </article>
       `;}).join('')}
       </div>
+    </div>
+  `;
+}
+
+function renderReplyOverview(commentSource = 'all') {
+  let comments = pendingComments.slice();
+  if (commentSource === 'pending') {
+    comments = comments.filter(c => c.reply_status === 'pending');
+  } else if (commentSource === 'exceptions') {
+    comments = comments.filter(c => c.reply_status === 'blocked' || c.reply_status === 'sent_unverified');
+  } else if (commentSource === 'skipped') {
+    comments = comments.filter(c => c.reply_status === 'skipped');
+  } else if (commentSource === 'done') {
+    comments = comments.filter(c => c.reply_status === 'succeeded');
+  }
+
+  if (!comments.length) {
+    return renderEmptyState('fa-face-smile-beam', '当前分类没有评论。');
+  }
+
+  const grouped = groupCommentsByWork(comments);
+
+  return `
+    <div class="reply-overview">
+      ${grouped.map(group => {
+        const workTime = formatTime(group.workPublishedAt);
+        return `
+          <div class="work-group">
+            <div class="work-group-header">
+              <i class="fa-solid fa-video"></i>
+              <span class="work-group-title">${escapeHtml(group.workTitle)}</span>
+              ${workTime ? `<span class="work-group-time">${workTime}</span>` : ''}
+              <span class="work-group-count">${group.comments.length} 条评论</span>
+              ${group.workUrl ? `<a class="work-link" target="_blank" href="${escapeAttribute(group.workUrl)}"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>` : ''}
+            </div>
+            <div class="reply-overview-list">
+              ${group.comments.map(comment => {
+                const badge = getReplyBadge(comment.reply_status);
+                const commentTime = formatTime(comment.last_seen_at || comment.first_seen_at);
+                return `
+                  <div class="reply-overview-item reply-${escapeHtml(comment.reply_status || 'pending')}">
+                    <div class="reply-overview-user">
+                      <div class="pending-user-avatar">${escapeHtml((comment.actor_name || '?').charAt(0))}</div>
+                      <div class="reply-overview-meta">
+                        <strong>${escapeHtml(comment.actor_name || '未知用户')}</strong>
+                        <span>${escapeHtml(comment.event_time_text || '')}${commentTime ? ` · ${commentTime}` : ''}</span>
+                      </div>
+                      <span class="reply-badge ${badge.className}">${badge.text}</span>
+                    </div>
+                    <div class="reply-overview-comment">${escapeHtml(comment.comment_text || '')}</div>
+                    ${comment.reply_text ? `<div class="reply-overview-reply"><i class="fa-solid fa-reply"></i> ${escapeHtml(comment.reply_text)}</div>` : ''}
+                    ${comment.reply_reason ? `<div class="reply-overview-reason"><i class="fa-solid fa-circle-exclamation"></i> ${escapeHtml(comment.reply_reason)}</div>` : ''}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      }).join('')}
+      ${renderPagination(commentPage, commentTotalPages, commentTotal, 'comment')}
     </div>
   `;
 }
