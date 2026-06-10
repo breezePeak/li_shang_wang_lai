@@ -201,26 +201,26 @@ function renderRiverTimeline() {
     ],
   };
 
-  container.innerHTML = `<canvas class="tree-canvas" id="tree-canvas"></canvas><div class="tree-root">${renderTree(treeData, activeStageId)}</div>`;
+  container.innerHTML = `<canvas class="tree-canvas" id="tree-canvas"></canvas><div class="tree-root">${renderTree(treeData, activeStageId, 0)}</div>`;
   requestAnimationFrame(() => drawTreeLines(container));
 }
 
-function renderTree(node, activeStageId) {
+function renderTree(node, activeStageId, depth) {
   const hasChildren = node.children && node.children.length > 0;
   const isActive = activeStageId === node.id;
-  const pointClass = `timeline-point ${node.tone || 'work'} ${isActive ? 'is-active' : ''} ${node.count > 0 ? 'has-count' : ''}`;
+  const depthClass = depth === 0 ? 'tree-depth-root' : depth === 1 ? 'tree-depth-1' : 'tree-depth-2';
 
-  let html = `<div class="tree-node ${hasChildren ? 'has-children' : ''}">`;
-  html += `<button class="${pointClass}" data-node-id="${node.id}" onclick="selectStage('${node.id}', this)" title="${escapeAttribute(node.helper || node.label)}">`;
-  html += `<span class="point-dot"><i class="fa-solid ${node.icon}"></i></span>`;
-  html += `<span class="point-copy"><strong>${node.label}</strong></span>`;
-  html += `<span class="point-count">${node.count || 0}</span>`;
+  let html = `<div class="tree-node ${hasChildren ? 'has-children' : ''} ${depthClass}">`;
+  html += `<button class="tree-card ${node.tone || 'work'} ${isActive ? 'is-active' : ''}" data-node-id="${node.id}" onclick="selectStage('${node.id}', this)" title="${escapeAttribute(node.helper || node.label)}">`;
+  html += `<span class="tree-icon"><i class="fa-solid ${node.icon}"></i></span>`;
+  html += `<span class="tree-label">${node.label}</span>`;
+  html += `<span class="tree-count">${node.count || 0}</span>`;
   html += `</button>`;
 
   if (hasChildren) {
     html += `<div class="tree-children">`;
     node.children.forEach(child => {
-      html += renderTree(child, activeStageId);
+      html += renderTree(child, activeStageId, depth + 1);
     });
     html += `</div>`;
   }
@@ -241,41 +241,58 @@ function drawTreeLines(container) {
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, rect.width, rect.height);
+
   ctx.strokeStyle = 'rgba(31, 109, 120, 0.25)';
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 2;
   ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
 
   const nodes = container.querySelectorAll('.tree-node.has-children');
   nodes.forEach(parentEl => {
-    const parentBtn = parentEl.querySelector(':scope > .timeline-point');
+    const parentBtn = parentEl.querySelector(':scope > .tree-card');
     const childrenEl = parentEl.querySelector(':scope > .tree-children');
     if (!parentBtn || !childrenEl) return;
 
-    const childBtns = childrenEl.querySelectorAll(':scope > .tree-node > .timeline-point');
+    const childBtns = childrenEl.querySelectorAll(':scope > .tree-node > .tree-card');
     if (!childBtns.length) return;
 
     const parentRect = parentBtn.getBoundingClientRect();
     const startX = parentRect.right - rect.left;
-    const startY = parentRect.top - rect.top + parentRect.height / 2;
-    const midX = startX + 16;
+    const midX = startX + 28;
 
+    const childPositions = [];
     childBtns.forEach(childBtn => {
       const childRect = childBtn.getBoundingClientRect();
-      const endX = childRect.left - rect.left;
-      const endY = childRect.top - rect.top + childRect.height / 2;
+      childPositions.push({
+        x: childRect.left - rect.left,
+        y: childRect.top - rect.top + childRect.height / 2
+      });
+    });
 
+    const firstY = childPositions[0].y;
+    const lastY = childPositions[childPositions.length - 1].y;
+
+    ctx.beginPath();
+    ctx.moveTo(midX, firstY);
+    ctx.lineTo(midX, lastY);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(startX, (firstY + lastY) / 2);
+    ctx.lineTo(midX, (firstY + lastY) / 2);
+    ctx.stroke();
+
+    childPositions.forEach(pos => {
       ctx.beginPath();
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(midX, startY);
-      ctx.lineTo(midX, endY);
-      ctx.lineTo(endX, endY);
+      ctx.moveTo(midX, pos.y);
+      ctx.lineTo(pos.x, pos.y);
       ctx.stroke();
 
       ctx.beginPath();
       ctx.fillStyle = 'rgba(31, 109, 120, 0.30)';
-      ctx.moveTo(endX, endY);
-      ctx.lineTo(endX - 5, endY - 3);
-      ctx.lineTo(endX - 5, endY + 3);
+      ctx.moveTo(pos.x, pos.y);
+      ctx.lineTo(pos.x - 6, pos.y - 4);
+      ctx.lineTo(pos.x - 6, pos.y + 4);
       ctx.closePath();
       ctx.fill();
     });

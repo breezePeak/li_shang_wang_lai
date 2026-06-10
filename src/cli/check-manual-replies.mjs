@@ -39,23 +39,24 @@ async function detectOwnProfileUrl(page) {
 
   try {
     await page.goto('https://www.douyin.com', { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(2500);
   } catch {
     console.error('[check] 无法打开抖音首页，请确认已登录');
     return '';
   }
 
-  const url = await page.evaluate(() => {
+  const profilePath = await page.evaluate(() => {
     const links = document.querySelectorAll('a[href*="/user/"]');
     const candidates = [];
+    const seen = new Set();
     for (const link of links) {
-      const href = link.getAttribute('href') || '';
+      let href = link.getAttribute('href') || '';
+      if (!href || href === '/' || seen.has(href)) continue;
+      seen.add(href);
       const rect = link.getBoundingClientRect();
       if (rect.width < 10 || rect.height < 10) continue;
       const hasAvatar = link.querySelector('img, [class*="avatar"], [class*="Avatar"]');
-      const text = (link.innerText || '').trim();
-      const isMy = text.includes('我') || text.includes('个人') || text === '';
-      candidates.push({ href, x: rect.x, y: rect.y, hasAvatar: !!hasAvatar, isMy });
+      candidates.push({ href, x: rect.x, y: rect.y, hasAvatar: !!hasAvatar });
     }
     candidates.sort((a, b) => a.x - b.x || a.y - b.y);
     const withAvatar = candidates.filter(c => c.hasAvatar);
@@ -64,13 +65,34 @@ async function detectOwnProfileUrl(page) {
     return '';
   });
 
-  if (url) {
-    const full = url.startsWith('http') ? url : `https://www.douyin.com${url}`;
-    console.error(`[check] 检测到主页: ${full}`);
-    return full;
+  if (!profilePath) {
+    console.error('[check] 未能从页面提取主页链接');
+    return '';
   }
 
-  console.error('[check] 未能从页面提取主页 URL');
+  let fullUrl = profilePath;
+  if (fullUrl.startsWith('//')) fullUrl = 'https:' + fullUrl;
+  else if (!fullUrl.startsWith('http')) fullUrl = 'https://www.douyin.com' + (fullUrl.startsWith('/') ? '' : '/') + fullUrl;
+
+  const normalized = normalizeDouyinUrl(fullUrl);
+  if (normalized) {
+    console.error(`[check] 检测到主页: ${normalized}`);
+    return normalized;
+  }
+
+  console.error(`[check] 检测到路径 "${profilePath}"，尝试跳转解析...`);
+
+  try {
+    await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 12000 });
+    await page.waitForTimeout(2000);
+    const resolved = normalizeDouyinUrl(page.url());
+    if (resolved && resolved.includes('/user/')) {
+      console.error(`[check] 解析后主页: ${resolved}`);
+      return resolved;
+    }
+  } catch {}
+
+  console.error(`[check] 未能解析主页 URL`);
   return '';
 }
 
