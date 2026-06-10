@@ -655,6 +655,8 @@ function renderStageDetail() {
 
 function buildCategoryList() {
   const totalCollected = statsData.collectedTotal || 0;
+  const replyTotal = (statsData.pendingReplies || 0) + (statsData.blockedReplies || 0) + (statsData.sentUnverifiedReplies || 0) + (statsData.skippedReplies || 0) + (statsData.succeededReplies || 0);
+  const replyExceptions = (statsData.blockedReplies || 0) + (statsData.sentUnverifiedReplies || 0);
   const retryCount = reviewTasks.filter((task) => ['failed_collect', 'failed_generate_comment'].includes(task.status)).length;
   const executableCount = reviewTasks.filter((task) => ['pending_visit', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment'].includes(task.status)).length;
   const errorCount = reviewTasks.filter((task) => ['failed_like', 'failed_comment', 'failed'].includes(task.status)).length;
@@ -664,23 +666,24 @@ function buildCategoryList() {
       groupLabel: '评论回复流程',
       items: [
         { key: 'collect-total', label: '采集入库', count: totalCollected, icon: 'fa-database', tone: 'collect', sub: `点赞${statsData.collectedLikes || 0} 评论${statsData.collectedComments || 0} 回复${statsData.collectedReplies || 0} 关注${statsData.collectedFollows || 0}` },
-        { key: 'reply-pending', label: '待回评', count: statsData.pendingReplies || 0, icon: 'fa-reply', tone: 'work' },
-        { key: 'reply-blocked', label: '已阻塞', count: statsData.blockedReplies || 0, icon: 'fa-shield-halved', tone: 'warning' },
-        { key: 'reply-unverified', label: '发送未确认', count: statsData.sentUnverifiedReplies || 0, icon: 'fa-triangle-exclamation', tone: 'danger' },
-        { key: 'reply-skipped', label: '已跳过', count: statsData.skippedReplies || 0, icon: 'fa-ban', tone: 'muted' },
-        { key: 'reply-done', label: '已完成', count: statsData.succeededReplies || 0, icon: 'fa-circle-check', tone: 'done' },
+        { key: 'reply-entry', label: '回评入口', count: replyTotal, icon: 'fa-reply-all', tone: 'main', sub: `待回评${statsData.pendingReplies || 0} · 异常${replyExceptions} · 忽略${statsData.skippedReplies || 0} · 成功${statsData.succeededReplies || 0}` },
+        { key: 'reply-pending', label: '待回评', count: statsData.pendingReplies || 0, icon: 'fa-reply', tone: 'work', indent: true, help: 'pending 状态，会被 comments:execute 自动处理' },
+        { key: 'reply-exceptions', label: '回评异常', count: replyExceptions, icon: 'fa-triangle-exclamation', tone: 'warning', indent: true, sub: `阻塞${statsData.blockedReplies || 0} · 发送未确认${statsData.sentUnverifiedReplies || 0}` },
+        { key: 'reply-skipped', label: '忽略回评', count: statsData.skippedReplies || 0, icon: 'fa-ban', tone: 'muted', indent: true },
+        { key: 'reply-done', label: '回评成功', count: statsData.succeededReplies || 0, icon: 'fa-circle-check', tone: 'done', indent: true, help: '由待回评处理后进入' },
       ],
     },
     {
       groupLabel: '回访流程',
       items: [
-        { key: 'visit-unhandled', label: '未处理线索', count: getUnhandledEventCount(), icon: 'fa-inbox', tone: 'work', sub: `点赞${statsData.unhandledLikes || 0} 评论${statsData.unhandledComments || 0} 回复${statsData.unhandledReplies || 0} 关注${statsData.unhandledFollows || 0}` },
-        { key: 'visit-tasks', label: '回访任务', count: statsData.totalTasks || 0, icon: 'fa-list-check', tone: 'work' },
-        { key: 'visit-retry', label: '待重试', count: retryCount, icon: 'fa-rotate-left', tone: 'warning' },
-        { key: 'visit-exec', label: '可执行', count: executableCount, icon: 'fa-bolt', tone: 'work' },
-        { key: 'visit-errors', label: '执行异常', count: errorCount, icon: 'fa-circle-xmark', tone: 'danger' },
-        { key: 'visit-skipped', label: '无法回访', count: statsData.skippedVisitTasks || 0, icon: 'fa-user-slash', tone: 'muted' },
-        { key: 'visit-done', label: '完成归档', count: statsData.completedTasks || 0, icon: 'fa-flag-checkered', tone: 'done' },
+        { key: 'visit-entry', label: '回访入口', count: statsData.totalTasks || 0, icon: 'fa-route', tone: 'main', sub: `未处理${getUnhandledEventCount()} · 可执行${executableCount} · 完成${statsData.completedTasks || 0}` },
+        { key: 'visit-unhandled', label: '未处理线索', count: getUnhandledEventCount(), icon: 'fa-inbox', tone: 'work', indent: true, sub: `点赞${statsData.unhandledLikes || 0} 评论${statsData.unhandledComments || 0} 回复${statsData.unhandledReplies || 0} 关注${statsData.unhandledFollows || 0}` },
+        { key: 'visit-tasks', label: '回访任务', count: statsData.totalTasks || 0, icon: 'fa-list-check', tone: 'work', indent: true },
+        { key: 'visit-retry', label: '待重试', count: retryCount, icon: 'fa-rotate-left', tone: 'warning', indent: true },
+        { key: 'visit-exec', label: '可执行', count: executableCount, icon: 'fa-bolt', tone: 'work', indent: true },
+        { key: 'visit-errors', label: '执行异常', count: errorCount, icon: 'fa-circle-xmark', tone: 'danger', indent: true },
+        { key: 'visit-skipped', label: '无法回访', count: statsData.skippedVisitTasks || 0, icon: 'fa-user-slash', tone: 'muted', indent: true },
+        { key: 'visit-done', label: '完成归档', count: statsData.completedTasks || 0, icon: 'fa-flag-checkered', tone: 'done', indent: true },
       ],
     },
   ];
@@ -702,7 +705,7 @@ function renderDetailCategories() {
     <div class="category-group">
       <div class="category-group-label">${group.groupLabel}</div>
       ${group.items.map((item) => `
-        <button class="category-card ${item.tone} ${selectedCategory === item.key ? 'is-active' : ''}" onclick="selectCategory('${item.key}')">
+        <button class="category-card ${item.tone} ${item.indent ? 'indented' : ''} ${item.help ? 'has-help' : ''} ${selectedCategory === item.key ? 'is-active' : ''}" onclick="selectCategory('${item.key}')" ${item.help ? `title="${escapeAttribute(item.help)}"` : ''}>
           <span class="category-icon"><i class="fa-solid ${item.icon}"></i></span>
           <span class="category-label">${item.label}</span>
           <strong class="category-count">${item.count}</strong>
@@ -734,16 +737,32 @@ function renderCategoryContent(categoryKey) {
           ['回复通知', statsData.collectedReplies || 0, 'fa-reply'],
           ['关注通知', statsData.collectedFollows || 0, 'fa-user-plus'],
         ]);
+    case 'reply-entry':
+      return renderCategoryOverview('回评入口',
+        `回评线全部 ${(statsData.pendingReplies || 0) + (statsData.blockedReplies || 0) + (statsData.sentUnverifiedReplies || 0) + (statsData.skippedReplies || 0) + (statsData.succeededReplies || 0)} 条评论，分三个分支处理。`,
+        [
+          ['待回评', statsData.pendingReplies || 0, 'fa-reply'],
+          ['回评异常', (statsData.blockedReplies || 0) + (statsData.sentUnverifiedReplies || 0), 'fa-triangle-exclamation'],
+          ['忽略回评', statsData.skippedReplies || 0, 'fa-ban'],
+          ['回评成功', statsData.succeededReplies || 0, 'fa-circle-check'],
+        ]);
     case 'reply-pending':
       return renderPendingCommentsHtml('pending');
-    case 'reply-blocked':
-      return renderPendingCommentsHtml('blocked');
-    case 'reply-unverified':
-      return renderPendingCommentsHtml('unverified');
+    case 'reply-exceptions':
+      return renderPendingCommentsHtml('exceptions');
     case 'reply-skipped':
       return renderPendingCommentsHtml('skipped');
     case 'reply-done':
       return renderPendingCommentsHtml('done');
+    case 'visit-entry':
+      return renderCategoryOverview('回访入口',
+        `回访线全部 ${statsData.totalTasks || 0} 条任务，从线索到执行到归档。`,
+        [
+          ['未处理线索', getUnhandledEventCount(), 'fa-inbox'],
+          ['回访任务', statsData.totalTasks || 0, 'fa-list-check'],
+          ['执行异常', reviewTasks.filter((t) => ['failed_like', 'failed_comment', 'failed'].includes(t.status)).length, 'fa-circle-xmark'],
+          ['完成归档', statsData.completedTasks || 0, 'fa-flag-checkered'],
+        ]);
     case 'visit-unhandled':
       return renderUnhandledEventsHtml();
     case 'visit-tasks':
@@ -1132,7 +1151,7 @@ function renderPendingCommentsHtml(commentSource = 'all') {
   if (commentSource === 'pending') {
     comments = comments.filter(comment => comment.reply_status === 'pending');
   } else if (commentSource === 'exceptions') {
-    comments = comments.filter(comment => comment.reply_status !== 'pending');
+    comments = comments.filter(comment => comment.reply_status === 'blocked' || comment.reply_status === 'sent_unverified');
   } else if (commentSource === 'blocked') {
     comments = comments.filter(comment => comment.reply_status === 'blocked');
   } else if (commentSource === 'unverified') {

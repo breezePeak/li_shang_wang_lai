@@ -1489,6 +1489,60 @@ body {
   line-height: 1.3;
 }
 
+/* 入口卡片（回评入口/回访入口） */
+.category-card.main {
+  background: rgba(255, 255, 255, 0.62);
+  border-color: rgba(31, 109, 120, 0.12);
+}
+
+.category-card.main .category-icon {
+  color: #1f6d78;
+  background: rgba(31, 109, 120, 0.13);
+}
+
+.category-card.main .category-count {
+  color: #1f6d78;
+  background: rgba(31, 109, 120, 0.10);
+}
+
+.category-card.main:hover {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(31, 109, 120, 0.26);
+}
+
+.category-card.main.is-active {
+  background: rgba(31, 109, 120, 0.08);
+  border-color: rgba(31, 109, 120, 0.36);
+}
+
+/* 缩进子卡片 */
+.category-card.indented {
+  margin-left: 20px;
+  width: calc(100% - 20px);
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+.category-card.indented .category-icon {
+  width: 18px;
+  height: 18px;
+  font-size: 9px;
+  border-radius: 6px;
+}
+
+.category-card.indented .category-label {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.category-card.indented .category-count {
+  min-width: 22px;
+  height: 20px;
+  font-size: 11px;
+  padding: 0 7px;
+}
+
 /* ── 分类详情（右侧工作区） ── */
 .category-detail-overview {
   padding: 8px 0;
