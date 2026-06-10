@@ -574,7 +574,7 @@ body {
 
 .lane-trunk .timeline-point {
   flex-shrink: 0;
-  width: 90px;
+  width: 90px !important;
 }
 
 .trunk-connector {
@@ -650,8 +650,8 @@ body {
 }
 
 .branch-nodes .timeline-point {
-  width: 90px;
-  min-height: 68px;
+  width: 90px !important;
+  min-height: 68px !important;
   opacity: 0.82;
   transition: opacity 180ms ease, transform 180ms ease;
 }
@@ -663,22 +663,22 @@ body {
 }
 
 .branch-nodes .point-dot {
-  width: 28px;
-  height: 28px;
-  font-size: 11px;
+  width: 28px !important;
+  height: 28px !important;
+  font-size: 11px !important;
 }
 
 .branch-nodes .point-copy strong {
-  font-size: 11px;
+  font-size: 11px !important;
 }
 
 .branch-nodes .point-count {
-  top: -4px;
-  left: 20px;
-  min-width: 20px;
-  height: 18px;
-  font-size: 10px;
-  padding: 0 5px;
+  top: -4px !important;
+  left: 20px !important;
+  min-width: 20px !important;
+  height: 18px !important;
+  font-size: 10px !important;
+  padding: 0 5px !important;
 }
 
 .lane-spark {
