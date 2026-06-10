@@ -8,6 +8,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+function safeJsonParse(str) {
+  if (!str) return null;
+  try { return JSON.parse(str); } catch { return null; }
+}
+
 app.use(express.json());
 // 映射前端静态页面存放的 public 目录
 app.use(express.static(path.join(__dirname, '../public')));
@@ -141,6 +146,34 @@ app.get('/api/stats', (req, res) => {
   }
 });
 
+// 2. GET /api/unhandled-events: 获取未处理的互动事件（visitUnhandled 节点）
+app.get('/api/unhandled-events', (req, res) => {
+  try {
+    const db = getDb();
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+
+    const [countRow] = db.prepare(
+      "SELECT COUNT(*) as total FROM interaction_events WHERE status = 'new'"
+    ).all();
+    const total = countRow.total;
+
+    const events = db.prepare(`
+      SELECT id, event_type, actor_name, actor_profile_url, relation,
+        my_work_title, comment_text, event_time_text, status, created_at
+      FROM interaction_events
+      WHERE status = 'new'
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(limit, offset);
+
+    res.json({ ok: true, data: events, page, limit, total, totalPages: Math.ceil(total / limit) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // 2. GET /api/revisit-tasks: 获取可执行/可重试/异常回访任务（支持分页）
 app.get('/api/revisit-tasks', (req, res) => {
   try {
@@ -181,6 +214,7 @@ app.get('/api/revisit-tasks', (req, res) => {
         publishTime: row.target_work_publish_time,
       },
       generatedComment: row.generated_comment,
+      referenceComments: row.reference_comments_json ? safeJsonParse(row.reference_comments_json) : null,
       likeStatus: row.like_status,
       commentStatus: row.comment_status,
       retryCount: row.retry_count,

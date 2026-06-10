@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
 let statsData = {};
 let reviewTasks = [];
 let pendingComments = [];
+let unhandledEvents = [];
 let currentViewMode = localStorage.getItem('viewMode') || 'grid';
 let selectedTaskIds = new Set();
 let selectedCommentIds = new Set();
@@ -20,6 +21,11 @@ let taskPage = 1;
 let taskTotalPages = 1;
 let taskTotal = 0;
 let taskLimit = 12;
+
+let eventPage = 1;
+let eventTotalPages = 1;
+let eventTotal = 0;
+let eventLimit = 12;
 
 const REPLY_STAGE_IDS = new Set(['replies', 'replyPending', 'replyExceptions', 'replySkipped', 'replyDone']);
 const VISIT_STAGE_IDS = new Set(['visits', 'visitUnhandled', 'visitRetry', 'execute', 'executeErrors', 'visitSkipped', 'done', 'archive']);
@@ -56,7 +62,7 @@ function applyViewButtons() {
 }
 
 async function refreshAll() {
-  await Promise.all([fetchStats(), fetchReviewTasks(), fetchPendingComments()]);
+  await Promise.all([fetchStats(), fetchReviewTasks(), fetchPendingComments(), fetchUnhandledEvents()]);
   renderHeroStats();
   renderRiverTimeline();
   renderStageDetail();
@@ -102,6 +108,21 @@ async function fetchPendingComments() {
     }
   } catch (err) {
     console.error('获取回评评论失败:', err);
+  }
+}
+
+async function fetchUnhandledEvents() {
+  try {
+    const url = `/api/unhandled-events?page=${eventPage}&limit=${eventLimit}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    if (json.ok) {
+      unhandledEvents = json.data;
+      eventTotal = json.total || 0;
+      eventTotalPages = json.totalPages || 1;
+    }
+  } catch (err) {
+    console.error('获取未处理事件失败:', err);
   }
 }
 
@@ -459,7 +480,7 @@ function buildStageDetailData() {
     visitUnhandled: {
       kicker: '回访未处理',
       title: '未处理关注、回复、点赞、评论线索',
-      description: '这些是 interaction_events 中仍为 new 的通知。时间线上明确展示关注和回复，避免它们被点赞/评论主路径淹没。',
+      description: 'interaction_events 中仍为 new 的通知。可直接查看每条事件详情。',
       metrics: [
         { label: '未处理点赞', value: statsData.unhandledLikes || 0 },
         { label: '未处理评论', value: statsData.unhandledComments || 0 },
@@ -471,14 +492,9 @@ function buildStageDetailData() {
         buildBranchCard('评论通知', '既可能产生回评，也可能沉淀回访。', statsData.unhandledComments || 0),
         buildBranchCard('回复/关注通知', '当前时间线单独展示，便于发现未处理来源。', (statsData.unhandledReplies || 0) + (statsData.unhandledFollows || 0)),
       ],
-      workspaceTitle: '未处理线索说明',
-      workspaceSubtitle: '这里展示统计，不直接展示通知明细。',
-      workspaceType: 'overview',
-      workspaceContent: renderOverviewContent([
-        ['推荐命令', 'npm run interactions:scan -- --days N --max-count M --prepare-visits'],
-        ['关注/回复', `当前未处理关注 ${statsData.unhandledFollows || 0} 条，未处理回复 ${statsData.unhandledReplies || 0} 条。`],
-        ['处理边界', '回访任务准备仍以 DB 状态为准，时间线只展示入口压力。'],
-      ]),
+      workspaceTitle: '未处理互动事件',
+      workspaceSubtitle: 'status = new 的事件，等待 return-visit:prepare 处理。',
+      workspaceType: 'unhandled-events',
     },
     visitRetry: {
       kicker: '回访重试',
@@ -667,6 +683,14 @@ function renderStageWorkspace() {
     return;
   }
 
+  if (detailData.workspaceType === 'unhandled-events') {
+    toolbar.style.display = 'none';
+    workspace.className = 'workspace-body';
+    workspace.innerHTML = renderUnhandledEventsHtml();
+    updateBulkBar();
+    return;
+  }
+
   if (detailData.workspaceType === 'overview') {
     toolbar.style.display = 'none';
     workspace.className = 'workspace-body';
@@ -762,6 +786,7 @@ function renderTaskCardsHtml(tasks) {
     const { badgeClass, badgeText } = getTaskBadge(task);
     const firstChar = task.userName ? task.userName.charAt(0) : '?';
     const isChecked = selectedTaskIds.has(task.id) ? 'checked' : '';
+    const refTexts = formatReferenceComments(task.referenceComments);
     return `
       <article class="task-card">
         <div class="card-checkbox-wrapper">
@@ -786,6 +811,7 @@ function renderTaskCardsHtml(tasks) {
           ${task.targetWork?.publishTime ? `<span class="work-block-time"><i class="fa-regular fa-clock"></i> ${formatTime(task.targetWork.publishTime)}</span>` : ''}
           ${task.targetWork?.workUrl ? `<a class="work-link" target="_blank" href="${task.targetWork.workUrl}">打开作品 <i class="fa-solid fa-arrow-up-right-from-square"></i></a>` : ''}
         </div>
+        ${refTexts ? `<div class="ref-comments-block">${refTexts}</div>` : ''}
         <div class="comment-input-area">
           <label>回访评论草稿</label>
           <textarea class="comment-textarea" id="textarea-${task.id}" placeholder="输入评论内容...">${escapeHtml(task.generatedComment || '')}</textarea>
@@ -1023,6 +1049,46 @@ function getReplyBadge(status) {
   return { text: '待回评', className: 'reply-badge-pending' };
 }
 
+function getEventTypeBadge(type) {
+  if (type === 'like') return { text: '点赞', className: 'reply-badge-pending' };
+  if (type === 'comment') return { text: '评论', className: 'reply-badge-unverified' };
+  if (type === 'reply') return { text: '回复', className: 'reply-badge-succeeded' };
+  if (type === 'follow') return { text: '关注', className: 'reply-badge-blocked' };
+  return { text: type, className: 'reply-badge-pending' };
+}
+
+function renderUnhandledEventsHtml() {
+  if (!unhandledEvents.length) {
+    return renderEmptyState('fa-inbox', '当前没有未处理的互动事件。');
+  }
+
+  return `
+    <div class="reply-workbench">
+      <div class="pending-list">
+      ${unhandledEvents.map((event) => {
+        const badge = getEventTypeBadge(event.event_type);
+        const eventTime = formatTime(event.created_at);
+        return `
+        <article class="pending-card">
+          <div class="pending-main">
+            <div class="pending-user">
+              <div class="pending-user-avatar">${escapeHtml((event.actor_name || '?').charAt(0))}</div>
+              <div>
+                <h4>${escapeHtml(event.actor_name || '未知用户')}</h4>
+                <span><span class="reply-badge ${badge.className}">${badge.text}</span> · ${escapeHtml(event.event_time_text || '')}${eventTime ? ` · ${eventTime}` : ''}${event.relation === 'follow' ? ' · 互关' : ''}</span>
+              </div>
+            </div>
+            ${event.my_work_title ? `<div class="pending-text"><strong>我的作品：</strong>${escapeHtml(event.my_work_title)}</div>` : ''}
+            ${event.comment_text ? `<div class="pending-text"><strong>内容：</strong>${escapeHtml(event.comment_text)}</div>` : ''}
+          </div>
+        </article>
+      `;}).join('')}
+      </div>
+      ${renderPagination(eventPage, eventTotalPages, eventTotal, 'event')}
+    </div>
+  `;
+}
+
 function renderOverviewContent(items) {
   return `
     <div class="pending-list">
@@ -1081,9 +1147,15 @@ window.goTaskPage = async function(page) {
   renderStageDetail();
 };
 
+window.goEventPage = async function(page) {
+  eventPage = page;
+  await fetchUnhandledEvents();
+  renderStageDetail();
+};
+
 function renderPagination(page, totalPages, total, type) {
   if (totalPages <= 1) return '';
-  const fnName = type === 'task' ? 'goTaskPage' : 'goCommentPage';
+  const fnName = type === 'task' ? 'goTaskPage' : type === 'event' ? 'goEventPage' : 'goCommentPage';
   let html = '<div class="pagination-bar">';
   html += `<span class="pagination-info">共 ${total} 条，第 ${page}/${totalPages} 页</span>`;
   html += '<div class="pagination-btns">';
@@ -1112,6 +1184,7 @@ window.selectStage = function(stageId, sourceElement) {
   selectedDetailBranchIndex = null;
   commentPage = 1;
   taskPage = 1;
+  eventPage = 1;
   playStageEffect(stageId, sourceElement);
   renderRiverTimeline();
   renderStageDetail();
@@ -1541,4 +1614,15 @@ function formatTime(isoString) {
   } catch {
     return isoString;
   }
+}
+
+function formatReferenceComments(ref) {
+  if (!ref) return '';
+  const list = Array.isArray(ref) ? ref : [ref];
+  return list.map((item, i) => {
+    const name = item.actorName || item.actor_name || '';
+    const text = item.commentText || item.comment_text || item.text || '';
+    if (!text) return '';
+    return `<div class="ref-comment-item"><strong>${escapeHtml(name || '用户')}：</strong>${escapeHtml(text)}</div>`;
+  }).filter(Boolean).join('');
 }

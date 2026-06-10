@@ -1522,7 +1522,8 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   box-sizing: border-box;
 }
 
@@ -1696,6 +1697,26 @@ body {
   color: var(--muted);
   font-size: 10px;
   font-weight: 600;
+}
+
+.cabin-workspace .ref-comments-block {
+  margin: 2px 0 4px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(211, 155, 52, 0.06);
+  border-left: 2px solid var(--river-c);
+}
+
+.cabin-workspace .ref-comment-item {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--muted);
+  padding: 1px 0;
+}
+
+.cabin-workspace .ref-comment-item strong {
+  color: var(--text);
+  font-weight: 700;
 }
 
 .table-time-cell {
