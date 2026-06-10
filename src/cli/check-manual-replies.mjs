@@ -12,6 +12,7 @@ import { normalizeDouyinUrl } from '../utils/douyin-url.mjs';
 import {
   collectVisibleWorkCommentCandidates,
   expandVisibleWorkCommentReplies,
+  scrollCommentAreaOnce,
   waitForWorkCommentArea,
   waitForWorkModal,
 } from '../adapters/work-modal-page.mjs';
@@ -209,12 +210,41 @@ async function checkSingleWork(page, aweme, profileUrl, { apply = false } = {}) 
       return { awemeId, title, createTime, error: 'no_comment_area', totalCandidates: 0, repliedCount: 0, unrepliedCount: 0, unreplied: [] };
     }
 
-    await expandVisibleWorkCommentReplies(page, { maxClicks: 8 }).catch(() => null);
+    const allCandidates = new Map();
+    let lastSignature = '';
+    let noProgress = 0;
 
-    const collected = await collectVisibleWorkCommentCandidates(page);
-    const candidates = collected?.ok ? (collected.candidates || []) : [];
+    for (let round = 0; ; round++) {
+      await expandVisibleWorkCommentReplies(page, { maxClicks: 8 }).catch(() => null);
 
-    const unreplied = candidates
+      const collected = await collectVisibleWorkCommentCandidates(page);
+      if (!collected?.ok) break;
+
+      const candidates = collected.candidates || [];
+      let added = 0;
+      for (const c of candidates) {
+        const key = `${c.cid || ''}|${c.actorName || ''}|${c.commentText || ''}`;
+        if (!allCandidates.has(key)) {
+          allCandidates.set(key, c);
+          added++;
+        }
+      }
+
+      const signature = candidates.map(c => `${c.cid}|${c.actorName}|${String(c.commentText).slice(0, 40)}`).join('::');
+      if (signature === lastSignature) {
+        noProgress++;
+        if (noProgress >= 3) break;
+      } else {
+        noProgress = 0;
+        lastSignature = signature;
+      }
+
+      const scrollResult = await scrollCommentAreaOnce(page);
+      if (!scrollResult.ok) break;
+    }
+
+    const allList = [...allCandidates.values()];
+    const unreplied = allList
       .filter(c => c.hasReplyButton && !c.hasAuthorReply)
       .map(c => ({
         actorName: c.actorName || '',
@@ -222,7 +252,7 @@ async function checkSingleWork(page, aweme, profileUrl, { apply = false } = {}) 
         cid: c.cid || '',
       }));
 
-    const repliedCount = candidates.filter(c => c.hasAuthorReply).length;
+    const repliedCount = allList.filter(c => c.hasAuthorReply).length;
 
     if (apply) {
       for (const uc of unreplied) {
@@ -238,7 +268,7 @@ async function checkSingleWork(page, aweme, profileUrl, { apply = false } = {}) 
       }
     }
 
-    return { awemeId, title, createTime, totalCandidates: candidates.length, repliedCount, unrepliedCount: unreplied.length, unreplied, error: '' };
+    return { awemeId, title, createTime, totalCandidates: allList.length, repliedCount, unrepliedCount: unreplied.length, unreplied, error: '' };
   } catch (err) {
     return { awemeId, title, createTime, error: err.message, totalCandidates: 0, repliedCount: 0, unrepliedCount: 0, unreplied: [] };
   }

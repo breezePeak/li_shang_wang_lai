@@ -197,7 +197,7 @@ body {
   padding: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
   border-radius: 28px;
   border: 1px solid rgba(76, 99, 83, 0.10);
   background: rgba(255, 252, 244, 0.50);
@@ -207,10 +207,10 @@ body {
 /* 宽屏大河道面板 */
 .river-board {
   width: 100%;
-  height: 45%;
-  min-height: 280px;
+  flex: 1;
+  min-height: 320px;
   margin: 0;
-  padding: 10px 22px 0;
+  padding: 10px 22px 10px;
   background:
     radial-gradient(circle at 18% 20%, rgba(47, 143, 115, 0.08), transparent 30%),
     rgba(255, 252, 244, 0.70);
@@ -221,7 +221,6 @@ body {
   border-radius: 28px 28px 0 0;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   flex-shrink: 0;
   z-index: 10;
 }
@@ -327,28 +326,22 @@ body {
 
 .river-scroll {
   flex: 1;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
   width: 100%;
   display: flex;
-  align-items: stretch;
-}
-
-/* 隐藏河流横向滚动条的粗重感，仅保留微型极细线 */
-.river-scroll::-webkit-scrollbar {
-  height: 4px;
-}
-.river-scroll::-webkit-scrollbar-thumb {
-  background: rgba(31, 109, 120, 0.12);
-  border-radius: 99px;
+  align-items: center;
+  justify-content: center;
 }
 
 .river-stage-strip {
   position: relative;
   width: 100%;
-  height: 210px;
+  min-height: 240px;
   margin: 0;
   padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .timeline-overview,

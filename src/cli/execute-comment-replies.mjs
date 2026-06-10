@@ -635,7 +635,6 @@ async function captureSinglePassDebugSnapshot(page, {
 }
 
 export async function executeSinglePassForWorkGroup(page, group, commentListCollector, {
-  maxViewportRounds = 20,
   maxNoProgressRounds = 3,
   collectCandidates = collectVisibleWorkCommentCandidates,
   expandReplies = expandVisibleWorkCommentReplies,
@@ -673,7 +672,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
 
   console.log(`[comments:execute] single-pass start work=${currentWork.workId || currentWork.modalId || currentWork.workUrl} pending=${pendingMap.size}`);
 
-  while (pendingMap.size > 0 && viewportRound <= maxViewportRounds) {
+  while (pendingMap.size > 0) {
     await expandReplies(page, { maxClicks: 6 }).catch(() => null);
     const collected = await collectCandidates(page);
     const visibleCandidates = normalizeVisibleCandidatesResult(collected);
@@ -829,7 +828,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       lastSignature = signature;
     }
 
-    if (noProgressRounds > maxNoProgressRounds || viewportRound === maxViewportRounds) {
+    if (noProgressRounds > maxNoProgressRounds) {
       break;
     }
 
