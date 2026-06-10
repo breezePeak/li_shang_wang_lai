@@ -289,7 +289,7 @@ function buildStageMap() {
 
 function buildStageDetailData() {
   const replyWorkCount = (statsData.pendingReplies || 0) + (statsData.replyExceptions || 0);
-  const replyExceptionComments = pendingComments.filter(c => c.reply_status !== 'pending');
+  const replyExceptionComments = pendingComments.filter(c => c.reply_status === 'blocked' || c.reply_status === 'sent_unverified');
   const visitQueueTasks = reviewTasks.filter((task) => ['pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'failed_collect', 'failed_generate_comment'].includes(task.status));
   const visitRetryTasks = reviewTasks.filter((task) => ['failed_collect', 'failed_generate_comment'].includes(task.status));
   const executableTasks = reviewTasks.filter((task) => ['pending_visit', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment'].includes(task.status));
@@ -357,10 +357,10 @@ function buildStageDetailData() {
         buildBranchCard('异常处理', 'blocked / sent_unverified 需要人工确认后再重试或忽略。', replyExceptionComments.length),
         buildBranchCard('完成与忽略', 'succeeded 和 skipped 是回评线的终点。', (statsData.succeededReplies || 0) + (statsData.skippedReplies || 0)),
       ],
-      workspaceTitle: '待回评评论',
-      workspaceSubtitle: '入口默认展示 pending；点击异常、忽略、完成可看对应时间点。',
+      workspaceTitle: '所有待回评评论',
+      workspaceSubtitle: '入口默认展示所有评论（待处理 + 异常 + 已完成 + 已跳过）。',
       workspaceType: 'pending-comments',
-      commentSource: 'pending',
+      commentSource: 'all',
     },
     replyPending: {
       kicker: '回评待处理',
@@ -403,7 +403,7 @@ function buildStageDetailData() {
     replySkipped: {
       kicker: '回评止损',
       title: '已忽略回评',
-      description: '这里显示时间线上的忽略终点。当前接口不加载 skipped 明细，只展示统计，避免把已止损项混回执行队列。',
+      description: '人工忽略的评论，不再进入自动回评队列。可在此复查是否需要恢复。',
       metrics: [
         { label: '忽略回评', value: statsData.skippedReplies || 0 },
         { label: '待回评', value: statsData.pendingReplies || 0 },
@@ -413,13 +413,10 @@ function buildStageDetailData() {
       branches: [
         buildBranchCard('人工忽略', '通常由处理台点击忽略产生，状态为 skipped。', statsData.skippedReplies || 0),
       ],
-      workspaceTitle: '忽略回评说明',
-      workspaceSubtitle: 'skipped 不进入自动执行。',
-      workspaceType: 'overview',
-      workspaceContent: renderOverviewContent([
-        ['状态含义', 'skipped 表示人工决定不再回复。'],
-        ['恢复方式', '如需恢复，需要在数据库层或后续接口中重新改回 pending。'],
-      ]),
+      workspaceTitle: '已忽略回评',
+      workspaceSubtitle: 'skipped 不进入自动执行，可在此查看。',
+      workspaceType: 'pending-comments',
+      commentSource: 'skipped',
     },
     replyDone: {
       kicker: '回评完成',
@@ -434,13 +431,10 @@ function buildStageDetailData() {
       branches: [
         buildBranchCard('完成闭环', '成功回复后不会再进入 pending 队列。', statsData.succeededReplies || 0),
       ],
-      workspaceTitle: '回评完成说明',
-      workspaceSubtitle: '已完成项不展示明细，避免重复操作。',
-      workspaceType: 'overview',
-      workspaceContent: renderOverviewContent([
-        ['状态含义', 'succeeded 表示已成功回复。'],
-        ['风险提示', '不要把 succeeded 项手动放回 pending，避免重复回复。'],
-      ]),
+      workspaceTitle: '已完成回评',
+      workspaceSubtitle: 'succeeded 状态的评论，不再进入待处理队列。',
+      workspaceType: 'pending-comments',
+      commentSource: 'done',
     },
     visits: {
       kicker: '回访',
@@ -543,7 +537,7 @@ function buildStageDetailData() {
     visitSkipped: {
       kicker: '回访止损',
       title: '无法回访或已跳过任务',
-      description: '私密账号、无作品、无合适作品等任务会进入跳过终点。这些也是时间线分支，不应和异常重试混在一起。',
+      description: '私密账号、无作品、无合适作品等任务会进入跳过终点。可在此复查。',
       metrics: [
         { label: '跳过总数', value: skippedVisitTasks },
         { label: '无作品', value: getVisitStatusCount('skipped_no_work') },
@@ -553,18 +547,15 @@ function buildStageDetailData() {
       branches: [
         buildBranchCard('不再自动执行', '跳过任务是回访线的止损终点。', skippedVisitTasks),
       ],
-      workspaceTitle: '跳过回访说明',
-      workspaceSubtitle: '跳过状态不进入执行列表。',
-      workspaceType: 'overview',
-      workspaceContent: renderOverviewContent([
-        ['状态含义', 'skipped_no_work / skipped_private / skipped_no_suitable_work 都是无法继续的回访结果。'],
-        ['下一步', '如果跳过过多，优先看作品匹配逻辑和主页可访问性。'],
-      ]),
+      workspaceTitle: '已跳过回访任务',
+      workspaceSubtitle: '这些任务不会自动执行，可在此查看详情。',
+      workspaceType: 'tasks',
+      taskSource: 'visitSkipped',
     },
     done: {
       kicker: '终点',
       title: '完成归档阶段',
-      description: '回访任务完成后进入 done。回评成功会写入 work_comments.succeeded，并同步 interaction_events 状态。',
+      description: '回访任务完成后进入 done。可在此复查已完成的任务详情。',
       metrics: [
         { label: '已完成', value: statsData.completedTasks || 0 },
         { label: '总任务', value: statsData.totalTasks || 0 },
@@ -575,14 +566,10 @@ function buildStageDetailData() {
         buildBranchCard('回访完成', '回访 done 是回访线的完成终点。', statsData.completedTasks || 0),
         buildBranchCard('回评完成', '回评 succeeded 是回评线的完成终点。', statsData.succeededReplies || 0),
       ],
-      workspaceTitle: '完成阶段说明',
-      workspaceSubtitle: '这里展示闭环结果和效率，不展示待处理卡片。',
-      workspaceType: 'overview',
-      workspaceContent: renderOverviewContent([
-        ['闭环结果', `当前已完成 ${statsData.completedTasks || 0} 条，总任务 ${statsData.totalTasks || 0} 条。`],
-        ['完成率', `${calcCompletionRate()} 的任务已经走完全链路。`],
-        ['下一步', '如果完成率低，优先查看回评异常、待重试和执行异常分支。'],
-      ]),
+      workspaceTitle: '已完成回访任务',
+      workspaceSubtitle: 'done 状态的任务，可在此查看详情。',
+      workspaceType: 'tasks',
+      taskSource: 'visitDone',
     },
     archive: {
       kicker: '归档',
@@ -730,6 +717,10 @@ function getFilteredTasksByStage(taskSource) {
     tasks = tasks.filter((task) => ['pending_execute', 'executing'].includes(task.status));
   } else if (taskSource === 'executeErrors') {
     tasks = tasks.filter((task) => ['failed_like', 'failed_comment', 'failed'].includes(task.status));
+  } else if (taskSource === 'visitSkipped') {
+    tasks = tasks.filter((task) => ['skipped_no_work', 'skipped_private', 'skipped_no_suitable_work'].includes(task.status));
+  } else if (taskSource === 'visitDone') {
+    tasks = tasks.filter((task) => task.status === 'done');
   }
 
   const searchQuery = document.getElementById('search-input').value.toLowerCase().trim();
@@ -744,7 +735,7 @@ function getFilteredTasksByStage(taskSource) {
 
     let matchStatus = true;
     if (statusFilter === 'pending') {
-      matchStatus = !String(task.status || '').startsWith('failed') && task.status !== 'pending_execute' && task.status !== 'executing';
+      matchStatus = !String(task.status || '').startsWith('failed') && !String(task.status || '').startsWith('skipped_') && task.status !== 'pending_execute' && task.status !== 'executing' && task.status !== 'done';
     } else if (statusFilter === 'ready') {
       matchStatus = task.status === 'pending_execute' || task.status === 'executing';
     } else if (statusFilter === 'failed') {
@@ -1063,6 +1054,12 @@ function renderEmptyState(icon, text) {
 }
 
 function getTaskBadge(task) {
+  if (task.status === 'done') {
+    return { badgeClass: 'badge-ready', badgeText: '已完成', dotClass: 'done' };
+  }
+  if (String(task.status || '').startsWith('skipped_')) {
+    return { badgeClass: 'badge-fail', badgeText: '已跳过', dotClass: 'skipped' };
+  }
   if (task.status === 'pending_execute' || task.status === 'executing') {
     return { badgeClass: 'badge-ready', badgeText: '待执行', dotClass: 'ready' };
   }
@@ -1176,7 +1173,11 @@ function getVisiblePendingComments(commentSource = 'all') {
   if (commentSource === 'pending') {
     comments = comments.filter(comment => comment.reply_status === 'pending');
   } else if (commentSource === 'exceptions') {
-    comments = comments.filter(comment => comment.reply_status !== 'pending');
+    comments = comments.filter(comment => comment.reply_status === 'blocked' || comment.reply_status === 'sent_unverified');
+  } else if (commentSource === 'skipped') {
+    comments = comments.filter(comment => comment.reply_status === 'skipped');
+  } else if (commentSource === 'done') {
+    comments = comments.filter(comment => comment.reply_status === 'succeeded');
   }
   return comments;
 }

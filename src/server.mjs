@@ -148,19 +148,21 @@ app.get('/api/revisit-tasks', (req, res) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const offset = (page - 1) * limit;
+    const statusParam = req.query.status || '';
+    const defaultStatuses = ['pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment', 'failed', 'done', 'skipped_no_work', 'skipped_private', 'skipped_no_suitable_work'];
+    const allowed = statusParam ? statusParam.split(',').map(s => s.trim()).filter(Boolean) : defaultStatuses;
+    const placeholders = allowed.map(() => '?').join(',');
 
-    const [countRow] = db.prepare(`
-      SELECT COUNT(*) as total FROM return_visit_tasks 
-      WHERE status IN ('pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment', 'failed')
-    `).all();
+    const countSql = `SELECT COUNT(*) as total FROM return_visit_tasks WHERE status IN (${placeholders})`;
+    const [countRow] = db.prepare(countSql).all(...allowed);
     const total = countRow.total;
 
     const tasks = db.prepare(`
       SELECT * FROM return_visit_tasks 
-      WHERE status IN ('pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment', 'failed')
+      WHERE status IN (${placeholders})
       ORDER BY updated_at DESC
       LIMIT ? OFFSET ?
-    `).all(limit, offset);
+    `).all(...allowed, limit, offset);
 
     const formatted = tasks.map(row => ({
       id: row.id,
@@ -321,20 +323,20 @@ app.post('/api/revisit-tasks/bulk-skip', (req, res) => {
   }
 });
 
-// 5. GET /api/pending-comments: 获取待处理/异常回评评论列表（支持分页）
+// 5. GET /api/pending-comments: 获取待处理/异常回评评论列表（支持分页和状态筛选）
 app.get('/api/pending-comments', (req, res) => {
   try {
     const db = getDb();
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const offset = (page - 1) * limit;
+    const statusParam = req.query.status || '';
+    const defaultStatuses = ['pending', 'blocked', 'sent_unverified', 'skipped', 'succeeded'];
+    const allowed = statusParam ? statusParam.split(',').map(s => s.trim()).filter(Boolean) : defaultStatuses;
+    const placeholders = allowed.map(() => '?').join(',');
 
-    const params = [limit, offset];
-
-    const [countRow] = db.prepare(`
-      SELECT COUNT(*) as total FROM work_comments wc
-      WHERE wc.reply_status IN ('pending', 'blocked', 'sent_unverified', 'skipped')
-    `).all();
+    const countSql = `SELECT COUNT(*) as total FROM work_comments wc WHERE wc.reply_status IN (${placeholders})`;
+    const [countRow] = db.prepare(countSql).all(...allowed);
     const total = countRow.total;
 
     const comments = db.prepare(`
@@ -355,10 +357,10 @@ app.get('/api/pending-comments', (req, res) => {
         AND wc.modal_id IS NOT NULL
         AND wc.modal_id != ''
         AND w_by_modal.modal_id = wc.modal_id
-      WHERE wc.reply_status IN ('pending', 'blocked', 'sent_unverified', 'skipped')
+      WHERE wc.reply_status IN (${placeholders})
       ORDER BY wc.last_seen_at DESC
       LIMIT ? OFFSET ?
-    `).all(...params);
+    `).all(...allowed, limit, offset);
 
     res.json({ ok: true, data: comments, page, limit, total, totalPages: Math.ceil(total / limit) });
   } catch (err) {
