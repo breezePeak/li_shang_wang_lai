@@ -871,6 +871,8 @@ function renderPendingCommentsHtml(commentSource = 'all') {
 
   const allChecked = comments.length > 0 && comments.every(comment => selectedCommentIds.has(comment.id)) ? 'checked' : '';
 
+  const grouped = groupCommentsByWork(comments);
+
   return `
     <div class="reply-workbench">
       <div class="reply-bulk-toolbar">
@@ -901,12 +903,46 @@ function renderPendingCommentsHtml(commentSource = 'all') {
           </button>
         </div>
       </div>
-      <div class="pending-list">
-      ${comments.map((comment) => {
+      <div class="work-group-list">
+      ${grouped.map(group => renderWorkCommentGroup(group)).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function groupCommentsByWork(comments) {
+  const groups = new Map();
+  for (const comment of comments) {
+    const workKey = comment.joined_work_url || comment.work_url || comment.work_id || comment.modal_id || '__unknown__';
+    if (!groups.has(workKey)) {
+      groups.set(workKey, {
+        workUrl: comment.joined_work_url || comment.work_url || '',
+        workTitle: comment.joined_work_title || comment.work_id || comment.modal_id || '未知作品',
+        workDesc: comment.joined_work_desc || '',
+        comments: [],
+      });
+    }
+    groups.get(workKey).comments.push(comment);
+    if (!groups.get(workKey).workUrl && (comment.joined_work_url || comment.work_url)) {
+      groups.get(workKey).workUrl = comment.joined_work_url || comment.work_url;
+    }
+  }
+  return Array.from(groups.values());
+}
+
+function renderWorkCommentGroup(group) {
+  return `
+    <div class="work-group">
+      <div class="work-group-header">
+        <i class="fa-solid fa-video"></i>
+        <span class="work-group-title">${escapeHtml(group.workTitle)}</span>
+        <span class="work-group-count">${group.comments.length} 条评论</span>
+        ${group.workUrl ? `<a class="work-link" target="_blank" href="${escapeAttribute(group.workUrl)}"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>` : ''}
+      </div>
+      <div class="work-group-comments">
+      ${group.comments.map((comment) => {
         const badge = getReplyBadge(comment.reply_status);
         const textareaId = `reply-text-${comment.id}`;
-        const workUrl = comment.joined_work_url || comment.work_url || '';
-        const workTitle = comment.joined_work_title || comment.work_id || comment.modal_id || '原作品';
         const reason = comment.reply_reason || '';
         const isChecked = selectedCommentIds.has(comment.id) ? 'checked' : '';
         return `
@@ -940,7 +976,6 @@ function renderPendingCommentsHtml(commentSource = 'all') {
               <label for="${textareaId}">回评文本</label>
               <textarea id="${textareaId}" class="comment-textarea" placeholder="可手动填写或修改回评文本...">${escapeHtml(comment.reply_text || '')}</textarea>
             </div>
-            ${workUrl ? `<div class="pending-work-context"><a class="work-link" target="_blank" href="${escapeAttribute(workUrl)}">打开${escapeHtml(workTitle)} <i class="fa-solid fa-arrow-up-right-from-square"></i></a></div>` : ''}
           </div>
           <div class="pending-actions">
             <button class="btn btn-primary" onclick="retryComment(${comment.id})"><i class="fa-solid fa-rotate-right"></i>重试</button>

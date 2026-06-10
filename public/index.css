@@ -1215,7 +1215,7 @@ body {
   min-height: 0;
   padding: 14px 22px 22px;
   display: grid;
-  grid-template-columns: minmax(320px, 0.82fr) minmax(0, 1.62fr);
+  grid-template-columns: minmax(260px, 0.55fr) minmax(0, 2fr);
   gap: 16px;
   background:
     linear-gradient(180deg, rgba(255, 252, 244, 0.72), rgba(250, 245, 234, 0.92)),
@@ -1815,6 +1815,64 @@ body {
   height: 100%;
   align-content: start;
   overflow-y: auto;
+}
+
+.work-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.work-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid rgba(76, 99, 83, 0.10);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.42);
+  overflow: hidden;
+}
+
+.work-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(47, 143, 115, 0.06);
+  border-bottom: 1px solid rgba(76, 99, 83, 0.08);
+}
+
+.work-group-header i {
+  color: var(--river-a);
+  font-size: 14px;
+}
+
+.work-group-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-group-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.work-group-comments {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 6px;
+  padding: 10px;
 }
 
 .cabin-workspace .pending-card {
