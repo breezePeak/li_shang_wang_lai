@@ -559,39 +559,43 @@ body {
 }
 
 /* ── 树形时间线布局 ── */
-.tree-node {
-  position: relative;
+.tree-root {
   display: flex;
   align-items: flex-start;
-  gap: 0;
+  padding: 10px;
+  overflow-x: auto;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.tree-node {
+  display: flex;
+  align-items: flex-start;
+  position: relative;
 }
 
 .tree-node.has-children {
-  flex-direction: column;
+  flex-direction: row;
   align-items: flex-start;
 }
 
 .tree-node .timeline-point {
   flex-shrink: 0;
   width: 98px !important;
+  min-height: 72px !important;
 }
 
 .tree-children {
   display: flex;
   align-items: flex-start;
-  gap: 0;
-  margin-left: 98px;
   position: relative;
+  margin-left: 20px;
 }
 
 .tree-branch-lines {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
+  position: relative;
   width: 40px;
-  pointer-events: none;
-  z-index: 0;
+  flex-shrink: 0;
 }
 
 .branch-vertical {
@@ -628,34 +632,29 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 0 0 0 40px;
-  flex: 1;
 }
 
-.tree-children-list .tree-node {
+.tree-children-list > .tree-node {
+  display: flex;
   align-items: flex-start;
 }
 
-.tree-children-list .tree-children {
-  margin-left: 98px;
-}
-
-.tree-children-list .timeline-point {
+.tree-children-list > .tree-node > .timeline-point {
   width: 98px !important;
   min-height: 72px !important;
 }
 
-.tree-children-list .point-dot {
+.tree-children-list > .tree-node > .timeline-point .point-dot {
   width: 30px !important;
   height: 30px !important;
   font-size: 12px !important;
 }
 
-.tree-children-list .point-copy strong {
+.tree-children-list > .tree-node > .timeline-point .point-copy strong {
   font-size: 11px !important;
 }
 
-.tree-children-list .point-count {
+.tree-children-list > .tree-node > .timeline-point .point-count {
   top: -4px !important;
   left: 22px !important;
   min-width: 22px !important;

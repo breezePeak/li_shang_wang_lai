@@ -24,6 +24,7 @@
     "interactions:scan": "node ./src/cli/scan-interactions.mjs",
     "actions:pending": "node ./src/cli/report-pending.mjs",
     "comments:execute": "node ./src/cli/execute-comment-replies.mjs",
+    "check:manual-replies": "node ./src/cli/check-manual-replies.mjs",
     "comments:classify": "node ./src/cli/classify-comment.mjs",
     "return-visit:prepare": "node ./src/cli/execute-return-visit-prepare.mjs",
     "return-visit:comment": "node ./src/cli/set-return-visit-comment.mjs",
