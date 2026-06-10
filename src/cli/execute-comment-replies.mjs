@@ -636,6 +636,7 @@ async function captureSinglePassDebugSnapshot(page, {
 
 export async function executeSinglePassForWorkGroup(page, group, commentListCollector, {
   maxNoProgressRounds = 3,
+  days = 0,
   collectCandidates = collectVisibleWorkCommentCandidates,
   expandReplies = expandVisibleWorkCommentReplies,
   openMatchedReplyBox = openReplyBoxForMatchedWorkComment,
@@ -828,6 +829,11 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       lastSignature = signature;
     }
 
+    if (days > 0 && visibleCandidates.length > 0 && visibleCandidates.every(c => isTimeBeyondDays(c.timeText, days))) {
+      if (noProgressRounds >= 3) break;
+      noProgressRounds = Math.max(noProgressRounds, 3);
+    }
+
     if (noProgressRounds > maxNoProgressRounds) {
       break;
     }
@@ -856,6 +862,14 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
 function pickedReasonLabel(reason) {
   if (!reason) return 'blocked';
   return reason;
+}
+
+function isTimeBeyondDays(timeText, days) {
+  if (!timeText || !days) return false;
+  const text = String(timeText).trim();
+  const dayMatch = text.match(/^(\d+)天前/);
+  if (dayMatch) return Number(dayMatch[1]) > days;
+  return false;
 }
 
 async function executeWorkCommentItems(items, args) {
@@ -994,6 +1008,7 @@ async function executeWorkCommentItems(items, args) {
           }
 
           const groupResults = await executeSinglePassForWorkGroup(page, group, commentListCollector, {
+            days: args.days,
             ...(diagnosePosition ? {
               openMatchedReplyBox: async (_page, target, candidate, { matchedBy }) => {
                 console.log(`[comments:execute:diagnose] matched commentId=${target?.targetCommentId || ''} matchedBy=${matchedBy} actor="${target?.actorName || ''}" comment="${String(target?.commentText || '').slice(0, 60)}" domIndex=${candidate?.domIndex}`);

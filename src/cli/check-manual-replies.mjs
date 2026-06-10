@@ -182,7 +182,15 @@ async function collectProfileWorks(page, profileUrl, { days = 7, maxScroll = 40 
   }
 }
 
-async function checkSingleWork(page, aweme, profileUrl, { apply = false } = {}) {
+function isTimeBeyondDays(timeText, days) {
+  if (!timeText || !days) return false;
+  const text = String(timeText).trim();
+  const dayMatch = text.match(/^(\d+)天前/);
+  if (dayMatch) return Number(dayMatch[1]) > days;
+  return false;
+}
+
+async function checkSingleWork(page, aweme, profileUrl, { apply = false, days = 7 } = {}) {
   const awemeId = String(aweme?.aweme_id || '');
   const title = String(aweme?.desc || aweme?.preview_title || '').slice(0, 45);
   const createTime = aweme?.create_time
@@ -237,6 +245,12 @@ async function checkSingleWork(page, aweme, profileUrl, { apply = false } = {}) 
       } else {
         noProgress = 0;
         lastSignature = signature;
+      }
+
+      const allBeyondDays = candidates.length > 0 && candidates.every(c => isTimeBeyondDays(c.timeText, days));
+      if (allBeyondDays) {
+        noProgress = 99;
+        break;
       }
 
       const scrollResult = await scrollCommentAreaOnce(page);
@@ -333,7 +347,7 @@ async function main() {
 
     for (let i = 0; i < toCheck.length; i++) {
       const aweme = toCheck[i];
-      const result = await checkSingleWork(page, aweme, profileUrl, { apply: args.apply });
+      const result = await checkSingleWork(page, aweme, profileUrl, { apply: args.apply, days: args.days });
       allResults.push(result);
 
       const flag = result.error ? '!!' : result.unrepliedCount > 0 ? 'x' : '\u2713';
