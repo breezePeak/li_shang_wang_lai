@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { exec } from 'child_process';
 import { getDb } from './db/database.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -537,6 +538,14 @@ app.post('/api/pending-comments/:id/ignore', (req, res) => {
 });
 
 app.listen(PORT, () => {
+  const url = `http://localhost:${PORT}`;
   console.error(`[server] 礼尚往来回访控制驾驶舱服务已成功启动！`);
-  console.error(`[server] 请使用浏览器打开：http://localhost:${PORT}`);
+  console.error(`[server] 正在打开浏览器：${url}`);
+
+  const cmd = process.platform === 'win32'
+    ? `start "" "${url}"`
+    : process.platform === 'darwin'
+      ? `open "${url}"`
+      : `xdg-open "${url}"`;
+  exec(cmd);
 });
