@@ -552,6 +552,135 @@ body {
   z-index: 0;
 }
 
+/* ── 分支时间线（回评线） ── */
+.timeline-lane-branch .lane-branch-layout {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 6px 4px;
+  flex: 1;
+}
+
+.lane-trunk {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 10px 4px 8px;
+  z-index: 2;
+}
+
+.lane-trunk .timeline-point {
+  flex-shrink: 0;
+  width: 90px;
+}
+
+.trunk-connector {
+  display: flex;
+  align-items: flex-start;
+  flex-shrink: 0;
+  width: 36px;
+  padding-top: 13px;
+}
+
+.connector-line {
+  flex: 1;
+  height: 2px;
+  background: rgba(31, 109, 120, 0.22);
+  position: relative;
+}
+
+.connector-arrow {
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  color: rgba(31, 109, 120, 0.30);
+  font-size: 9px;
+  margin-top: -6px;
+  margin-left: -2px;
+}
+
+.lane-branch-off {
+  display: flex;
+  align-items: stretch;
+  padding: 0 4px 2px;
+  z-index: 1;
+}
+
+.branch-stem {
+  position: relative;
+  width: 20px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  margin-left: 22px;
+}
+
+.stem-line {
+  position: absolute;
+  top: 0;
+  bottom: 8px;
+  left: 50%;
+  width: 1px;
+  background: rgba(31, 109, 120, 0.14);
+}
+
+.stem-line::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -1px;
+  width: 46px;
+  height: 1px;
+  background: rgba(31, 109, 120, 0.12);
+}
+
+.branch-nodes {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  flex: 1;
+  padding-top: 2px;
+  padding-left: 8px;
+}
+
+.branch-nodes .timeline-point {
+  width: 80px;
+  min-height: 58px;
+  transform: scale(0.88);
+  transform-origin: top left;
+  opacity: 0.78;
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.branch-nodes .timeline-point:hover,
+.branch-nodes .timeline-point.is-active {
+  transform: scale(0.92) translateY(-1px);
+  opacity: 1;
+}
+
+.branch-nodes .point-dot {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+
+.branch-nodes .point-copy strong {
+  font-size: 10px;
+}
+
+.branch-nodes .point-count {
+  top: -4px;
+  left: 16px;
+  min-width: 18px;
+  height: 16px;
+  font-size: 9px;
+  padding: 0 5px;
+}
+
 .lane-spark {
   position: absolute;
   top: 39px;

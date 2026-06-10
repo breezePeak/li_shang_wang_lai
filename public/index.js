@@ -140,13 +140,17 @@ function renderRiverTimeline() {
   if (!container) return;
   const stageMap = buildStageMap();
   const activeStageId = selectedStageId;
+  const replyExceptionsTotal = (statsData.blockedReplies || 0) + (statsData.sentUnverifiedReplies || 0);
 
-  const replyLane = [
+  const replyTrunk = [
     timelinePoint('replies', '回评入口', 'fa-comments', stageMap.replies?.count || 0, '评论入库后进入 reply_status 队列', 'main'),
     timelinePoint('replyPending', '待回评', 'fa-reply', statsData.pendingReplies || 0, 'pending 会被 comments:execute 处理', 'work'),
-    timelinePoint('replyExceptions', '回评异常', 'fa-triangle-exclamation', statsData.replyExceptions || 0, 'blocked / sent_unverified 需要人工介入', 'warning'),
-    timelinePoint('replySkipped', '忽略回评', 'fa-ban', statsData.skippedReplies || 0, '人工忽略或不再处理的回复', 'muted'),
-    timelinePoint('replyDone', '回评完成', 'fa-circle-check', statsData.succeededReplies || 0, '已回复成功写入 DB', 'done'),
+    timelinePoint('replyDone', '回评成功', 'fa-circle-check', statsData.succeededReplies || 0, '已回复成功写入 DB', 'done'),
+  ];
+
+  const replyBranches = [
+    timelinePoint('replyExceptions', '回评异常', 'fa-triangle-exclamation', replyExceptionsTotal, 'blocked / sent_unverified 需人工介入', 'warning'),
+    timelinePoint('replySkipped', '忽略回评', 'fa-ban', statsData.skippedReplies || 0, '人工忽略或不再处理', 'muted'),
   ];
 
   const visitLane = [
@@ -171,7 +175,7 @@ function renderRiverTimeline() {
       </button>
       <div class="timeline-splitter" aria-hidden="true"></div>
     </div>
-    ${renderTimelineLane({ id: 'reply', title: '回评时间线', subtitle: '处理别人评论我的作品', icon: 'fa-reply-all', points: replyLane, activeStageId })}
+    ${renderReplyBranchLane({ activeStageId, trunk: replyTrunk, branches: replyBranches })}
     ${renderTimelineLane({ id: 'visit', title: '回访时间线', subtitle: '回访点赞/评论/关注/回复线索', icon: 'fa-route', points: visitLane, activeStageId })}
   `;
 }
@@ -199,6 +203,39 @@ function renderTimelineLane({ id, title, subtitle, icon, points, activeStageId }
           ${Array.from({ length: 10 }, (_, i) => `<i style="--i:${i}"></i>`).join('')}
         </span>
         ${points.map(point => renderTimelinePoint(point, activeStageId)).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderReplyBranchLane({ activeStageId, trunk, branches }) {
+  const isLaneActive = REPLY_STAGE_IDS.has(activeStageId);
+  return `
+    <section class="timeline-lane timeline-lane-branch ${isLaneActive ? 'is-active' : ''}">
+      <div class="lane-title">
+        <span><i class="fa-solid fa-reply-all"></i></span>
+        <div>
+          <strong>回评时间线</strong>
+          <small>处理别人评论我的作品</small>
+        </div>
+      </div>
+      <div class="lane-branch-layout">
+        <div class="lane-trunk">
+          ${trunk.map((point, i) => {
+            const connector = i < trunk.length - 1
+              ? '<span class="trunk-connector"><span class="connector-line"></span><span class="connector-arrow"><i class="fa-solid fa-chevron-right"></i></span></span>'
+              : '';
+            return `${renderTimelinePoint(point, activeStageId)}${connector}`;
+          }).join('')}
+        </div>
+        <div class="lane-branch-off">
+          <div class="branch-stem" aria-hidden="true">
+            <span class="stem-line"></span>
+          </div>
+          <div class="branch-nodes">
+            ${branches.map(point => renderTimelinePoint(point, activeStageId)).join('')}
+          </div>
+        </div>
       </div>
     </section>
   `;
