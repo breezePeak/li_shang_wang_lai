@@ -31,19 +31,21 @@ Agent 生成或填写评论时，必须遵守 `references/comment-safety-rules.m
 
 ## 评论回复流程
 
-先扫描入库并查询待回评范围：
+> **Agent 必须按以下步骤严格执行，不得跳步或自行变通。**
+
+**步骤 1**：扫描互动数据并入库，准备待回评范围：
 
 ```bash
 npm run interactions:scan -- --type comment --days N --max-count M --prepare-replies
 ```
 
-然后执行：
+**步骤 2**：执行评论回复：
 
 ```bash
 npm run comments:execute -- --days N --limit M
 ```
 
-`comments:execute` 从 `work_comments` 读取待回评评论，在当前进程内调用 Hermes/OpenClaw 生成并写回 `reply_text`，然后打开待回复评论所属的抖音作品页，在作品评论区定位目标评论；优先结合 `cid/comment_id` 与 `/aweme/v1/web/comment/list/` 做确认，唯一命中后点击“回复”、填写、发送并校验，不再进入创作者评论管理页。
+`comments:execute` 从 `work_comments` 读取待回评评论，生成 `reply_text`，到作品评论区定位目标评论并填写发送。
 
 ## 回访流程
 
@@ -70,12 +72,3 @@ npm run visit:run -- --execute
 - 评论回复使用 `work_comments.id`。
 - 回访执行使用 `return_visit_tasks.taskId`。
 - Agent 不编辑任务 ID，也不编辑中间文件。
-
-## 安全限制
-
-- 不发送空评论。
-- 不发送广告、引流、互关、互赞、骚扰内容。
-- 不在命令失败后继续真实动作。
-- 回访默认直接执行 `visit:run --execute`，不依赖 `return-visit:prepare` 或 JSON 文件。
-
-- 页面未稳定、登录失效、点赞状态未知、重复执行风险或发送结果未确认时必须阻断。
