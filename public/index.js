@@ -45,6 +45,10 @@ function bindEvents() {
   document.getElementById('filter-relation').addEventListener('change', renderStageWorkspace);
   document.getElementById('btn-view-grid').addEventListener('click', () => setViewMode('grid'));
   document.getElementById('btn-view-table').addEventListener('click', () => setViewMode('table'));
+  window.addEventListener('resize', () => {
+    const container = document.getElementById('river-nodes-container');
+    if (container) drawTreeLines(container);
+  });
   document.getElementById('btn-bulk-approve').addEventListener('click', bulkApproveTasks);
   document.getElementById('btn-bulk-skip').addEventListener('click', bulkSkipTasks);
   document.getElementById('btn-bulk-cancel').addEventListener('click', clearSelectedTasks);
@@ -197,7 +201,8 @@ function renderRiverTimeline() {
     ],
   };
 
-  container.innerHTML = `<div class="tree-root">${renderTree(treeData, activeStageId)}</div>`;
+  container.innerHTML = `<canvas class="tree-canvas" id="tree-canvas"></canvas><div class="tree-root">${renderTree(treeData, activeStageId)}</div>`;
+  requestAnimationFrame(() => drawTreeLines(container));
 }
 
 function renderTree(node, activeStageId) {
@@ -206,7 +211,7 @@ function renderTree(node, activeStageId) {
   const pointClass = `timeline-point ${node.tone || 'work'} ${isActive ? 'is-active' : ''} ${node.count > 0 ? 'has-count' : ''}`;
 
   let html = `<div class="tree-node ${hasChildren ? 'has-children' : ''}">`;
-  html += `<button class="${pointClass}" onclick="selectStage('${node.id}', this)" title="${escapeAttribute(node.helper || node.label)}">`;
+  html += `<button class="${pointClass}" data-node-id="${node.id}" onclick="selectStage('${node.id}', this)" title="${escapeAttribute(node.helper || node.label)}">`;
   html += `<span class="point-dot"><i class="fa-solid ${node.icon}"></i></span>`;
   html += `<span class="point-copy"><strong>${node.label}</strong></span>`;
   html += `<span class="point-count">${node.count || 0}</span>`;
@@ -214,23 +219,67 @@ function renderTree(node, activeStageId) {
 
   if (hasChildren) {
     html += `<div class="tree-children">`;
-    html += `<div class="tree-branch-lines" aria-hidden="true">`;
-    html += `<span class="branch-vertical"></span>`;
-    node.children.forEach((child, i) => {
-      const topPos = 28 + i * 60;
-      html += `<span class="branch-horizontal" style="top:${topPos}px"></span>`;
-    });
-    html += `</div>`;
-    html += `<div class="tree-children-list">`;
     node.children.forEach(child => {
       html += renderTree(child, activeStageId);
     });
-    html += `</div>`;
     html += `</div>`;
   }
 
   html += `</div>`;
   return html;
+}
+
+function drawTreeLines(container) {
+  const canvas = document.getElementById('tree-canvas');
+  if (!canvas) return;
+  const rect = container.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  ctx.strokeStyle = 'rgba(31, 109, 120, 0.25)';
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = 'round';
+
+  const nodes = container.querySelectorAll('.tree-node.has-children');
+  nodes.forEach(parentEl => {
+    const parentBtn = parentEl.querySelector(':scope > .timeline-point');
+    const childrenEl = parentEl.querySelector(':scope > .tree-children');
+    if (!parentBtn || !childrenEl) return;
+
+    const childBtns = childrenEl.querySelectorAll(':scope > .tree-node > .timeline-point');
+    if (!childBtns.length) return;
+
+    const parentRect = parentBtn.getBoundingClientRect();
+    const startX = parentRect.right - rect.left;
+    const startY = parentRect.top - rect.top + parentRect.height / 2;
+    const midX = startX + 16;
+
+    childBtns.forEach(childBtn => {
+      const childRect = childBtn.getBoundingClientRect();
+      const endX = childRect.left - rect.left;
+      const endY = childRect.top - rect.top + childRect.height / 2;
+
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(midX, startY);
+      ctx.lineTo(midX, endY);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(31, 109, 120, 0.30)';
+      ctx.moveTo(endX, endY);
+      ctx.lineTo(endX - 5, endY - 3);
+      ctx.lineTo(endX - 5, endY + 3);
+      ctx.closePath();
+      ctx.fill();
+    });
+  });
 }
 
 function timelinePoint(id, label, icon, count, helper, tone = 'work') {
