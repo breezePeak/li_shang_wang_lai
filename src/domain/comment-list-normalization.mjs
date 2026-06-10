@@ -1,5 +1,12 @@
 import { normalizeRelation, getNoticeCommentText, safeJsonStringify } from './notice-api-normalization.mjs';
 
+function unixToIso(unixSeconds) {
+  if (!unixSeconds) return null;
+  const ms = Number(unixSeconds) * 1000;
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  return new Date(ms).toISOString();
+}
+
 /**
  * 归一化 /aweme/v1/web/comment/list/ 接口返回的单条评论原始数据。
  *
@@ -23,6 +30,7 @@ export function normalizeCommentListItem(raw = {}) {
     rawText: String(raw?.text || ''),
     createTime: raw?.create_time || null,
     eventTimeText: raw?.create_time ? String(raw.create_time) : '',
+    eventCreatedAt: unixToIso(raw?.create_time),
     diggCount: Number(raw?.digg_count || 0),
     replyCommentTotal: Number(raw?.reply_comment_total || 0),
     contentType: raw?.content_type ?? null,

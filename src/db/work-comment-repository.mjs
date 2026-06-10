@@ -7,7 +7,7 @@ export function upsertWorkComment(comment) {
   const {
     workId, workUrl, modalId,
     actorName, actorProfileUrl, actorProfileKey,
-    commentText, eventTimeText, commentKey,
+    commentText, eventTimeText, eventCreatedAt, commentKey,
     sourceEventId, sourceNotificationKey,
     rawCommentJson,
   } = comment;
@@ -38,6 +38,8 @@ export function upsertWorkComment(comment) {
     }
   }
 
+  const firstSeenAt = eventCreatedAt || now;
+
   const stmt = db.prepare(`
     INSERT INTO work_comments (work_id, work_url, modal_id, actor_name, actor_profile_url, actor_profile_key,
       comment_text, event_time_text, comment_key, source_event_id, source_notification_key,
@@ -49,7 +51,7 @@ export function upsertWorkComment(comment) {
     actorName || null, actorProfileUrl || null, actorProfileKey || null,
     commentText, eventTimeText || null, commentKey,
     sourceEventId || null, sourceNotificationKey || null,
-    rawCommentJson || null, now, now,
+    rawCommentJson || null, firstSeenAt, now,
   );
   return { action: 'inserted', id: result.lastInsertRowid };
 }

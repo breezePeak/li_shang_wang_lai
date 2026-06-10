@@ -21,6 +21,13 @@ export function getNoticeCreateTimeMs(item) {
   return raw > 0 ? raw * 1000 : null;
 }
 
+function unixToIso(unixSeconds) {
+  if (!unixSeconds) return null;
+  const ms = Number(unixSeconds) * 1000;
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  return new Date(ms).toISOString();
+}
+
 export function buildNoticeRawPayloadJson(item) {
   return safeJsonStringify(item);
 }
@@ -148,6 +155,7 @@ export function normalizeCommentNotice(item) {
     commentId,
     eventTimeText: item?.create_time ? String(item.create_time) : '',
     eventTimestamp: item?.create_time || null,
+    eventCreatedAt: unixToIso(item?.create_time),
     ...work,
     rawPayloadJson: buildNoticeRawPayloadJson(item),
   };
@@ -193,6 +201,7 @@ export function normalizeDiggNotice(item) {
     commentId: String(digg?.real_cid || digg?.cid || ''),
     eventTimeText: item?.create_time ? String(item.create_time) : '',
     eventTimestamp: item?.create_time || null,
+    eventCreatedAt: unixToIso(item?.create_time),
     ...work,
     rawPayloadJson: buildNoticeRawPayloadJson(item),
   };

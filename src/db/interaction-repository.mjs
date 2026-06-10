@@ -55,7 +55,7 @@ function _isKeyFieldEnrichment(existing, incoming) {
  */
 export function upsertNotificationEvent({
   eventType, actorName, actorProfileKey, actorProfileUrl, relation,
-  commentText, eventTimeText, fingerprint, dedupConfidence,
+  commentText, eventTimeText, eventCreatedAt, fingerprint, dedupConfidence,
   platformEventId, notificationItemKey, workId, workUrl,
   action, content, rawPayloadJson,
   targetWorkId, targetWorkUrl, profileResolutionStatus,
@@ -146,8 +146,8 @@ export function upsertNotificationEvent({
       (event_type, actor_name, actor_profile_key, actor_profile_url, relation, my_work_title, comment_text, event_time_text,
        platform_event_id, fingerprint, notification_item_key,
        target_work_id, target_work_url, dedup_confidence, profile_resolution_status,
-       raw_payload_json, scanned_at, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       raw_payload_json, created_at, scanned_at, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     eventType, actorName,
@@ -157,7 +157,7 @@ export function upsertNotificationEvent({
     platformEventId || null, fingerprint, notificationItemKey || null,
     incoming.targetWorkId, incoming.targetWorkUrl,
     dedupConfidence || null, profileResolutionStatus || null,
-    rawPayloadJson || null, scannedAt, 'new',
+    rawPayloadJson || null, eventCreatedAt || scannedAt, scannedAt, 'new',
   );
   if (result.changes > 0) {
     return { action: 'inserted', eventId: result.lastInsertRowid };
