@@ -72,3 +72,41 @@ npm run visit:run -- --execute
 - 评论回复使用 `work_comments.id`。
 - 回访执行使用 `return_visit_tasks.taskId`。
 - Agent 不编辑任务 ID，也不编辑中间文件。
+
+- 命令执行失败时，优先快速定位并修复，而非花大量时间分析源码。尝试修复后再重试。
+
+## 常见问题排查
+
+### comments:execute 报「评论区始终未展开」
+
+**现象：** 评论按钮已点击（`click-comment` 成功），但评论区模态框未弹出，`[work-modal] 未找到评论Tab按钮`，最终所有待回评评论失败，错误 `评论区始终未展开`。
+
+**可能原因：**
+1. **抖音 DOM 更新** — 评论按钮的容器/选择器或有变更，2026-06-08（extractCid/extractCommentText 修复）和 2026-06-09（评论区展开失败）均有发生。
+2. **登录态失效** — 虽然整体登录有效，但作品页的交互组件渲染依赖于特定 cookie 或 token。
+3. **网络延迟** — 评论按钮点击后评论区组件异步加载超时。
+
+**排查步骤：**
+1. 检查 `work-modal` 日志，看 `[work-modal] 已点击评论按钮` 后是否出现 `[work-modal] 已点击评论Tab` — 没有则说明评论区没渲染出来。
+2. 确认 `comment-list-api` 是否捕获到评论列表数据（有数据但 UI 没展开 = 渲染问题）。
+3. 检查浏览器 profile 中的登录 cookies 是否仍有效。
+
+**历史修复：**
+- 2026-06-08：`extractCid` 增加全量 data-* 属性扫描；`pickWorkCommentCandidate` 增加 `actor_fallback` 兜底。
+- 2026-06-09：`clickTopCommentTab` 搜索不到"评论"Tab。修复方式：扩大选择器（增加 `[aria-label]`、`[title]`、`[data-e2e]`），增加 `aria-label`/`title` 文本来源，全文匹配改为子串包含，放宽视口限制（45%→55%），放宽最小尺寸（20px→16px）。
+
+### 通知面板扫描超时（notification bell）
+
+**现象：** `[notify-page] 尝试打开通知面板 attempt=5 bell=no` 且超时 60s。
+
+**原因：** 用户未登录或 session 过期时，抖音页面不显示通知铃铛。
+
+**解决：** 运行 `npm run auth` 重新扫码登录。登录成功后通知面板扫描会自动工作。
+
+### 回访评论生成失败（failed_generate_comment）
+
+**现象：** 回访任务状态为 `failed_generate_comment`，`last_error` 为 `visible_work_changed_before_agent`。
+
+**原因：** 在 Agent 生成评论前页面发生了跳转或内容变化（图文/视频切换、连播等）。
+
+**影响范围：** 通常只影响少量任务（22 个任务中失败 2 个），不影响整体流程。
