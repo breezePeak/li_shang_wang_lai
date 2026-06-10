@@ -1868,7 +1868,7 @@ body {
   border: 1px solid rgba(76, 99, 83, 0.10);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.42);
-  overflow: hidden;
+  flex-shrink: 0;
 }
 
 .work-group-header {
@@ -1878,6 +1878,8 @@ body {
   padding: 12px 16px;
   background: rgba(47, 143, 115, 0.06);
   border-bottom: 1px solid rgba(76, 99, 83, 0.08);
+  border-radius: 16px 16px 0 0;
+  overflow: hidden;
 }
 
 .work-group-header i {
