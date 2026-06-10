@@ -11,6 +11,7 @@ let selectedTaskIds = new Set();
 let selectedCommentIds = new Set();
 let selectedStageId = 'collect';
 let selectedDetailBranchIndex = null;
+let selectedCategory = null;
 
 let commentPage = 1;
 let commentTotalPages = 1;
@@ -647,24 +648,205 @@ function renderStageDetail() {
     </div>
   `).join('');
 
-  const branchesEl = document.getElementById('detail-branches');
-  const branchCountEl = document.getElementById('detail-branch-count');
-  branchCountEl.textContent = detailData.branches.length;
-  branchesEl.innerHTML = detailData.branches.map((branch, index) => `
-    <button class="branch-card ${selectedDetailBranchIndex === index ? 'is-active' : ''}" onclick="selectDetailBranch(${index})">
-      <span class="branch-main"><i class="fa-solid fa-code-branch"></i>${branch.title}</span>
-      <span class="branch-count">${branch.count} 条</span>
-      <small>${branch.description}</small>
-    </button>
-  `).join('');
+  renderDetailCategories();
 
   renderStageWorkspace();
+}
+
+function buildCategoryList() {
+  const totalCollected = statsData.collectedTotal || 0;
+  const retryCount = reviewTasks.filter((task) => ['failed_collect', 'failed_generate_comment'].includes(task.status)).length;
+  const executableCount = reviewTasks.filter((task) => ['pending_visit', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment'].includes(task.status)).length;
+  const errorCount = reviewTasks.filter((task) => ['failed_like', 'failed_comment', 'failed'].includes(task.status)).length;
+
+  return [
+    {
+      groupLabel: '评论回复流程',
+      items: [
+        { key: 'collect-total', label: '采集入库', count: totalCollected, icon: 'fa-database', tone: 'collect', sub: `点赞${statsData.collectedLikes || 0} 评论${statsData.collectedComments || 0} 回复${statsData.collectedReplies || 0} 关注${statsData.collectedFollows || 0}` },
+        { key: 'reply-pending', label: '待回评', count: statsData.pendingReplies || 0, icon: 'fa-reply', tone: 'work' },
+        { key: 'reply-blocked', label: '已阻塞', count: statsData.blockedReplies || 0, icon: 'fa-shield-halved', tone: 'warning' },
+        { key: 'reply-unverified', label: '发送未确认', count: statsData.sentUnverifiedReplies || 0, icon: 'fa-triangle-exclamation', tone: 'danger' },
+        { key: 'reply-skipped', label: '已跳过', count: statsData.skippedReplies || 0, icon: 'fa-ban', tone: 'muted' },
+        { key: 'reply-done', label: '已完成', count: statsData.succeededReplies || 0, icon: 'fa-circle-check', tone: 'done' },
+      ],
+    },
+    {
+      groupLabel: '回访流程',
+      items: [
+        { key: 'visit-unhandled', label: '未处理线索', count: getUnhandledEventCount(), icon: 'fa-inbox', tone: 'work', sub: `点赞${statsData.unhandledLikes || 0} 评论${statsData.unhandledComments || 0} 回复${statsData.unhandledReplies || 0} 关注${statsData.unhandledFollows || 0}` },
+        { key: 'visit-tasks', label: '回访任务', count: statsData.totalTasks || 0, icon: 'fa-list-check', tone: 'work' },
+        { key: 'visit-retry', label: '待重试', count: retryCount, icon: 'fa-rotate-left', tone: 'warning' },
+        { key: 'visit-exec', label: '可执行', count: executableCount, icon: 'fa-bolt', tone: 'work' },
+        { key: 'visit-errors', label: '执行异常', count: errorCount, icon: 'fa-circle-xmark', tone: 'danger' },
+        { key: 'visit-skipped', label: '无法回访', count: statsData.skippedVisitTasks || 0, icon: 'fa-user-slash', tone: 'muted' },
+        { key: 'visit-done', label: '完成归档', count: statsData.completedTasks || 0, icon: 'fa-flag-checkered', tone: 'done' },
+      ],
+    },
+  ];
+}
+
+function renderDetailCategories() {
+  const categoriesEl = document.getElementById('detail-categories');
+  if (!categoriesEl) return;
+  const groups = buildCategoryList();
+  categoriesEl.innerHTML = groups.map((group) => `
+    <div class="category-group">
+      <div class="category-group-label">${group.groupLabel}</div>
+      ${group.items.map((item) => `
+        <button class="category-card ${item.tone} ${selectedCategory === item.key ? 'is-active' : ''}" onclick="selectCategory('${item.key}')">
+          <span class="category-icon"><i class="fa-solid ${item.icon}"></i></span>
+          <span class="category-label">${item.label}</span>
+          <strong class="category-count">${item.count}</strong>
+          ${item.sub ? `<small class="category-sub">${item.sub}</small>` : ''}
+        </button>
+      `).join('')}
+    </div>
+  `).join('');
+}
+
+window.selectCategory = function(categoryKey) {
+  selectedCategory = selectedCategory === categoryKey ? null : categoryKey;
+  selectedDetailBranchIndex = null;
+  renderDetailCategories();
+  renderStageWorkspace();
+};
+
+function renderCategoryContent(categoryKey) {
+  const cat = findCategory(categoryKey);
+  if (!cat) return renderEmptyState('fa-question', '未知分类。');
+
+  switch (categoryKey) {
+    case 'collect-total':
+      return renderCategoryOverview('采集入库',
+        `入库总量 ${statsData.collectedTotal || 0} 条，覆盖点赞、评论、回复、关注四类通知。`,
+        [
+          ['点赞通知', statsData.collectedLikes || 0, 'fa-heart'],
+          ['评论通知', statsData.collectedComments || 0, 'fa-comment'],
+          ['回复通知', statsData.collectedReplies || 0, 'fa-reply'],
+          ['关注通知', statsData.collectedFollows || 0, 'fa-user-plus'],
+        ]);
+    case 'reply-pending':
+      return renderPendingCommentsHtml('pending');
+    case 'reply-blocked':
+      return renderPendingCommentsHtml('blocked');
+    case 'reply-unverified':
+      return renderPendingCommentsHtml('unverified');
+    case 'reply-skipped':
+      return renderPendingCommentsHtml('skipped');
+    case 'reply-done':
+      return renderPendingCommentsHtml('done');
+    case 'visit-unhandled':
+      return renderUnhandledEventsHtml();
+    case 'visit-tasks':
+      return renderCategoryVisitTasks('all');
+    case 'visit-retry':
+      return renderCategoryVisitTasks('retry');
+    case 'visit-exec':
+      return renderCategoryVisitTasks('exec');
+    case 'visit-errors':
+      return renderCategoryVisitTasks('errors');
+    case 'visit-skipped':
+      return renderCategoryVisitTasks('skipped');
+    case 'visit-done':
+      return renderCategoryVisitTasks('done');
+    default:
+      return renderEmptyState('fa-question', '未知分类。');
+  }
+}
+
+function findCategory(key) {
+  for (const group of buildCategoryList()) {
+    for (const item of group.items) {
+      if (item.key === key) return item;
+    }
+  }
+  return null;
+}
+
+function renderCategoryOverview(title, subtitle, items) {
+  return `
+    <div class="category-detail-overview">
+      <div class="category-detail-header">
+        <h4>${title}</h4>
+        <p>${subtitle}</p>
+      </div>
+      <div class="category-overview-grid">
+        ${items.map(([label, count, icon]) => `
+          <div class="category-overview-card">
+            <span class="category-overview-icon"><i class="fa-solid ${icon}"></i></span>
+            <strong>${count}</strong>
+            <span>${label}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderCategoryVisitTasks(source) {
+  let tasks = reviewTasks.slice();
+  let title = '';
+  let subtitle = '';
+
+  switch (source) {
+    case 'all':
+      title = '全部回访任务';
+      subtitle = `共 ${tasks.length} 条任务`;
+      break;
+    case 'retry':
+      tasks = tasks.filter((task) => ['failed_collect', 'failed_generate_comment'].includes(task.status));
+      title = '待重试任务';
+      subtitle = `共 ${tasks.length} 条，作品收集或评论生成失败可重试`;
+      break;
+    case 'exec':
+      tasks = tasks.filter((task) => ['pending_visit', 'pending_execute', 'executing', 'failed_collect', 'failed_generate_comment', 'failed_like', 'failed_comment'].includes(task.status));
+      title = '可执行任务';
+      subtitle = `共 ${tasks.length} 条，可由 visit:run --execute 推进`;
+      break;
+    case 'errors':
+      tasks = tasks.filter((task) => ['failed_like', 'failed_comment', 'failed'].includes(task.status));
+      title = '执行异常任务';
+      subtitle = `共 ${tasks.length} 条，需人工判断是否重试`;
+      break;
+    case 'skipped':
+      tasks = tasks.filter((task) => ['skipped_no_work', 'skipped_private', 'skipped_no_suitable_work'].includes(task.status));
+      title = '无法回访任务';
+      subtitle = `共 ${tasks.length} 条，私密/无作品/无合适作品`;
+      break;
+    case 'done':
+      tasks = tasks.filter((task) => task.status === 'done');
+      title = '完成归档任务';
+      subtitle = `共 ${tasks.length} 条已完成`;
+      break;
+    default:
+      title = '回访任务';
+      subtitle = `共 ${tasks.length} 条`;
+  }
+
+  const visibleIds = new Set(tasks.map((task) => task.id));
+  selectedTaskIds = new Set([...selectedTaskIds].filter((id) => visibleIds.has(id)));
+
+  if (!tasks.length) {
+    return renderEmptyState('fa-water', '当前分类没有可展示的任务。');
+  }
+
+  const renderFn = currentViewMode === 'table' ? renderTaskTableHtml : renderTaskCardsHtml;
+  return renderFn(tasks) + renderPagination(taskPage, taskTotalPages, taskTotal, 'task');
 }
 
 function renderStageWorkspace() {
   const detailData = buildStageDetailData()[selectedStageId] || buildStageDetailData().collect;
   const workspace = document.getElementById('workspace-body');
   const toolbar = document.getElementById('workspace-actions');
+
+  if (selectedCategory) {
+    toolbar.style.display = 'none';
+    workspace.className = 'workspace-body';
+    workspace.innerHTML = renderCategoryContent(selectedCategory);
+    updateBulkBar();
+    return;
+  }
 
   if (selectedDetailBranchIndex !== null && detailData.branches[selectedDetailBranchIndex]) {
     toolbar.style.display = 'none';
@@ -943,13 +1125,31 @@ function renderPendingCommentsHtml(commentSource = 'all') {
     comments = comments.filter(comment => comment.reply_status === 'pending');
   } else if (commentSource === 'exceptions') {
     comments = comments.filter(comment => comment.reply_status !== 'pending');
+  } else if (commentSource === 'blocked') {
+    comments = comments.filter(comment => comment.reply_status === 'blocked');
+  } else if (commentSource === 'unverified') {
+    comments = comments.filter(comment => comment.reply_status === 'sent_unverified');
+  } else if (commentSource === 'skipped') {
+    comments = comments.filter(comment => comment.reply_status === 'skipped');
+  } else if (commentSource === 'done') {
+    comments = comments.filter(comment => comment.reply_status === 'succeeded');
   }
 
   const visibleIds = new Set(comments.map(comment => comment.id));
   selectedCommentIds = new Set([...selectedCommentIds].filter(id => visibleIds.has(id)));
 
+  const emptyMessages = {
+    'all': '当前没有评论数据。',
+    'pending': '当前没有待回评的评论。',
+    'blocked': '当前没有被阻塞的回评。',
+    'unverified': '当前没有发送未确认的回评。',
+    'skipped': '当前没有已跳过的回评。',
+    'done': '当前没有已完成的回评。',
+    'exceptions': '当前没有异常回评。',
+  };
+
   if (!comments.length) {
-    return renderEmptyState('fa-face-smile-beam', '当前没有待处理或异常回评。');
+    return renderEmptyState('fa-face-smile-beam', emptyMessages[commentSource] || '当前没有数据。');
   }
 
   const allChecked = comments.length > 0 && comments.every(comment => selectedCommentIds.has(comment.id)) ? 'checked' : '';
@@ -1276,6 +1476,7 @@ function renderPagination(page, totalPages, total, type) {
 window.selectStage = function(stageId, sourceElement) {
   selectedStageId = stageId;
   selectedDetailBranchIndex = null;
+  selectedCategory = null;
   commentPage = 1;
   taskPage = 1;
   eventPage = 1;
@@ -1339,6 +1540,10 @@ function getVisiblePendingComments(commentSource = 'all') {
   let comments = pendingComments.slice();
   if (commentSource === 'pending') {
     comments = comments.filter(comment => comment.reply_status === 'pending');
+  } else if (commentSource === 'blocked') {
+    comments = comments.filter(comment => comment.reply_status === 'blocked');
+  } else if (commentSource === 'unverified') {
+    comments = comments.filter(comment => comment.reply_status === 'sent_unverified');
   } else if (commentSource === 'exceptions') {
     comments = comments.filter(comment => comment.reply_status === 'blocked' || comment.reply_status === 'sent_unverified');
   } else if (commentSource === 'skipped') {

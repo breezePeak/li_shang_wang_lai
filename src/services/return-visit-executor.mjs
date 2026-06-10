@@ -594,6 +594,8 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   const userName = task.userName || task.actorName || '';
   const logTag = `[visit][${taskId}]`;
 
+  let commentText = '';
+
   console.error(`${logTag} ========== 开始回访: ${userName} ==========`);
 
   // [1/5] 解析作品
@@ -618,7 +620,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   const openedWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_open');
   if (openedWorkCheck) return openedWorkCheck;
 
-  // [2/5] 检测页面类型 + 观看视频
+  // [2/5] 检测页面类型 + 观看视频（与评论生成并行）
   const presentation = await detectWorkPresentationKind(page, resolvedWork);
   const currentUrl = presentation.currentUrl;
   const isNotePage = presentation.isNotePage;
@@ -634,12 +636,65 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     if (beforeWatchWorkCheck) return beforeWatchWorkCheck;
   }
 
+  // 检查是否可复用已生成的评论
+  commentText = String(task.generatedComment || '').trim();
+  if (commentText && canReuseGeneratedCommentForWork(task, resolvedWork)) {
+    console.error(`[agent] task=${taskId} 复用已生成评论 comment=${commentText}`);
+  } else {
+    if (commentText) {
+      console.error(`[agent] task=${taskId} 丢弃已生成评论: 当前作品上下文已变化`);
+      commentText = '';
+    }
+  }
+
+  // 启动评论生成（后台并行，不阻塞视频观看）
+  let commentGenPromise = null;
+  let commentGenVisibleError = null;
+  if (!commentText) {
+    commentGenPromise = (async () => {
+      const visibleForAgent = await refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, 'before_agent');
+      if (!visibleForAgent.ok) {
+        commentGenVisibleError = visibleForAgent;
+        return null;
+      }
+      const commentContext = buildCommentContext(task, visibleForAgent.work);
+      console.error(`[agent] task=${taskId} 请求生成评论（并行于视频观看）`);
+      const text = await agentProvider.generateComment(commentContext);
+      console.error(`[agent] task=${taskId} 评论生成成功 comment=${text}`);
+      return text;
+    })();
+  }
+
+  // 观看视频（与评论生成并行）
   if (!isNotePage) {
     console.error(`${logTag} [2/5] 观看视频中... policy=${watchPolicy} seconds=${watchSeconds}`);
     await handleVideoWatch(page, watchPolicy, watchSeconds);
     console.error(`${logTag} [2/5] 观看完成`);
   } else {
     console.error(`${logTag} [2/5] 图文/note，跳过观看`);
+  }
+
+  // 等待评论生成完成
+  if (commentGenPromise) {
+    const generated = await commentGenPromise;
+    if (commentGenVisibleError) {
+      console.error(`[visit] task=${taskId} failed reason=${commentGenVisibleError.error} detail=${commentGenVisibleError.reason || ''}`);
+      await saveDebugScreenshot(page, task.taskId, commentGenVisibleError.error || 'visible_work_before_agent');
+      return {
+        ok: false,
+        status: 'failed_generate_comment',
+        error: commentGenVisibleError.error,
+        likeStatus: task.likeStatus || 'pending',
+        commentStatus: task.commentStatus || 'pending',
+        resolvedWork,
+        data: commentGenVisibleError,
+      };
+    }
+    if (!generated) {
+      console.error(`[visit] task=${taskId} failed reason=Agent 生成评论失败`);
+      return { ok: false, status: 'failed_generate_comment', error: 'agent_comment_failed', likeStatus: task.likeStatus || 'pending', commentStatus: task.commentStatus || 'pending', resolvedWork };
+    }
+    commentText = generated;
   }
 
   const afterWatchWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_watch');
@@ -735,42 +790,13 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     await saveDebugScreenshot(page, task.taskId, 'comment_box');
     return { ok: false, status: 'failed_comment', error: boxReady.reason || 'comment_box_not_found', likeStatus: nextLikeStatus.value, commentStatus: 'failed', resolvedWork };
   }
-  console.error(`[visit] task=${taskId} 评论框可用，进入 WAIT_AGENT_COMMENT`);
+  console.error(`[visit] task=${taskId} 评论框可用`);
 
-  let commentText = '';
-  try {
-    commentText = String(task.generatedComment || '').trim();
-    if (commentText && canReuseGeneratedCommentForWork(task, resolvedWork)) {
-      console.error(`[agent] task=${taskId} 复用已生成评论 comment=${commentText}`);
-    } else {
-      if (commentText) {
-        console.error(`[agent] task=${taskId} 丢弃已生成评论: 当前作品上下文已变化`);
-        commentText = '';
-      }
-      const visibleForAgent = await refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, 'before_agent');
-      if (!visibleForAgent.ok) {
-        console.error(`[visit] task=${taskId} failed reason=${visibleForAgent.error} detail=${visibleForAgent.reason || ''}`);
-        await saveDebugScreenshot(page, task.taskId, visibleForAgent.error || 'visible_work_before_agent');
-        return {
-          ok: false,
-          status: 'failed_generate_comment',
-          error: visibleForAgent.error,
-          likeStatus: nextLikeStatus.value,
-          commentStatus: nextCommentStatus.value,
-          resolvedWork,
-          data: visibleForAgent,
-        };
-      }
-
-      const commentContext = buildCommentContext(task, visibleForAgent.work);
-      console.error(`[agent] task=${taskId} 请求生成评论`);
-      commentText = await agentProvider.generateComment(commentContext);
-      console.error(`[agent] task=${taskId} 评论生成成功 comment=${commentText}`);
-    }
-  } catch (err) {
-    console.error(`[visit] task=${taskId} failed reason=Agent 生成评论失败: ${err.message}`);
-    return { ok: false, status: 'failed_generate_comment', error: err.message || 'agent_comment_failed', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork };
+  if (!commentText) {
+    console.error(`[visit] task=${taskId} failed reason=评论文本为空`);
+    return { ok: false, status: 'failed_generate_comment', error: 'comment_text_empty', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork };
   }
+  console.error(`${logTag} [4/5] 评论已生成: "${commentText.slice(0, 40)}"`);
 
   console.error(`${logTag} [5/5] 发送评论: "${commentText.slice(0, 40)}"`);
   const beforeCommentSendWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_comment_send', {
