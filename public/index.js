@@ -231,6 +231,7 @@ function renderReplyBranchLane({ activeStageId, trunk, branches }) {
         <div class="lane-branch-off">
           <div class="branch-stem" aria-hidden="true">
             <span class="stem-line"></span>
+            <span class="stem-junction"></span>
           </div>
           <div class="branch-nodes">
             ${branches.map(point => renderTimelinePoint(point, activeStageId)).join('')}
