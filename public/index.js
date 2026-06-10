@@ -689,7 +689,15 @@ function buildCategoryList() {
 function renderDetailCategories() {
   const categoriesEl = document.getElementById('detail-categories');
   if (!categoriesEl) return;
-  const groups = buildCategoryList();
+  const allGroups = buildCategoryList();
+
+  let groups;
+  if (VISIT_STAGE_IDS.has(selectedStageId)) {
+    groups = allGroups.filter(g => g.groupLabel === '回访流程');
+  } else {
+    groups = allGroups.filter(g => g.groupLabel === '评论回复流程');
+  }
+
   categoriesEl.innerHTML = groups.map((group) => `
     <div class="category-group">
       <div class="category-group-label">${group.groupLabel}</div>
