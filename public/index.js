@@ -1109,10 +1109,48 @@ function renderUnhandledEventsHtml() {
     return renderEmptyState('fa-inbox', '当前没有未处理的互动事件。');
   }
 
+  const grouped = groupEventsByWork(unhandledEvents);
+
   return `
     <div class="reply-workbench">
-      <div class="pending-list">
-      ${unhandledEvents.map((event) => {
+      <div class="work-group-list">
+      ${grouped.map(group => renderEventWorkGroup(group)).join('')}
+      </div>
+      ${renderPagination(eventPage, eventTotalPages, eventTotal, 'event')}
+    </div>
+  `;
+}
+
+function groupEventsByWork(events) {
+  const groups = new Map();
+  for (const event of events) {
+    const workKey = event.my_work_title || event.target_work_id || '__unknown__';
+    if (!groups.has(workKey)) {
+      groups.set(workKey, {
+        workTitle: event.my_work_title || '未知作品',
+        workUrl: event.target_work_url || '',
+        events: [],
+      });
+    }
+    groups.get(workKey).events.push(event);
+    if (!groups.get(workKey).workUrl && event.target_work_url) {
+      groups.get(workKey).workUrl = event.target_work_url;
+    }
+  }
+  return Array.from(groups.values());
+}
+
+function renderEventWorkGroup(group) {
+  return `
+    <div class="work-group">
+      <div class="work-group-header">
+        <i class="fa-solid fa-video"></i>
+        <span class="work-group-title">${escapeHtml(group.workTitle)}</span>
+        <span class="work-group-count">${group.events.length} 条线索</span>
+        ${group.workUrl ? `<a class="work-link" target="_blank" href="${escapeAttribute(group.workUrl)}"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>` : ''}
+      </div>
+      <div class="work-group-comments">
+      ${group.events.map((event) => {
         const badge = getEventTypeBadge(event.event_type);
         const eventTime = formatTime(event.created_at);
         return `
@@ -1125,13 +1163,11 @@ function renderUnhandledEventsHtml() {
                 <span><span class="reply-badge ${badge.className}">${badge.text}</span> · ${escapeHtml(event.event_time_text || '')}${eventTime ? ` · ${eventTime}` : ''}${event.relation === 'follow' ? ' · 互关' : ''}</span>
               </div>
             </div>
-            ${event.my_work_title ? `<div class="pending-text"><strong>我的作品：</strong>${escapeHtml(event.my_work_title)}</div>` : ''}
             ${event.comment_text ? `<div class="pending-text"><strong>内容：</strong>${escapeHtml(event.comment_text)}</div>` : ''}
           </div>
         </article>
       `;}).join('')}
       </div>
-      ${renderPagination(eventPage, eventTotalPages, eventTotal, 'event')}
     </div>
   `;
 }
