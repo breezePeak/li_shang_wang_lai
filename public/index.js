@@ -145,12 +145,12 @@ function renderRiverTimeline() {
   const replyTrunk = [
     timelinePoint('replies', '回评入口', 'fa-comments', stageMap.replies?.count || 0, '评论入库后进入 reply_status 队列', 'main'),
     timelinePoint('replyPending', '待回评', 'fa-reply', statsData.pendingReplies || 0, 'pending 会被 comments:execute 处理', 'work'),
-    timelinePoint('replyDone', '回评成功', 'fa-circle-check', statsData.succeededReplies || 0, '已回复成功写入 DB', 'done'),
   ];
 
   const replyBranches = [
     timelinePoint('replyExceptions', '回评异常', 'fa-triangle-exclamation', replyExceptionsTotal, 'blocked / sent_unverified 需人工介入', 'warning'),
     timelinePoint('replySkipped', '忽略回评', 'fa-ban', statsData.skippedReplies || 0, '人工忽略或不再处理', 'muted'),
+    timelinePoint('replyDone', '回评成功', 'fa-circle-check', statsData.succeededReplies || 0, '已回复成功写入 DB', 'done'),
   ];
 
   const visitLane = [
@@ -231,7 +231,6 @@ function renderReplyBranchLane({ activeStageId, trunk, branches }) {
         <div class="lane-branch-off">
           <div class="branch-stem" aria-hidden="true">
             <span class="stem-line"></span>
-            <span class="stem-junction"></span>
           </div>
           <div class="branch-nodes">
             ${branches.map(point => renderTimelinePoint(point, activeStageId)).join('')}

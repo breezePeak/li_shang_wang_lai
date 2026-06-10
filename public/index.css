@@ -574,14 +574,14 @@ body {
 
 .lane-trunk .timeline-point {
   flex-shrink: 0;
-  width: 90px !important;
+  width: 98px !important;
 }
 
 .trunk-connector {
   display: flex;
   align-items: flex-start;
   flex-shrink: 0;
-  width: 36px;
+  width: 40px;
   padding-top: 13px;
 }
 
@@ -589,7 +589,6 @@ body {
   flex: 1;
   height: 2px;
   background: rgba(31, 109, 120, 0.22);
-  position: relative;
 }
 
 .connector-arrow {
@@ -616,7 +615,7 @@ body {
   flex-shrink: 0;
   display: flex;
   justify-content: center;
-  margin-left: 22px;
+  margin-left: 140px;
 }
 
 .stem-line {
@@ -629,29 +628,18 @@ body {
   border-radius: 1px;
 }
 
-.stem-junction {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  width: 48px;
-  height: 2px;
-  background: rgba(31, 109, 120, 0.14);
-  border-radius: 1px;
-  transform: translateX(0);
-}
-
 .branch-nodes {
   display: flex;
   align-items: flex-start;
-  gap: 22px;
+  gap: 16px;
   flex: 1;
   padding-top: 4px;
   padding-left: 10px;
 }
 
 .branch-nodes .timeline-point {
-  width: 90px !important;
-  min-height: 68px !important;
+  width: 98px !important;
+  min-height: 72px !important;
   opacity: 0.82;
   transition: opacity 180ms ease, transform 180ms ease;
 }
@@ -663,9 +651,9 @@ body {
 }
 
 .branch-nodes .point-dot {
-  width: 28px !important;
-  height: 28px !important;
-  font-size: 11px !important;
+  width: 30px !important;
+  height: 30px !important;
+  font-size: 12px !important;
 }
 
 .branch-nodes .point-copy strong {
@@ -674,11 +662,11 @@ body {
 
 .branch-nodes .point-count {
   top: -4px !important;
-  left: 20px !important;
-  min-width: 20px !important;
-  height: 18px !important;
+  left: 22px !important;
+  min-width: 22px !important;
+  height: 20px !important;
   font-size: 10px !important;
-  padding: 0 5px !important;
+  padding: 0 6px !important;
 }
 
 .lane-spark {
