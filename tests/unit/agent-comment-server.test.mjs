@@ -60,7 +60,7 @@ describe('agent comment server helpers', () => {
     expect(prompt).toContain('评论生成规则与安全边界');
     expect(prompt).toContain('## Agent 存在感');
     expect(prompt).toContain('## Agent 人格');
-    expect(prompt).toContain('你的名字叫赫妹儿');
+    expect(prompt).not.toContain('你的名字叫赫妹儿');
     expect(prompt).toContain('可以自然沿用这套自身配置');
     expect(prompt).toContain('项目规则只负责安全边界，不覆盖 Agent 自己的人格');
     expect(prompt).toContain('轻量幽默、语气词、颜文字或少量 emoji');
@@ -94,7 +94,7 @@ describe('agent comment server helpers', () => {
     expect(prompt).toContain('评论生成规则与安全边界');
     expect(prompt).toContain('## Agent 存在感');
     expect(prompt).toContain('## Agent 人格');
-    expect(prompt).toContain('你的名字叫赫妹儿');
+    expect(prompt).not.toContain('你的名字叫赫妹儿');
     expect(prompt).toContain('可以自然沿用这套自身配置');
     expect(prompt).toContain('项目规则只负责安全边界，不覆盖 Agent 自己的人格');
     expect(prompt).toContain('轻量幽默、语气词、颜文字或少量 emoji');
