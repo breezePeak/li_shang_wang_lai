@@ -23,7 +23,7 @@
 
 body {
   margin: 0;
-  height: 100vh;
+  min-height: 100vh;
   width: 100vw;
   font-family: var(--font-family);
   background:
@@ -31,13 +31,14 @@ body {
     radial-gradient(circle at 85% 12%, rgba(211, 155, 52, 0.15), transparent 25%),
     linear-gradient(180deg, #f8f4ea 0%, #efe8d8 100%);
   color: var(--text);
-  overflow: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
   padding-top: 16px;
+  padding-bottom: 16px;
 }
 
 .app-header {
@@ -191,24 +192,22 @@ body {
   position: relative;
   z-index: 10;
   width: 80vw;
-  height: calc(80vh - 54px);
   min-width: 1080px;
-  min-height: 616px;
+  min-height: 600px;
   margin: 0 auto;
   padding: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  flex: 1 0 auto;
   border-radius: 28px;
   border: 1px solid rgba(76, 99, 83, 0.10);
   background: rgba(255, 252, 244, 0.50);
   box-shadow: 0 28px 80px rgba(58, 53, 34, 0.12);
 }
 
-/* 宽屏大河道面板（高度占比提高至屏幕高度的 2/3 - 65vh） */
+/* 宽屏大河道面板 */
 .river-board {
   width: 100%;
-  height: 32%;
   min-height: 205px;
   margin: 0;
   padding: 10px 22px 0;
@@ -223,6 +222,7 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  flex-shrink: 0;
   z-index: 10;
 }
 
@@ -1211,8 +1211,8 @@ body {
 
 .stage-dashboard {
   width: 100%;
-  height: 68%;
-  min-height: 0;
+  flex: 1 0 auto;
+  min-height: 350px;
   padding: 14px 22px 22px;
   display: grid;
   grid-template-columns: minmax(260px, 0.55fr) minmax(0, 2fr);
@@ -1221,8 +1221,8 @@ body {
     linear-gradient(180deg, rgba(255, 252, 244, 0.72), rgba(250, 245, 234, 0.92)),
     radial-gradient(circle at 78% 20%, rgba(31, 109, 120, 0.06), transparent 30%);
   border-top: 1px solid rgba(58, 78, 63, 0.10);
+  border-radius: 0 0 28px 28px;
   box-sizing: border-box;
-  overflow: hidden;
 }
 
 /* 三列公用布局 */

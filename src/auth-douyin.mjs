@@ -26,7 +26,17 @@ async function hasDouyinLogin(context) {
 }
 
 async function main() {
-  console.log('[auth] 打开浏览器供扫码登录...');
+  console.log('[auth] 检查现有登录态...');
+  const headlessCtx = await createBrowserContext({ headless: true });
+  const alreadyLoggedIn = await hasDouyinLogin(headlessCtx.context);
+  await headlessCtx.browser.close();
+
+  if (alreadyLoggedIn) {
+    console.log('[auth] 已登录，无需重新认证。');
+    return;
+  }
+
+  console.log('[auth] 未登录，打开浏览器供扫码登录...');
   const { browser, context } = await createBrowserContext({ headless: false });
   const page = await context.newPage();
   await page.goto(AUTH_URL, { waitUntil: 'domcontentloaded' });

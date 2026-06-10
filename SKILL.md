@@ -11,14 +11,14 @@ Agent 生成或填写评论时，必须遵守 `references/comment-safety-rules.m
 
 ## 基本原则
 
-- 只调用项目已有 CLI，不直接写 Playwright 脚本。
-- 不直接修改 SQLite。
-- 不绕过登录、验证码、滑块或平台风控。
-- 所有 `npm run` 参数必须放在 `--` 后面。
-- 命令失败后停止后续真实动作，先读取错误并诊断。
-- 评论回复由 `comments:execute --days N --limit M` 从数据库读取并执行。
-- 回访必须带 `--execute` 才真实点赞和评论。
-- CLI 在进程内调用 Hermes/OpenClaw 生成 `reply_text` 或回访评论文本，不控制浏览器之外的额外服务，不编辑中间文件。
+1. **登录检查**：每次任务执行前，Agent 必须先运行 `npm run auth` 确认登录态，已登录再继续后续步骤；未登录则终止并提示用户扫码。
+2. **只走 CLI**：Agent 只通过项目已有 `npm run` 命令执行操作，不得直接编写 Playwright/浏览器自动化脚本。
+3. **不碰数据库**：Agent 不得直接修改 SQLite。
+4. **不绕风控**：Agent 不得绕过登录、验证码、滑块或任何平台风控措施。
+5. **失败即停**：任何命令失败后，Agent 必须立即停止后续真实动作，先读取错误诊断，不得盲目重试。
+6. **严格遵循流程**：Agent 必须严格按照下方"评论回复流程"和"回访流程"的步骤执行，不得跳过、合并或自行变通。
+7. **不编辑中间文件**：Agent 不得编辑任务 ID 或任何中间文件。
+8. **安全与阻断**：不发送空评论、广告、引流、互关、互赞、骚扰内容。页面未稳定、登录失效、点赞状态未知、重复执行风险、发送结果未确认时，必须阻断。
 
 ## 用户意图映射
 
@@ -43,23 +43,25 @@ npm run interactions:scan -- --type comment --days N --max-count M --prepare-rep
 npm run comments:execute -- --days N --limit M
 ```
 
-`comments:execute` 会从 `work_comments` 查询待回评评论，在当前进程内调用 Hermes/OpenClaw 生成并写回 `reply_text`，然后打开待回复评论所属的抖音作品页，在作品评论区定位目标评论；优先结合 `cid/comment_id` 与 `/aweme/v1/web/comment/list/` 做确认，唯一命中后点击“回复”、填写、发送并校验，不再进入创作者评论管理页。
+`comments:execute` 从 `work_comments` 读取待回评评论，在当前进程内调用 Hermes/OpenClaw 生成并写回 `reply_text`，然后打开待回复评论所属的抖音作品页，在作品评论区定位目标评论；优先结合 `cid/comment_id` 与 `/aweme/v1/web/comment/list/` 做确认，唯一命中后点击“回复”、填写、发送并校验，不再进入创作者评论管理页。
 
 ## 回访流程
 
-先扫描入库并准备待回访 DB 任务：
+> **Agent 必须按以下步骤严格执行，不得跳步或自行变通。**
+
+**步骤 1**：扫描互动数据并入库，准备待回访任务：
 
 ```bash
 npm run interactions:scan -- --days N --max-count M --prepare-visits
 ```
 
-然后执行回访：
+**步骤 2**：执行回访（点赞 + 评论）：
 
 ```bash
 npm run visit:run -- --execute
 ```
 
-执行阶段会从 `return_visit_tasks` 读取任务，打开目标用户主页一次，监听 `/aweme/v1/web/aweme/post/` 主页作品列表 API；有可用的对方作品 `workId` 时优先匹配并点击目标作品，否则选择主页首个非置顶作品，进入作品页后在当前进程内调用 Hermes/OpenClaw 生成回访评论，再由 CLI 填写并提交。
+`visit:run` 从 `return_visit_tasks` 读取任务，打开目标用户主页，选择作品，生成回访评论并填写提交。
 
 不带 `--execute` 时只能 dry-run，不得真实点赞或评论。
 
