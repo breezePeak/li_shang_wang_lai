@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { detectWorkPresentationKind } from '../../src/services/return-visit-executor.mjs';
+import { detectWorkPresentationKind, waitForInteractionWatchGate } from '../../src/services/return-visit-executor.mjs';
 
 describe('return-visit executor work presentation detection', () => {
   it('modal_id 图文页会被识别为 note-like 页面', async () => {
@@ -24,5 +24,35 @@ describe('return-visit executor work presentation detection', () => {
     expect(result.isModalPage).toBe(true);
     expect(result.isNotePage).toBe(false);
     expect(result.hasVideoElement).toBe(true);
+  });
+});
+
+describe('return-visit executor interaction watch gate', () => {
+  it('full policy only waits the configured interaction gate before continuing', async () => {
+    const page = {
+      evaluate: vi
+        .fn()
+        .mockResolvedValueOnce({ duration: 120, paused: false, currentTime: 0 })
+        .mockResolvedValueOnce(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const waited = await waitForInteractionWatchGate(page, 'full', [3, 3]);
+
+    expect(waited).toBe(3);
+    expect(page.waitForTimeout).toHaveBeenCalledTimes(1);
+    expect(page.waitForTimeout).toHaveBeenCalledWith(3000);
+  });
+
+  it('skips the interaction gate when no video is present', async () => {
+    const page = {
+      evaluate: vi.fn().mockResolvedValue(null),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const waited = await waitForInteractionWatchGate(page, 'seconds', [5, 5]);
+
+    expect(waited).toBe(0);
+    expect(page.waitForTimeout).not.toHaveBeenCalled();
   });
 });

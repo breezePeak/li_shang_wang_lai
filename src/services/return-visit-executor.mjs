@@ -66,34 +66,75 @@ export async function waitRandom(page, range, fallbackMin, fallbackMax) {
   return ms;
 }
 
+async function ensureVideoPlaybackStarted(page) {
+  const videoInfo = await page.evaluate(() => {
+    const video = document.querySelector('video');
+    if (!video) return null;
+    return {
+      duration: Number(video.duration || 0),
+      paused: !!video.paused,
+      currentTime: Number(video.currentTime || 0),
+    };
+  });
+
+  if (!videoInfo) {
+    console.log('[return-visit:watch] 页面上未找到 video 元素，自动跳过播放等待逻辑');
+    return null;
+  }
+
+  await page.evaluate(() => {
+    const video = document.querySelector('video');
+    if (video && video.paused) {
+      video.play().catch(() => {});
+    }
+  });
+
+  return videoInfo;
+}
+
+export async function waitForInteractionWatchGate(page, watchPolicy = 'seconds', watchSeconds = [5, 8]) {
+  try {
+    const videoInfo = await ensureVideoPlaybackStarted(page);
+    if (!videoInfo) return 0;
+
+    const duration = Number(videoInfo.duration || 0);
+    let [min, max] = normalizeRange(watchSeconds, 5, 8);
+    let targetSeconds = randomInRange(min, max);
+
+    if (duration > 0 && targetSeconds > duration) {
+      targetSeconds = Math.max(1, Math.floor(Math.max(duration - 1, duration * 0.75)));
+      console.log(`[return-visit:watch] 视频总时长 (${duration.toFixed(1)}s) 短于门槛时长。避免触发连播，调整为 ${targetSeconds} 秒后进入互动...`);
+    } else if (duration > 0 && targetSeconds >= Math.max(1, duration - 0.5)) {
+      targetSeconds = Math.max(1, Math.floor(Math.max(duration - 1, duration * 0.75)));
+      console.log(`[return-visit:watch] 互动门槛接近完播 (${duration.toFixed(1)}s)。避免触发连播，调整为 ${targetSeconds} 秒后进入互动...`);
+    } else if (watchPolicy === 'full') {
+      console.log(`[return-visit:watch] full 模式改为“最短观看后互动”。视频继续自然播放，${targetSeconds} 秒后进入点赞评论...`);
+    } else if (duration > 0) {
+      console.log(`[return-visit:watch] 最短观看门槛。视频时长: ${duration.toFixed(1)}s，等待 ${targetSeconds} 秒后进入互动...`);
+    } else {
+      console.log(`[return-visit:watch] 最短观看门槛。视频时长未知，等待 ${targetSeconds} 秒后进入互动...`);
+    }
+
+    await page.waitForTimeout(targetSeconds * 1000);
+    console.log(`[return-visit:watch] 已达到互动门槛，共观看 ${targetSeconds} 秒。`);
+    return targetSeconds;
+  } catch (err) {
+    console.error(`[return-visit:watch] 互动门槛等待执行异常: ${err.message}`);
+    return 0;
+  }
+}
+
 /**
  * 新增: 控制视频播放观看频率与时长
  */
 export async function handleVideoWatch(page, watchPolicy = 'seconds', watchSeconds = [5, 8]) {
   try {
-    const videoInfo = await page.evaluate(() => {
-      const video = document.querySelector('video');
-      if (!video) return null;
-      return {
-        duration: video.duration || 0,
-        paused: video.paused,
-        currentTime: video.currentTime || 0
-      };
-    });
-
+    const videoInfo = await ensureVideoPlaybackStarted(page);
     if (!videoInfo) {
-      console.log('[return-visit:watch] 页面上未找到 video 元素，自动跳过播放等待逻辑');
       return;
     }
 
     const duration = Number(videoInfo.duration || 0);
-    // 若视频处于暂停状态，自动尝试唤醒播放
-    await page.evaluate(() => {
-      const video = document.querySelector('video');
-      if (video && video.paused) {
-        video.play().catch(() => {});
-      }
-    });
 
     if (watchPolicy === 'full') {
       console.log(`[return-visit:watch] 完播模式启动。视频总时长: ${duration.toFixed(1)}s，开始等待播放结束...`);
@@ -648,7 +689,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   const openedWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_open');
   if (openedWorkCheck) return openedWorkCheck;
 
-  // [2/5] 检测页面类型 + 观看视频（与评论生成并行）
+  // [2/5] 检测页面类型 + 启动视频播放/最短观看门槛（与评论生成并行）
   const presentation = await detectWorkPresentationKind(page, resolvedWork);
   const currentUrl = presentation.currentUrl;
   const isNotePage = presentation.isNotePage;
@@ -693,13 +734,13 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     })();
   }
 
-  // 观看视频（与评论生成并行）
+  // 最短观看门槛（与评论生成并行）
   if (!isNotePage) {
-    console.error(`${logTag} [2/5] 观看视频中... policy=${watchPolicy} seconds=${watchSeconds}`);
-    await handleVideoWatch(page, watchPolicy, watchSeconds);
-    console.error(`${logTag} [2/5] 观看完成`);
+    console.error(`${logTag} [2/5] 等待最短观看门槛... policy=${watchPolicy} seconds=${watchSeconds}`);
+    await waitForInteractionWatchGate(page, watchPolicy, watchSeconds);
+    console.error(`${logTag} [2/5] 已达到互动门槛，进入点赞评论阶段`);
   } else {
-    console.error(`${logTag} [2/5] 图文/note，跳过观看`);
+    console.error(`${logTag} [2/5] 图文/note，跳过观看门槛`);
   }
 
   // 等待评论生成完成
@@ -725,8 +766,8 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     commentText = generated;
   }
 
-  const afterWatchWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_watch');
-  if (afterWatchWorkCheck) return afterWatchWorkCheck;
+  const afterWatchGateWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_watch');
+  if (afterWatchGateWorkCheck) return afterWatchGateWorkCheck;
 
   const nextLikeStatus = { value: task.likeStatus || 'pending' };
   const nextCommentStatus = { value: task.commentStatus || 'pending' };
