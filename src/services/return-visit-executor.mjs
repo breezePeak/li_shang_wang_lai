@@ -141,6 +141,30 @@ export async function handleVideoWatch(page, watchPolicy = 'seconds', watchSecon
   }
 }
 
+export async function pauseCurrentVideo(page) {
+  try {
+    const result = await page.evaluate(() => {
+      const video = document.querySelector('video');
+      if (!video) return { found: false, paused: false };
+      if (!video.paused) {
+        video.pause();
+      }
+      return {
+        found: true,
+        paused: video.paused,
+        currentTime: Number(video.currentTime || 0),
+      };
+    });
+    if (result?.found) {
+      console.error(`[return-visit:watch] 评论阶段前暂停视频 paused=${result.paused} currentTime=${Number(result.currentTime || 0).toFixed(1)}s`);
+    }
+    return result;
+  } catch (err) {
+    console.error(`[return-visit:watch] 暂停视频失败: ${err.message}`);
+    return { found: false, paused: false };
+  }
+}
+
 export async function detectWorkPresentationKind(page, resolvedWork = {}) {
   const currentUrl = typeof page?.url === 'function' ? page.url() : '';
   const awemeType = String(resolvedWork?.awemeType || '').trim();
@@ -219,13 +243,17 @@ async function blockIfCurrentWorkChanged(page, task, resolvedWork, phase, status
   };
 }
 
-export async function postReturnVisitComment(page, text, presentation = {}, { execute = false, expectedWorkId = '' } = {}) {
+export async function postReturnVisitComment(page, text, presentation = {}, { execute = false, expectedWorkId = '', commentBoxReady = false } = {}) {
   if (presentation?.isModalPage) {
     console.error(`[comment] 发评论: modal页, 先打开评论区...`);
-    const modalReady = await waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true });
-    if (!modalReady?.ok) {
-      console.error(`[comment] [FAIL] modal未就绪: ${modalReady?.message || modalReady?.code}`);
-      return { ok: false, code: modalReady?.code, message: modalReady?.message || 'work_modal_not_ready', data: modalReady?.data };
+    if (!commentBoxReady) {
+      const modalReady = await waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true });
+      if (!modalReady?.ok) {
+        console.error(`[comment] [FAIL] modal未就绪: ${modalReady?.message || modalReady?.code}`);
+        return { ok: false, code: modalReady?.code, message: modalReady?.message || 'work_modal_not_ready', data: modalReady?.data };
+      }
+    } else {
+      console.error('[comment] 复用已就绪的评论区，跳过重复打开');
     }
     if (expectedWorkId) {
       const workCheck = await verifyCurrentReturnVisitWork(page, { workId: expectedWorkId }, 'inside_comment_send');
@@ -778,6 +806,8 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   console.error(`${logTag} [4/5] 等待发评论... delay=${waitBetweenLikeAndCommentMs}ms`);
   await waitRandom(page, waitBetweenLikeAndCommentMs, 2000, 6000);
 
+  await pauseCurrentVideo(page);
+
   const beforeCommentBoxWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_comment_box', {
     likeStatus: nextLikeStatus.value,
     commentStatus: nextCommentStatus.value,
@@ -819,7 +849,11 @@ export async function executeReturnVisitTask(page, task, options = {}) {
       data: visibleBeforeSend,
     };
   }
-  const commentResult = await postReturnVisitComment(page, commentText, presentation, { execute: true, expectedWorkId: resolvedWork.workId });
+  const commentResult = await postReturnVisitComment(page, commentText, presentation, {
+    execute: true,
+    expectedWorkId: resolvedWork.workId,
+    commentBoxReady: true,
+  });
   if (!commentResult.ok) {
     console.error(`${logTag} [5/5] [FAIL] 评论失败: ${commentResult.message} url=${page.url()}`);
     console.error(`${logTag} 评论失败详情:`, JSON.stringify(commentResult.data || {}));
