@@ -190,6 +190,29 @@ function isTimeBeyondDays(timeText, days) {
   return false;
 }
 
+export function splitWorkCommentReplyStatus(candidates = []) {
+  const replied = [];
+  const unreplied = [];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const normalized = {
+      actorName: candidate.actorName || '',
+      commentText: candidate.commentText || '',
+      cid: candidate.cid || '',
+    };
+    if (candidate.hasAuthorReply) {
+      replied.push(normalized);
+      continue;
+    }
+    if (candidate.hasReplyButton) {
+      unreplied.push(normalized);
+    }
+  }
+
+  return { replied, unreplied };
+}
+
 async function checkSingleWork(page, aweme, profileUrl, { apply = false, days = 7 } = {}) {
   const awemeId = String(aweme?.aweme_id || '');
   const title = String(aweme?.desc || aweme?.preview_title || '').slice(0, 45);
@@ -258,33 +281,28 @@ async function checkSingleWork(page, aweme, profileUrl, { apply = false, days = 
     }
 
     const allList = [...allCandidates.values()];
-    const unreplied = allList
-      .filter(c => c.hasReplyButton && !c.hasAuthorReply)
-      .map(c => ({
-        actorName: c.actorName || '',
-        commentText: c.commentText || '',
-        cid: c.cid || '',
-      }));
-
-    const repliedCount = allList.filter(c => c.hasAuthorReply).length;
+    const { replied, unreplied } = splitWorkCommentReplyStatus(allList);
+    const repliedCount = replied.length;
+    let appliedCount = 0;
 
     if (apply) {
-      for (const uc of unreplied) {
+      for (const rc of replied) {
         const existing = findCommentByWorkActorAndText({
           workId: awemeId,
           modalId: awemeId,
-          actorName: uc.actorName,
-          commentText: uc.commentText,
+          actorName: rc.actorName,
+          commentText: rc.commentText,
         });
         if (existing && existing.reply_status === 'pending') {
           markCommentManuallyReplied(existing.id, 'author already replied (check script)');
+          appliedCount++;
         }
       }
     }
 
-    return { awemeId, title, createTime, totalCandidates: allList.length, repliedCount, unrepliedCount: unreplied.length, unreplied, error: '' };
+    return { awemeId, title, createTime, totalCandidates: allList.length, repliedCount, unrepliedCount: unreplied.length, unreplied, appliedCount, error: '' };
   } catch (err) {
-    return { awemeId, title, createTime, error: err.message, totalCandidates: 0, repliedCount: 0, unrepliedCount: 0, unreplied: [] };
+    return { awemeId, title, createTime, error: err.message, totalCandidates: 0, repliedCount: 0, unrepliedCount: 0, unreplied: [], appliedCount: 0 };
   }
 }
 
@@ -383,7 +401,7 @@ async function main() {
   } else {
     console.log(`\n${'─'.repeat(60)}`);
     console.log(` ${allResults.length}作品  ${totalComments}评论  ${allResults.reduce((s, r) => s + (r.repliedCount || 0), 0)}已回  ${totalUnreplied}待回  ${errors}错误`);
-    if (args.apply) console.log(` (标记 ${allResults.filter(r => r.applied).length} 条)`);
+    if (args.apply) console.log(` (标记 ${allResults.reduce((sum, r) => sum + Number(r.appliedCount || 0), 0)} 条)`);
 
     for (const r of allResults) {
       if (r.unrepliedCount > 0) {

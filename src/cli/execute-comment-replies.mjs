@@ -492,16 +492,23 @@ export function planViewportPendingMatches(pendingItems, visibleCandidates, {
     const apiComment = getCollectorTargetComment(pendingItem, commentListCollector);
     const target = buildTarget(pendingItem, apiComment);
     const availableCandidates = (visibleCandidates || []).filter(candidate => !usedDomIndexes.has(candidate.domIndex));
+    const manualPicked = pickCandidate(
+      availableCandidates.filter(candidate => candidate.hasAuthorReply),
+      target,
+      { requireReplyButton: false }
+    );
+
+    if (manualPicked.ok && manualPicked.candidate) {
+      manualPicked.reason = 'manually_replied';
+      blocked.push({ item: pendingItem, target, picked: manualPicked, blockedReason: 'manually_replied' });
+      continue;
+    }
+
     const picked = pickCandidate(availableCandidates, target);
 
     if (picked.ok && picked.candidate) {
-      if (picked.candidate.hasAuthorReply) {
-        picked.reason = 'manually_replied';
-        blocked.push({ item: pendingItem, target, picked, blockedReason: 'manually_replied' });
-      } else {
-        usedDomIndexes.add(picked.candidate.domIndex);
-        actionable.push({ item: pendingItem, target, picked });
-      }
+      usedDomIndexes.add(picked.candidate.domIndex);
+      actionable.push({ item: pendingItem, target, picked });
       continue;
     }
 

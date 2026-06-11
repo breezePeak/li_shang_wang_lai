@@ -811,6 +811,26 @@ describe('comments:execute single-pass per work', () => {
     expect(plan.actionable).toHaveLength(0);
   });
 
+  it('planViewportPendingMatches 对已出现作者回复的评论直接标记 manually_replied，即使没有回复按钮', () => {
+    const plan = planViewportPendingMatches([
+      { commentId: 1, actorName: 'target-user', commentText: 'same', eventTimeText: '06-01' },
+    ], [
+      {
+        domIndex: 0,
+        cid: '',
+        actorName: 'target-user',
+        commentText: 'same',
+        timeText: '06-01',
+        hasReplyButton: false,
+        hasAuthorReply: true,
+      },
+    ]);
+
+    expect(plan.actionable).toHaveLength(0);
+    expect(plan.blocked).toHaveLength(1);
+    expect(plan.blocked[0].blockedReason).toBe('manually_replied');
+  });
+
   it('planViewportPendingMatches 对唯一 text+actor 的 time_not_verified 仍可阻断', () => {
     const plan = planViewportPendingMatches([
       { commentId: 1, actorName: 'target-user', commentText: 'same', eventTimeText: '06-09' },

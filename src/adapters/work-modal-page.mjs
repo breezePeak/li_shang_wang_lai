@@ -1683,14 +1683,19 @@ export function buildWorkReplyTarget(item = {}, apiComment = null) {
   };
 }
 
-export function pickWorkCommentCandidate(candidates = [], target = {}) {
+export function pickWorkCommentCandidate(candidates = [], target = {}, options = {}) {
+  const { requireReplyButton = true } = options;
   const targetCommentId = String(target.targetCommentId || '').trim();
   const actorName = normalizeActorName(target.actorName);
   const commentText = normalizeInlineText(target.commentText);
   const eventTimeText = normalizeInlineText(target.eventTimeText);
   const strictTime = eventTimeText && !isRelativeTimeText(eventTimeText);
 
-  const visibleCandidates = (candidates || []).filter(candidate => candidate && candidate.hasReplyButton);
+  const visibleCandidates = (candidates || []).filter(candidate => {
+    if (!candidate) return false;
+    if (!requireReplyButton) return true;
+    return candidate.hasReplyButton;
+  });
   if (visibleCandidates.length === 0) {
     return { ok: false, reason: 'not_found' };
   }
