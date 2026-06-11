@@ -260,6 +260,66 @@ describe('回复输入打字效果', () => {
       else process.env.LISHANGWANGLAI_REPLY_TYPING = originalTyping;
     }
   });
+
+  it('postWorkModalComment 优先按评论发布请求成功确认', async () => {
+    const originalTyping = process.env.LISHANGWANGLAI_REPLY_TYPING;
+    process.env.LISHANGWANGLAI_REPLY_TYPING = '0';
+
+    const listeners = new Map();
+    let phase = 'prepare';
+    const page = {
+      on: vi.fn((event, handler) => listeners.set(event, handler)),
+      off: vi.fn((event, handler) => {
+        if (listeners.get(event) === handler) listeners.delete(event);
+      }),
+      evaluate: vi.fn(async (fn, arg) => {
+        if (arg?.text && arg?.method) {
+          phase = 'filled';
+          return { ok: true, method: arg.method, sendButtonVisible: true };
+        }
+        if (arg?.replyNeedle && arg?.replyPrefix) {
+          return { visible: false, inputCleared: false, commentPreview: '' };
+        }
+        return { ok: true, phase };
+      }),
+      locator: vi.fn(() => ({
+        last: () => ({
+          waitFor: vi.fn(async () => {}),
+          click: vi.fn(async () => {
+            const handler = listeners.get('response');
+            if (handler) {
+              await handler({
+                url: () => 'https://www.douyin.com/aweme/v1/web/comment/publish/?aweme_id=1',
+                status: () => 200,
+                request: () => ({
+                  method: () => 'POST',
+                  postData: () => 'text=程序员快乐时刻：脚本跑通了',
+                }),
+                json: async () => ({ status_code: 0, comment: { cid: 'cid-modal-1' } }),
+              });
+            }
+          }),
+        }),
+      })),
+      keyboard: {
+        press: vi.fn(async () => {}),
+        insertText: vi.fn(async () => {}),
+      },
+      waitForTimeout: vi.fn(async () => {}),
+    };
+
+    try {
+      const result = await postWorkModalComment(page, '程序员快乐时刻：脚本跑通了');
+      expect(result.ok).toBe(true);
+      expect(result.data.unconfirmed).toBe(false);
+      expect(result.data.verified).toBe(true);
+      expect(result.data.method).toBe('submit_api_success');
+      expect(result.data.submitApi.commentId).toBe('cid-modal-1');
+    } finally {
+      if (originalTyping === undefined) delete process.env.LISHANGWANGLAI_REPLY_TYPING;
+      else process.env.LISHANGWANGLAI_REPLY_TYPING = originalTyping;
+    }
+  });
 });
 
 describe('parseDouyinTimeText', () => {

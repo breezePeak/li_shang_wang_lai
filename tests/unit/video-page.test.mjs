@@ -83,6 +83,51 @@ describe('video-page adapters mock testing', () => {
     expect(res.data.text).toBe('精彩视频，点赞！');
   });
 
+  it('postVideoComment prefers comment submit api success over page fallback', async () => {
+    const listeners = new Map();
+    const mockPage = {
+      on: vi.fn((event, handler) => listeners.set(event, handler)),
+      off: vi.fn((event, handler) => {
+        if (listeners.get(event) === handler) listeners.delete(event);
+      }),
+      locator: vi.fn().mockImplementation((selector) => {
+        const locator = createMockLocator(selector, [
+          '[data-e2e="video-comment"]',
+          '[contenteditable="true"][data-placeholder*="评"]',
+          'span.Law8JZNu',
+        ]);
+        if (selector === 'span.Law8JZNu') {
+          locator.click = vi.fn(async () => {
+            const handler = listeners.get('response');
+            if (handler) {
+              await handler({
+                url: () => 'https://www.douyin.com/aweme/v1/web/comment/publish/?aweme_id=1',
+                status: () => 200,
+                request: () => ({
+                  method: () => 'POST',
+                  postData: () => 'text=精彩视频，点赞！',
+                }),
+                json: async () => ({ status_code: 0, comment: { cid: 'cid-1' } }),
+              });
+            }
+          });
+        }
+        return locator;
+      }),
+      evaluate: vi.fn().mockResolvedValue(true),
+      keyboard: {
+        type: vi.fn().mockResolvedValue(undefined),
+        press: vi.fn().mockResolvedValue(undefined),
+      },
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const res = await postVideoComment(mockPage, '精彩视频，点赞！', { execute: true });
+    expect(res.ok).toBe(true);
+    expect(res.data.method).toBe('submit_api_success');
+    expect(res.data.submitApi.commentId).toBe('cid-1');
+  });
+
   it('navigateToVideo 接受 jingxuan modal_id 作品页', async () => {
     const mockPage = {
       goto: vi.fn().mockResolvedValue(undefined),

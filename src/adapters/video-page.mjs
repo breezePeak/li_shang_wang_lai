@@ -1,4 +1,5 @@
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
+import { createCommentSubmitApiWatcher } from './comment-submit-api-listener.mjs';
 
 export const DOUYIN_PLAYER_ACTION_SELECTORS = Object.freeze({
   like: '[data-e2e="video-player-digg"]',
@@ -1413,6 +1414,7 @@ export async function activateCommentComposer(page) {
 }
 
 export async function postVideoComment(page, text, { execute = false } = {}) {
+  let submitWatcher = null;
   try {
     if (!text || !text.trim()) {
       return blocking(
@@ -1431,6 +1433,7 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
     }
 
     const trimmed = text.trim();
+    submitWatcher = createCommentSubmitApiWatcher(page, { expectedText: trimmed });
 
     // 1. 尝试打开评论面板
     let clickCommentPanelSuccess = await ensureCommentPanelOpen(page);
@@ -1528,7 +1531,13 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
     }
 
     console.error('[video-page] 已提交评论');
-    await page.waitForTimeout(2000);
+    const apiConfirmed = await submitWatcher.waitForSuccess({ timeoutMs: 2500 });
+    if (apiConfirmed) {
+      console.error(`[video-page] 评论请求已成功 matchedBy=${apiConfirmed.matchedBy} commentId=${apiConfirmed.commentId || ''}`);
+      return success({ text: trimmed, verified: true, unconfirmed: false, method: 'submit_api_success', submitApi: apiConfirmed });
+    }
+
+    await page.waitForTimeout(600);
 
     const isEmpty = await input.evaluate(el => {
       const text = el.textContent || '';
@@ -1539,12 +1548,14 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
       return success({ text: trimmed, unconfirmed: true });
     }
 
-    return success({ text: trimmed });
+    return success({ text: trimmed, verified: true, unconfirmed: false, method: 'editor_cleared_after_send' });
   } catch (err) {
     return blocking(
       RESULT_CODES.BLOCKED,
       `发表评论异常: ${err.message}`,
       { data: { error: err.message } }
     );
+  } finally {
+    submitWatcher?.stop?.();
   }
 }

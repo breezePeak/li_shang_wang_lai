@@ -2,6 +2,7 @@ import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 import { normalizeDouyinUrl } from '../utils/douyin-url.mjs';
 import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
 import { findScrollableContainerBox, scrollContainerByWheel } from './scroll-container.mjs';
+import { createCommentSubmitApiWatcher } from './comment-submit-api-listener.mjs';
 import path from 'path';
 
 function isTruthyEnv(value) {
@@ -2582,56 +2583,68 @@ export async function postWorkModalComment(page, commentText) {
   }
 
   console.error(`[work-modal] 发送顶层评论: "${commentText.slice(0, 60)}"`);
-  const sent = await sendReplyInWorkModal(page, commentText);
-  if (!sent.ok) return sent;
-
   const replyNeedle = commentText.trim();
-  const replyPrefix = replyNeedle.slice(0, 20);
-  const startedAt = Date.now();
-  let lastState = { visible: false, inputCleared: false };
+  const submitWatcher = createCommentSubmitApiWatcher(page, { expectedText: replyNeedle });
 
-  while (Date.now() - startedAt < 5000) {
-    const state = await page.evaluate(({ replyNeedle, replyPrefix }) => {
-      const commentArea = document.querySelector('.comment-mainContent');
-      const commentTextVisible = (commentArea?.innerText || '').trim();
-      const visible = commentTextVisible.includes(replyNeedle)
-        || (replyPrefix.length >= 5 && commentTextVisible.includes(replyPrefix));
+  try {
+    const sent = await sendReplyInWorkModal(page, commentText);
+    if (!sent.ok) return sent;
 
-      const container = document.querySelector('.comment-input-container') || document.querySelector('.comment-input-inner-container');
-      const editorEl = document.querySelector('[data-return-visit-editor="true"]')
-        || container?.querySelector('[contenteditable="true"], textarea, input[type="text"]');
-      const editorText = (typeof editorEl?.value === 'string' ? editorEl.value : (editorEl?.innerText || editorEl?.textContent || '')).trim();
-      const containerText = (container?.innerText || '').trim();
-      const inputCleared = !editorText.includes(replyPrefix) && !containerText.includes(replyPrefix);
-
-      return {
-        visible,
-        inputCleared,
-        commentPreview: commentTextVisible.slice(0, 200),
-      };
-    }, { replyNeedle, replyPrefix }).catch(() => ({ visible: false, inputCleared: false }));
-
-    lastState = state;
-    if (state.visible) {
-      console.error('[work-modal] 顶层评论已在评论区可见');
-      return success({ ...sent.data, verified: true, unconfirmed: false });
+    const apiConfirmed = await submitWatcher.waitForSuccess({ timeoutMs: 2500 });
+    if (apiConfirmed) {
+      console.error(`[work-modal] 顶层评论请求已成功 matchedBy=${apiConfirmed.matchedBy} commentId=${apiConfirmed.commentId || ''}`);
+      return success({ ...sent.data, verified: true, unconfirmed: false, method: 'submit_api_success', submitApi: apiConfirmed });
     }
 
-    if (state.inputCleared) {
-      console.error('[work-modal] 顶层评论未立即可见，但输入框已清空，按页面已接受发送处理');
-      return success({ ...sent.data, verified: true, unconfirmed: false, method: 'editor_cleared_after_send' });
+    const replyPrefix = replyNeedle.slice(0, 20);
+    const startedAt = Date.now();
+    let lastState = { visible: false, inputCleared: false };
+
+    while (Date.now() - startedAt < 5000) {
+      const state = await page.evaluate(({ replyNeedle, replyPrefix }) => {
+        const commentArea = document.querySelector('.comment-mainContent');
+        const commentTextVisible = (commentArea?.innerText || '').trim();
+        const visible = commentTextVisible.includes(replyNeedle)
+          || (replyPrefix.length >= 5 && commentTextVisible.includes(replyPrefix));
+
+        const container = document.querySelector('.comment-input-container') || document.querySelector('.comment-input-inner-container');
+        const editorEl = document.querySelector('[data-return-visit-editor="true"]')
+          || container?.querySelector('[contenteditable="true"], textarea, input[type="text"]');
+        const editorText = (typeof editorEl?.value === 'string' ? editorEl.value : (editorEl?.innerText || editorEl?.textContent || '')).trim();
+        const containerText = (container?.innerText || '').trim();
+        const inputCleared = !editorText.includes(replyPrefix) && !containerText.includes(replyPrefix);
+
+        return {
+          visible,
+          inputCleared,
+          commentPreview: commentTextVisible.slice(0, 200),
+        };
+      }, { replyNeedle, replyPrefix }).catch(() => ({ visible: false, inputCleared: false }));
+
+      lastState = state;
+      if (state.visible) {
+        console.error('[work-modal] 顶层评论已在评论区可见');
+        return success({ ...sent.data, verified: true, unconfirmed: false, method: 'comment_visible_after_send' });
+      }
+
+      if (state.inputCleared) {
+        console.error('[work-modal] 顶层评论未立即可见，但输入框已清空，按页面已接受发送处理');
+        return success({ ...sent.data, verified: true, unconfirmed: false, method: 'editor_cleared_after_send' });
+      }
+
+      await page.waitForTimeout(400).catch(() => {});
     }
 
-    await page.waitForTimeout(400).catch(() => {});
+    console.error(`[work-modal] 顶层评论发送未确认 visible=${lastState.visible} inputCleared=${lastState.inputCleared}`);
+    return success({
+      ...sent.data,
+      verified: false,
+      unconfirmed: true,
+      verification: lastState,
+    });
+  } finally {
+    submitWatcher.stop();
   }
-
-  console.error(`[work-modal] 顶层评论发送未确认 visible=${lastState.visible} inputCleared=${lastState.inputCleared}`);
-  return success({
-    ...sent.data,
-    verified: false,
-    unconfirmed: true,
-    verification: lastState,
-  });
 }
 
 export async function verifyReplyInWorkModal(page, item, replyText, options = {}) {
