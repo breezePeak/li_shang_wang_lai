@@ -96,8 +96,8 @@ textarea {
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(24, 31, 29, 0.16);
-  backdrop-filter: blur(4px);
+  background:
+    linear-gradient(270deg, rgba(31, 43, 40, 0.08) 0%, rgba(31, 43, 40, 0.04) 14%, rgba(31, 43, 40, 0.01) 28%, rgba(31, 43, 40, 0) 42%);
   opacity: 0;
   pointer-events: none;
   transition: opacity 220ms ease;
@@ -553,7 +553,7 @@ textarea {
   top: 18px;
   right: 18px;
   bottom: 18px;
-  width: clamp(380px, 34vw, 560px);
+  width: clamp(360px, 30vw, 500px);
   min-height: 0;
   overflow: hidden;
   transform: translateX(calc(100% + 28px));
@@ -1002,7 +1002,7 @@ textarea {
 
 @media (max-width: 1220px) {
   .stage-drawer {
-    width: min(560px, calc(100vw - 20px));
+    width: min(500px, calc(100vw - 20px));
     top: 10px;
     right: 10px;
     bottom: 10px;
