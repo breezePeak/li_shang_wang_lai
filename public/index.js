@@ -35,6 +35,7 @@ async function initApp() {
 function bindEvents() {
   document.getElementById('btn-refresh').addEventListener('click', refreshAll);
   document.getElementById('btn-close-drawer').addEventListener('click', closeDrawer);
+  document.getElementById('drawer-backdrop').addEventListener('click', closeDrawer);
   document.getElementById('btn-back-work').addEventListener('click', () => {
     selectedWorkKey = null;
     renderDrawer();
@@ -352,12 +353,14 @@ function closeDrawer() {
 
 function renderDrawer() {
   const drawer = document.getElementById('stage-drawer');
+  const backdrop = document.getElementById('drawer-backdrop');
   const empty = document.getElementById('drawer-empty');
   const frame = document.getElementById('drawer-frame');
   const track = document.getElementById('drawer-track');
 
   if (!selectedStageId) {
     drawer.classList.remove('is-open', 'is-detail-open');
+    backdrop.classList.remove('is-visible');
     empty.style.display = 'flex';
     frame.style.display = 'none';
     return;
@@ -369,6 +372,7 @@ function renderDrawer() {
 
   drawer.classList.add('is-open');
   drawer.classList.toggle('is-detail-open', Boolean(workGroup));
+  backdrop.classList.add('is-visible');
   empty.style.display = 'none';
   frame.style.display = 'flex';
   track.style.transform = workGroup ? 'translateX(-50%)' : 'translateX(0)';

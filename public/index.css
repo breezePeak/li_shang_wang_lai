@@ -93,6 +93,22 @@ textarea {
   margin: 22px auto 28px;
 }
 
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(24, 31, 29, 0.16);
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+  z-index: 18;
+}
+
+.drawer-backdrop.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .topbar {
   display: flex;
   align-items: flex-start;
@@ -248,10 +264,7 @@ textarea {
 .accent-visit strong { color: var(--visit); }
 
 .workspace-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(380px, 0.85fr);
-  gap: 18px;
-  align-items: start;
+  display: block;
 }
 
 .flow-panel,
@@ -536,10 +549,24 @@ textarea {
 }
 
 .stage-drawer {
-  position: sticky;
+  position: fixed;
   top: 18px;
+  right: 18px;
+  bottom: 18px;
+  width: clamp(380px, 34vw, 560px);
+  min-height: 0;
   overflow: hidden;
+  transform: translateX(calc(100% + 28px));
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 260ms ease, opacity 220ms ease;
+  z-index: 24;
+}
+
+.stage-drawer.is-open {
   transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .drawer-empty,
@@ -974,14 +1001,11 @@ textarea {
 .toast.error { background: linear-gradient(135deg, var(--danger), #994733); }
 
 @media (max-width: 1220px) {
-  .workspace-shell {
-    grid-template-columns: 1fr;
-  }
-
   .stage-drawer {
-    position: relative;
-    top: 0;
-    min-height: 640px;
+    width: min(560px, calc(100vw - 20px));
+    top: 10px;
+    right: 10px;
+    bottom: 10px;
   }
 
   .hero-band {
@@ -1006,7 +1030,6 @@ textarea {
 
   .flow-panel,
   .stage-drawer {
-    min-height: auto;
     border-radius: 24px;
   }
 
