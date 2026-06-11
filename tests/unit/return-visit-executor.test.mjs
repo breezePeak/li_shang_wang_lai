@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
+import { resolve } from 'path';
 import { detectWorkPresentationKind, waitForInteractionWatchGate } from '../../src/services/return-visit-executor.mjs';
 
 describe('return-visit executor work presentation detection', () => {
@@ -28,6 +30,30 @@ describe('return-visit executor work presentation detection', () => {
 });
 
 describe('return-visit executor interaction watch gate', () => {
+  it('打开作品后先启动 Agent，再等待观看门槛', () => {
+    const source = fs.readFileSync(resolve(import.meta.dirname, '../../src/services/return-visit-executor.mjs'), 'utf8');
+    const agentStart = source.indexOf('打开作品后立即请求生成评论');
+    const watchGate = source.indexOf('等待最短观看门槛');
+
+    expect(agentStart).toBeGreaterThan(0);
+    expect(watchGate).toBeGreaterThan(agentStart);
+  });
+
+  it('默认只观看 3 秒就进入互动', async () => {
+    const page = {
+      evaluate: vi
+        .fn()
+        .mockResolvedValueOnce({ duration: 120, paused: false, currentTime: 0 })
+        .mockResolvedValueOnce(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const waited = await waitForInteractionWatchGate(page);
+
+    expect(waited).toBe(3);
+    expect(page.waitForTimeout).toHaveBeenCalledWith(3000);
+  });
+
   it('full policy only waits the configured interaction gate before continuing', async () => {
     const page = {
       evaluate: vi

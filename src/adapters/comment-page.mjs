@@ -1,5 +1,6 @@
 import { wait } from '../utils/wait.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
+import { resolveReplyTypingOptions, typeReplyTextWithEffect } from './work-modal-page.mjs';
 
 const COMMENT_PAGE_URL = 'https://creator.douyin.com/creator-micro/interactive/comment';
 
@@ -690,32 +691,71 @@ async function scrollPage(page) {
 
 export async function fillReplyText(page, replyText) {
   try {
-    const filled = await page.evaluate((text) => {
+    const target = await page.evaluate(() => {
+      document.querySelectorAll('[data-lswl-reply-input]').forEach(el => el.removeAttribute('data-lswl-reply-input'));
+
+      function pickVisibleInput(root) {
+        const input = root.querySelector('[contenteditable="true"], textarea, [role="textbox"]');
+        if (!input || input.offsetHeight === 0) return null;
+        input.setAttribute('data-lswl-reply-input', 'true');
+        return input;
+      }
+
       // Find the reply-content container with a visible input
       const replyContainers = document.querySelectorAll('[class*="reply-content"]');
       for (const container of replyContainers) {
         if (container.offsetHeight === 0) continue;
-        const input = container.querySelector('[contenteditable="true"], textarea, [role="textbox"]');
-        if (!input || input.offsetHeight === 0) continue;
-
-        input.focus();
-        input.innerText = text;
-        input.value = text;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        return { filled: true, method: 'reply-content-class' };
+        const input = pickVisibleInput(container);
+        if (input) return { found: true, method: 'reply-content-class' };
       }
 
       // Fallback: any visible contenteditable
       const inputs = document.querySelectorAll('[contenteditable="true"], textarea, [role="textbox"]');
       for (const el of inputs) {
         if (el.offsetHeight === 0) continue;
-        el.focus();
-        el.innerText = text;
-        el.value = text;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        return { filled: true, method: 'fallback-visible' };
+        el.setAttribute('data-lswl-reply-input', 'true');
+        return { found: true, method: 'fallback-visible' };
+      }
+
+      return { found: false };
+    });
+
+    if (target?.found) {
+      const input = page.locator('[data-lswl-reply-input="true"]').last();
+      await input.click();
+      await page.keyboard.press('Control+A').catch(() => {});
+      await page.keyboard.press('Backspace').catch(() => {});
+
+      const typing = await typeReplyTextWithEffect(page, replyText, resolveReplyTypingOptions());
+      const verified = await page.evaluate((text) => {
+        const input = document.querySelector('[data-lswl-reply-input="true"]');
+        if (!input) return { ok: false, reason: 'input_missing' };
+        const actual = (input.value || input.innerText || input.textContent || '').trim();
+        return { ok: actual === String(text || '').trim(), actual: actual.slice(0, 80) };
+      }, replyText);
+
+      if (verified.ok) {
+        console.error(`[comment-page] 填写回复文字成功 (${target.method}/${typing.method})`);
+        await page.waitForTimeout(800);
+        return success({ filled: true, method: typing.method, targetMethod: target.method });
+      }
+      console.error(`[comment-page] 键盘输入后校验失败，回退 DOM 填充: ${verified.reason || verified.actual || ''}`);
+    }
+
+    const filled = await page.evaluate((text) => {
+      const inputs = [
+        ...document.querySelectorAll('[data-lswl-reply-input="true"]'),
+        ...document.querySelectorAll('[class*="reply-content"] [contenteditable="true"], [class*="reply-content"] textarea, [class*="reply-content"] [role="textbox"]'),
+        ...document.querySelectorAll('[contenteditable="true"], textarea, [role="textbox"]'),
+      ];
+      for (const input of inputs) {
+        if (!input || input.offsetHeight === 0) continue;
+        input.focus();
+        input.innerText = text;
+        input.value = text;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        return { filled: true, method: input.hasAttribute('data-lswl-reply-input') ? 'keyboard-target-fallback' : 'dom-fallback' };
       }
 
       return { filled: false };

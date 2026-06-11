@@ -115,19 +115,19 @@ async function main() {
   const pageLoadRetryCount = Number(returnVisitConfig.pageLoadRetryCount ?? 1);
   const maxConsecutiveFailures = Number(returnVisitConfig.maxConsecutiveFailures ?? 3);
   const waitBetweenUsersMs = returnVisitConfig.waitBetweenUsersMs || [8000, 20000];
-  const waitBetweenLikeAndCommentMs = returnVisitConfig.waitBetweenLikeAndCommentMs || [2000, 6000];
+  const waitBetweenLikeAndCommentMs = returnVisitConfig.waitBetweenLikeAndCommentMs || [500, 1200];
   const restEveryTasksRange = getRange(returnVisitConfig.restEveryTasksRange, 8, 12);
   const restDurationMs = returnVisitConfig.restDurationMs || [60000, 180000];
 
   // 映射视频观看策略与秒数默认值
   const watchPolicy = args.watchPolicy || returnVisitConfig.watchPolicy || 'seconds';
-  const watchSecondsRaw = args.watchSeconds || returnVisitConfig.watchSeconds || '5-8';
+  const watchSecondsRaw = args.watchSeconds || returnVisitConfig.watchSeconds || '3';
   const taskResults = [];
   let done = 0;
   let skipped = 0;
   let failed = 0;
 
-  let watchSeconds = [5, 8];
+  let watchSeconds = [3, 3];
   if (typeof watchSecondsRaw === 'string') {
     const parts = watchSecondsRaw.split('-');
     if (parts.length === 2) {

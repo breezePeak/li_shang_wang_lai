@@ -92,13 +92,13 @@ async function ensureVideoPlaybackStarted(page) {
   return videoInfo;
 }
 
-export async function waitForInteractionWatchGate(page, watchPolicy = 'seconds', watchSeconds = [5, 8]) {
+export async function waitForInteractionWatchGate(page, watchPolicy = 'seconds', watchSeconds = [3, 3]) {
   try {
     const videoInfo = await ensureVideoPlaybackStarted(page);
     if (!videoInfo) return 0;
 
     const duration = Number(videoInfo.duration || 0);
-    let [min, max] = normalizeRange(watchSeconds, 5, 8);
+    let [min, max] = normalizeRange(watchSeconds, 3, 3);
     let targetSeconds = randomInRange(min, max);
 
     if (duration > 0 && targetSeconds > duration) {
@@ -127,7 +127,7 @@ export async function waitForInteractionWatchGate(page, watchPolicy = 'seconds',
 /**
  * 新增: 控制视频播放观看频率与时长
  */
-export async function handleVideoWatch(page, watchPolicy = 'seconds', watchSeconds = [5, 8]) {
+export async function handleVideoWatch(page, watchPolicy = 'seconds', watchSeconds = [3, 3]) {
   try {
     const videoInfo = await ensureVideoPlaybackStarted(page);
     if (!videoInfo) {
@@ -159,7 +159,7 @@ export async function handleVideoWatch(page, watchPolicy = 'seconds', watchSecon
         await page.waitForTimeout(1000);
       }
     } else {
-      let [min, max] = normalizeRange(watchSeconds, 5, 8);
+      let [min, max] = normalizeRange(watchSeconds, 3, 3);
       let targetSeconds = randomInRange(min, max);
 
       if (duration > 0 && targetSeconds > duration) {
@@ -653,9 +653,9 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     pageLoadRetryCount = 1,
     maxWorksToCheck = 3,
     maxReferenceComments = 5,
-    waitBetweenLikeAndCommentMs = [2000, 6000],
+    waitBetweenLikeAndCommentMs = [500, 1200],
     watchPolicy = 'seconds',
-    watchSeconds = [5, 8],
+    watchSeconds = [3, 3],
     agentProvider = new LocalAgentProvider(),
   } = options;
 
@@ -689,6 +689,41 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   const openedWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_open');
   if (openedWorkCheck) return openedWorkCheck;
 
+  // 作品一打开并通过上下文校验后，立刻启动 Agent 生成评论。
+  // 后续 3 秒播放门槛、点赞检测/点击都与这段生成并行。
+  commentText = String(task.generatedComment || '').trim();
+  if (commentText && canReuseGeneratedCommentForWork(task, resolvedWork)) {
+    console.error(`[agent] task=${taskId} 复用已生成评论 comment=${commentText}`);
+  } else {
+    if (commentText) {
+      console.error(`[agent] task=${taskId} 丢弃已生成评论: 当前作品上下文已变化`);
+      commentText = '';
+    }
+  }
+
+  // 启动评论生成（后台并行，不阻塞视频观看）
+  let commentGenPromise = null;
+  let commentGenVisibleError = null;
+  if (!commentText) {
+    commentGenPromise = (async () => {
+      try {
+        const visibleForAgent = await refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, 'before_agent');
+        if (!visibleForAgent.ok) {
+          commentGenVisibleError = visibleForAgent;
+          return null;
+        }
+        const commentContext = buildCommentContext(task, visibleForAgent.work);
+        console.error(`[agent] task=${taskId} 打开作品后立即请求生成评论（并行于播放/点赞）`);
+        const text = await agentProvider.generateComment(commentContext);
+        console.error(`[agent] task=${taskId} 评论生成成功 comment=${text}`);
+        return text;
+      } catch (err) {
+        commentGenVisibleError = { ok: false, error: 'agent_comment_failed', reason: err.message };
+        return null;
+      }
+    })();
+  }
+
   // [2/5] 检测页面类型 + 启动视频播放/最短观看门槛（与评论生成并行）
   const presentation = await detectWorkPresentationKind(page, resolvedWork);
   const currentUrl = presentation.currentUrl;
@@ -705,35 +740,6 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     if (beforeWatchWorkCheck) return beforeWatchWorkCheck;
   }
 
-  // 检查是否可复用已生成的评论
-  commentText = String(task.generatedComment || '').trim();
-  if (commentText && canReuseGeneratedCommentForWork(task, resolvedWork)) {
-    console.error(`[agent] task=${taskId} 复用已生成评论 comment=${commentText}`);
-  } else {
-    if (commentText) {
-      console.error(`[agent] task=${taskId} 丢弃已生成评论: 当前作品上下文已变化`);
-      commentText = '';
-    }
-  }
-
-  // 启动评论生成（后台并行，不阻塞视频观看）
-  let commentGenPromise = null;
-  let commentGenVisibleError = null;
-  if (!commentText) {
-    commentGenPromise = (async () => {
-      const visibleForAgent = await refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, 'before_agent');
-      if (!visibleForAgent.ok) {
-        commentGenVisibleError = visibleForAgent;
-        return null;
-      }
-      const commentContext = buildCommentContext(task, visibleForAgent.work);
-      console.error(`[agent] task=${taskId} 请求生成评论（并行于视频观看）`);
-      const text = await agentProvider.generateComment(commentContext);
-      console.error(`[agent] task=${taskId} 评论生成成功 comment=${text}`);
-      return text;
-    })();
-  }
-
   // 最短观看门槛（与评论生成并行）
   if (!isNotePage) {
     console.error(`${logTag} [2/5] 等待最短观看门槛... policy=${watchPolicy} seconds=${watchSeconds}`);
@@ -741,29 +747,6 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     console.error(`${logTag} [2/5] 已达到互动门槛，进入点赞评论阶段`);
   } else {
     console.error(`${logTag} [2/5] 图文/note，跳过观看门槛`);
-  }
-
-  // 等待评论生成完成
-  if (commentGenPromise) {
-    const generated = await commentGenPromise;
-    if (commentGenVisibleError) {
-      console.error(`[visit] task=${taskId} failed reason=${commentGenVisibleError.error} detail=${commentGenVisibleError.reason || ''}`);
-      await saveDebugScreenshot(page, task.taskId, commentGenVisibleError.error || 'visible_work_before_agent');
-      return {
-        ok: false,
-        status: 'failed_generate_comment',
-        error: commentGenVisibleError.error,
-        likeStatus: task.likeStatus || 'pending',
-        commentStatus: task.commentStatus || 'pending',
-        resolvedWork,
-        data: commentGenVisibleError,
-      };
-    }
-    if (!generated) {
-      console.error(`[visit] task=${taskId} failed reason=Agent 生成评论失败`);
-      return { ok: false, status: 'failed_generate_comment', error: 'agent_comment_failed', likeStatus: task.likeStatus || 'pending', commentStatus: task.commentStatus || 'pending', resolvedWork };
-    }
-    commentText = generated;
   }
 
   const afterWatchGateWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_watch');
@@ -862,6 +845,30 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     return { ok: false, status: 'failed_comment', error: boxReady.reason || 'comment_box_not_found', likeStatus: nextLikeStatus.value, commentStatus: 'failed', resolvedWork };
   }
   console.error(`[visit] task=${taskId} 评论框可用`);
+
+  // 评论生成可能仍在后台进行。点赞已经在 3 秒观看门槛后完成，
+  // 到真正发送评论前再等待生成结果，避免 Agent 延迟阻塞点赞动作。
+  if (commentGenPromise) {
+    const generated = await commentGenPromise;
+    if (commentGenVisibleError) {
+      console.error(`[visit] task=${taskId} failed reason=${commentGenVisibleError.error} detail=${commentGenVisibleError.reason || ''}`);
+      await saveDebugScreenshot(page, task.taskId, commentGenVisibleError.error || 'visible_work_before_agent');
+      return {
+        ok: false,
+        status: 'failed_generate_comment',
+        error: commentGenVisibleError.error,
+        likeStatus: nextLikeStatus.value,
+        commentStatus: nextCommentStatus.value,
+        resolvedWork,
+        data: commentGenVisibleError,
+      };
+    }
+    if (!generated) {
+      console.error(`[visit] task=${taskId} failed reason=Agent 生成评论失败`);
+      return { ok: false, status: 'failed_generate_comment', error: 'agent_comment_failed', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork };
+    }
+    commentText = generated;
+  }
 
   if (!commentText) {
     console.error(`[visit] task=${taskId} failed reason=评论文本为空`);

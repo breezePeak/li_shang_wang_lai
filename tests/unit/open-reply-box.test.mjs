@@ -7,6 +7,7 @@ let page = null;
 // Dynamic import for ESM
 let openReplyBox = null;
 let openReplyBoxForComment = null;
+let fillReplyText = null;
 
 beforeAll(async () => {
   browser = await chromium.launch({ headless: true });
@@ -14,6 +15,7 @@ beforeAll(async () => {
   const mod = await import('../../src/adapters/comment-page.mjs');
   openReplyBox = mod.openReplyBox;
   openReplyBoxForComment = mod.openReplyBoxForComment;
+  fillReplyText = mod.fillReplyText;
 });
 
 afterAll(async () => {
@@ -258,5 +260,40 @@ describe('openReplyBox - adapter level', () => {
 
     expect(result.ok).toBe(false);
     expect(result.code).toBe('ACTOR_NAME_NOT_VERIFIED');
+  });
+});
+
+describe('fillReplyText - typing effect', () => {
+  it('uses keyboard typing effect for reply inputs', async () => {
+    const originalTyping = process.env.LISHANGWANGLAI_REPLY_TYPING;
+    const originalDelay = process.env.LISHANGWANGLAI_REPLY_TYPE_DELAY_MS;
+    const originalJitter = process.env.LISHANGWANGLAI_REPLY_TYPE_JITTER_MS;
+    process.env.LISHANGWANGLAI_REPLY_TYPING = '1';
+    process.env.LISHANGWANGLAI_REPLY_TYPE_DELAY_MS = '0';
+    process.env.LISHANGWANGLAI_REPLY_TYPE_JITTER_MS = '0';
+
+    try {
+      await page.setContent(`
+        <html><body>
+          <div class="reply-content">
+            <div contenteditable="true" role="textbox" style="width: 240px; height: 32px;"></div>
+          </div>
+        </body></html>
+      `);
+
+      const result = await fillReplyText(page, '谢谢支持');
+      const text = await page.locator('[role="textbox"]').innerText();
+
+      expect(result.ok).toBe(true);
+      expect(result.data.method).toBe('keyboard_type_effect');
+      expect(text).toBe('谢谢支持');
+    } finally {
+      if (originalTyping === undefined) delete process.env.LISHANGWANGLAI_REPLY_TYPING;
+      else process.env.LISHANGWANGLAI_REPLY_TYPING = originalTyping;
+      if (originalDelay === undefined) delete process.env.LISHANGWANGLAI_REPLY_TYPE_DELAY_MS;
+      else process.env.LISHANGWANGLAI_REPLY_TYPE_DELAY_MS = originalDelay;
+      if (originalJitter === undefined) delete process.env.LISHANGWANGLAI_REPLY_TYPE_JITTER_MS;
+      else process.env.LISHANGWANGLAI_REPLY_TYPE_JITTER_MS = originalJitter;
+    }
   });
 });
