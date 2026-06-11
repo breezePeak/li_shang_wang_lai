@@ -159,6 +159,39 @@ describe('comment list api normalization', () => {
     expect(result.actorFollowerStatus).toBe(2);
   });
 
+  it('extracts author reply info from reply_comment list', () => {
+    const raw = {
+      cid: 'root-1',
+      text: '原评论',
+      reply_comment_total: 2,
+      reply_comment: [
+        {
+          cid: 'reply-author-1',
+          text: '作者回复',
+          label_text: '作者',
+          label_type: 1,
+        },
+        {
+          cid: 'reply-other-1',
+          text: '其他人回复',
+          label_text: '互相关注',
+          label_type: 8,
+        },
+      ],
+      user: {
+        uid: 'u-root',
+        nickname: '原评论用户',
+      },
+    };
+
+    const result = normalizeCommentListItem(raw);
+    expect(result.replyCommentTotal).toBe(2);
+    expect(result.replyCommentCount).toBe(2);
+    expect(result.hasAuthorReply).toBe(true);
+    expect(result.authorReplyCount).toBe(1);
+    expect(result.authorReplyCids).toEqual(['reply-author-1']);
+  });
+
   it('uses uid as fallback for actorProfileKey when sec_uid missing', () => {
     const raw = {
       cid: 'no-sec-uid',

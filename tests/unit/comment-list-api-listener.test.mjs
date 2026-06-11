@@ -128,6 +128,50 @@ describe('comment list api collector', () => {
     collector.stop();
   });
 
+  it('merges duplicate cid updates and preserves author reply info from later responses', async () => {
+    const page = createMockPage();
+    const collector = createCommentListApiCollector(page);
+
+    page.emit('response', {
+      url: () => 'https://www.douyin.com/aweme/v1/web/comment/list/?aweme_id=a1&cursor=0',
+      status: () => 200,
+      json: async () => ({
+        comments: [
+          { cid: 'c1', text: '第一版', user: { nickname: 'u1' }, reply_comment_total: 0, reply_comment: [] },
+        ],
+      }),
+    });
+    await page.waitForTimeout(5);
+
+    page.emit('response', {
+      url: () => 'https://www.douyin.com/aweme/v1/web/comment/list/?aweme_id=a1&cursor=10',
+      status: () => 200,
+      json: async () => ({
+        comments: [
+          {
+            cid: 'c1',
+            text: '第一版',
+            user: { nickname: 'u1' },
+            reply_comment_total: 1,
+            reply_comment: [
+              { cid: 'reply-1', text: '作者回复', label_text: '作者', label_type: 1 },
+            ],
+          },
+        ],
+      }),
+    });
+    await page.waitForTimeout(5);
+
+    const comment = collector.getByCid('c1');
+    expect(comment).toBeTruthy();
+    expect(comment.hasAuthorReply).toBe(true);
+    expect(comment.authorReplyCount).toBe(1);
+    expect(comment.authorReplyCids).toEqual(['reply-1']);
+    expect(collector.getStats().commentCount).toBe(1);
+
+    collector.stop();
+  });
+
   it('waitForComment returns comment when found', async () => {
     const page = createMockPage();
     const collector = createCommentListApiCollector(page);

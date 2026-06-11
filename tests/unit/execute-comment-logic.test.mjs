@@ -831,6 +831,33 @@ describe('comments:execute single-pass per work', () => {
     expect(plan.blocked[0].blockedReason).toBe('manually_replied');
   });
 
+  it('planViewportPendingMatches 优先使用 comment-list API 的 hasAuthorReply 标记 manually_replied', () => {
+    const collector = {
+      getByCid: (cid) => cid === 'api-c1'
+        ? { commentId: 'api-c1', hasAuthorReply: true, authorReplyCount: 1, authorReplyCids: ['r1'] }
+        : null,
+    };
+
+    const plan = planViewportPendingMatches([
+      { commentId: 1, targetCommentId: 'api-c1', actorName: 'target-user', commentText: 'same', eventTimeText: '06-01' },
+    ], [
+      {
+        domIndex: 0,
+        cid: 'api-c1',
+        actorName: 'target-user',
+        commentText: 'same',
+        timeText: '06-01',
+        hasReplyButton: true,
+        hasAuthorReply: false,
+      },
+    ], { commentListCollector: collector });
+
+    expect(plan.actionable).toHaveLength(0);
+    expect(plan.blocked).toHaveLength(1);
+    expect(plan.blocked[0].blockedReason).toBe('manually_replied');
+    expect(plan.blocked[0].picked.matchedBy).toBe('comment_list_api_author_reply');
+  });
+
   it('planViewportPendingMatches 对唯一 text+actor 的 time_not_verified 仍可阻断', () => {
     const plan = planViewportPendingMatches([
       { commentId: 1, actorName: 'target-user', commentText: 'same', eventTimeText: '06-09' },

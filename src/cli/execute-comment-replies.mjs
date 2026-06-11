@@ -491,6 +491,22 @@ export function planViewportPendingMatches(pendingItems, visibleCandidates, {
   for (const pendingItem of pendingItems) {
     const apiComment = getCollectorTargetComment(pendingItem, commentListCollector);
     const target = buildTarget(pendingItem, apiComment);
+
+    if (apiComment?.hasAuthorReply) {
+      blocked.push({
+        item: pendingItem,
+        target,
+        picked: {
+          ok: true,
+          reason: 'manually_replied',
+          matchedBy: 'comment_list_api_author_reply',
+          candidate: null,
+        },
+        blockedReason: 'manually_replied',
+      });
+      continue;
+    }
+
     const availableCandidates = (visibleCandidates || []).filter(candidate => !usedDomIndexes.has(candidate.domIndex));
     const manualPicked = pickCandidate(
       availableCandidates.filter(candidate => candidate.hasAuthorReply),

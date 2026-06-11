@@ -1,5 +1,33 @@
 import { normalizeCommentListItem } from '../domain/comment-list-normalization.mjs';
 
+function mergeNormalizedComment(existing = null, incoming = null) {
+  if (!existing) return incoming;
+  if (!incoming) return existing;
+
+  const authorReplyCidSet = new Set([
+    ...(Array.isArray(existing.authorReplyCids) ? existing.authorReplyCids : []),
+    ...(Array.isArray(incoming.authorReplyCids) ? incoming.authorReplyCids : []),
+  ].filter(Boolean));
+
+  return {
+    ...existing,
+    ...incoming,
+    rawText: existing.rawText || incoming.rawText || '',
+    commentText: existing.commentText || incoming.commentText || '',
+    createTime: existing.createTime || incoming.createTime || null,
+    eventTimeText: existing.eventTimeText || incoming.eventTimeText || '',
+    eventCreatedAt: existing.eventCreatedAt || incoming.eventCreatedAt || null,
+    replyCommentTotal: Math.max(Number(existing.replyCommentTotal || 0), Number(incoming.replyCommentTotal || 0)),
+    replyCommentCount: Math.max(Number(existing.replyCommentCount || 0), Number(incoming.replyCommentCount || 0)),
+    hasAuthorReply: Boolean(existing.hasAuthorReply || incoming.hasAuthorReply),
+    authorReplyCount: authorReplyCidSet.size > 0
+      ? authorReplyCidSet.size
+      : Math.max(Number(existing.authorReplyCount || 0), Number(incoming.authorReplyCount || 0)),
+    authorReplyCids: Array.from(authorReplyCidSet),
+    rawCommentJson: incoming.rawCommentJson || existing.rawCommentJson || '',
+  };
+}
+
 /**
  * 监听浏览器 /aweme/v1/web/comment/list/ 接口响应，收集评论数据。
  * 模式与 notice-api-listener.mjs 一致：
@@ -46,9 +74,10 @@ export function createCommentListApiCollector(page) {
     for (const raw of list) {
       const normalized = normalizeCommentListItem(raw);
       if (!normalized.commentId) continue;
-      if (commentsByCid.has(normalized.commentId)) continue;
-      commentsByCid.set(normalized.commentId, normalized);
-      added++;
+      const existing = commentsByCid.get(normalized.commentId) || null;
+      const merged = mergeNormalizedComment(existing, normalized);
+      commentsByCid.set(normalized.commentId, merged);
+      if (!existing) added++;
     }
 
     meta.responseCount++;
