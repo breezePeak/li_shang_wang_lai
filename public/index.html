@@ -3,139 +3,129 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>礼尚往来 · 流程驾驶舱</title>
-  <link rel="stylesheet" href="index.css?v=2">
+  <title>礼尚往来 · 互动流程图</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="index.css?v=3">
 </head>
 <body>
-  <div class="page-noise"></div>
-  <div class="page-orb orb-a"></div>
-  <div class="page-orb orb-b"></div>
-  <div class="page-fireworks" aria-hidden="true">
-    <span class="bg-firework bg-firework-a"><i></i></span>
-    <span class="bg-firework bg-firework-b"><i></i></span>
-    <span class="bg-firework bg-firework-c"><i></i></span>
-  </div>
-
-  <header class="app-header">
-    <div class="river-brand">
-      <div class="river-brand-mark"><i class="fa-solid fa-timeline"></i></div>
-      <div class="river-brand-text">
-        <h1>礼尚往来</h1>
-        <p>PARALLEL TIMELINE COCKPIT</p>
-      </div>
-    </div>
-
-    <div class="river-meta-container">
-      <div class="meta-frosted-chip">
-        <span class="chip-dot"></span>
-        <span>SQLite WAL</span>
-      </div>
-      <div class="meta-frosted-chip">
-        <span class="chip-label">入库</span>
-        <strong class="chip-value" id="hero-collected-total">0</strong>
-      </div>
-      <div class="meta-frosted-chip">
-        <span class="chip-label">待处理</span>
-        <strong class="chip-value" id="hero-total-tasks">0</strong>
-      </div>
-      <div class="meta-frosted-chip">
-        <span class="chip-label">异常</span>
-        <strong class="chip-value" id="hero-completed-tasks">0</strong>
-      </div>
-      <button class="frosted-refresh-btn" id="btn-refresh">
-        <i class="fa-solid fa-rotate-right"></i>
-        <span>刷新</span>
-      </button>
-    </div>
-  </header>
+  <div class="backdrop-grid" aria-hidden="true"></div>
+  <div class="backdrop-blob blob-a" aria-hidden="true"></div>
+  <div class="backdrop-blob blob-b" aria-hidden="true"></div>
 
   <div class="app-shell">
-    <section class="river-board">
-      <div class="river-scroll">
-        <div class="river-stage-strip" id="river-stage-strip">
-          <!-- 并列时间线：回评和回访同级展示 -->
-          <div class="river-nodes-container" id="river-nodes-container"></div>
+    <header class="topbar">
+      <div class="brand-block">
+        <div class="brand-mark"><i class="fa-solid fa-diagram-project"></i></div>
+        <div class="brand-copy">
+          <span class="brand-eyebrow">Li Shang Wang Lai</span>
+          <h1>互动回评 / 回访流程图</h1>
+          <p>点击任意节点，右侧滑出该节点的数量信息与作品列表，再进入作品明细。</p>
         </div>
+      </div>
+
+      <div class="topbar-actions">
+        <div class="pill">
+          <span>采集</span>
+          <strong id="hero-collected-total">0</strong>
+        </div>
+        <div class="pill">
+          <span>待处理</span>
+          <strong id="hero-total-tasks">0</strong>
+        </div>
+        <div class="pill">
+          <span>异常</span>
+          <strong id="hero-error-total">0</strong>
+        </div>
+        <button class="refresh-btn" id="btn-refresh">
+          <i class="fa-solid fa-rotate-right"></i>
+          <span>刷新</span>
+        </button>
+      </div>
+    </header>
+
+    <section class="hero-band">
+      <div class="hero-card accent-main">
+        <span class="hero-label">通知入库</span>
+        <strong id="summary-collected-total">0</strong>
+        <p>点赞、评论、回复、关注全部先进入数据库。</p>
+      </div>
+      <div class="hero-card accent-reply">
+        <span class="hero-label">回评队列</span>
+        <strong id="summary-reply-total">0</strong>
+        <p>待回评、异常、已完成都统一从作品维度展开。</p>
+      </div>
+      <div class="hero-card accent-visit">
+        <span class="hero-label">回访队列</span>
+        <strong id="summary-visit-total">0</strong>
+        <p>未处理线索、执行中与已归档统一按作品查看。</p>
       </div>
     </section>
 
-    <!-- 下方常驻阶段驾驶台 -->
-    <main class="stage-dashboard" id="detail-cabin">
-      <div class="cabin-column cabin-summary summary-card">
-        <div class="detail-heading">
-          <span class="detail-kicker" id="detail-kicker">STAGE</span>
-          <h3 id="detail-title">阶段加载中...</h3>
-          <p id="detail-description"></p>
+    <main class="workspace-shell">
+      <section class="flow-panel">
+        <div class="panel-head">
+          <div>
+            <span class="section-kicker">Flow Graph</span>
+            <h2>统一的节点 → 作品 → 明细三层流程</h2>
+          </div>
+          <p>左侧流程图只负责选阶段，右侧所有节点都复用同一套推进面板。</p>
         </div>
-        <div class="detail-metrics" id="detail-metrics">
-          <!-- JS 动态填充 metrics -->
-        </div>
-        <div class="detail-categories-head" id="detail-categories-head">
-          <h4><i class="fa-solid fa-layer-group"></i> 流程统计</h4>
-        </div>
-        <div class="detail-categories" id="detail-categories">
-          <!-- JS 动态填充流程分类统计 -->
-        </div>
-      </div>
+        <div id="graph-root" class="graph-root"></div>
+      </section>
 
-      <div class="cabin-column cabin-workspace detail-card">
-        <div class="workspace-toolbar">
-          <div class="workspace-status">
-            <h4 id="workspace-title">当前阶段任务</h4>
-            <p id="workspace-subtitle">按所选流程节点自动切换内容。</p>
-          </div>
-          <div class="workspace-actions" id="workspace-actions">
-            <div class="search-box">
-              <i class="fa-solid fa-magnifying-glass"></i>
-              <input type="text" id="search-input" placeholder="搜索用户、作品、评论...">
-            </div>
-            <div class="select-wrap">
-              <select id="filter-status">
-                <option value="all">所有状态</option>
-                <option value="pending">处理中</option>
-                <option value="ready">待执行</option>
-                <option value="failed">失败</option>
-              </select>
-            </div>
-            <div class="select-wrap">
-              <select id="filter-relation">
-                <option value="all">所有来源</option>
-                <option value="follow">互关</option>
-                <option value="other">其他</option>
-              </select>
-            </div>
-            <div class="view-toggle">
-              <button class="view-btn active" id="btn-view-grid"><i class="fa-solid fa-grip"></i></button>
-              <button class="view-btn" id="btn-view-table"><i class="fa-solid fa-table-list"></i></button>
-            </div>
-          </div>
+      <aside id="stage-drawer" class="stage-drawer">
+        <div class="drawer-empty" id="drawer-empty">
+          <div class="drawer-empty-mark"><i class="fa-solid fa-arrow-pointer"></i></div>
+          <h3>先点一个节点</h3>
+          <p>右侧会滑出该节点的数量信息、作品列表，以及作品下的评论/回访明细。</p>
         </div>
 
-        <div class="workspace-body" id="workspace-body"></div>
-      </div>
+        <div class="drawer-frame" id="drawer-frame">
+          <div class="drawer-head">
+            <div class="drawer-head-copy">
+              <span class="section-kicker" id="drawer-kicker">Stage</span>
+              <h3 id="drawer-title">阶段详情</h3>
+              <p id="drawer-subtitle">按节点查看作品与评论/回访明细。</p>
+            </div>
+            <button class="drawer-close" id="btn-close-drawer" title="关闭">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+
+          <div class="drawer-breadcrumbs" id="drawer-breadcrumbs"></div>
+
+          <div class="drawer-track" id="drawer-track">
+            <section class="drawer-page">
+              <div class="drawer-stats" id="drawer-stats"></div>
+              <div class="list-section">
+                <div class="list-section-head">
+                  <h4>作品列表</h4>
+                  <span id="works-count-text">0 个作品</span>
+                </div>
+                <div class="works-list" id="works-list"></div>
+              </div>
+            </section>
+
+            <section class="drawer-page detail-page">
+              <div class="detail-head">
+                <button class="back-btn" id="btn-back-work">
+                  <i class="fa-solid fa-arrow-left"></i>
+                  <span>返回作品列表</span>
+                </button>
+                <div class="detail-meta" id="work-detail-meta"></div>
+              </div>
+              <div class="item-list" id="work-item-list"></div>
+            </section>
+          </div>
+        </div>
+      </aside>
     </main>
   </div>
 
   <div class="toast-container" id="toast-container"></div>
-
-  <div class="bulk-floating-bar" id="bulk-action-bar">
-    <div class="bulk-bar-content">
-      <div class="bulk-info">
-        <span class="bulk-icon"><i class="fa-solid fa-list-check"></i></span>
-        <span class="bulk-count">已选中 <strong id="selected-count">0</strong> 项</span>
-      </div>
-      <div class="bulk-actions">
-          <button class="btn btn-primary" id="btn-bulk-approve">
-            <i class="fa-solid fa-circle-check"></i> 批量保存待执行
-        </button>
-        <button class="btn btn-danger" id="btn-bulk-skip">
-          <i class="fa-solid fa-circle-xmark"></i> 批量跳过
-        </button>
-        <button class="btn btn-secondary" id="btn-bulk-cancel">取消选择</button>
-      </div>
-    </div>
-  </div>
 
   <script src="index.js"></script>
 </body>
