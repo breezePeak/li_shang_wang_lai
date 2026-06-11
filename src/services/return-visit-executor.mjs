@@ -66,6 +66,57 @@ export async function waitRandom(page, range, fallbackMin, fallbackMax) {
   return ms;
 }
 
+function elapsedMs(startedAt) {
+  return Date.now() - startedAt;
+}
+
+function formatLogFields(fields = {}) {
+  return Object.entries(fields)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(' ');
+}
+
+function logTimedStep(logTag, step, event, fields = {}) {
+  const suffix = formatLogFields(fields);
+  console.error(`${logTag} [timing] step=${step} event=${event}${suffix ? ` ${suffix}` : ''}`);
+}
+
+async function waitWithProgress(promise, { logTag, step, startedAt = Date.now(), intervalMs = 2000, fields = {} } = {}) {
+  logTimedStep(logTag, step, 'start', fields);
+  let settled = false;
+  const wrapped = Promise.resolve(promise).then(
+    value => {
+      settled = true;
+      return { ok: true, value };
+    },
+    error => {
+      settled = true;
+      return { ok: false, error };
+    }
+  );
+
+  while (!settled) {
+    const result = await Promise.race([
+      wrapped,
+      new Promise(resolve => setTimeout(() => resolve({ pending: true }), intervalMs)),
+    ]);
+    if (!result.pending) {
+      logTimedStep(logTag, step, result.ok ? 'done' : 'error', {
+        elapsedMs: elapsedMs(startedAt),
+        ...(result.ok ? {} : { error: result.error?.message || result.error }),
+      });
+      if (!result.ok) throw result.error;
+      return result.value;
+    }
+    logTimedStep(logTag, step, 'waiting', { elapsedMs: elapsedMs(startedAt), ...fields });
+  }
+
+  const result = await wrapped;
+  if (!result.ok) throw result.error;
+  return result.value;
+}
+
 async function ensureVideoPlaybackStarted(page) {
   const videoInfo = await page.evaluate(() => {
     const video = document.querySelector('video');
@@ -330,27 +381,49 @@ export async function postReturnVisitComment(page, text, presentation = {}, { ex
 }
 
 export async function ensureReturnVisitCommentBoxReady(page, presentation = {}) {
+  const startedAt = Date.now();
   if (presentation?.isModalPage) {
+    console.error(`[comment-box] modal: start waitForWorkModal timeoutMs=8000 url=${typeof page?.url === 'function' ? page.url() : ''}`);
+    const modalStartedAt = Date.now();
     const modalReady = await waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true });
+    console.error(`[comment-box] modal: waitForWorkModal done ok=${Boolean(modalReady?.ok)} elapsedMs=${elapsedMs(modalStartedAt)} message=${modalReady?.message || ''} code=${modalReady?.code || ''}`);
     if (!modalReady?.ok) {
       return { ok: false, reason: modalReady?.message || modalReady?.code || 'work_modal_not_ready', data: modalReady?.data };
     }
-    return ensureWorkModalCommentBoxReady(page);
+    const boxStartedAt = Date.now();
+    console.error('[comment-box] modal: start ensureWorkModalCommentBoxReady');
+    const result = await ensureWorkModalCommentBoxReady(page);
+    console.error(`[comment-box] modal: ensureWorkModalCommentBoxReady done ok=${Boolean(result?.ok)} elapsedMs=${elapsedMs(boxStartedAt)} method=${result?.method || ''} reason=${result?.reason || ''} totalElapsedMs=${elapsedMs(startedAt)}`);
+    return result;
   }
 
+  console.error(`[comment-box] video: start ensureCommentPanelOpen url=${typeof page?.url === 'function' ? page.url() : ''}`);
+  const panelStartedAt = Date.now();
   const panelOpen = await ensureCommentPanelOpen(page);
+  console.error(`[comment-box] video: ensureCommentPanelOpen done ok=${Boolean(panelOpen)} elapsedMs=${elapsedMs(panelStartedAt)}`);
   if (!panelOpen) return { ok: false, reason: 'comment_panel_not_open' };
 
+  const findStartedAt = Date.now();
+  console.error('[comment-box] video: start findCommentInput');
   let input = await findCommentInput(page);
+  console.error(`[comment-box] video: findCommentInput done found=${Boolean(input)} elapsedMs=${elapsedMs(findStartedAt)}`);
   if (!input) {
+    const activateStartedAt = Date.now();
+    console.error('[comment-box] video: start activateCommentComposer');
     const activated = await activateCommentComposer(page);
+    console.error(`[comment-box] video: activateCommentComposer done ok=${Boolean(activated?.ok)} elapsedMs=${elapsedMs(activateStartedAt)} reason=${activated?.reason || ''}`);
     if (activated?.ok) {
       await page.waitForTimeout(800);
+      const refindStartedAt = Date.now();
+      console.error('[comment-box] video: start findCommentInput after activate');
       input = await findCommentInput(page);
+      console.error(`[comment-box] video: findCommentInput after activate done found=${Boolean(input)} elapsedMs=${elapsedMs(refindStartedAt)}`);
     }
   }
 
-  return input ? { ok: true, method: 'video_comment_input' } : { ok: false, reason: 'comment_input_not_found' };
+  const result = input ? { ok: true, method: 'video_comment_input' } : { ok: false, reason: 'comment_input_not_found' };
+  console.error(`[comment-box] video: done ok=${result.ok} method=${result.method || ''} reason=${result.reason || ''} totalElapsedMs=${elapsedMs(startedAt)}`);
+  return result;
 }
 
 export function buildCommentContext(task, resolvedWork = {}) {
@@ -664,15 +737,23 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   const logTag = `[visit][${taskId}]`;
 
   let commentText = '';
+  const taskStartedAt = Date.now();
 
   console.error(`${logTag} ========== 开始回访: ${userName} ==========`);
+  logTimedStep(logTag, 'task_total', 'start', { user: userName || '(unknown)' });
 
   // [1/5] 解析作品
   console.error(`${logTag} [1/5] 解析作品: 从用户主页打开目标作品...`);
+  const resolveStartedAt = Date.now();
   const resolved = await resolveWorkForExecution(page, task, {
     pageLoadRetryCount,
     maxWorksToCheck,
     maxReferenceComments,
+  });
+  logTimedStep(logTag, 'resolve_work', resolved.ok ? 'done' : 'error', {
+    elapsedMs: elapsedMs(resolveStartedAt),
+    status: resolved.status || '',
+    reason: resolved.reason || '',
   });
 
   if (!resolved.ok) {
@@ -704,34 +785,77 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   // 启动评论生成（后台并行，不阻塞视频观看）
   let commentGenPromise = null;
   let commentGenVisibleError = null;
+  let commentGenStartedAt = null;
+  let commentGenFinishedAt = null;
   if (!commentText) {
+    commentGenStartedAt = Date.now();
+    logTimedStep(logTag, 'agent_generate_comment', 'start', {
+      phase: 'after_open',
+      workId: resolvedWork.workId || '',
+    });
     commentGenPromise = (async () => {
       try {
+        const contextStartedAt = Date.now();
         const visibleForAgent = await refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, 'before_agent');
+        logTimedStep(logTag, 'agent_visible_context', visibleForAgent.ok ? 'done' : 'error', {
+          elapsedMs: elapsedMs(contextStartedAt),
+          error: visibleForAgent.error || '',
+          reason: visibleForAgent.reason || '',
+        });
         if (!visibleForAgent.ok) {
           commentGenVisibleError = visibleForAgent;
           return null;
         }
         const commentContext = buildCommentContext(task, visibleForAgent.work);
         console.error(`[agent] task=${taskId} 打开作品后立即请求生成评论（并行于播放/点赞）`);
+        const requestStartedAt = Date.now();
         const text = await agentProvider.generateComment(commentContext);
+        commentGenFinishedAt = Date.now();
+        logTimedStep(logTag, 'agent_generate_comment', 'done', {
+          elapsedMs: elapsedMs(commentGenStartedAt),
+          requestMs: elapsedMs(requestStartedAt),
+          length: String(text || '').length,
+        });
         console.error(`[agent] task=${taskId} 评论生成成功 comment=${text}`);
         return text;
       } catch (err) {
+        commentGenFinishedAt = Date.now();
+        logTimedStep(logTag, 'agent_generate_comment', 'error', {
+          elapsedMs: elapsedMs(commentGenStartedAt),
+          error: err.message,
+        });
         commentGenVisibleError = { ok: false, error: 'agent_comment_failed', reason: err.message };
         return null;
       }
     })();
+  } else {
+    logTimedStep(logTag, 'agent_generate_comment', 'skipped', { reason: 'reuse_generated_comment', length: commentText.length });
   }
 
   // [2/5] 检测页面类型 + 启动视频播放/最短观看门槛（与评论生成并行）
+  const presentationStartedAt = Date.now();
   const presentation = await detectWorkPresentationKind(page, resolvedWork);
+  logTimedStep(logTag, 'detect_presentation', 'done', {
+    elapsedMs: elapsedMs(presentationStartedAt),
+    isModal: presentation.isModalPage,
+    isNote: presentation.isNotePage,
+    hasVideo: presentation.hasVideoElement,
+  });
   const currentUrl = presentation.currentUrl;
   const isNotePage = presentation.isNotePage;
   console.error(`${logTag} [2/5] 页面类型: isModal=${presentation.isModalPage} isNote=${isNotePage} hasVideo=${presentation.hasVideoElement}`);
 
   if (presentation.isModalPage && !resolved.autoPlayChecked) {
-    const modalReady = await waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true, openCommentArea: false });
+    const modalStartedAt = Date.now();
+    const modalReady = await waitWithProgress(
+      waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true, openCommentArea: false }),
+      {
+        logTag,
+        step: 'modal_ready_before_watch',
+        startedAt: modalStartedAt,
+        fields: { timeoutMs: 8000, openCommentArea: false },
+      }
+    );
     if (!modalReady?.ok) {
       console.error(`${logTag} [2/5] [FAIL] modal未就绪: ${modalReady?.message || modalReady?.code}`);
       return { ok: false, status: 'failed_collect', error: modalReady?.message || 'work_modal_not_ready', likeStatus: task.likeStatus || 'pending', commentStatus: task.commentStatus || 'pending', resolvedWork };
@@ -743,9 +867,16 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   // 最短观看门槛（与评论生成并行）
   if (!isNotePage) {
     console.error(`${logTag} [2/5] 等待最短观看门槛... policy=${watchPolicy} seconds=${watchSeconds}`);
+    const watchStartedAt = Date.now();
     await waitForInteractionWatchGate(page, watchPolicy, watchSeconds);
+    logTimedStep(logTag, 'watch_gate', 'done', {
+      elapsedMs: elapsedMs(watchStartedAt),
+      agentDone: Boolean(commentGenFinishedAt),
+      agentElapsedMs: commentGenStartedAt ? elapsedMs(commentGenStartedAt) : '',
+    });
     console.error(`${logTag} [2/5] 已达到互动门槛，进入点赞评论阶段`);
   } else {
+    logTimedStep(logTag, 'watch_gate', 'skipped', { reason: 'note_page' });
     console.error(`${logTag} [2/5] 图文/note，跳过观看门槛`);
   }
 
@@ -757,12 +888,18 @@ export async function executeReturnVisitTask(page, task, options = {}) {
 
   // [3/5] 点赞
   console.error(`${logTag} [3/5] 检测点赞状态... execute=${execute}`);
+  const likeStateStartedAt = Date.now();
   const beforeLikeWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_like', {
     likeStatus: nextLikeStatus.value,
     commentStatus: nextCommentStatus.value,
   });
   if (beforeLikeWorkCheck) return beforeLikeWorkCheck;
   const likeState = await checkLikeState(page);
+  logTimedStep(logTag, 'check_like_state', likeState.ok ? 'done' : 'error', {
+    elapsedMs: elapsedMs(likeStateStartedAt),
+    confidence: likeState.data?.confidence || '',
+    message: likeState.message || '',
+  });
   if (!likeState.ok || likeState.data?.confidence !== 'confirmed') {
     console.error(`${logTag} [3/5] [FAIL] 点赞状态无法确认 confidence=${likeState.data?.confidence}`);
     let debugCandidates = [];
@@ -793,7 +930,13 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     console.error(`${logTag} [3/5] 跳过点赞(dry-run)`);
   } else {
     console.error(`${logTag} [3/5] 执行点赞点击...`);
+    const clickLikeStartedAt = Date.now();
     const clickResult = await clickLike(page, { execute: true });
+    logTimedStep(logTag, 'click_like', clickResult.ok ? 'done' : 'error', {
+      elapsedMs: elapsedMs(clickLikeStartedAt),
+      code: clickResult.code || '',
+      message: clickResult.message || '',
+    });
     if (!clickResult.ok) {
       if (clickResult.code === 'ALREADY_LIKED') {
         nextLikeStatus.value = 'already_liked';
@@ -805,7 +948,12 @@ export async function executeReturnVisitTask(page, task, options = {}) {
       }
     } else {
       console.error(`${logTag} [3/5] 点赞点击完成，确认中...`);
+      const confirmLikeStartedAt = Date.now();
       const confirmResult = await confirmLikeSucceeded(page);
+      logTimedStep(logTag, 'confirm_like', confirmResult.ok ? 'done' : 'error', {
+        elapsedMs: elapsedMs(confirmLikeStartedAt),
+        message: confirmResult.message || '',
+      });
       if (!confirmResult.ok) {
         console.error(`${logTag} [3/5] 点赞确认未通过: ${confirmResult.message}，继续后续操作`);
         await saveDebugScreenshot(page, task.taskId, 'like_confirm');
@@ -828,9 +976,16 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   }
 
   console.error(`${logTag} [4/5] 等待发评论... delay=${waitBetweenLikeAndCommentMs}ms`);
-  await waitRandom(page, waitBetweenLikeAndCommentMs, 2000, 6000);
+  const likeToCommentStartedAt = Date.now();
+  const likeToCommentMs = await waitRandom(page, waitBetweenLikeAndCommentMs, 500, 1200);
+  logTimedStep(logTag, 'like_to_comment_delay', 'done', {
+    elapsedMs: elapsedMs(likeToCommentStartedAt),
+    waitedMs: likeToCommentMs,
+  });
 
+  const pauseStartedAt = Date.now();
   await pauseCurrentVideo(page);
+  logTimedStep(logTag, 'pause_video_before_comment', 'done', { elapsedMs: elapsedMs(pauseStartedAt) });
 
   const beforeCommentBoxWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_comment_box', {
     likeStatus: nextLikeStatus.value,
@@ -838,18 +993,52 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   });
   if (beforeCommentBoxWorkCheck) return beforeCommentBoxWorkCheck;
 
-  const boxReady = await ensureReturnVisitCommentBoxReady(page, presentation);
+  const commentBoxStartedAt = Date.now();
+  const boxReady = await waitWithProgress(
+    ensureReturnVisitCommentBoxReady(page, presentation),
+    {
+      logTag,
+      step: 'comment_box_ready',
+      startedAt: commentBoxStartedAt,
+      fields: {
+        isModal: presentation.isModalPage,
+        currentUrl: typeof page?.url === 'function' ? page.url() : '',
+      },
+    }
+  );
   if (!boxReady.ok) {
+    logTimedStep(logTag, 'comment_box_ready', 'failed', {
+      elapsedMs: elapsedMs(commentBoxStartedAt),
+      reason: boxReady.reason || '',
+      method: boxReady.method || '',
+    });
     console.error(`[visit] task=${taskId} failed reason=评论框不存在 detail=${boxReady.reason || ''}`);
     await saveDebugScreenshot(page, task.taskId, 'comment_box');
     return { ok: false, status: 'failed_comment', error: boxReady.reason || 'comment_box_not_found', likeStatus: nextLikeStatus.value, commentStatus: 'failed', resolvedWork };
   }
+  logTimedStep(logTag, 'comment_box_ready', 'ready', {
+    elapsedMs: elapsedMs(commentBoxStartedAt),
+    method: boxReady.method || '',
+    reason: boxReady.reason || '',
+  });
   console.error(`[visit] task=${taskId} 评论框可用`);
 
   // 评论生成可能仍在后台进行。点赞已经在 3 秒观看门槛后完成，
   // 到真正发送评论前再等待生成结果，避免 Agent 延迟阻塞点赞动作。
   if (commentGenPromise) {
-    const generated = await commentGenPromise;
+    const waitAgentStartedAt = Date.now();
+    logTimedStep(logTag, 'agent_result_before_comment', 'inspect', {
+      alreadyDone: Boolean(commentGenFinishedAt),
+      agentElapsedMs: commentGenStartedAt ? elapsedMs(commentGenStartedAt) : '',
+    });
+    const generated = await waitWithProgress(commentGenPromise, {
+      logTag,
+      step: 'agent_result_before_comment',
+      startedAt: waitAgentStartedAt,
+      fields: {
+        agentTotalElapsedMs: commentGenStartedAt ? elapsedMs(commentGenStartedAt) : '',
+      },
+    });
     if (commentGenVisibleError) {
       console.error(`[visit] task=${taskId} failed reason=${commentGenVisibleError.error} detail=${commentGenVisibleError.reason || ''}`);
       await saveDebugScreenshot(page, task.taskId, commentGenVisibleError.error || 'visible_work_before_agent');
@@ -868,6 +1057,11 @@ export async function executeReturnVisitTask(page, task, options = {}) {
       return { ok: false, status: 'failed_generate_comment', error: 'agent_comment_failed', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork };
     }
     commentText = generated;
+    logTimedStep(logTag, 'agent_result_before_comment', 'accepted', {
+      waitElapsedMs: elapsedMs(waitAgentStartedAt),
+      agentTotalElapsedMs: commentGenStartedAt ? elapsedMs(commentGenStartedAt) : '',
+      length: String(commentText || '').length,
+    });
   }
 
   if (!commentText) {
@@ -882,7 +1076,13 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     commentStatus: nextCommentStatus.value,
   });
   if (beforeCommentSendWorkCheck) return beforeCommentSendWorkCheck;
+  const visibleBeforeSendStartedAt = Date.now();
   const visibleBeforeSend = await refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, 'before_comment_send');
+  logTimedStep(logTag, 'visible_context_before_send', visibleBeforeSend.ok ? 'done' : 'error', {
+    elapsedMs: elapsedMs(visibleBeforeSendStartedAt),
+    error: visibleBeforeSend.error || '',
+    reason: visibleBeforeSend.reason || '',
+  });
   if (!visibleBeforeSend.ok) {
     console.error(`[visit] task=${taskId} failed reason=${visibleBeforeSend.error} detail=${visibleBeforeSend.reason || ''}`);
     await saveDebugScreenshot(page, task.taskId, visibleBeforeSend.error || 'visible_work_before_comment_send');
@@ -897,10 +1097,24 @@ export async function executeReturnVisitTask(page, task, options = {}) {
       data: visibleBeforeSend,
     };
   }
-  const commentResult = await postReturnVisitComment(page, commentText, presentation, {
-    execute: true,
-    expectedWorkId: resolvedWork.workId,
-    commentBoxReady: true,
+  const postCommentStartedAt = Date.now();
+  const commentResult = await waitWithProgress(
+    postReturnVisitComment(page, commentText, presentation, {
+      execute: true,
+      expectedWorkId: resolvedWork.workId,
+      commentBoxReady: true,
+    }),
+    {
+      logTag,
+      step: 'post_comment',
+      startedAt: postCommentStartedAt,
+      fields: { isModal: presentation.isModalPage },
+    }
+  );
+  logTimedStep(logTag, 'post_comment', commentResult.ok ? 'done_result_ok' : 'done_result_error', {
+    elapsedMs: elapsedMs(postCommentStartedAt),
+    message: commentResult.message || '',
+    code: commentResult.code || '',
   });
   if (!commentResult.ok) {
     console.error(`${logTag} [5/5] [FAIL] 评论失败: ${commentResult.message} url=${page.url()}`);
@@ -927,5 +1141,6 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   }
 
   console.error(`${logTag} [DONE] 回访完成 like=${nextLikeStatus.value} comment=${nextCommentStatus.value}`);
+  logTimedStep(logTag, 'task_total', 'done', { elapsedMs: elapsedMs(taskStartedAt) });
   return { ok: true, status: 'done', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork, generatedComment: commentText, executedAt: new Date().toISOString() };
 }
