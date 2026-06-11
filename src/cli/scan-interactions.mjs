@@ -132,6 +132,69 @@ function compactLogValue(value, max = 120) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
+export function resolveNotificationEventTime(notification = {}, { nowMs = Date.now() } = {}) {
+  const rawTimestamp = Number(
+    notification?.eventTimestamp ??
+    notification?.create_time ??
+    0
+  );
+  const eventMs = rawTimestamp > 0 ? rawTimestamp * 1000 : 0;
+
+  if (eventMs > 0) {
+    return {
+      eventMs,
+      source: 'create_time',
+      detail: `create_time=${rawTimestamp}`,
+    };
+  }
+
+  const parsedTime = parseDouyinTimeText(
+    notification?.eventTimeText ||
+    notification?.timeText ||
+    ''
+  );
+  const parsedMs = parsedTime ? new Date(parsedTime).getTime() : 0;
+
+  if (parsedMs > 0) {
+    return {
+      eventMs: parsedMs,
+      source: 'parsed_text',
+      detail: `解析时间: ${new Date(parsedMs).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`,
+    };
+  }
+
+  return {
+    eventMs: 0,
+    source: 'unknown',
+    detail: '时间不可解析',
+    nowMs,
+  };
+}
+
+export function isNotificationOlderThanDays(notification = {}, days, { nowMs = Date.now() } = {}) {
+  if (!Number(days)) {
+    return {
+      older: false,
+      eventMs: 0,
+      source: 'disabled',
+      detail: '',
+    };
+  }
+
+  const resolved = resolveNotificationEventTime(notification, { nowMs });
+  if (!(resolved.eventMs > 0)) {
+    return {
+      older: false,
+      ...resolved,
+    };
+  }
+
+  return {
+    older: resolved.eventMs < nowMs - Number(days) * 86400000,
+    ...resolved,
+  };
+}
+
 function buildNotificationFallbackKey(n) {
   const actor = n.actorProfileKey || n.actorProfileUrl || n.username || '';
   const work = n.workId || n.workUrl || n.thumbnailKey || '';
@@ -935,13 +998,13 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     }
 
     if (notificationDays && (normalized.eventType === 'comment' || normalized.eventType === 'like' || normalized.eventType === 'reply')) {
-      const eventMs = Number(normalized.eventTimestamp || 0) * 1000;
-      if (eventMs > 0 && eventMs < Date.now() - notificationDays * 86400000) {
+      const timeCheck = isNotificationOlderThanDays(normalized, notificationDays);
+      if (timeCheck.older) {
         consecutiveOldRelevantCount++;
         logApiNotificationSkip(
           notificationIndex,
           normalized,
-          `超过 ${notificationDays} 天时间窗口 create_time=${normalized.eventTimestamp}`,
+          `超过 ${notificationDays} 天时间窗口 ${timeCheck.detail}`,
           notificationId
         );
         if (consecutiveOldRelevantCount >= 3) {
@@ -1523,18 +1586,18 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
         }
 
         const isRelevantEvent = n.eventType === 'comment' || n.eventType === 'like';
-        const parsedNotificationTime = notificationDays && isRelevantEvent ? parseDouyinTimeText(n.timeText || '') : null;
-        const isOlderThanWindow = !!(notificationDays && parsedNotificationTime && new Date(parsedNotificationTime).getTime() < Date.now() - notificationDays * 86400000);
+        const timeCheck = notificationDays && isRelevantEvent
+          ? isNotificationOlderThanDays(n, notificationDays)
+          : { older: false, detail: '' };
         if (isRelevantEvent && notificationDays) {
-          if (isOlderThanWindow) {
-            const parsedStr = parsedNotificationTime ? new Date(parsedNotificationTime).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '(解析失败)';
+          if (timeCheck.older) {
             consecutiveOldRelevantCount++;
             if (consecutiveOldRelevantCount >= 3) {
               console.error(`[scan]   连续 ${consecutiveOldRelevantCount} 条评论/点赞通知超过 ${notificationDays} 天，停止继续滚动`);
               stopDueToOldRelevant = true;
               break;
             }
-            logNotificationSkip(notificationIndex, n, `超过 ${notificationDays} 天时间窗口 (解析时间: ${parsedStr})`, notificationDedupeKey);
+            logNotificationSkip(notificationIndex, n, `超过 ${notificationDays} 天时间窗口 (${timeCheck.detail})`, notificationDedupeKey);
             continue;
           }
           consecutiveOldRelevantCount = 0;
