@@ -51,6 +51,8 @@ export const RETURN_VISIT_SCAN_STATUS = [
   RETURN_VISIT_STATUS.FAILED_COLLECT,
 ];
 
+export const RETURN_VISIT_REOPEN_WINDOW_MS = 4 * 60 * 60 * 1000;
+
 const SOURCE_PRIORITY = {
   other: 1,
   follow: 2,
@@ -150,6 +152,329 @@ function sanitizeCommentStatus(value) {
   return VALID_COMMENT_STATUS.has(value) ? value : 'pending';
 }
 
+function getTaskVisitAnchorMs(taskOrRow) {
+  const executedAtMs = Date.parse(taskOrRow?.executed_at || taskOrRow?.executedAt || '');
+  if (Number.isFinite(executedAtMs)) return executedAtMs;
+  const updatedAtMs = Date.parse(taskOrRow?.updated_at || taskOrRow?.updatedAt || '');
+  if (Number.isFinite(updatedAtMs)) return updatedAtMs;
+  return 0;
+}
+
+function shouldResetTaskForNewInteraction(taskOrRow, nowMs = Date.now()) {
+  if (!RETURN_VISIT_TERMINAL_STATUS.has(taskOrRow?.status)) return true;
+  const anchorMs = getTaskVisitAnchorMs(taskOrRow);
+  if (!(anchorMs > 0)) return true;
+  return nowMs - anchorMs >= RETURN_VISIT_REOPEN_WINDOW_MS;
+}
+
+function buildSourcePlatformEventIdIndex(rows = []) {
+  const index = new Map();
+  for (const row of rows) {
+    for (const platformId of parseJsonArray(row.source_platform_event_ids_json)) {
+      const key = String(platformId || '').trim();
+      if (!key || index.has(key)) continue;
+      index.set(key, row);
+    }
+  }
+  return index;
+}
+
+function prepareTaskSource(source = {}) {
+  const relation = String(source.relation || '').trim().toLowerCase();
+  const userId = String(source.userId || source.user_id || source.actor_profile_key || source.targetUserId || '').trim() || null;
+  const userProfileUrl = normalizeDouyinUrl(
+    source.userProfileUrl || source.user_profile_url || source.actor_profile_url || source.profileUrl || source.homepage_url || ''
+  ) || null;
+  const userName = String(source.userName || source.user_name || source.actor_name || source.nickname || '').trim();
+  const identityKey = buildIdentityKey({ userId, userProfileUrl, userName });
+  const sourceType = normalizeEventSourceType(source.sourceType || source.source_type || source.eventType || source.event_type || source.interactionType);
+  const sourceEventId = source.sourceEventId ?? source.source_event_id ?? source.event_id ?? source.eventId ?? source.interactionId ?? null;
+  const sourcePlatformEventId = String(
+    source.sourcePlatformEventId ??
+    source.source_platform_event_id ??
+    source.platformEventId ??
+    source.platform_event_id ??
+    ''
+  ).trim() || null;
+  const canUseSourceTargetWork = sourceType === 'reply';
+  const targetWorkId = canUseSourceTargetWork
+    ? String(source.targetWorkId || source.target_work_id || source.workId || source.work_id || '').trim() || null
+    : null;
+  const targetWorkUrl = canUseSourceTargetWork
+    ? normalizeDouyinUrl(source.targetWorkUrl || source.target_work_url || source.workUrl || source.work_url || '') || null
+    : null;
+
+  return {
+    relation,
+    userId,
+    userProfileUrl,
+    userName,
+    identityKey,
+    sourceType,
+    sourceEventId,
+    sourcePlatformEventId,
+    targetWorkId,
+    targetWorkUrl,
+  };
+}
+
+function createOrUpdateReturnVisitTasksFromSources(rawSources = []) {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const nowMs = Date.parse(now);
+  let inserted = 0;
+  let enriched = 0;
+  let skipped = 0;
+  let skippedPlatformDuplicate = 0;
+  let skippedWindow = 0;
+  let reopened = 0;
+
+  const existingRows = db.prepare('SELECT * FROM return_visit_tasks').all();
+  const rowsByIdentity = new Map(existingRows.map(row => [row.identity_key, row]));
+  const sourcePlatformEventIdIndex = buildSourcePlatformEventIdIndex(existingRows);
+  const insertStmt = db.prepare(`
+    INSERT INTO return_visit_tasks (
+      task_id, identity_key, user_id, user_name, user_profile_url,
+      source_type, source_types_json, source_event_ids_json, source_platform_event_ids_json,
+      action_type, status, target_work_id, target_work_url, like_status, comment_status,
+      created_at, updated_at
+    ) VALUES (
+      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?,
+      'like_and_comment', ?, ?, ?, 'pending', 'pending',
+      ?, ?
+    )
+  `);
+
+  for (const rawSource of rawSources || []) {
+    const source = prepareTaskSource(rawSource);
+    if (source.relation && source.relation !== 'friend' && source.relation !== 'mutual') {
+      skipped++;
+      continue;
+    }
+    if (!source.identityKey) {
+      skipped++;
+      continue;
+    }
+
+    if (source.sourcePlatformEventId && sourcePlatformEventIdIndex.has(source.sourcePlatformEventId)) {
+      skipped++;
+      skippedPlatformDuplicate++;
+      continue;
+    }
+
+    const existing = rowsByIdentity.get(source.identityKey) || null;
+    if (!existing) {
+      const taskId = buildTaskId(source.identityKey);
+      const insertedRow = {
+        id: null,
+        task_id: taskId,
+        identity_key: source.identityKey,
+        user_id: source.userId,
+        user_name: source.userName || '(unknown)',
+        user_profile_url: source.userProfileUrl,
+        source_type: source.sourceType,
+        source_types_json: JSON.stringify([source.sourceType]),
+        source_event_ids_json: JSON.stringify(source.sourceEventId != null ? [source.sourceEventId] : []),
+        source_platform_event_ids_json: JSON.stringify(source.sourcePlatformEventId ? [source.sourcePlatformEventId] : []),
+        action_type: 'like_and_comment',
+        status: RETURN_VISIT_STATUS.PENDING_VISIT,
+        target_work_id: source.targetWorkId,
+        target_work_url: source.targetWorkUrl,
+        like_status: 'pending',
+        comment_status: 'pending',
+        created_at: now,
+        updated_at: now,
+      };
+      const insertResult = insertStmt.run(
+        insertedRow.task_id,
+        insertedRow.identity_key,
+        insertedRow.user_id,
+        insertedRow.user_name,
+        insertedRow.user_profile_url,
+        insertedRow.source_type,
+        insertedRow.source_types_json,
+        insertedRow.source_event_ids_json,
+        insertedRow.source_platform_event_ids_json,
+        insertedRow.status,
+        insertedRow.target_work_id,
+        insertedRow.target_work_url,
+        insertedRow.created_at,
+        insertedRow.updated_at
+      );
+      insertedRow.id = insertResult.lastInsertRowid;
+      rowsByIdentity.set(source.identityKey, insertedRow);
+      if (source.sourcePlatformEventId) {
+        sourcePlatformEventIdIndex.set(source.sourcePlatformEventId, insertedRow);
+      }
+      inserted++;
+      continue;
+    }
+
+    const mergedSourceTypes = toUniqueArray([
+      ...parseJsonArray(existing.source_types_json),
+      source.sourceType,
+    ]);
+    const mergedSourceEventIds = toUniqueArray([
+      ...parseJsonArray(existing.source_event_ids_json),
+      ...(source.sourceEventId != null ? [source.sourceEventId] : []),
+    ]);
+    const mergedSourcePlatformEventIds = toUniqueArray([
+      ...parseJsonArray(existing.source_platform_event_ids_json),
+      ...(source.sourcePlatformEventId ? [source.sourcePlatformEventId] : []),
+    ]);
+    const nextSourceType = mergeSourceType(existing.source_type || 'other', source.sourceType);
+    const updateCols = [
+      'source_type = ?',
+      'source_types_json = ?',
+      'source_event_ids_json = ?',
+      'source_platform_event_ids_json = ?',
+      'updated_at = ?',
+    ];
+    const params = [
+      nextSourceType,
+      JSON.stringify(mergedSourceTypes),
+      JSON.stringify(mergedSourceEventIds),
+      JSON.stringify(mergedSourcePlatformEventIds),
+      now,
+    ];
+
+    if (source.userId && !existing.user_id) {
+      updateCols.push('user_id = ?');
+      params.push(source.userId);
+      existing.user_id = source.userId;
+    }
+    if (source.userProfileUrl && !existing.user_profile_url) {
+      updateCols.push('user_profile_url = ?');
+      params.push(source.userProfileUrl);
+      existing.user_profile_url = source.userProfileUrl;
+    }
+    if (source.userName && (!existing.user_name || existing.user_name === '(unknown)')) {
+      updateCols.push('user_name = ?');
+      params.push(source.userName);
+      existing.user_name = source.userName;
+    }
+    if (source.targetWorkId && !existing.target_work_id) {
+      updateCols.push('target_work_id = ?');
+      params.push(source.targetWorkId);
+      existing.target_work_id = source.targetWorkId;
+    }
+    if (source.targetWorkUrl && !existing.target_work_url) {
+      updateCols.push('target_work_url = ?');
+      params.push(source.targetWorkUrl);
+      existing.target_work_url = source.targetWorkUrl;
+    }
+
+    let countedAsReopened = false;
+    if (source.sourcePlatformEventId && RETURN_VISIT_TERMINAL_STATUS.has(existing.status)) {
+      if (shouldResetTaskForNewInteraction(existing, nowMs)) {
+        updateCols.push('status = ?');
+        params.push(RETURN_VISIT_STATUS.PENDING_VISIT);
+        updateCols.push('target_work_title = NULL');
+        updateCols.push('target_work_text = NULL');
+        updateCols.push('target_work_summary = NULL');
+        updateCols.push('target_work_publish_time = NULL');
+        updateCols.push('reference_comments_json = NULL');
+        updateCols.push('generated_comment = NULL');
+        updateCols.push('like_status = ?');
+        params.push('pending');
+        updateCols.push('comment_status = ?');
+        params.push('pending');
+        updateCols.push('collected_at = NULL');
+        updateCols.push('generated_at = NULL');
+        updateCols.push('executed_at = NULL');
+        updateCols.push('last_error = NULL');
+        updateCols.push('retry_count = 0');
+        existing.status = RETURN_VISIT_STATUS.PENDING_VISIT;
+        existing.like_status = 'pending';
+        existing.comment_status = 'pending';
+        existing.executed_at = null;
+        existing.collected_at = null;
+        existing.generated_at = null;
+        existing.last_error = null;
+        existing.retry_count = 0;
+        countedAsReopened = true;
+        reopened++;
+      } else {
+        const skipUpdateCols = [
+          'source_type = ?',
+          'source_types_json = ?',
+          'source_event_ids_json = ?',
+          'source_platform_event_ids_json = ?',
+        ];
+        const skipParams = [
+          nextSourceType,
+          JSON.stringify(mergedSourceTypes),
+          JSON.stringify(mergedSourceEventIds),
+          JSON.stringify(mergedSourcePlatformEventIds),
+        ];
+        if (source.userId && !existing.user_id) {
+          skipUpdateCols.push('user_id = ?');
+          skipParams.push(source.userId);
+          existing.user_id = source.userId;
+        }
+        if (source.userProfileUrl && !existing.user_profile_url) {
+          skipUpdateCols.push('user_profile_url = ?');
+          skipParams.push(source.userProfileUrl);
+          existing.user_profile_url = source.userProfileUrl;
+        }
+        if (source.userName && (!existing.user_name || existing.user_name === '(unknown)')) {
+          skipUpdateCols.push('user_name = ?');
+          skipParams.push(source.userName);
+          existing.user_name = source.userName;
+        }
+        if (source.targetWorkId && !existing.target_work_id) {
+          skipUpdateCols.push('target_work_id = ?');
+          skipParams.push(source.targetWorkId);
+          existing.target_work_id = source.targetWorkId;
+        }
+        if (source.targetWorkUrl && !existing.target_work_url) {
+          skipUpdateCols.push('target_work_url = ?');
+          skipParams.push(source.targetWorkUrl);
+          existing.target_work_url = source.targetWorkUrl;
+        }
+        skipParams.push(existing.id);
+        db.prepare(`UPDATE return_visit_tasks SET ${skipUpdateCols.join(', ')} WHERE id = ?`).run(...skipParams);
+        existing.source_type = nextSourceType;
+        existing.source_types_json = JSON.stringify(mergedSourceTypes);
+        existing.source_event_ids_json = JSON.stringify(mergedSourceEventIds);
+        existing.source_platform_event_ids_json = JSON.stringify(mergedSourcePlatformEventIds);
+        rowsByIdentity.set(source.identityKey, existing);
+        sourcePlatformEventIdIndex.set(source.sourcePlatformEventId, existing);
+        skipped++;
+        skippedWindow++;
+        continue;
+      }
+    }
+
+    params.push(existing.id);
+    db.prepare(`UPDATE return_visit_tasks SET ${updateCols.join(', ')} WHERE id = ?`).run(...params);
+
+    existing.source_type = nextSourceType;
+    existing.source_types_json = JSON.stringify(mergedSourceTypes);
+    existing.source_event_ids_json = JSON.stringify(mergedSourceEventIds);
+    existing.source_platform_event_ids_json = JSON.stringify(mergedSourcePlatformEventIds);
+    existing.updated_at = now;
+    rowsByIdentity.set(source.identityKey, existing);
+    if (source.sourcePlatformEventId) {
+      sourcePlatformEventIdIndex.set(source.sourcePlatformEventId, existing);
+    }
+    enriched++;
+    if (countedAsReopened) {
+      existing.updated_at = now;
+    }
+  }
+
+  return {
+    inserted,
+    enriched,
+    skipped,
+    reopened,
+    skippedPlatformDuplicate,
+    skippedWindow,
+  };
+}
+
 export function buildIdentityKey({ userId, userProfileUrl, userName }) {
   const id = String(userId || '').trim();
   if (id) return `uid:${id}`;
@@ -184,6 +509,7 @@ function mapRowToTask(row) {
     sourceType: row.source_type,
     sourceTypes: parseJsonArray(row.source_types_json),
     sourceEventIds: parseJsonArray(row.source_event_ids_json),
+    sourcePlatformEventIds: parseJsonArray(row.source_platform_event_ids_json),
     actionType: row.action_type,
     status: row.status,
     targetWork: {
@@ -242,245 +568,28 @@ export function createOrUpdateReturnVisitTasksFromEvents(options = {}) {
     status = 'new',
   } = options;
 
-  const db = getDb();
-  const now = new Date().toISOString();
   const events = getSourceEvents({ status });
-  let inserted = 0;
-  let enriched = 0;
-  let skipped = 0;
-
-  const selectStmt = db.prepare('SELECT * FROM return_visit_tasks WHERE identity_key = ?');
-  const insertStmt = db.prepare(`
-    INSERT INTO return_visit_tasks (
-      task_id, identity_key, user_id, user_name, user_profile_url,
-      source_type, source_types_json, source_event_ids_json,
-      action_type, status, target_work_id, target_work_url, like_status, comment_status,
-      created_at, updated_at
-    ) VALUES (
-      ?, ?, ?, ?, ?,
-      ?, ?, ?,
-      'like_and_comment', ?, ?, ?, 'pending', 'pending',
-      ?, ?
-    )
-  `);
-
-  for (const event of events) {
-    const relation = String(event.relation || '').trim().toLowerCase();
-    if (relation !== 'friend' && relation !== 'mutual') {
-      skipped++;
-      continue;
-    }
-
-    const userId = String(event.actor_profile_key || '').trim() || null;
-    const userProfileUrl = normalizeDouyinUrl(event.actor_profile_url || '') || null;
-    const userName = String(event.actor_name || '').trim();
-    const identityKey = buildIdentityKey({ userId, userProfileUrl, userName });
-    if (!identityKey) {
-      skipped++;
-      continue;
-    }
-
-    const sourceType = normalizeEventSourceType(event.event_type);
-    const canUseSourceTargetWork = sourceType === 'reply';
-    const targetWorkId = canUseSourceTargetWork ? String(event.target_work_id || '').trim() || null : null;
-    const targetWorkUrl = canUseSourceTargetWork ? normalizeDouyinUrl(event.target_work_url || '') || null : null;
-    const existing = selectStmt.get(identityKey);
-
-    if (!existing) {
-      const taskId = buildTaskId(identityKey);
-      insertStmt.run(
-        taskId,
-        identityKey,
-        userId,
-        userName || '(unknown)',
-        userProfileUrl,
-        sourceType,
-        JSON.stringify([sourceType]),
-        JSON.stringify([event.id]),
-        RETURN_VISIT_STATUS.PENDING_VISIT,
-        targetWorkId,
-        targetWorkUrl,
-        now,
-        now
-      );
-      inserted++;
-      continue;
-    }
-
-    const mergedSourceTypes = toUniqueArray([
-      ...parseJsonArray(existing.source_types_json),
-      sourceType,
-    ]);
-    const mergedSourceEventIds = toUniqueArray([
-      ...parseJsonArray(existing.source_event_ids_json),
-      event.id,
-    ]);
-    const nextSourceType = mergeSourceType(existing.source_type || 'other', sourceType);
-
-    const updateCols = [];
-    const params = [];
-
-    updateCols.push('source_type = ?');
-    params.push(nextSourceType);
-    updateCols.push('source_types_json = ?');
-    params.push(JSON.stringify(mergedSourceTypes));
-    updateCols.push('source_event_ids_json = ?');
-    params.push(JSON.stringify(mergedSourceEventIds));
-
-    if (userId && !existing.user_id) {
-      updateCols.push('user_id = ?');
-      params.push(userId);
-    }
-    if (userProfileUrl && !existing.user_profile_url) {
-      updateCols.push('user_profile_url = ?');
-      params.push(userProfileUrl);
-    }
-    if (userName && (!existing.user_name || existing.user_name === '(unknown)')) {
-      updateCols.push('user_name = ?');
-      params.push(userName);
-    }
-    if (targetWorkId && !existing.target_work_id) {
-      updateCols.push('target_work_id = ?');
-      params.push(targetWorkId);
-    }
-    if (targetWorkUrl && !existing.target_work_url) {
-      updateCols.push('target_work_url = ?');
-      params.push(targetWorkUrl);
-    }
-
-    updateCols.push('updated_at = ?');
-    params.push(now);
-    params.push(existing.id);
-
-    db.prepare(`UPDATE return_visit_tasks SET ${updateCols.join(', ')} WHERE id = ?`).run(...params);
-    enriched++;
-  }
-
+  const summary = createOrUpdateReturnVisitTasksFromSources(events.map(event => ({
+    relation: event.relation,
+    actor_profile_key: event.actor_profile_key,
+    actor_profile_url: event.actor_profile_url,
+    actor_name: event.actor_name,
+    event_type: event.event_type,
+    source_event_id: event.id,
+    source_platform_event_id: event.platform_event_id,
+    target_work_id: event.target_work_id,
+    target_work_url: event.target_work_url,
+  })));
   return {
     totalEvents: events.length,
-    inserted,
-    enriched,
-    skipped,
+    ...summary,
   };
 }
 
 export function createOrUpdateReturnVisitTasksFromItems(items = []) {
-  const db = getDb();
-  const now = new Date().toISOString();
-  let inserted = 0;
-  let enriched = 0;
-  let skipped = 0;
-
-  const selectStmt = db.prepare('SELECT * FROM return_visit_tasks WHERE identity_key = ?');
-  const insertStmt = db.prepare(`
-    INSERT INTO return_visit_tasks (
-      task_id, identity_key, user_id, user_name, user_profile_url,
-      source_type, source_types_json, source_event_ids_json,
-      action_type, status, target_work_id, target_work_url, like_status, comment_status,
-      created_at, updated_at
-    ) VALUES (
-      ?, ?, ?, ?, ?,
-      ?, ?, ?,
-      'like_and_comment', ?, ?, ?, 'pending', 'pending',
-      ?, ?
-    )
-  `);
-
-  for (const item of items || []) {
-    const relation = String(item.relation || '').trim().toLowerCase();
-    if (relation && relation !== 'friend' && relation !== 'mutual') {
-      skipped++;
-      continue;
-    }
-
-    const userId = String(item.actor_profile_key || item.user_id || item.targetUserId || '').trim() || null;
-    const userProfileUrl = normalizeDouyinUrl(item.actor_profile_url || item.user_profile_url || item.profileUrl || item.homepage_url || '') || null;
-    const userName = String(item.actor_name || item.user_name || item.nickname || '').trim();
-    const identityKey = buildIdentityKey({ userId, userProfileUrl, userName });
-    if (!identityKey) {
-      skipped++;
-      continue;
-    }
-
-    const sourceType = normalizeEventSourceType(item.source_type || item.event_type || item.interactionType);
-    const sourceEventId = item.source_event_id || item.event_id || item.interactionId || null;
-    const canUseSourceTargetWork = sourceType === 'reply';
-    const targetWorkId = canUseSourceTargetWork ? String(item.target_work_id || item.targetWorkId || item.work_id || item.workId || '').trim() || null : null;
-    const targetWorkUrl = canUseSourceTargetWork ? normalizeDouyinUrl(item.target_work_url || item.targetWorkUrl || item.work_url || item.workUrl || '') || null : null;
-    const existing = selectStmt.get(identityKey);
-
-    if (!existing) {
-      const taskId = buildTaskId(identityKey);
-      insertStmt.run(
-        taskId,
-        identityKey,
-        userId,
-        userName || '(unknown)',
-        userProfileUrl,
-        sourceType,
-        JSON.stringify([sourceType]),
-        JSON.stringify(sourceEventId ? [sourceEventId] : []),
-        RETURN_VISIT_STATUS.PENDING_VISIT,
-        targetWorkId,
-        targetWorkUrl,
-        now,
-        now
-      );
-      inserted++;
-      continue;
-    }
-
-    const mergedSourceTypes = toUniqueArray([
-      ...parseJsonArray(existing.source_types_json),
-      sourceType,
-    ]);
-    const mergedSourceEventIds = toUniqueArray([
-      ...parseJsonArray(existing.source_event_ids_json),
-      ...(sourceEventId ? [sourceEventId] : []),
-    ]);
-    const nextSourceType = mergeSourceType(existing.source_type || 'other', sourceType);
-    const updateCols = [
-      'source_type = ?',
-      'source_types_json = ?',
-      'source_event_ids_json = ?',
-      'updated_at = ?',
-    ];
-    const params = [
-      nextSourceType,
-      JSON.stringify(mergedSourceTypes),
-      JSON.stringify(mergedSourceEventIds),
-      now,
-    ];
-    if (userId && !existing.user_id) {
-      updateCols.push('user_id = ?');
-      params.push(userId);
-    }
-    if (userProfileUrl && !existing.user_profile_url) {
-      updateCols.push('user_profile_url = ?');
-      params.push(userProfileUrl);
-    }
-    if (userName && (!existing.user_name || existing.user_name === '(unknown)')) {
-      updateCols.push('user_name = ?');
-      params.push(userName);
-    }
-    if (targetWorkId && !existing.target_work_id) {
-      updateCols.push('target_work_id = ?');
-      params.push(targetWorkId);
-    }
-    if (targetWorkUrl && !existing.target_work_url) {
-      updateCols.push('target_work_url = ?');
-      params.push(targetWorkUrl);
-    }
-    params.push(existing.id);
-    db.prepare(`UPDATE return_visit_tasks SET ${updateCols.join(', ')} WHERE id = ?`).run(...params);
-    enriched++;
-  }
-
   return {
     totalItems: items.length,
-    inserted,
-    enriched,
-    skipped,
+    ...createOrUpdateReturnVisitTasksFromSources(items),
   };
 }
 
@@ -663,6 +772,9 @@ export function updateReturnVisitTask(taskId, patch = {}) {
   if (Object.prototype.hasOwnProperty.call(patch, 'sourceType')) setCol('source_type', patch.sourceType || 'other');
   if (Object.prototype.hasOwnProperty.call(patch, 'sourceTypes')) setCol('source_types_json', JSON.stringify(toUniqueArray(patch.sourceTypes)));
   if (Object.prototype.hasOwnProperty.call(patch, 'sourceEventIds')) setCol('source_event_ids_json', JSON.stringify(toUniqueArray(patch.sourceEventIds)));
+  if (Object.prototype.hasOwnProperty.call(patch, 'sourcePlatformEventIds')) {
+    setCol('source_platform_event_ids_json', JSON.stringify(toUniqueArray(patch.sourcePlatformEventIds)));
+  }
   if (Object.prototype.hasOwnProperty.call(patch, 'generatedComment')) setCol('generated_comment', patch.generatedComment || null);
   if (Object.prototype.hasOwnProperty.call(patch, 'likeStatus')) setCol('like_status', sanitizeLikeStatus(patch.likeStatus));
   if (Object.prototype.hasOwnProperty.call(patch, 'commentStatus')) setCol('comment_status', sanitizeCommentStatus(patch.commentStatus));

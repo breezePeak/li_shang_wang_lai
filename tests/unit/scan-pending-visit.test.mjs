@@ -239,7 +239,39 @@ describe('preparePendingVisitTasks', () => {
     expect(row).toBeTruthy();
     expect(JSON.parse(row.source_types_json)).toEqual(['like', 'comment']);
     expect(JSON.parse(row.source_event_ids_json)).toEqual([201, 202]);
+    expect(JSON.parse(row.source_platform_event_ids_json)).toEqual([]);
     expect(row.source_type).toBe('like');
+  });
+
+  it('dedupes by platform_event_id before enqueueing revisit task', () => {
+    const result = preparePendingVisitTasks([
+      makeEvent({
+        eventId: 211,
+        eventType: 'like',
+        actorName: '平台ID用户',
+        actorProfileKey: 'platform-id-user',
+        actorProfileUrl: 'https://www.douyin.com/user/platform-id-user',
+        relation: 'friend',
+        dbAction: 'inserted',
+        platformEventId: 'like-dup-001',
+      }),
+      makeEvent({
+        eventId: 212,
+        eventType: 'like',
+        actorName: '平台ID用户',
+        actorProfileKey: 'platform-id-user',
+        actorProfileUrl: 'https://www.douyin.com/user/platform-id-user',
+        relation: 'friend',
+        dbAction: 'enriched',
+        platformEventId: 'like-dup-001',
+      }),
+    ], { maxCount: 10 });
+
+    expect(result.tasks).toHaveLength(1);
+    const row = getDb().prepare('SELECT * FROM return_visit_tasks WHERE identity_key = ?').get('uid:platform-id-user');
+    expect(JSON.parse(row.source_event_ids_json)).toEqual([211]);
+    expect(JSON.parse(row.source_platform_event_ids_json)).toEqual(['like-dup-001']);
+    expect(result.sourceSummary.skippedPlatformDuplicate).toBe(1);
   });
 
   it('persists target work from interaction events into return_visit_task', () => {
@@ -304,6 +336,121 @@ describe('preparePendingVisitTasks', () => {
     ], { maxCount: 10 });
 
     expect(second.tasks).toEqual([]);
+  });
+
+  it('keeps done task closed within 4-hour window for same user new platform id', () => {
+    const event = makeEvent({
+      actorName: '四小时内用户',
+      actorProfileKey: 'window-same-user',
+      actorProfileUrl: 'https://www.douyin.com/user/window-same-user',
+      relation: 'friend',
+      dbAction: 'inserted',
+      eventId: 411,
+      platformEventId: 'like-window-001',
+    });
+
+    preparePendingVisitTasks([event], { maxCount: 10 });
+
+    const taskId = taskIdFor('window-same-user', event.actorProfileUrl, event.actorName);
+    updateReturnVisitTask(taskId, {
+      status: RETURN_VISIT_STATUS.DONE,
+      likeStatus: 'liked',
+      commentStatus: 'posted',
+      executedAt: new Date().toISOString(),
+    });
+
+    const second = preparePendingVisitTasks([
+      {
+        ...event,
+        dbAction: 'enriched',
+        eventId: 412,
+        platformEventId: 'like-window-002',
+      },
+    ], { maxCount: 10 });
+
+    expect(second.tasks).toEqual([]);
+    expect(second.sourceSummary.skippedWindow).toBe(1);
+
+    const row = getDb().prepare('SELECT * FROM return_visit_tasks WHERE task_id = ?').get(taskId);
+    expect(row.status).toBe(RETURN_VISIT_STATUS.DONE);
+    expect(JSON.parse(row.source_platform_event_ids_json)).toEqual(['like-window-001', 'like-window-002']);
+  });
+
+  it('reopens done task after 4-hour window for same user new platform id', () => {
+    const event = makeEvent({
+      actorName: '四小时后用户',
+      actorProfileKey: 'reopen-same-user',
+      actorProfileUrl: 'https://www.douyin.com/user/reopen-same-user',
+      relation: 'friend',
+      dbAction: 'inserted',
+      eventId: 421,
+      platformEventId: 'like-reopen-001',
+    });
+
+    preparePendingVisitTasks([event], { maxCount: 10 });
+
+    const taskId = taskIdFor('reopen-same-user', event.actorProfileUrl, event.actorName);
+    updateReturnVisitTask(taskId, {
+      status: RETURN_VISIT_STATUS.DONE,
+      likeStatus: 'liked',
+      commentStatus: 'posted',
+      executedAt: new Date(Date.now() - 5 * 3600000).toISOString(),
+      generatedComment: '旧回访文案',
+    });
+
+    const second = preparePendingVisitTasks([
+      {
+        ...event,
+        dbAction: 'enriched',
+        eventId: 422,
+        platformEventId: 'like-reopen-002',
+      },
+    ], { maxCount: 10 });
+
+    expect(second.tasks).toHaveLength(1);
+    expect(second.tasks[0].taskId).toBe(taskId);
+    expect(second.tasks[0].status).toBe(RETURN_VISIT_STATUS.PENDING_VISIT);
+    expect(second.sourceSummary.reopened).toBe(1);
+
+    const row = getDb().prepare('SELECT * FROM return_visit_tasks WHERE task_id = ?').get(taskId);
+    expect(row.status).toBe(RETURN_VISIT_STATUS.PENDING_VISIT);
+    expect(row.like_status).toBe('pending');
+    expect(row.comment_status).toBe('pending');
+    expect(row.executed_at).toBeNull();
+    expect(row.generated_comment).toBeNull();
+    expect(JSON.parse(row.source_platform_event_ids_json)).toEqual(['like-reopen-001', 'like-reopen-002']);
+  });
+
+  it('merges new platform id into non-terminal task without creating another task', () => {
+    const event = makeEvent({
+      actorName: '执行中用户',
+      actorProfileKey: 'active-same-user',
+      actorProfileUrl: 'https://www.douyin.com/user/active-same-user',
+      relation: 'friend',
+      dbAction: 'inserted',
+      eventId: 431,
+      platformEventId: 'like-active-001',
+    });
+
+    preparePendingVisitTasks([event], { maxCount: 10 });
+
+    const taskId = taskIdFor('active-same-user', event.actorProfileUrl, event.actorName);
+    updateReturnVisitTask(taskId, { status: RETURN_VISIT_STATUS.PENDING_EXECUTE });
+
+    const second = preparePendingVisitTasks([
+      {
+        ...event,
+        dbAction: 'enriched',
+        eventId: 432,
+        platformEventId: 'like-active-002',
+      },
+    ], { maxCount: 10 });
+
+    expect(second.tasks).toEqual([]);
+    const row = getDb().prepare('SELECT * FROM return_visit_tasks WHERE task_id = ?').get(taskId);
+    expect(row.status).toBe(RETURN_VISIT_STATUS.PENDING_EXECUTE);
+    expect(JSON.parse(row.source_event_ids_json)).toEqual([431, 432]);
+    expect(JSON.parse(row.source_platform_event_ids_json)).toEqual(['like-active-001', 'like-active-002']);
   });
 
   it('filters out pending_execute done and skipped tasks even when this round is enriched', () => {

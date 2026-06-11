@@ -11,7 +11,7 @@ import { normalizeCommentEvent, buildRawPayloadJson } from '../domain/comment-ev
 import { classifyNotificationAction } from '../domain/notification-action-router.mjs';
 import { insertEvent, getEventCounts, findUnstableEvent, promoteUnstableEvent, enrichEvent, upsertNotificationEvent, listEventsForDedupe } from '../db/interaction-repository.mjs';
 import { upsertWorkContext, listWorksForDedupe, findWorkByThumbnailKey, findWorkByWorkId } from '../db/work-repository.mjs';
-import { upsertWorkComment, listPendingCommentsGroupedByHomepageAndWork, listReplyTrackedCommentKeysForWork, listCommentsForDedupe, findCollectedCommentForWork } from '../db/work-comment-repository.mjs';
+import { upsertWorkComment, listPendingCommentsGroupedByHomepageAndWork, listReplyTrackedCommentKeysForWork, listCommentsForDedupe, findCollectedCommentForWork, markCommentManuallyReplied } from '../db/work-comment-repository.mjs';
 import logger from '../utils/logger.mjs';
 import { runMigrations } from '../db/migrations.mjs';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
@@ -540,17 +540,24 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
             scrollCount: apiResult.scrollCount || 0,
           }),
         });
+        const alreadyRepliedByAuthor = Boolean(c.hasAuthorReply);
+        if (alreadyRepliedByAuthor && result.id && result.action !== 'duplicate') {
+          markCommentManuallyReplied(result.id, 'author already replied (comment-list api)');
+        }
 
         dedupeContext.commentKeys.add(dedupeKey);
 
-        console.error(`[scan]   + comment/list api 命中 cid=${targetCommentId} actor=${compactLogValue(c.actorName, 30)} text=${compactLogValue(c.commentText, 40)}`);
+        console.error(
+          `[scan]   + comment/list api 命中 cid=${targetCommentId} actor=${compactLogValue(c.actorName, 30)} ` +
+          `text=${compactLogValue(c.commentText, 40)} hasAuthorReply=${alreadyRepliedByAuthor}`
+        );
 
         return {
           ok: true,
           workResult,
           total: 1,
           inWindow: 1,
-          pending: 1,
+          pending: alreadyRepliedByAuthor ? 0 : 1,
           inserted: result.action === 'inserted' ? 1 : 0,
           enriched: result.action === 'enriched' ? 1 : 0,
           duplicate: result.action === 'inserted' || result.action === 'enriched' ? 0 : 1,
@@ -824,6 +831,7 @@ export function preparePendingVisitTasks(events, { days = null, maxCount = 100, 
     const sourceItem = {
       source_type: sourceType,
       source_event_id: event.eventId || null,
+      source_platform_event_id: event.platformEventId || null,
       actor_name: event.actorName || '',
       actor_profile_key: event.actorProfileKey || null,
       actor_profile_url: event.actorProfileUrl || null,

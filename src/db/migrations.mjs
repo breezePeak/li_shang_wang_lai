@@ -238,6 +238,7 @@ export function runMigrations(dbPath = DB_PATH) {
       source_type TEXT NOT NULL DEFAULT 'other',
       source_types_json TEXT,
       source_event_ids_json TEXT,
+      source_platform_event_ids_json TEXT,
       action_type TEXT NOT NULL DEFAULT 'like_and_comment'
         CHECK (action_type IN ('like_and_comment')),
       status TEXT NOT NULL DEFAULT 'pending_visit'
@@ -284,6 +285,16 @@ export function runMigrations(dbPath = DB_PATH) {
     CREATE INDEX IF NOT EXISTS idx_return_visit_retry
       ON return_visit_tasks(retry_count);
   `);
+
+  const checkReturnVisit = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='return_visit_tasks'"
+  ).get();
+  const returnVisitSql = checkReturnVisit ? (checkReturnVisit.sql || '') : '';
+  if (returnVisitSql && !returnVisitSql.includes('source_platform_event_ids_json')) {
+    console.error('[db:init] 旧版 return_visit_tasks 缺少 source_platform_event_ids_json 列，迁移中...');
+    db.exec('ALTER TABLE return_visit_tasks ADD COLUMN source_platform_event_ids_json TEXT');
+    console.error('[db:init] source_platform_event_ids_json 列已添加');
+  }
 
   // Migrate: add published_at column to works
   const checkWorks = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='works'").get();
