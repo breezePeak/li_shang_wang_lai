@@ -610,7 +610,7 @@ function buildStageDetailData() {
       ],
       workspaceTitle: '已完成回评',
       workspaceSubtitle: 'succeeded 状态的评论，不再进入待处理队列。',
-      workspaceType: 'pending-comments',
+      workspaceType: 'reply-overview',
       commentSource: 'done',
     },
     visits: {
@@ -1397,6 +1397,28 @@ function renderPendingCommentsHtml(commentSource = 'all') {
   `;
 }
 
+function renderReplyStatusSelect(comment) {
+  const status = String(comment.reply_status || 'pending');
+  const editableStatuses = [
+    { value: 'pending', label: '待回评' },
+    { value: 'blocked', label: '已阻塞' },
+    { value: 'sent_unverified', label: '发送未确认' },
+    { value: 'skipped', label: '已跳过' },
+  ];
+  const terminalStatus = status === 'succeeded'
+    ? [{ value: 'succeeded', label: '已成功' }]
+    : [];
+  const options = [...editableStatuses, ...terminalStatus];
+
+  return `
+    <select id="status-${comment.id}" class="status-select" onchange="updateCommentStatus(${comment.id}, this.value)" data-current="${escapeHtml(status)}">
+      ${options.map(option => `
+        <option value="${option.value}" ${status === option.value ? 'selected' : ''}>${option.label}</option>
+      `).join('')}
+    </select>
+  `;
+}
+
 function groupCommentsByWork(comments) {
   const groups = new Map();
   for (const comment of comments) {
@@ -1466,12 +1488,7 @@ function renderWorkCommentGroup(group) {
             ${reason ? `<div class="pending-reason"><strong>异常：</strong>${escapeHtml(reason)}</div>` : ''}
             <div class="pending-status-row">
               <label for="status-${comment.id}">状态</label>
-              <select id="status-${comment.id}" class="status-select" onchange="updateCommentStatus(${comment.id}, this.value)" data-current="${escapeHtml(comment.reply_status || 'pending')}">
-                <option value="pending" ${comment.reply_status === 'pending' ? 'selected' : ''}>待回评</option>
-                <option value="blocked" ${comment.reply_status === 'blocked' ? 'selected' : ''}>已阻塞</option>
-                <option value="sent_unverified" ${comment.reply_status === 'sent_unverified' ? 'selected' : ''}>发送未确认</option>
-                <option value="skipped" ${comment.reply_status === 'skipped' ? 'selected' : ''}>已跳过</option>
-              </select>
+              ${renderReplyStatusSelect(comment)}
             </div>
             <div class="pending-reply-editor">
               <label for="${textareaId}">回评文本</label>
