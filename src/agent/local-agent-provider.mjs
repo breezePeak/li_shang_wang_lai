@@ -16,4 +16,6 @@ export class LocalAgentProvider {
   async generateReplies(contexts) {
     return generateRepliesWithHermes(contexts, this.options);
   }
+
+  async close() {}
 }

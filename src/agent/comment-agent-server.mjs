@@ -316,6 +316,7 @@ export async function callHermes(prompt, options = {}) {
 }
 
 export async function generateCommentWithHermes(context, options = {}) {
+  const callAgent = typeof options.callAgent === 'function' ? options.callAgent : callAgentCli;
   const maxLength = Number(context?.requirements?.maxLength || options.maxLength || getCommentMaxLength());
   const basePrompt = buildCommentPrompt({
     ...context,
@@ -334,7 +335,7 @@ export async function generateCommentWithHermes(context, options = {}) {
       '不要解释，不要 Markdown。',
     ].join('\n');
     try {
-      const output = await callAgentCli(`${basePrompt}${retryHint}`, options);
+      const output = await callAgent(`${basePrompt}${retryHint}`, options);
       const parsed = extractJson(output);
       if (typeof parsed.comment !== 'string') {
         throw new Error('Agent 返回格式错误: comment 必须是 string');
@@ -349,6 +350,7 @@ export async function generateCommentWithHermes(context, options = {}) {
 }
 
 export async function generateReplyWithHermes(context, options = {}) {
+  const callAgent = typeof options.callAgent === 'function' ? options.callAgent : callAgentCli;
   const maxLength = Number(context?.requirements?.maxLength || options.maxLength || getReplyMaxLength());
   const minLength = Number(context?.requirements?.minLength || options.minLength || getReplyMinLength());
   const basePrompt = buildReplyPrompt({
@@ -370,7 +372,7 @@ export async function generateReplyWithHermes(context, options = {}) {
       '回复仍必须遵守项目评论生成规则与安全边界，不要解释，不要 Markdown。',
     ].join('\n');
     try {
-      const output = await callAgentCli(`${basePrompt}${retryHint}`, options);
+      const output = await callAgent(`${basePrompt}${retryHint}`, options);
       const parsed = extractJson(output);
       if (typeof parsed.reply !== 'string') {
         throw new Error('Agent 返回格式错误: reply 必须是 string');
@@ -385,6 +387,7 @@ export async function generateReplyWithHermes(context, options = {}) {
 }
 
 export async function generateRepliesWithHermes(contexts = [], options = {}) {
+  const callAgent = typeof options.callAgent === 'function' ? options.callAgent : callAgentCli;
   const items = Array.isArray(contexts) ? contexts : [];
   if (items.length === 0) return [];
 
@@ -411,7 +414,7 @@ export async function generateRepliesWithHermes(contexts = [], options = {}) {
       `必须返回 ${normalized.length} 条 replies，taskId 必须和输入完全一致，不要解释，不要 Markdown。`,
     ].join('\n');
     try {
-      const output = await callAgentCli(`${basePrompt}${retryHint}`, options);
+      const output = await callAgent(`${basePrompt}${retryHint}`, options);
       const parsed = extractJson(output);
       return validateReplyBatch(parsed, normalized);
     } catch (err) {

@@ -14,6 +14,7 @@ import {
   executeReturnVisitTask,
   waitRandom,
 } from '../services/return-visit-executor.mjs';
+import { createAgentProvider } from '../agent/agent-provider-factory.mjs';
 
 function parseArgs(argv) {
   const args = {
@@ -178,139 +179,144 @@ async function main() {
 
   let browser = null;
   let page = null;
+  const agentProvider = createAgentProvider();
   try {
-    const ctx = await createBrowserContext({
-      headless: args.headless,
-      enableReuse: args.keepOpen,
-    });
-    browser = ctx.browser;
-    const pages = ctx.context.pages();
-    page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
-  } catch (err) {
-    const msg = `浏览器启动失败: ${err.message}`;
+    try {
+      const ctx = await createBrowserContext({
+        headless: args.headless,
+        enableReuse: args.keepOpen,
+      });
+      browser = ctx.browser;
+      const pages = ctx.context.pages();
+      page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
+    } catch (err) {
+      const msg = `浏览器启动失败: ${err.message}`;
+      if (args.json) {
+        printJsonError('return-visit:execute', RESULT_CODES.UNKNOWN_ERROR, msg, { recoverable: false });
+        return;
+      }
+      throw err;
+    }
+
+    let consecutiveFailures = 0;
+    let processedSinceRest = 0;
+    let restAfter = randomInRange(restEveryTasksRange[0], restEveryTasksRange[1]);
+
+    for (let index = 0; index < tasks.length; index++) {
+      const task = tasks[index];
+      if (consecutiveFailures >= maxConsecutiveFailures) {
+        log(args.json, `[return-visit:execute] 连续失败 ${consecutiveFailures} 个任务，暂停本轮执行`);
+        break;
+      }
+
+      updateReturnVisitTask(task.taskId, {
+        status: RETURN_VISIT_STATUS.EXECUTING,
+        lastError: null,
+      });
+
+      log(args.json, `[return-visit:execute] executing task: ${task.taskId}`);
+      if (task.targetWork?.workUrl) {
+        log(args.json, `[return-visit:execute] opening workUrl: ${task.targetWork.workUrl}`);
+      }
+
+      const result = await executeReturnVisitTask(page, task, {
+        execute: executeMode,
+        pageLoadRetryCount,
+        maxWorksToCheck,
+        waitBetweenLikeAndCommentMs,
+        watchPolicy,
+        watchSeconds,
+        agentProvider,
+      });
+
+      if (result.resolvedWork) {
+        updateReturnVisitTask(task.taskId, {
+          generatedComment: result.generatedComment || task.generatedComment || null,
+          targetWork: {
+            workId: result.resolvedWork.workId,
+            workUrl: result.resolvedWork.workUrl,
+            workTitle: result.resolvedWork.workTitle,
+            workText: result.resolvedWork.workText,
+            contentSummary: result.resolvedWork.contentSummary,
+            publishTime: result.resolvedWork.publishTime,
+          },
+          referenceComments: result.resolvedWork.referenceComments || [],
+        });
+      }
+
+      if (result.ok && result.status === RETURN_VISIT_STATUS.DONE) {
+        markReturnVisitDone(task, {
+          likeStatus: result.likeStatus,
+          commentStatus: result.commentStatus,
+        });
+        taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.DONE, likeStatus: result.likeStatus, commentStatus: result.commentStatus });
+        done++;
+        consecutiveFailures = 0;
+        log(args.json, '[return-visit:execute] task done');
+      } else if (result.ok && result.dryRun) {
+        updateReturnVisitTask(task.taskId, {
+          status: RETURN_VISIT_STATUS.PENDING_EXECUTE,
+          likeStatus: result.likeStatus,
+          commentStatus: result.commentStatus,
+        });
+        taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.PENDING_EXECUTE, dryRun: true });
+        consecutiveFailures = 0;
+      } else if (!result.ok && String(result.status || '').startsWith('skipped_')) {
+        updateReturnVisitTask(task.taskId, {
+          status: result.status,
+          likeStatus: result.likeStatus || task.likeStatus,
+          commentStatus: result.commentStatus || task.commentStatus,
+          lastError: result.error || result.status,
+        });
+        taskResults.push({ taskId: task.taskId, status: result.status, reason: result.error || result.status });
+        skipped++;
+        consecutiveFailures = 0;
+      } else {
+        log(args.json, `[return-visit:execute] 失败 ${task.taskId}: ${result.status || 'unknown'} reason=${result.error || 'unknown'}`);
+        markReturnVisitFailure(task, {
+          status: result.status || RETURN_VISIT_STATUS.FAILED,
+          error: result.error || 'execute_failed',
+          likeStatus: result.likeStatus || task.likeStatus,
+          commentStatus: result.commentStatus || task.commentStatus,
+        });
+        taskResults.push({ taskId: task.taskId, status: result.status || RETURN_VISIT_STATUS.FAILED, reason: result.error || 'execute_failed' });
+        failed++;
+        consecutiveFailures++;
+        log(args.json, `[return-visit:execute] failed: ${result.error || result.status || 'unknown'}`);
+      }
+
+      processedSinceRest++;
+
+      if (executeMode && index < tasks.length - 1) {
+        const userWaitMs = await waitRandom(page, waitBetweenUsersMs, 8000, 20000);
+        log(args.json, `[return-visit:execute] wait between users: ${userWaitMs}ms`);
+      }
+
+      if (executeMode && processedSinceRest >= restAfter) {
+        const restMs = await waitRandom(page, restDurationMs, 60000, 180000);
+        log(args.json, `[return-visit:execute] rest: ${restMs}ms`);
+        processedSinceRest = 0;
+        restAfter = randomInRange(restEveryTasksRange[0], restEveryTasksRange[1]);
+      }
+    }
+
+    const summary = {
+      loaded: tasks.length,
+      done,
+      skipped,
+      failed,
+      mode: executeMode ? 'execute' : 'dry-run',
+    };
+    log(args.json, `[return-visit:execute] summary done=${done} skipped=${skipped} failed=${failed}`);
+
+    if (browser && !args.keepOpen) {
+      await browser.close();
+    }
     if (args.json) {
-      printJsonError('return-visit:execute', RESULT_CODES.UNKNOWN_ERROR, msg, { recoverable: false });
-      return;
+      printJsonResult('return-visit:execute', { tasks: taskResults }, summary);
     }
-    throw err;
-  }
-
-  let consecutiveFailures = 0;
-  let processedSinceRest = 0;
-  let restAfter = randomInRange(restEveryTasksRange[0], restEveryTasksRange[1]);
-
-  for (let index = 0; index < tasks.length; index++) {
-    const task = tasks[index];
-    if (consecutiveFailures >= maxConsecutiveFailures) {
-      log(args.json, `[return-visit:execute] 连续失败 ${consecutiveFailures} 个任务，暂停本轮执行`);
-      break;
-    }
-
-    updateReturnVisitTask(task.taskId, {
-      status: RETURN_VISIT_STATUS.EXECUTING,
-      lastError: null,
-    });
-
-    log(args.json, `[return-visit:execute] executing task: ${task.taskId}`);
-    if (task.targetWork?.workUrl) {
-      log(args.json, `[return-visit:execute] opening workUrl: ${task.targetWork.workUrl}`);
-    }
-
-    const result = await executeReturnVisitTask(page, task, {
-      execute: executeMode,
-      pageLoadRetryCount,
-      maxWorksToCheck,
-      waitBetweenLikeAndCommentMs,
-      watchPolicy,
-      watchSeconds,
-    });
-
-    if (result.resolvedWork) {
-      updateReturnVisitTask(task.taskId, {
-        generatedComment: result.generatedComment || task.generatedComment || null,
-        targetWork: {
-          workId: result.resolvedWork.workId,
-          workUrl: result.resolvedWork.workUrl,
-          workTitle: result.resolvedWork.workTitle,
-          workText: result.resolvedWork.workText,
-          contentSummary: result.resolvedWork.contentSummary,
-          publishTime: result.resolvedWork.publishTime,
-        },
-        referenceComments: result.resolvedWork.referenceComments || [],
-      });
-    }
-
-    if (result.ok && result.status === RETURN_VISIT_STATUS.DONE) {
-      markReturnVisitDone(task, {
-        likeStatus: result.likeStatus,
-        commentStatus: result.commentStatus,
-      });
-      taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.DONE, likeStatus: result.likeStatus, commentStatus: result.commentStatus });
-      done++;
-      consecutiveFailures = 0;
-      log(args.json, '[return-visit:execute] task done');
-    } else if (result.ok && result.dryRun) {
-      updateReturnVisitTask(task.taskId, {
-        status: RETURN_VISIT_STATUS.PENDING_EXECUTE,
-        likeStatus: result.likeStatus,
-        commentStatus: result.commentStatus,
-      });
-      taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.PENDING_EXECUTE, dryRun: true });
-      consecutiveFailures = 0;
-    } else if (!result.ok && String(result.status || '').startsWith('skipped_')) {
-      updateReturnVisitTask(task.taskId, {
-        status: result.status,
-        likeStatus: result.likeStatus || task.likeStatus,
-        commentStatus: result.commentStatus || task.commentStatus,
-        lastError: result.error || result.status,
-      });
-      taskResults.push({ taskId: task.taskId, status: result.status, reason: result.error || result.status });
-      skipped++;
-      consecutiveFailures = 0;
-    } else {
-      log(args.json, `[return-visit:execute] 失败 ${task.taskId}: ${result.status || 'unknown'} reason=${result.error || 'unknown'}`);
-      markReturnVisitFailure(task, {
-        status: result.status || RETURN_VISIT_STATUS.FAILED,
-        error: result.error || 'execute_failed',
-        likeStatus: result.likeStatus || task.likeStatus,
-        commentStatus: result.commentStatus || task.commentStatus,
-      });
-      taskResults.push({ taskId: task.taskId, status: result.status || RETURN_VISIT_STATUS.FAILED, reason: result.error || 'execute_failed' });
-      failed++;
-      consecutiveFailures++;
-      log(args.json, `[return-visit:execute] failed: ${result.error || result.status || 'unknown'}`);
-    }
-
-    processedSinceRest++;
-
-    if (executeMode && index < tasks.length - 1) {
-      const userWaitMs = await waitRandom(page, waitBetweenUsersMs, 8000, 20000);
-      log(args.json, `[return-visit:execute] wait between users: ${userWaitMs}ms`);
-    }
-
-    if (executeMode && processedSinceRest >= restAfter) {
-      const restMs = await waitRandom(page, restDurationMs, 60000, 180000);
-      log(args.json, `[return-visit:execute] rest: ${restMs}ms`);
-      processedSinceRest = 0;
-      restAfter = randomInRange(restEveryTasksRange[0], restEveryTasksRange[1]);
-    }
-  }
-
-  const summary = {
-    loaded: tasks.length,
-    done,
-    skipped,
-    failed,
-    mode: executeMode ? 'execute' : 'dry-run',
-  };
-  log(args.json, `[return-visit:execute] summary done=${done} skipped=${skipped} failed=${failed}`);
-
-  if (args.json) {
-    printJsonResult('return-visit:execute', { tasks: taskResults }, summary);
-  }
-
-  if (browser && !args.keepOpen) {
-    await browser.close();
+  } finally {
+    await agentProvider.close?.();
   }
 }
 

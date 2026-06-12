@@ -84,6 +84,39 @@ $env:AGENT_PROVIDER="openclaw"; npm run comments:execute -- --days 7 --limit 50
 | `REPLY_MAX_LENGTH` | `60` | 回评回复最大长度 |
 | `AGENT_TIMEOUT_MS` | `60000` | 通用超时 |
 
+## Agent 传输模式
+
+默认不设置任何新变量时，仍然使用现有 CLI 调用 `hermes` / `openclaw`，主流程行为不变。
+
+```bash
+# 默认 CLI
+npm run comments:execute -- --days 7 --limit 50
+```
+
+```bash
+# 配置 Hermes WebSocket 常驻调用
+HERMES_WS_URL=ws://127.0.0.1:3001 npm run comments:execute -- --days 7 --limit 50
+HERMES_WS_URL=ws://127.0.0.1:3001 npm run visit:run -- --execute
+```
+
+```bash
+# 强制退回 CLI
+AGENT_TRANSPORT=cli npm run comments:execute -- --days 7 --limit 50
+```
+
+```bash
+# 强制 WebSocket 且关闭 fallback
+AGENT_TRANSPORT=ws AGENT_WS_FALLBACK=none HERMES_WS_URL=ws://127.0.0.1:3001 npm run comments:execute -- --days 7 --limit 50
+```
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `AGENT_TRANSPORT` | 自动判断 | `cli` / `ws`。未设置且存在 `HERMES_WS_URL` 时默认优先 `ws` |
+| `HERMES_WS_URL` | `''` | Hermes WebSocket 地址，例如 `ws://127.0.0.1:3001` |
+| `AGENT_WS_TIMEOUT_MS` | `60000` | WebSocket 请求超时，未设置时回退到 `AGENT_TIMEOUT_MS` |
+| `AGENT_WS_FALLBACK` | `cli` | `cli` / `none`。WebSocket 失败时默认自动回退到原 CLI |
+| `REPLY_BATCH_SIZE` | `8` | 回评批量生成时每批请求条数 |
+
 ## 文档边界
 
 - `README.md`：项目介绍、安装方式、环境要求、命令速查。

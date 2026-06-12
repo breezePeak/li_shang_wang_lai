@@ -40,6 +40,7 @@ import { writeFileSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
+import { createAgentProvider } from '../agent/agent-provider-factory.mjs';
 import { normalizeNoticeApiItem } from '../domain/notice-api-normalization.mjs';
 import { countVisibleChars, getReplyLengthTolerance, getReplyMaxLength, getReplyMinLength, hasForbiddenReplyPersona, hasLowQualityReplyText } from '../agent/comment-agent-server.mjs';
 
@@ -1134,7 +1135,15 @@ async function main() {
   loaded = { items: buildWorkCommentItemsFromDbRows(rows) };
   console.log(`[comments:execute] loaded pending comments from db: ${loaded.items.length}`);
 
-  agentResults = await generateMissingReplies(loaded.items);
+  const agentProvider = createAgentProvider();
+  try {
+    agentResults = await generateMissingReplies(loaded.items, {
+      agentProvider,
+      batchSize: Number(process.env.REPLY_BATCH_SIZE || 8),
+    });
+  } finally {
+    await agentProvider.close?.();
+  }
 
   if (args.agentOnly) {
     const generated = agentResults.filter(r => r.ok && r.reply).length;

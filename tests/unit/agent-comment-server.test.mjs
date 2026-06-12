@@ -9,6 +9,8 @@ import {
   buildReplyPrompt,
   loadCommentSafetyRules,
   resolveAgentCliConfig,
+  generateCommentWithHermes,
+  generateRepliesWithHermes,
 } from '../../src/agent/comment-agent-server.mjs';
 import { LocalAgentProvider } from '../../src/agent/local-agent-provider.mjs';
 
@@ -206,6 +208,32 @@ describe('agent comment server helpers', () => {
       { taskId: 'work_comment_1', requirements: { minLength: 15, maxLength: 30 } },
       { taskId: 'work_comment_2', requirements: { minLength: 15, maxLength: 30 } },
     ])).resolves.toEqual([
+      { taskId: 'work_comment_1', reply: 'Hermes代看后觉得1号评论挺真诚自然' },
+      { taskId: 'work_comment_2', reply: 'Hermes代看后觉得2号评论挺真诚自然' },
+    ]);
+  });
+
+  it('generateCommentWithHermes supports injected callAgent', async () => {
+    const callAgent = async (prompt) => {
+      expect(prompt).toContain('{"comment":"评论内容"}');
+      return JSON.stringify({ comment: '挺真实' });
+    };
+
+    await expect(generateCommentWithHermes({ taskId: 'visit_injected' }, { callAgent })).resolves.toBe('挺真实');
+  });
+
+  it('generateRepliesWithHermes keeps input task order with injected callAgent', async () => {
+    const callAgent = async () => JSON.stringify({
+      replies: [
+        { taskId: 'work_comment_2', reply: 'Hermes代看后觉得2号评论挺真诚自然' },
+        { taskId: 'work_comment_1', reply: 'Hermes代看后觉得1号评论挺真诚自然' },
+      ],
+    });
+
+    await expect(generateRepliesWithHermes([
+      { taskId: 'work_comment_1', requirements: { minLength: 15, maxLength: 30 } },
+      { taskId: 'work_comment_2', requirements: { minLength: 15, maxLength: 30 } },
+    ], { callAgent })).resolves.toEqual([
       { taskId: 'work_comment_1', reply: 'Hermes代看后觉得1号评论挺真诚自然' },
       { taskId: 'work_comment_2', reply: 'Hermes代看后觉得2号评论挺真诚自然' },
     ]);

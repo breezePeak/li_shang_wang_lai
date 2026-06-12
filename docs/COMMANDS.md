@@ -37,6 +37,20 @@ npm run visit:run -- --execute
 
 评论回复结束后只有在用户明确要求回访时，才进入回访流程。回评和回访都不读写中间 JSON 文件。
 
+### Agent 传输配置
+
+默认不设置任何新环境变量时，仍然使用现有 CLI 调用 `hermes` / `openclaw`，主流程命令不变。
+
+设置 `HERMES_WS_URL` 后，评论回复和回访中的评论生成会优先走 WebSocket 常驻连接；同一进程内复用同一个连接。WebSocket 不可用时，默认自动 fallback 到原 CLI。设置 `AGENT_WS_FALLBACK=none` 可关闭 fallback，强制要求 WebSocket 成功。
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `AGENT_TRANSPORT` | 自动判断 | `cli` / `ws` |
+| `HERMES_WS_URL` | `''` | Hermes WebSocket 地址，例如 `ws://127.0.0.1:3001` |
+| `AGENT_WS_TIMEOUT_MS` | `60000` | WebSocket 请求超时，未设置时回退到 `AGENT_TIMEOUT_MS` |
+| `AGENT_WS_FALLBACK` | `cli` | `cli` / `none` |
+| `REPLY_BATCH_SIZE` | `8` | `comments:execute` 批量生成回复时每批条数 |
+
 ## 1. auth
 
 ```bash
