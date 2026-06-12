@@ -3,6 +3,7 @@ import { createAgentProvider } from '../../src/agent/agent-provider-factory.mjs'
 import { LocalAgentProvider } from '../../src/agent/local-agent-provider.mjs';
 import { HermesWebSocketAgentProvider } from '../../src/agent/hermes-ws-agent-provider.mjs';
 import { FallbackAgentProvider } from '../../src/agent/fallback-agent-provider.mjs';
+import { HermesApiAgentProvider } from '../../src/agent/hermes-api-agent-provider.mjs';
 
 function withEnv(env, fn) {
   const previous = {};
@@ -79,6 +80,26 @@ describe('createAgentProvider', () => {
 
     expect(provider).toBeInstanceOf(HermesWebSocketAgentProvider);
   });
+
+  it('uses api transport when AGENT_TRANSPORT=api', () => {
+    const provider = withEnv({
+      AGENT_TRANSPORT: 'api',
+      AGENT_API_FALLBACK: undefined,
+    }, () => createAgentProvider());
+
+    expect(provider).toBeInstanceOf(FallbackAgentProvider);
+    expect(provider.primary).toBeInstanceOf(HermesApiAgentProvider);
+    expect(provider.fallback).toBeInstanceOf(LocalAgentProvider);
+  });
+
+  it('can disable api fallback with AGENT_API_FALLBACK=none', () => {
+    const provider = withEnv({
+      AGENT_TRANSPORT: 'api',
+      AGENT_API_FALLBACK: 'none',
+    }, () => createAgentProvider());
+
+    expect(provider).toBeInstanceOf(HermesApiAgentProvider);
+  });
 });
 
 describe('FallbackAgentProvider', () => {
@@ -109,6 +130,25 @@ describe('FallbackAgentProvider', () => {
       close: vi.fn().mockResolvedValue(undefined),
     };
     const provider = new FallbackAgentProvider(primary, fallback);
+
+    await expect(provider.generateReplies([{ taskId: 'work_comment_1' }])).resolves.toEqual([
+      { taskId: 'work_comment_1', reply: 'Hermes代看后觉得这条反馈挺真诚自然' },
+    ]);
+
+    expect(primary.generateReplies).toHaveBeenCalledTimes(1);
+    expect(fallback.generateReplies).toHaveBeenCalledTimes(1);
+  });
+
+  it('api transport falls back to cli when primary fails', async () => {
+    const primary = {
+      generateReplies: vi.fn().mockRejectedValue(new Error('Hermes API request failed with status 500: boom')),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const fallback = {
+      generateReplies: vi.fn().mockResolvedValue([{ taskId: 'work_comment_1', reply: 'Hermes代看后觉得这条反馈挺真诚自然' }]),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const provider = new FallbackAgentProvider(primary, fallback, { name: 'api' });
 
     await expect(provider.generateReplies([{ taskId: 'work_comment_1' }])).resolves.toEqual([
       { taskId: 'work_comment_1', reply: 'Hermes代看后觉得这条反馈挺真诚自然' },

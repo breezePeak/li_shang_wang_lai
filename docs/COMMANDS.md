@@ -39,16 +39,70 @@ npm run visit:run -- --execute
 
 ### Agent 传输配置
 
-默认不设置任何新环境变量时，仍然使用现有 CLI 调用 `hermes` / `openclaw`，主流程命令不变。
+默认不设置任何新环境变量时，仍然使用现有 CLI 调用 `hermes` / `openclaw`，主流程命令不变。这也是安装 Skill 后的默认体验。
 
-设置 `HERMES_WS_URL` 后，评论回复和回访中的评论生成会优先走 WebSocket 常驻连接；同一进程内复用同一个连接。WebSocket 不可用时，默认自动 fallback 到原 CLI。设置 `AGENT_WS_FALLBACK=none` 可关闭 fallback，强制要求 WebSocket 成功。
+```powershell
+Remove-Item Env:\AGENT_TRANSPORT -ErrorAction SilentlyContinue
+Remove-Item Env:\HERMES_API_KEY -ErrorAction SilentlyContinue
+Remove-Item Env:\HERMES_API_BASE_URL -ErrorAction SilentlyContinue
+Remove-Item Env:\HERMES_WS_URL -ErrorAction SilentlyContinue
 
-注意：`HERMES_WS_URL` 必须指向 Hermes 自身提供的 WebSocket 常驻服务，不是本项目的 `npm run agent-server`。`agent-server` 只是 HTTP 调试入口，不提供 `agent.prompt` WebSocket 协议。
+npm run comments:execute -- --days 7 --limit 5 --agent-only
+```
+
+可选加速模式是 Hermes API Server。它不是安装必需项，不会自动启动，也不会因为本机 Hermes `.env` 里存在 `API_SERVER_KEY` 就自动切换。只有显式设置 `AGENT_TRANSPORT=api` 时才启用。
+
+Windows 配置示例：
+
+```powershell
+notepad "$env:LOCALAPPDATA\hermes\.env"
+```
+
+```dotenv
+API_SERVER_ENABLED=true
+API_SERVER_KEY=li-shang-wang-lai-local-dev
+API_SERVER_HOST=127.0.0.1
+API_SERVER_PORT=8642
+```
+
+手动启动 gateway：
+
+```bash
+hermes gateway
+```
+
+项目启用 API 模式：
+
+```powershell
+$env:AGENT_TRANSPORT="api"
+$env:HERMES_API_BASE_URL="http://127.0.0.1:8642/v1"
+$env:HERMES_API_KEY="li-shang-wang-lai-local-dev"
+$env:HERMES_API_MODEL="hermes-agent"
+
+npm run comments:execute -- --days 7 --limit 5 --agent-only
+npm run visit:run -- --execute
+```
+
+如果未设置 `HERMES_API_KEY`，项目会尝试从 Hermes 本地 `.env` 读取 `API_SERVER_KEY`。这里的 `API_SERVER_KEY` 不是模型供应商 key，而是你给本机 Hermes API Server 设置的访问口令。
+
+API 失败时默认自动 fallback 到 CLI；设置 `AGENT_API_FALLBACK=none` 可关闭 fallback。
+
+WebSocket 模式保留为预留能力，但请注意：
+
+- Hermes 当前没有 `hermes ws` 命令。
+- `hermes acp` 是 ACP/stdio，不是 WebSocket 服务。
+- `HERMES_WS_URL` 仅用于外部兼容 `agent.prompt` 协议的 WebSocket adapter。
+- `npm run agent-server` 只是 HTTP 调试入口，不提供 `agent.prompt` WebSocket 协议。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `AGENT_TRANSPORT` | 自动判断 | `cli` / `ws` |
-| `HERMES_WS_URL` | `''` | Hermes WebSocket 地址，例如 `ws://127.0.0.1:3001`；需连接外部 Hermes WS 服务，不是 `npm run agent-server` |
+| `AGENT_TRANSPORT` | 自动判断 | `cli` / `api` / `ws` |
+| `HERMES_API_BASE_URL` | `http://127.0.0.1:8642/v1` | 本机 Hermes API Server 的 `/v1` 根路径 |
+| `HERMES_API_KEY` | `''` | 本机 Hermes API Server 的 Bearer token；未设置时会尝试只读读取 Hermes 本地 `.env` 中的 `API_SERVER_KEY` |
+| `HERMES_API_MODEL` | `hermes-agent` | API 模式使用的模型名 |
+| `AGENT_API_TIMEOUT_MS` | `60000` | API 请求超时，未设置时回退到 `AGENT_TIMEOUT_MS` |
+| `AGENT_API_FALLBACK` | `cli` | `cli` / `none` |
+| `HERMES_WS_URL` | `''` | 外部兼容 `agent.prompt` 协议的 WebSocket adapter 地址 |
 | `AGENT_WS_TIMEOUT_MS` | `60000` | WebSocket 请求超时，未设置时回退到 `AGENT_TIMEOUT_MS` |
 | `AGENT_WS_FALLBACK` | `cli` | `cli` / `none` |
 | `REPLY_BATCH_SIZE` | `8` | `comments:execute` 批量生成回复时每批条数 |
