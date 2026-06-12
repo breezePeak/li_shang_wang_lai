@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAgentProvider } from '../../src/agent/agent-provider-factory.mjs';
 import { LocalAgentProvider } from '../../src/agent/local-agent-provider.mjs';
-import { HermesWebSocketAgentProvider } from '../../src/agent/hermes-ws-agent-provider.mjs';
 import { FallbackAgentProvider } from '../../src/agent/fallback-agent-provider.mjs';
 import { HermesApiAgentProvider } from '../../src/agent/hermes-api-agent-provider.mjs';
 
@@ -32,53 +31,17 @@ describe('createAgentProvider', () => {
   it('returns LocalAgentProvider by default', () => {
     const provider = withEnv({
       AGENT_TRANSPORT: undefined,
-      HERMES_WS_URL: undefined,
-      AGENT_WS_FALLBACK: undefined,
     }, () => createAgentProvider());
 
     expect(provider).toBeInstanceOf(LocalAgentProvider);
-  });
-
-  it('uses websocket transport when HERMES_WS_URL is set', () => {
-    const provider = withEnv({
-      AGENT_TRANSPORT: undefined,
-      HERMES_WS_URL: 'ws://127.0.0.1:3001',
-      AGENT_WS_FALLBACK: undefined,
-    }, () => createAgentProvider());
-
-    expect(provider).toBeInstanceOf(FallbackAgentProvider);
-    expect(provider.primary).toBeInstanceOf(HermesWebSocketAgentProvider);
-    expect(provider.fallback).toBeInstanceOf(LocalAgentProvider);
   });
 
   it('forces cli transport when AGENT_TRANSPORT=cli', () => {
     const provider = withEnv({
       AGENT_TRANSPORT: 'cli',
-      HERMES_WS_URL: 'ws://127.0.0.1:3001',
     }, () => createAgentProvider());
 
     expect(provider).toBeInstanceOf(LocalAgentProvider);
-  });
-
-  it('uses websocket transport when AGENT_TRANSPORT=ws', () => {
-    const provider = withEnv({
-      AGENT_TRANSPORT: 'ws',
-      HERMES_WS_URL: 'ws://127.0.0.1:3001',
-      AGENT_WS_FALLBACK: undefined,
-    }, () => createAgentProvider());
-
-    expect(provider).toBeInstanceOf(FallbackAgentProvider);
-    expect(provider.primary).toBeInstanceOf(HermesWebSocketAgentProvider);
-  });
-
-  it('can disable fallback with AGENT_WS_FALLBACK=none', () => {
-    const provider = withEnv({
-      AGENT_TRANSPORT: 'ws',
-      HERMES_WS_URL: 'ws://127.0.0.1:3001',
-      AGENT_WS_FALLBACK: 'none',
-    }, () => createAgentProvider());
-
-    expect(provider).toBeInstanceOf(HermesWebSocketAgentProvider);
   });
 
   it('uses api transport when AGENT_TRANSPORT=api', () => {
@@ -105,7 +68,7 @@ describe('createAgentProvider', () => {
 describe('FallbackAgentProvider', () => {
   it('falls back when primary generateComment fails', async () => {
     const primary = {
-      generateComment: vi.fn().mockRejectedValue(new Error('agent websocket connect timeout after 50ms')),
+      generateComment: vi.fn().mockRejectedValue(new Error('primary failed')),
       close: vi.fn().mockResolvedValue(undefined),
     };
     const fallback = {
@@ -122,7 +85,7 @@ describe('FallbackAgentProvider', () => {
 
   it('falls back when primary generateReplies fails', async () => {
     const primary = {
-      generateReplies: vi.fn().mockRejectedValue(new Error('ws down')),
+      generateReplies: vi.fn().mockRejectedValue(new Error('primary down')),
       close: vi.fn().mockResolvedValue(undefined),
     };
     const fallback = {

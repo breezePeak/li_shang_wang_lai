@@ -45,7 +45,6 @@ npm run visit:run -- --execute
 Remove-Item Env:\AGENT_TRANSPORT -ErrorAction SilentlyContinue
 Remove-Item Env:\HERMES_API_KEY -ErrorAction SilentlyContinue
 Remove-Item Env:\HERMES_API_BASE_URL -ErrorAction SilentlyContinue
-Remove-Item Env:\HERMES_WS_URL -ErrorAction SilentlyContinue
 
 npm run comments:execute -- --days 7 --limit 5 --agent-only
 ```
@@ -87,24 +86,14 @@ npm run visit:run -- --execute
 
 API 失败时默认自动 fallback 到 CLI；设置 `AGENT_API_FALLBACK=none` 可关闭 fallback。
 
-WebSocket 模式保留为预留能力，但请注意：
-
-- Hermes 当前没有 `hermes ws` 命令。
-- `hermes acp` 是 ACP/stdio，不是 WebSocket 服务。
-- `HERMES_WS_URL` 仅用于外部兼容 `agent.prompt` 协议的 WebSocket adapter。
-- `npm run agent-server` 只是 HTTP 调试入口，不提供 `agent.prompt` WebSocket 协议。
-
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `AGENT_TRANSPORT` | 自动判断 | `cli` / `api` / `ws` |
+| `AGENT_TRANSPORT` | `cli` | `cli` / `api` |
 | `HERMES_API_BASE_URL` | `http://127.0.0.1:8642/v1` | 本机 Hermes API Server 的 `/v1` 根路径 |
 | `HERMES_API_KEY` | `''` | 本机 Hermes API Server 的 Bearer token；未设置时会尝试只读读取 Hermes 本地 `.env` 中的 `API_SERVER_KEY` |
 | `HERMES_API_MODEL` | `hermes-agent` | API 模式使用的模型名 |
 | `AGENT_API_TIMEOUT_MS` | `60000` | API 请求超时，未设置时回退到 `AGENT_TIMEOUT_MS` |
 | `AGENT_API_FALLBACK` | `cli` | `cli` / `none` |
-| `HERMES_WS_URL` | `''` | 外部兼容 `agent.prompt` 协议的 WebSocket adapter 地址 |
-| `AGENT_WS_TIMEOUT_MS` | `60000` | WebSocket 请求超时，未设置时回退到 `AGENT_TIMEOUT_MS` |
-| `AGENT_WS_FALLBACK` | `cli` | `cli` / `none` |
 | `REPLY_BATCH_SIZE` | `8` | `comments:execute` 批量生成回复时每批条数 |
 
 ## 1. auth

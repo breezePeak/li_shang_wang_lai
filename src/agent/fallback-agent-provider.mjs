@@ -3,7 +3,7 @@ export class FallbackAgentProvider {
     this.primary = primary;
     this.fallback = fallback;
     this.options = options;
-    this.name = options.name || 'websocket';
+    this.name = options.name || 'primary';
   }
 
   async runWithFallback(method, args = []) {
