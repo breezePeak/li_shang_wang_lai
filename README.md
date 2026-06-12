@@ -99,6 +99,8 @@ HERMES_WS_URL=ws://127.0.0.1:3001 npm run comments:execute -- --days 7 --limit 5
 HERMES_WS_URL=ws://127.0.0.1:3001 npm run visit:run -- --execute
 ```
 
+`HERMES_WS_URL` 必须指向 Hermes 自身提供的 WebSocket 常驻服务，不是本项目的 `npm run agent-server`。当前 `agent-server` 仅提供 HTTP 调试接口（`/generate-comment`、`/generate-reply`、`/generate-replies`、`/health`），不实现 `agent.prompt` WebSocket 协议。
+
 ```bash
 # 强制退回 CLI
 AGENT_TRANSPORT=cli npm run comments:execute -- --days 7 --limit 50
@@ -112,7 +114,7 @@ AGENT_TRANSPORT=ws AGENT_WS_FALLBACK=none HERMES_WS_URL=ws://127.0.0.1:3001 npm 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `AGENT_TRANSPORT` | 自动判断 | `cli` / `ws`。未设置且存在 `HERMES_WS_URL` 时默认优先 `ws` |
-| `HERMES_WS_URL` | `''` | Hermes WebSocket 地址，例如 `ws://127.0.0.1:3001` |
+| `HERMES_WS_URL` | `''` | Hermes WebSocket 地址，例如 `ws://127.0.0.1:3001`；需连接外部 Hermes WS 服务，不是 `npm run agent-server` |
 | `AGENT_WS_TIMEOUT_MS` | `60000` | WebSocket 请求超时，未设置时回退到 `AGENT_TIMEOUT_MS` |
 | `AGENT_WS_FALLBACK` | `cli` | `cli` / `none`。WebSocket 失败时默认自动回退到原 CLI |
 | `REPLY_BATCH_SIZE` | `8` | 回评批量生成时每批请求条数 |

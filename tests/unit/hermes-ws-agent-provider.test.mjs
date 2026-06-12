@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
 import { HermesWebSocketAgentProvider } from '../../src/agent/hermes-ws-agent-provider.mjs';
 
@@ -127,5 +128,32 @@ describe('HermesWebSocketAgentProvider', () => {
       { taskId: 'work_comment_1', reply: 'Hermes代看后觉得1号评论挺真诚自然' },
       { taskId: 'work_comment_2', reply: 'Hermes代看后觉得2号评论挺真诚自然' },
     ]);
+  });
+
+  it('times out websocket connect attempts', async () => {
+    class HangingWebSocket extends EventEmitter {
+      static CONNECTING = 0;
+      static OPEN = 1;
+
+      constructor() {
+        super();
+        this.readyState = HangingWebSocket.CONNECTING;
+        this.terminated = false;
+      }
+
+      terminate() {
+        this.terminated = true;
+        this.readyState = 3;
+      }
+    }
+
+    provider = new HermesWebSocketAgentProvider({
+      url: 'ws://127.0.0.1:3001',
+      timeoutMs: 50,
+      WebSocketImpl: HangingWebSocket,
+    });
+
+    await expect(provider.generateComment({ taskId: 'visit_ws_timeout' }))
+      .rejects.toThrow('agent websocket connect timeout after 50ms');
   });
 });

@@ -82,6 +82,23 @@ describe('createAgentProvider', () => {
 });
 
 describe('FallbackAgentProvider', () => {
+  it('falls back when primary generateComment fails', async () => {
+    const primary = {
+      generateComment: vi.fn().mockRejectedValue(new Error('agent websocket connect timeout after 50ms')),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const fallback = {
+      generateComment: vi.fn().mockResolvedValue('挺真实'),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const provider = new FallbackAgentProvider(primary, fallback);
+
+    await expect(provider.generateComment({ taskId: 'visit_1' })).resolves.toBe('挺真实');
+
+    expect(primary.generateComment).toHaveBeenCalledTimes(1);
+    expect(fallback.generateComment).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back when primary generateReplies fails', async () => {
     const primary = {
       generateReplies: vi.fn().mockRejectedValue(new Error('ws down')),

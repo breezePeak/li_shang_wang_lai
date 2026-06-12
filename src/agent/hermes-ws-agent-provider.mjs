@@ -113,15 +113,29 @@ export class HermesWebSocketAgentProvider {
       let settled = false;
 
       const cleanup = () => {
+        clearTimeout(connectTimeoutHandle);
         socket.off?.('open', onOpen);
         socket.off?.('error', onError);
         socket.off?.('close', onCloseBeforeOpen);
       };
 
+      const connectTimeoutHandle = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        try {
+          socket.terminate?.();
+        } catch {}
+        this.connectPromise = null;
+        reject(new Error(`agent websocket connect timeout after ${this.timeoutMs}ms`));
+      }, this.timeoutMs);
+
       const onOpen = () => {
+        if (settled) return;
         settled = true;
         cleanup();
         this.socket = socket;
+        this.connectPromise = null;
         this.attachSocketHandlers(socket);
         resolve(socket);
       };

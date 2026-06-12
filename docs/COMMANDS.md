@@ -43,10 +43,12 @@ npm run visit:run -- --execute
 
 设置 `HERMES_WS_URL` 后，评论回复和回访中的评论生成会优先走 WebSocket 常驻连接；同一进程内复用同一个连接。WebSocket 不可用时，默认自动 fallback 到原 CLI。设置 `AGENT_WS_FALLBACK=none` 可关闭 fallback，强制要求 WebSocket 成功。
 
+注意：`HERMES_WS_URL` 必须指向 Hermes 自身提供的 WebSocket 常驻服务，不是本项目的 `npm run agent-server`。`agent-server` 只是 HTTP 调试入口，不提供 `agent.prompt` WebSocket 协议。
+
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `AGENT_TRANSPORT` | 自动判断 | `cli` / `ws` |
-| `HERMES_WS_URL` | `''` | Hermes WebSocket 地址，例如 `ws://127.0.0.1:3001` |
+| `HERMES_WS_URL` | `''` | Hermes WebSocket 地址，例如 `ws://127.0.0.1:3001`；需连接外部 Hermes WS 服务，不是 `npm run agent-server` |
 | `AGENT_WS_TIMEOUT_MS` | `60000` | WebSocket 请求超时，未设置时回退到 `AGENT_TIMEOUT_MS` |
 | `AGENT_WS_FALLBACK` | `cli` | `cli` / `none` |
 | `REPLY_BATCH_SIZE` | `8` | `comments:execute` 批量生成回复时每批条数 |
