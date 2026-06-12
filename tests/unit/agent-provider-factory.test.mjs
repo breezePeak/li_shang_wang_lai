@@ -3,6 +3,7 @@ import { createAgentProvider } from '../../src/agent/agent-provider-factory.mjs'
 import { LocalAgentProvider } from '../../src/agent/local-agent-provider.mjs';
 import { FallbackAgentProvider } from '../../src/agent/fallback-agent-provider.mjs';
 import { HermesApiAgentProvider } from '../../src/agent/hermes-api-agent-provider.mjs';
+import { DirectApiAgentProvider } from '../../src/agent/direct-api-agent-provider.mjs';
 
 function withEnv(env, fn) {
   const previous = {};
@@ -63,6 +64,40 @@ describe('createAgentProvider', () => {
 
     expect(provider).toBeInstanceOf(HermesApiAgentProvider);
   });
+
+  it('uses direct-api transport when AGENT_TRANSPORT=direct-api', () => {
+    const provider = withEnv({
+      AGENT_TRANSPORT: 'direct-api',
+      DIRECT_API_FALLBACK: undefined,
+    }, () => createAgentProvider({
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'direct-token',
+      model: 'openrouter/model',
+      soul: '自然一点',
+      env: {},
+    }));
+
+    expect(provider).toBeInstanceOf(FallbackAgentProvider);
+    expect(provider.primary).toBeInstanceOf(DirectApiAgentProvider);
+    expect(provider.fallback).toBeInstanceOf(LocalAgentProvider);
+  });
+
+  it('can disable direct-api fallback with DIRECT_API_FALLBACK=none', () => {
+    const provider = withEnv({
+      AGENT_TRANSPORT: 'direct-api',
+      DIRECT_API_FALLBACK: 'none',
+    }, () => createAgentProvider({
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'direct-token',
+      model: 'openrouter/model',
+      soul: '自然一点',
+      env: {},
+    }));
+
+    expect(provider).toBeInstanceOf(DirectApiAgentProvider);
+  });
 });
 
 describe('FallbackAgentProvider', () => {
@@ -119,5 +154,31 @@ describe('FallbackAgentProvider', () => {
 
     expect(primary.generateReplies).toHaveBeenCalledTimes(1);
     expect(fallback.generateReplies).toHaveBeenCalledTimes(1);
+  });
+
+  it('direct-api transport falls back to cli when primary fails', async () => {
+    const provider = withEnv({
+      AGENT_TRANSPORT: 'direct-api',
+      DIRECT_API_FALLBACK: 'cli',
+    }, () => createAgentProvider({
+      provider: 'openrouter',
+      baseUrl: 'http://127.0.0.1:39999/v1',
+      apiKey: 'bad',
+      model: 'bad',
+      soul: '自然一点',
+      timeoutMs: 20,
+      env: {},
+    }));
+
+    provider.fallback.generateReplies = vi.fn().mockResolvedValue([
+      { taskId: 'work_comment_1', reply: 'Hermes代看后觉得这条反馈挺真诚自然' },
+    ]);
+
+    await expect(provider.generateReplies([{ taskId: 'work_comment_1' }])).resolves.toEqual([
+      { taskId: 'work_comment_1', reply: 'Hermes代看后觉得这条反馈挺真诚自然' },
+    ]);
+
+    expect(provider.primary).toBeInstanceOf(DirectApiAgentProvider);
+    expect(provider.fallback.generateReplies).toHaveBeenCalledTimes(1);
   });
 });

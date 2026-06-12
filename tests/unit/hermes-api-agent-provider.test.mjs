@@ -2,9 +2,8 @@ import http from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   HermesApiAgentProvider,
-  parseSimpleEnv,
-  readHermesEnvConfig,
 } from '../../src/agent/hermes-api-agent-provider.mjs';
+import { parseSimpleEnv, readHermesEnvConfig } from '../../src/agent/agent-env.mjs';
 
 function createServer(handler) {
   const requests = [];

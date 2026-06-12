@@ -1,49 +1,13 @@
-import { existsSync, readFileSync } from 'fs';
-import { homedir } from 'os';
-import { join } from 'path';
 import {
   generateCommentWithHermes,
   generateRepliesWithHermes,
   generateReplyWithHermes,
 } from './comment-agent-server.mjs';
+import { readHermesEnvConfig } from './agent-env.mjs';
+export { parseSimpleEnv, readHermesEnvConfig, resolveHermesEnvPaths } from './agent-env.mjs';
 
 export function normalizeBaseUrl(value) {
   return String(value || 'http://127.0.0.1:8642/v1').replace(/\/+$/, '');
-}
-
-export function resolveHermesEnvPath(env = process.env) {
-  const localAppData = String(env?.LOCALAPPDATA || '').trim();
-  if (process.platform === 'win32' && localAppData) {
-    return join(localAppData, 'hermes', '.env');
-  }
-  return join(homedir(), '.hermes', '.env');
-}
-
-export function parseSimpleEnv(content = '') {
-  const values = {};
-  for (const rawLine of String(content || '').split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const eqIndex = line.indexOf('=');
-    if (eqIndex <= 0) continue;
-    const key = line.slice(0, eqIndex).trim();
-    let value = line.slice(eqIndex + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
-      value = value.slice(1, -1);
-    }
-    if (key) values[key] = value;
-  }
-  return values;
-}
-
-export function readHermesEnvConfig(env = process.env) {
-  const filePath = resolveHermesEnvPath(env);
-  if (!existsSync(filePath)) return {};
-  try {
-    return parseSimpleEnv(readFileSync(filePath, 'utf8'));
-  } catch {
-    return {};
-  }
 }
 
 export function readHermesEnvKey(env = process.env) {
@@ -88,10 +52,13 @@ export class HermesApiAgentProvider {
       throw new Error('HERMES_API_KEY is not configured');
     }
 
+    const startedAt = Date.now();
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => {
       controller.abort(new Error(`Hermes API request timeout after ${this.timeoutMs}ms`));
     }, this.timeoutMs);
+
+    console.error(`[agent:hermes-api] request start baseUrl=${this.baseUrl} model=${this.model}`);
 
     try {
       const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
@@ -124,8 +91,13 @@ export class HermesApiAgentProvider {
         throw new Error('Hermes API response missing choices[0].message.content');
       }
 
+      console.error(`[agent:hermes-api] request done elapsedMs=${Date.now() - startedAt} outputChars=${output.length}`);
       return output;
     } catch (error) {
+      const reason = error?.name === 'AbortError' || error?.message === `Hermes API request timeout after ${this.timeoutMs}ms`
+        ? `Hermes API request timeout after ${this.timeoutMs}ms`
+        : (error?.message || String(error));
+      console.error(`[agent:hermes-api] request failed elapsedMs=${Date.now() - startedAt} reason=${reason}`);
       if (error?.name === 'AbortError' || error?.message === `Hermes API request timeout after ${this.timeoutMs}ms`) {
         throw new Error(`Hermes API request timeout after ${this.timeoutMs}ms`);
       }

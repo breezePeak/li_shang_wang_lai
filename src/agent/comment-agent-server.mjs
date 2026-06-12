@@ -302,13 +302,22 @@ export async function callAgentCli(prompt, options = {}) {
   const config = resolveAgentCliConfig(options);
   const args = config.argsTemplate.map(part => part === '{prompt}' ? prompt : part);
   if (!args.includes(prompt)) args.push(prompt);
+  const startedAt = Date.now();
 
-  const { stdout } = await execFileAsync(config.bin, args, {
-    timeout: config.timeoutMs,
-    maxBuffer: 1024 * 1024,
-    windowsHide: true,
-  });
-  return stdout;
+  console.error(`[agent:cli] request start provider=${config.provider}`);
+
+  try {
+    const { stdout } = await execFileAsync(config.bin, args, {
+      timeout: config.timeoutMs,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+    });
+    console.error(`[agent:cli] request done elapsedMs=${Date.now() - startedAt}`);
+    return stdout;
+  } catch (error) {
+    console.error(`[agent:cli] request failed elapsedMs=${Date.now() - startedAt}`);
+    throw error;
+  }
 }
 
 export async function callHermes(prompt, options = {}) {

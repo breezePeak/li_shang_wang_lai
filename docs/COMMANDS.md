@@ -41,6 +41,28 @@ npm run visit:run -- --execute
 
 默认不设置任何新环境变量时，仍然使用现有 CLI 调用 `hermes` / `openclaw`，主流程命令不变。这也是安装 Skill 后的默认体验。
 
+三种模式：
+
+- `cli`
+  - `AGENT_TRANSPORT=cli`
+  - 默认模式
+  - 不需要 API key
+  - 直接调用 `hermes chat` / `openclaw chat`
+- `api`
+  - `AGENT_TRANSPORT=api`
+  - 调用本机 `hermes gateway`
+  - 使用 `HERMES_API_KEY`
+  - `HERMES_API_KEY` 等于 Hermes 本地 `API_SERVER_KEY`
+  - 不是模型供应商 key
+- `direct-api`
+  - `AGENT_TRANSPORT=direct-api`
+  - 直接调用模型供应商 `/v1/chat/completions`
+  - 使用 `DIRECT_API_KEY`
+  - 不经过 Hermes gateway
+  - 不使用 `API_SERVER_KEY` 作为模型 key
+  - 手动注入 `SOUL.md`、`references/comment-safety-rules.md` 和评论上下文
+  - 不会自动加载 Hermes memory / skills / tools
+
 ```powershell
 Remove-Item Env:\AGENT_TRANSPORT -ErrorAction SilentlyContinue
 Remove-Item Env:\HERMES_API_KEY -ErrorAction SilentlyContinue
@@ -49,7 +71,7 @@ Remove-Item Env:\HERMES_API_BASE_URL -ErrorAction SilentlyContinue
 npm run comments:execute -- --days 7 --limit 5 --agent-only
 ```
 
-可选加速模式是 Hermes API Server。它不是安装必需项，不会自动启动，也不会因为本机 Hermes `.env` 里存在 `API_SERVER_KEY` 就自动切换。只有显式设置 `AGENT_TRANSPORT=api` 时才启用。
+可选加速模式之一是 Hermes API Server。它不是安装必需项，不会自动启动，也不会因为本机 Hermes `.env` 里存在 `API_SERVER_KEY` 就自动切换。只有显式设置 `AGENT_TRANSPORT=api` 时才启用。
 
 Windows 配置示例：
 
@@ -86,15 +108,115 @@ npm run visit:run -- --execute
 
 API 失败时默认自动 fallback 到 CLI；设置 `AGENT_API_FALLBACK=none` 可关闭 fallback。
 
+Direct API 模式同样必须显式启用：
+
+```powershell
+$env:AGENT_TRANSPORT="direct-api"
+
+# 如果 Hermes .env 已经有 OPENROUTER_API_KEY / HERMES_INFERENCE_MODEL，
+# 可以先只设置 transport 和 provider。
+$env:DIRECT_API_PROVIDER="openrouter"
+$env:DIRECT_API_FALLBACK="none"
+
+npm run comments:execute -- --days 7 --limit 5 --agent-only
+```
+
+如果自动推断不出来，再显式补全：
+
+```powershell
+$env:AGENT_TRANSPORT="direct-api"
+$env:DIRECT_API_PROVIDER="openrouter"
+$env:DIRECT_API_BASE_URL="https://openrouter.ai/api/v1"
+$env:DIRECT_API_KEY="<模型供应商 API key>"
+$env:DIRECT_API_MODEL="<模型名>"
+$env:DIRECT_API_FALLBACK="none"
+
+npm run comments:execute -- --days 7 --limit 5 --agent-only
+```
+
+如果 `%LOCALAPPDATA%\hermes\.env` 里已有：
+
+```dotenv
+OPENROUTER_API_KEY=xxx
+HERMES_INFERENCE_MODEL=xxx
+```
+
+则 `direct-api` 会优先只读复用这些值，但仍然要求你显式设置：
+
+```powershell
+$env:AGENT_TRANSPORT="direct-api"
+```
+
+`direct-api` 默认失败时 fallback 到 CLI；设置 `DIRECT_API_FALLBACK=none` 可关闭 fallback。
+
+预期日志示例：
+
+```text
+[agent] transport=direct-api fallback=none
+[agent:direct-api] provider=openrouter baseUrl=https://openrouter.ai/api/v1 model=xxx key=env:OPENROUTER_API_KEY soul=loaded
+[agent:direct-api] request done taskType=comment_reply_batch elapsedMs=...
+```
+
+fallback 测试：
+
+```powershell
+$env:AGENT_TRANSPORT="direct-api"
+$env:DIRECT_API_BASE_URL="http://127.0.0.1:39999/v1"
+$env:DIRECT_API_KEY="bad"
+$env:DIRECT_API_MODEL="bad"
+$env:DIRECT_API_TIMEOUT_MS="2000"
+
+npm run comments:execute -- --days 7 --limit 5 --agent-only
+```
+
+预期：
+
+```text
+[agent] direct-api generateReplies failed, fallback to cli reason=...
+```
+
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `AGENT_TRANSPORT` | `cli` | `cli` / `api` |
+| `AGENT_TRANSPORT` | `cli` | `cli` / `api` / `direct-api` |
 | `HERMES_API_BASE_URL` | `http://127.0.0.1:8642/v1` | 本机 Hermes API Server 的 `/v1` 根路径 |
 | `HERMES_API_KEY` | `''` | 本机 Hermes API Server 的 Bearer token；未设置时会尝试只读读取 Hermes 本地 `.env` 中的 `API_SERVER_KEY` |
 | `HERMES_API_MODEL` | `hermes-agent` | API 模式使用的模型名 |
 | `AGENT_API_TIMEOUT_MS` | `60000` | API 请求超时，未设置时回退到 `AGENT_TIMEOUT_MS` |
 | `AGENT_API_FALLBACK` | `cli` | `cli` / `none` |
+| `DIRECT_API_PROVIDER` | 自动推断 | `openai` / `openrouter` / `deepseek` / `dashscope` / `qwen` |
+| `DIRECT_API_BASE_URL` | 自动推断 | 模型供应商 `/v1` 根路径；不会读取 `HERMES_API_BASE_URL` |
+| `DIRECT_API_KEY` | `''` | 模型供应商 API key；不会读取 `HERMES_API_KEY` 或 `API_SERVER_KEY` |
+| `DIRECT_API_MODEL` | 自动推断 | direct-api 使用的模型名 |
+| `DIRECT_API_TIMEOUT_MS` | `60000` | direct-api 请求超时，未设置时回退到 `AGENT_TIMEOUT_MS` |
+| `DIRECT_API_TEMPERATURE` | `0.6` | direct-api 采样温度 |
+| `DIRECT_API_MAX_TOKENS` | 自动计算 | 单条默认 256，批量自动放大 |
+| `DIRECT_API_FALLBACK` | `cli` | `cli` / `none` |
+| `DIRECT_API_SOUL_PATH` | `''` | 指定 `SOUL.md` 路径 |
+| `DIRECT_API_REQUIRE_SOUL` | `0` | 设为 `1` 时必须找到 `SOUL.md` |
 | `REPLY_BATCH_SIZE` | `8` | `comments:execute` 批量生成回复时每批条数 |
+
+`DIRECT_API_KEY` / `HERMES_API_KEY` / `API_SERVER_KEY` 的区别：
+
+- `DIRECT_API_KEY`：模型供应商 key，例如 OpenRouter / DeepSeek / DashScope / OpenAI。
+- `HERMES_API_KEY`：项目访问本机 Hermes gateway 的 Bearer token。
+- `API_SERVER_KEY`：Hermes 本地 `.env` 里的 gateway 访问口令，通常与 `HERMES_API_KEY` 对应；不是模型供应商 key。
+
+`direct-api` 的 `SOUL.md` 查找顺序：
+
+1. `DIRECT_API_SOUL_PATH`
+2. 当前目录 `SOUL.md`
+3. `%LOCALAPPDATA%\hermes\SOUL.md`
+4. `%USERPROFILE%\.hermes\SOUL.md`
+5. `~/.hermes/SOUL.md`
+
+找不到时默认继续运行；设置 `DIRECT_API_REQUIRE_SOUL=1` 时直接失败。
+
+性能说明：
+
+- `cli` 会为每次生成调用一次 `hermes chat` / `openclaw chat`。
+- `api` 省去 CLI 拉起成本，但仍经过 Hermes gateway / Agent 编排。
+- `direct-api` 省去 Hermes CLI / gateway 编排，但不会减少模型本身的推理耗时。
+- 是否明显更快，取决于模型响应速度、网络延迟、prompt 大小和批量规模。
 
 ## 1. auth
 
