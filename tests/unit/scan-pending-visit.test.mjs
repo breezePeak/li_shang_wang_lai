@@ -157,7 +157,7 @@ describe('summarizePendingReplies', () => {
 
     const db = getDb();
     const oldSeenAt = new Date(Date.now() - 3 * 86400000).toISOString();
-    db.prepare('UPDATE work_comments SET last_seen_at = ? WHERE id = ?').run(oldSeenAt, old.id);
+    db.prepare('UPDATE work_comments SET first_seen_at = ?, last_seen_at = ? WHERE id = ?').run(oldSeenAt, oldSeenAt, old.id);
 
     const summary = summarizePendingReplies({ days: 1, maxCount: 10 });
 

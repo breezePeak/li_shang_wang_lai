@@ -199,6 +199,43 @@ describe('comments:execute refactored logic', () => {
     expect(ids).not.toContain(4);
   });
 
+  it('按最近采集时间筛选并优先返回最近采集的评论，不让旧评论挤占 max-count', () => {
+    const db = getDb(testDb);
+    const nowIso = new Date().toISOString();
+    const oldIso = new Date(Date.now() - 3 * 86400000).toISOString();
+
+    db.prepare(`
+      INSERT INTO work_comments (
+        id, work_id, modal_id, work_url, actor_name, actor_profile_url, actor_profile_key,
+        comment_text, event_time_text, comment_key, reply_status, first_seen_at, last_seen_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    `).run(
+      101,
+      'old-work', 'old-work', 'https://www.douyin.com/video/old-work',
+      '旧评论用户', 'https://www.douyin.com/user/old-commenter', 'old-commenter',
+      '这是三天前采集的旧评论', '3天前', 'old-comment-key',
+      oldIso, nowIso
+    );
+
+    db.prepare(`
+      INSERT INTO work_comments (
+        id, work_id, modal_id, work_url, actor_name, actor_profile_url, actor_profile_key,
+        comment_text, event_time_text, comment_key, reply_status, first_seen_at, last_seen_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    `).run(
+      102,
+      'recent-work', 'recent-work', 'https://www.douyin.com/video/recent-work',
+      '最新评论用户', 'https://www.douyin.com/user/recent-commenter', 'recent-commenter',
+      '这是刚采集到的新评论', '1小时前', 'recent-comment-key',
+      nowIso, nowIso
+    );
+
+    const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: 1, days: 1 });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(102);
+  });
+
   it('resolveWorkUrlFromItem 优先使用现有字段并回退到 workId/modalId', () => {
     expect(resolveWorkUrlFromItem({ workUrl: 'https://a' }, {})).toBe('https://a');
     expect(resolveWorkUrlFromItem({ awemeUrl: 'https://b' }, {})).toBe('https://b');
@@ -282,8 +319,8 @@ describe('comments:execute refactored logic', () => {
     expect(provider.generateReplies).toHaveBeenCalledTimes(1);
     expect(provider.generateReplies.mock.calls[0][0].map(context => context.taskId)).toEqual(['work_comment_2']);
     expect(results).toEqual([
-      { commentId: 1, ok: true, skipped: true, reason: 'reply_text_exists' },
       { commentId: 2, ok: true, reply: 'Hermes代看后觉得2号评论挺真诚自然' },
+      { commentId: 1, ok: true, skipped: true, reason: 'reply_text_exists' },
     ]);
 
     const verifyDb = new Database(testDb);
