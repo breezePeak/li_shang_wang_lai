@@ -618,7 +618,7 @@ textarea {
   top: 18px;
   right: 18px;
   bottom: 18px;
-  width: clamp(420px, 34vw, 620px);
+  width: clamp(560px, 46vw, 920px);
   min-height: 0;
   overflow: hidden;
   transform: translateX(calc(100% + 28px));
@@ -727,6 +727,7 @@ textarea {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  display: flex;
 }
 
 .drawer-page {
@@ -737,27 +738,17 @@ textarea {
   gap: 18px;
   min-height: 0;
   height: 100%;
-  transition: transform 280ms ease, filter 220ms ease;
+  transition: width 280ms ease, transform 280ms ease, filter 220ms ease, opacity 220ms ease;
 }
 
 .drawer-shell.has-detail-open .drawer-page-master {
-  transform: translateX(-54px) scale(0.985);
-  filter: saturate(0.95);
+  width: 50%;
+  transform: translateX(0);
+  filter: saturate(0.98);
 }
 
 .detail-modal-backdrop {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, rgba(24, 35, 43, 0.08), rgba(24, 35, 43, 0.24) 38%, rgba(24, 35, 43, 0.48) 100%);
-  opacity: 0;
   pointer-events: none;
-  transition: opacity 220ms ease;
-  z-index: 2;
-}
-
-.detail-modal-backdrop.is-visible {
-  opacity: 1;
-  pointer-events: auto;
 }
 
 .drawer-stats {
@@ -927,30 +918,29 @@ textarea {
 .status-badge.muted { background: rgba(109, 119, 111, 0.10); color: var(--muted); }
 
 .detail-modal-panel {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  bottom: 14px;
-  width: min(72%, 430px);
-  padding: 18px 20px 20px;
-  border-radius: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  width: 0;
+  min-width: 0;
+  padding: 18px 0 20px;
+  border-left: 1px solid transparent;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 249, 241, 0.92)),
     radial-gradient(circle at top right, rgba(22, 107, 147, 0.10), transparent 30%);
-  box-shadow: 0 28px 60px rgba(24, 35, 43, 0.22);
   display: flex;
   flex-direction: column;
   gap: 18px;
   opacity: 0;
-  transform: translateX(calc(100% + 24px));
+  transform: translateX(28px);
   pointer-events: none;
-  transition: transform 280ms ease, opacity 220ms ease;
-  z-index: 3;
+  overflow: hidden;
+  transition: width 280ms ease, min-width 280ms ease, padding 280ms ease, border-color 220ms ease, transform 280ms ease, opacity 220ms ease;
 }
 
 .detail-modal-panel.is-visible {
   opacity: 1;
+  width: 50%;
+  min-width: 320px;
+  padding: 18px 20px 20px;
+  border-left-color: var(--line);
   transform: translateX(0);
   pointer-events: auto;
 }
@@ -1127,7 +1117,7 @@ textarea {
 
 @media (max-width: 1220px) {
   .stage-drawer {
-    width: min(620px, calc(100vw - 20px));
+    width: min(760px, calc(100vw - 20px));
     top: 10px;
     right: 10px;
     bottom: 10px;
@@ -1209,15 +1199,30 @@ textarea {
   }
 
   .drawer-shell.has-detail-open .drawer-page-master {
-    transform: translateX(-18px) scale(0.985);
+    width: 100%;
+    transform: none;
   }
 
   .detail-modal-panel {
+    position: absolute;
     top: auto;
     left: 10px;
     right: 10px;
     bottom: 10px;
     width: auto;
+    min-width: 0;
+    padding: 18px 20px 20px;
+    border-left: none;
+    border-top: 1px solid transparent;
+    border-radius: 28px;
+    box-shadow: 0 28px 60px rgba(24, 35, 43, 0.22);
     max-height: 72%;
+    transform: translateY(calc(100% + 18px));
+  }
+
+  .detail-modal-panel.is-visible {
+    width: auto;
+    border-top-color: var(--line);
+    transform: translateY(0);
   }
 }
