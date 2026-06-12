@@ -12,7 +12,7 @@ import {
   RETURN_VISIT_STATUS,
   updateReturnVisitTask,
 } from '../../src/services/return-visit-task-service.mjs';
-import { summarizePendingReplies, preparePendingVisitTasks, resolveScanCollectionLimit } from '../../src/cli/scan-interactions.mjs';
+import { summarizePendingReplies, preparePendingVisitTasks } from '../../src/cli/scan-interactions.mjs';
 
 const TEST_DB = resolve('data', 'test-scan-pending-visit.db');
 
@@ -159,7 +159,7 @@ describe('summarizePendingReplies', () => {
     const oldSeenAt = new Date(Date.now() - 3 * 86400000).toISOString();
     db.prepare('UPDATE work_comments SET first_seen_at = ?, last_seen_at = ? WHERE id = ?').run(oldSeenAt, oldSeenAt, old.id);
 
-    const summary = summarizePendingReplies({ days: 1, maxCount: 10 });
+    const summary = summarizePendingReplies({ days: 1 });
 
     expect(summary.homepageCount).toBe(1);
     expect(summary.workCount).toBe(2);
@@ -168,24 +168,6 @@ describe('summarizePendingReplies', () => {
     expect(summary.nextStep).toContain('comments:execute');
     expect(recent.action).toBe('inserted');
     expect(old.action).toBe('inserted');
-  });
-});
-
-describe('resolveScanCollectionLimit', () => {
-  it('treats maxCount as separate budgets for replies and visits', () => {
-    expect(resolveScanCollectionLimit({
-      maxCount: 100,
-      prepareReplies: true,
-      prepareVisits: true,
-    })).toBe(200);
-  });
-
-  it('keeps a single maxCount budget when only one downstream flow is enabled', () => {
-    expect(resolveScanCollectionLimit({
-      maxCount: 100,
-      prepareReplies: true,
-      prepareVisits: false,
-    })).toBe(100);
   });
 });
 

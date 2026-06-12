@@ -81,7 +81,7 @@
 │  遍历 apiCollector.getItems() 中的每条通知:                       │
 │  ├─ 本次扫描内重复 (processedNoticeIds)         → skip           │
 │  ├─ --type 过滤 (comment/like 不匹配)           → skip           │
-│  ├─ --max-count M 条数限制                      → return(成功)    │
+│  ├─ 不再按最大条数提前截断                      → 继续扫描        │
 │  ├─ --days N 天数窗口 (事件 create_time 比较)                     │
 │  │  ├─ 超过 N 天 → 累计连续过期计数                               │
 │  │  │  └─ 连续 ≥ 3 条 → stop='old-relevant' → break             │
@@ -524,7 +524,7 @@ pending_visit → executing → done
 ### A. 模块边界与约束
 
 ```text
-采集模块 (interactions:scan) — 通知面板唯一入口，负责入库；查询待处理范围时必须显式输入 --days 与 --max-count；不生成中间 JSON
+采集模块 (interactions:scan) — 通知面板唯一入口，负责入库；查询待处理范围时必须显式输入 --days；不生成中间 JSON
 LocalAgentProvider — 进程内调用 Hermes/OpenClaw 生成 comment/reply 文本，可通过 AGENT_PROVIDER=hermes|openclaw 切换
 agent-server — 可选 HTTP 调试/外部集成入口，不属于主流程
 回评模块 (comments:execute) — 默认从 DB 查询待回评，必须显式输入 --days 与 --limit/--max-count，调用 LocalAgentProvider 生成 reply_text，再由 CLI 执行浏览器动作
@@ -539,11 +539,11 @@ return-visit:prepare 不属于推荐主流程。
 
 ```text
 只看互动:   interactions:scan --display-only
-评论回复:   interactions:scan --days N --max-count M
+评论回复:   interactions:scan --days N
            → comments:execute --days N --limit M
-明确回访:   interactions:scan --days N --max-count M --prepare-visits
+明确回访:   interactions:scan --days N --prepare-visits
            → visit:run --execute
-评论+回访:  interactions:scan --days N --max-count M
+评论+回访:  interactions:scan --days N
            → comments:execute --days N --limit M
            → visit:run --execute
 ```

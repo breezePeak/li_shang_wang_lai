@@ -634,7 +634,7 @@ export function listReturnVisitTasksByIds(taskIds = []) {
 
 export function listReturnVisitPendingPrepareTasksByIds(taskIds = [], {
   days = null,
-  limit = 100,
+  limit = null,
   maxRetryCount = 2,
 } = {}) {
   const ids = Array.from(new Set((taskIds || []).map(id => String(id || '').trim()).filter(Boolean)));
@@ -681,7 +681,7 @@ export function listReturnVisitPendingPrepareTasksByIds(taskIds = [], {
     }
 
     tasks.push(mapRowToTask(row));
-    if (tasks.length >= limit) break;
+    if (Number(limit) > 0 && tasks.length >= limit) break;
   }
 
   return {
@@ -707,7 +707,7 @@ export function listReturnVisitPendingPrepareTasksByIds(taskIds = [], {
  */
 export function listReturnVisitScanTasks({
   days = null,
-  limit = 100,
+  limit = null,
   maxRetryCount = 2,
 } = {}) {
   const db = getDb();
@@ -744,7 +744,7 @@ export function listReturnVisitScanTasks({
     }
 
     tasks.push(mapRowToTask(row));
-    if (tasks.length >= limit) break;
+    if (Number(limit) > 0 && tasks.length >= limit) break;
   }
 
   return {

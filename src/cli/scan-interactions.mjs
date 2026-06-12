@@ -725,8 +725,8 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
   }
 }
 
-export function summarizePendingReplies({ days = null, maxCount = 500 } = {}) {
-  const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: maxCount, days });
+export function summarizePendingReplies({ days = null } = {}) {
+  const rows = listPendingCommentsGroupedByHomepageAndWork({ days });
   const homepageKeys = new Set();
   const workKeys = new Set();
   const missingHomepageWorkMap = new Map();
@@ -781,7 +781,7 @@ function getVisitSourceType(event) {
   return 'other';
 }
 
-export function preparePendingVisitTasks(events, { days = null, maxCount = 100, collectTypes = ['like', 'comment', 'reply', 'follow'] } = {}) {
+export function preparePendingVisitTasks(events, { days = null, maxCount = null, collectTypes = ['like', 'comment', 'reply', 'follow'] } = {}) {
   const allowed = new Set((collectTypes || []).map(type => String(type || '').trim()).filter(Boolean));
   const stats = {
     skipDbDuplicate: 0,
@@ -871,7 +871,7 @@ export function preparePendingVisitTasks(events, { days = null, maxCount = 100, 
   // 从数据库全量查询所有符合扫描参数的待回访任务，不限定本轮 taskIds。
   const dbResult = listReturnVisitScanTasks({
     days,
-    limit: maxCount,
+    limit: Number(maxCount) > 0 ? maxCount : null,
   });
   stats.dbCandidate = dbResult.candidateCount;
   stats.dbFilteredStatus = dbResult.filteredStatusCount;
@@ -912,27 +912,16 @@ export function preparePendingVisitTasks(events, { days = null, maxCount = 100, 
   };
 }
 
-export function resolveScanCollectionLimit(scanPlan = {}) {
-  const maxCount = Number(scanPlan.maxCount || 0);
-  if (!(maxCount > 0)) return null;
-
-  let bucketCount = 0;
-  if (scanPlan.prepareReplies) bucketCount++;
-  if (scanPlan.prepareVisits) bucketCount++;
-
-  return maxCount * Math.max(bucketCount, 1);
-}
-
-function buildPostScanPendingSummaries(scanPlan, allEvents, { days, maxCount }) {
+function buildPostScanPendingSummaries(scanPlan, allEvents, { days }) {
   const pendingReplySummary = scanPlan.prepareReplies
-    ? summarizePendingReplies({ days, maxCount: maxCount || 500 })
+    ? summarizePendingReplies({ days })
     : null;
   if (!pendingReplySummary) {
     console.error('[scan] 本次计划不查询待回评评论');
   }
 
   const pendingVisitSummary = scanPlan.prepareVisits
-    ? preparePendingVisitTasks(allEvents, { days, maxCount: maxCount || 100, collectTypes: scanPlan.collectTypes })
+    ? preparePendingVisitTasks(allEvents, { days, collectTypes: scanPlan.collectTypes })
     : null;
   if (!pendingVisitSummary) {
     console.error('[scan] 本次计划不准备待回访任务');
@@ -960,8 +949,6 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   const wantLikes = (type === 'all' || type === 'like');
   const wantReplies = (type === 'all' || type === 'reply');
   const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
-  const maxCount = Number(scanPlan.maxCount || 0) > 0 ? Number(scanPlan.maxCount) : null;
-  const scanCollectionLimit = resolveScanCollectionLimit(scanPlan);
   const maxScrollRounds = Number(scanPlan.maxScrollRounds || 100);
   const dedupeContext = buildDedupeContext(notificationDays);
   const processedNoticeIds = new Set();
@@ -1010,11 +997,6 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     if (!wantReplies && normalized.eventType === 'reply') {
       logApiNotificationSkip(notificationIndex, normalized, '--type 过滤回复类通知', notificationId);
       return { counted: false };
-    }
-
-    if (scanCollectionLimit && totalProcessedCount >= scanCollectionLimit) {
-      logApiNotificationSkip(notificationIndex, normalized, `达到最大采集条数 scanCollectionLimit=${scanCollectionLimit}`, notificationId);
-      return { counted: false, stop: 'max-count' };
     }
 
     if (notificationDays && (normalized.eventType === 'comment' || normalized.eventType === 'like' || normalized.eventType === 'reply')) {
@@ -1253,34 +1235,9 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
         const notificationIndex = totalProcessedCount + 1;
         const result = await processNoticeApiItem(item, notificationIndex);
         if (result?.counted) roundProcessed++;
-        if (result?.stop === 'max-count') {
-          console.error(`[scan] 达到最大采集条数 maxCount=${maxCount}，停止采集`);
-          scrollRounds = round;
-          if (!run.options?.keepOpen) await closeNotificationPanel(page);
-          const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays, maxCount });
-          return success({
-            inserted: totalInserted,
-            duplicateCount: totalDuplicateCount,
-            enriched: totalEnrichedCount,
-            ambiguousCount: totalAmbiguousCount,
-            profileResolved: totalProfileResolved,
-            profileUnresolved: totalProfileUnresolved,
-            parseFailed: getTotalParseFailed(),
-            scrollRounds,
-            workCommentsInserted: totalWorkCommentInserted,
-            workCommentsEnriched: totalWorkCommentEnriched,
-            workCommentsDuplicate: totalWorkCommentDuplicate,
-            pendingReplySummary,
-            pendingVisitSummary,
-            events: allEvents,
-            ambiguousEvents,
-            failedEvents,
-            step: 'notify-scan',
-          });
-        }
         if (result?.stop === 'old-relevant') {
           scrollRounds = round;
-          const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays, maxCount });
+          const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays });
           if (!run.options?.keepOpen) await closeNotificationPanel(page);
           return success({
             inserted: totalInserted,
@@ -1355,7 +1312,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       await closeNotificationPanel(page);
     }
 
-    const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays, maxCount });
+    const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays });
 
     console.error(
       `[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalAmbiguousCount} 歧义 | ` +
@@ -1493,8 +1450,6 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
   const wantReplies = (type === 'all' || type === 'reply');
   const wantFollows = (type === 'all' || type === 'follow');
   const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
-  const maxCount = Number(scanPlan.maxCount || 0) > 0 ? Number(scanPlan.maxCount) : null;
-  const scanCollectionLimit = resolveScanCollectionLimit(scanPlan);
   const dedupeContext = buildDedupeContext(notificationDays);
   console.error(
     `[scan] 去重上下文: notifications=${dedupeContext.notificationKeys.size} ` +
@@ -1565,11 +1520,6 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
 
     for (const [itemIndex, n] of notifications.entries()) {
       const notificationIndex = run.scanned + itemIndex + 1;
-      if (scanCollectionLimit && seenItemKeys.size >= scanCollectionLimit) {
-        logNotificationSkip(notificationIndex, n, `达到最大采集条数 scanCollectionLimit=${scanCollectionLimit}`);
-        stopDueToOldRelevant = true;
-        break;
-      }
       const itemKey = n.notificationItemKey || (n.username + '||' + n.action + '||' + (n.content || ''));
       if (seenItemKeys.has(itemKey)) {
         logNotificationSkip(notificationIndex, n, '本次扫描内重复通知', itemKey);
@@ -1879,7 +1829,7 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
     await closeNotificationPanel(page);
   }
 
-  const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays, maxCount });
+  const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays });
 
   console.error(`[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalAmbiguousCount} 歧义 | ${totalProfileResolved} 主页已解析 | ${totalProfileUnresolved} 主页未解析 | work_comments ${totalWorkCommentInserted} 新增/${totalWorkCommentEnriched} 补全/${totalWorkCommentDuplicate} 重复 | ${parseFailedCount} 条解析失败 | ${scrollRounds} 轮滚动`);
   return success({
@@ -1910,10 +1860,7 @@ async function main() {
   const pauseIdx = remaining.indexOf('--pause-after-open');
   const pauseAfterOpen = pauseIdx >= 0 ? parseInt(remaining[pauseIdx + 1], 10) || 0 : 0;
   const debugNotificationDom = remaining.includes('--debug-notification-dom');
-  const maxCountIdx = remaining.indexOf('--max-count');
-  const hasExplicitMaxCount = maxCountIdx >= 0;
   const hasExplicitDays = argv.includes('--days');
-  const maxCount = hasExplicitMaxCount ? Math.max(1, parseInt(remaining[maxCountIdx + 1], 10) || 1) : null;
   const collectTypesIdx = remaining.indexOf('--collect-types');
   const collectTypes = collectTypesIdx >= 0 && remaining[collectTypesIdx + 1]
     ? remaining[collectTypesIdx + 1].split(',').map(type => type.trim()).filter(Boolean)
@@ -1933,13 +1880,12 @@ async function main() {
   const explicitPrepareVisits = remaining.includes('--prepare-visits');
   const noExplicitPrepareFlags = !explicitPrepareReplies && !explicitPrepareVisits;
   const scanPlan = {
-    maxCount,
     collectTypes,
     prepareReplies: displayOnly ? false : (explicitPrepareReplies || noExplicitPrepareFlags),
     prepareVisits: displayOnly ? false : (explicitPrepareVisits || noExplicitPrepareFlags),
   };
-  if ((scanPlan.prepareReplies || scanPlan.prepareVisits) && (!hasExplicitDays || !hasExplicitMaxCount)) {
-    const message = '查询待回评或待回访范围必须手动输入采集天数和最大条数限制，例如：interactions:scan --days 7 --max-count 50';
+  if ((scanPlan.prepareReplies || scanPlan.prepareVisits) && !hasExplicitDays) {
+    const message = '查询待回评或待回访范围必须手动输入采集天数，例如：interactions:scan --days 7';
     if (options.json) {
       printJsonError('interactions:scan', RESULT_CODES.INVALID_ARGUMENTS, message, { recoverable: false });
     } else {

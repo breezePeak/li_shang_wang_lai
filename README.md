@@ -47,9 +47,9 @@ npm run auth
 | 初始化数据库 | `npm run db:init` |
 | 清空表数据 | `npm run db:reset` |
 | 只看互动 | `npm run interactions:scan -- --display-only` |
-| 扫描互动入库 | `npm run interactions:scan -- --days 7 --max-count 50` |
+| 扫描互动入库 | `npm run interactions:scan -- --days 7` |
 | 评论回复 | `npm run comments:execute -- --days 7 --limit 50` |
-| 准备回访任务 | `npm run interactions:scan -- --days 7 --max-count 50 --prepare-visits` |
+| 准备回访任务 | `npm run interactions:scan -- --days 7 --prepare-visits` |
 | 执行回访 | `npm run visit:run -- --execute` |
 | 运行测试 | `npm test` |
 
@@ -66,7 +66,7 @@ npm run auth
 常见示例：
 
 ```bash
-npm run interactions:scan -- --days 7 --max-count 50 --headless
+npm run interactions:scan -- --days 7 --headless
 npm run comments:execute -- --days 7 --limit 50 --headless
 npm run visit:run -- --execute --headless
 ```

@@ -26,10 +26,10 @@ Agent 生成或填写评论时，必须遵守 `references/comment-safety-rules.m
 
 | 用户意图 | 采集命令 | 后续动作 |
 |---|---|---|
-| 只看互动 | `npm run interactions:scan -- --type all --days N --max-count M --display-only` | 只展示互动数据 |
-| 评论回复 | `npm run interactions:scan -- --type comment --days N --max-count M --prepare-replies` | `comments:execute --days N --limit M` |
-| 明确回访 | `npm run interactions:scan -- --type all --days N --max-count M --prepare-visits` | `visit:run --execute` |
-| 评论回复并回访 | `npm run interactions:scan -- --type all --days N --max-count M` | 先回评，再按用户明确要求回访 |
+| 只看互动 | `npm run interactions:scan -- --type all --days N --display-only` | 只展示互动数据 |
+| 评论回复 | `npm run interactions:scan -- --type comment --days N --prepare-replies` | `comments:execute --days N --limit M` |
+| 明确回访 | `npm run interactions:scan -- --type all --days N --prepare-visits` | `visit:run --execute` |
+| 评论回复并回访 | `npm run interactions:scan -- --type all --days N` | 先回评，再按用户明确要求回访 |
 
 ## 评论回复流程
 
@@ -38,7 +38,7 @@ Agent 生成或填写评论时，必须遵守 `references/comment-safety-rules.m
 **步骤 1**：扫描互动数据并入库，准备待回评范围：
 
 ```bash
-npm run interactions:scan -- --type comment --days N --max-count M --prepare-replies
+npm run interactions:scan -- --type comment --days N --prepare-replies
 ```
 
 **步骤 2**：执行评论回复：
@@ -56,7 +56,7 @@ npm run comments:execute -- --days N --limit M
 **步骤 1**：扫描互动数据并入库，准备待回访任务：
 
 ```bash
-npm run interactions:scan -- --days N --max-count M --prepare-visits
+npm run interactions:scan -- --days N --prepare-visits
 ```
 
 **步骤 2**：执行回访（点赞 + 评论）：

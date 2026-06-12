@@ -24,14 +24,14 @@
 评论回复（DB 查询 + 进程内 Hermes/OpenClaw 生成 + CLI 执行）：
 
 ```bash
-npm run interactions:scan -- --type comment --days 7 --max-count 50 --prepare-replies
+npm run interactions:scan -- --type comment --days 7 --prepare-replies
 npm run comments:execute -- --days 7 --limit 50
 ```
 
 回访（DB 任务 + 进程内 Hermes/OpenClaw 生成 + CLI 执行）：
 
 ```bash
-npm run interactions:scan -- --days 7 --max-count 50 --prepare-visits
+npm run interactions:scan -- --days 7 --prepare-visits
 npm run visit:run -- --execute
 ```
 
@@ -246,8 +246,8 @@ npm run db:init
 
 ```bash
 npm run interactions:scan -- --display-only
-npm run interactions:scan -- --type comment --days 7 --max-count 50 --prepare-replies
-npm run interactions:scan -- --days 7 --max-count 50 --prepare-visits
+npm run interactions:scan -- --type comment --days 7 --prepare-replies
+npm run interactions:scan -- --days 7 --prepare-visits
 ```
 
 源文件：`src/cli/scan-interactions.mjs`
@@ -260,7 +260,6 @@ npm run interactions:scan -- --days 7 --max-count 50 --prepare-visits
 |---|---|---|
 | `--type` | `all` | `all` / `comment` / `like` / `reply` / `follow` |
 | `--days` | 必填（非 display-only） | 限定最近 N 天通知，传 `0` 取消限制 |
-| `--max-count` | 必填（非 display-only） | 最大采集通知条数 |
 | `--display-only` | `false` | 只采集和展示互动数据，不查询待回评 / 准备待回访任务 |
 | `--prepare-replies` | 默认准备 | 查询待回评 DB 摘要，不生成文件 |
 | `--prepare-visits` | 默认准备 | 创建/更新待回访 DB 任务，不生成文件 |

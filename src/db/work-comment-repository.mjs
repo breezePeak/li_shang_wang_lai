@@ -58,7 +58,7 @@ export function upsertWorkComment(comment) {
 
 export function listPendingCommentsGroupedByWork(options = {}) {
   const db = getDb();
-  const { limit = 100, days = null } = options;
+  const { limit = null, days = null } = options;
   const params = [];
   let sql = "SELECT * FROM work_comments WHERE reply_status = 'pending'";
   if (Number(days) > 0) {
@@ -66,8 +66,11 @@ export function listPendingCommentsGroupedByWork(options = {}) {
     sql += ' AND COALESCE(first_seen_at, last_seen_at) >= ?';
     params.push(since);
   }
-  sql += ' ORDER BY COALESCE(first_seen_at, last_seen_at) DESC, id DESC LIMIT ?';
-  params.push(limit);
+  sql += ' ORDER BY COALESCE(first_seen_at, last_seen_at) DESC, id DESC';
+  if (Number(limit) > 0) {
+    sql += ' LIMIT ?';
+    params.push(limit);
+  }
   const rows = db.prepare(sql).all(...params);
 
   const groups = new Map();
@@ -81,7 +84,7 @@ export function listPendingCommentsGroupedByWork(options = {}) {
 
 export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
   const db = getDb();
-  const { limit = 100, days = null } = options;
+  const { limit = null, days = null } = options;
   const params = [];
   let sql = `
     SELECT
@@ -122,9 +125,11 @@ export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
       CASE WHEN wc.reply_reason IS NULL OR wc.reply_reason = '' THEN 0 ELSE 1 END,
       COALESCE(wc.first_seen_at, wc.last_seen_at) DESC,
       wc.id DESC
-    LIMIT ?
   `;
-  params.push(limit);
+  if (Number(limit) > 0) {
+    sql += ' LIMIT ?';
+    params.push(limit);
+  }
   return db.prepare(sql).all(...params);
 }
 
