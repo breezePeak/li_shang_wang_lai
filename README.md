@@ -54,6 +54,22 @@ npm run auth
 
 完整参数见 `docs/COMMANDS.md`，流程细节见 `SKILL.md`。
 
+## 浏览器模式
+
+项目默认使用有头浏览器，方便登录、观察页面变化和人工接管。
+
+- 临时启用无头模式：在命令后追加 `--headless`
+- 长期启用无头模式：在 `config/local.json` 中设置 `"browser": { "headless": true }`
+- CLI 参数优先于配置文件；不传时默认仍是 `false`
+
+常见示例：
+
+```bash
+npm run interactions:scan -- --days 7 --max-count 50 --headless
+npm run comments:execute -- --days 7 --limit 50 --headless
+npm run visit:run -- --execute --headless
+```
+
 ## Agent 配置
 
 默认不设置任何新环境变量时，仍然走现有 CLI 调用，不会自动切到 API 或 direct-api。

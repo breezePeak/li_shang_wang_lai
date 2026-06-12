@@ -20,7 +20,7 @@ function parseArgs(argv) {
   const args = {
     json: false,
     keepOpen: false,
-    headless: false,
+    headless: undefined,
     dryRun: false,
     execute: true,
     watchPolicy: null,

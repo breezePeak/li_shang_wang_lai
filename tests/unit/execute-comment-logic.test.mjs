@@ -337,6 +337,13 @@ describe('comments:execute refactored logic', () => {
     expect(args.limit).toBe(2);
   });
 
+  it('parseArgs 支持 --headless，允许无头执行回评', () => {
+    const args = parseArgs(['--days', '7', '--limit', '2', '--headless']);
+    expect(args.headless).toBe(true);
+    expect(args.days).toBe(7);
+    expect(args.limit).toBe(2);
+  });
+
   it('extractTargetCommentId 能从 raw_comment_json 回推 cid', () => {
     const cid = extractTargetCommentId({}, {
       raw_comment_json: JSON.stringify({

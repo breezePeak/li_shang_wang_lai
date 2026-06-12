@@ -20,7 +20,7 @@ import { closeCurrentWorkModalToProfile, openProfileWorkByAwemeIdFromPostApi } f
 import { pathToFileURL } from 'url';
 
 function parseArgs(argv) {
-  const args = { profileUrl: '', days: 7, count: 20, json: false, keepOpen: false, apply: false, auto: false };
+  const args = { profileUrl: '', days: 7, count: 20, json: false, keepOpen: false, headless: undefined, apply: false, auto: false };
   for (let i = 0; i < argv.length; i++) {
     if ((argv[i] === '--profile' || argv[i] === '--profile-url') && argv[i + 1]) {
       args.profileUrl = String(argv[++i] || '').trim();
@@ -29,6 +29,7 @@ function parseArgs(argv) {
     if (argv[i] === '--count' && argv[i + 1]) args.count = Number(argv[++i] || 0) || 20;
     if (argv[i] === '--json') args.json = true;
     if (argv[i] === '--keep-open') args.keepOpen = true;
+    if (argv[i] === '--headless') args.headless = true;
     if (argv[i] === '--apply') args.apply = true;
     if (argv[i] === '--auto') args.auto = true;
   }
@@ -321,6 +322,7 @@ async function main() {
       '  --count    最多检查 N 个作品（默认 20）',
       '  --apply    将未回复评论在 DB 中标记为 manually_replied',
       '  --json     JSON 格式输出',
+      '  --headless 无头运行浏览器',
       '  --keep-open 保持浏览器不关闭',
     ].join('\n'));
     process.exit(1);
@@ -339,7 +341,7 @@ async function main() {
   const allResults = [];
 
   try {
-    const ctx = await createBrowserContext({ headless: false, enableReuse: Boolean(args.keepOpen) });
+    const ctx = await createBrowserContext({ headless: args.headless, enableReuse: Boolean(args.keepOpen) });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();

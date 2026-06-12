@@ -77,6 +77,7 @@ async function main() {
   const pageArgIdx = args.indexOf('--page');
   const pageType = pageArgIdx >= 0 ? args[pageArgIdx + 1] : 'comment';
   const keepOpen = args.includes('--keep-open');
+  const headless = args.includes('--headless') ? true : undefined;
   const urls = PAGE_URLS[pageType] || PAGE_URLS.comment;
 
   logger.setLevel('INFO');
@@ -94,7 +95,7 @@ async function main() {
   try {
     // 2. 启动浏览器
     console.log('[inspect] 正在启动浏览器...');
-    const ctx = await createBrowserContext({ headless: false, enableReuse: keepOpen });
+    const ctx = await createBrowserContext({ headless, enableReuse: keepOpen });
     browser = ctx.browser;
 
     const pages = ctx.context.pages();

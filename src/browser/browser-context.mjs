@@ -4,12 +4,28 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { loadConfig } from '../config/user-config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PROFILE_DIR = resolve(__dirname, '../../.playwright/douyin-profile');
 const CDP_PORT = 9224;
 const CDP_ENDPOINT = `http://127.0.0.1:${CDP_PORT}`;
 const LOCK_FILE = resolve(__dirname, '../../.playwright/.browser-pid');
+
+function resolveConfiguredProfileDir(profileDir) {
+  if (!profileDir) return DEFAULT_PROFILE_DIR;
+  return resolve(process.cwd(), profileDir);
+}
+
+function resolveLaunchOptions(options = {}) {
+  const browserConfig = loadConfig().browser || {};
+  return {
+    headless: options.headless ?? Boolean(browserConfig.headless),
+    profileDir: resolveConfiguredProfileDir(options.profileDir ?? browserConfig.profileDir),
+    slowMo: options.slowMo ?? Number(browserConfig.slowMo ?? 150),
+    enableReuse: options.enableReuse ?? false,
+  };
+}
 
 function checkPort() {
   return new Promise((resolve) => {
@@ -92,11 +108,11 @@ async function launchDetachedReusableBrowser({ profileDir, headless }) {
  */
 export async function createBrowserContext(options = {}) {
   const {
-    headless = false,
-    profileDir = DEFAULT_PROFILE_DIR,
-    slowMo = 150,
-    enableReuse = false,
-  } = options;
+    headless,
+    profileDir,
+    slowMo,
+    enableReuse,
+  } = resolveLaunchOptions(options);
 
   // CDP reuse is only attempted when explicitly enabled (e.g. keep-open mode).
   if (enableReuse) {

@@ -31,6 +31,7 @@ function chinaTimestamp() {
 async function main() {
   const args = process.argv.slice(2);
   const keepOpen = args.includes('--keep-open');
+  const headless = args.includes('--headless') ? true : undefined;
 
   const outputRoot = path.resolve(process.cwd(), 'interactions-output', 'inspect');
   const sessionDir = path.join(outputRoot, 'notify-' + chinaTimestamp());
@@ -41,7 +42,7 @@ async function main() {
   let browser = null;
   try {
     console.log('[notify] 启动浏览器...');
-    const ctx = await createBrowserContext({ headless: false, enableReuse: keepOpen });
+    const ctx = await createBrowserContext({ headless, enableReuse: keepOpen });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     const page = pages.length > 0 ? pages[0] : await ctx.context.newPage();

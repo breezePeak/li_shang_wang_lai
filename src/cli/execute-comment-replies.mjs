@@ -50,6 +50,7 @@ export function parseArgs(argv) {
     json: false,
     diagnosePosition: false,
     keepOpen: false,
+    headless: undefined,
     limit: null,
     days: null,
     agentOnly: false,
@@ -63,6 +64,7 @@ export function parseArgs(argv) {
     if (argv[i] === '--json') args.json = true;
     if (argv[i] === '--diagnose-position') args.diagnosePosition = true;
     if (argv[i] === '--keep-open') args.keepOpen = true;
+    if (argv[i] === '--headless') args.headless = true;
     if ((argv[i] === '--limit' || argv[i] === '--max-count') && argv[i + 1]) args.limit = Number(argv[++i] || 0) || null;
     if (argv[i] === '--days' && argv[i + 1]) args.days = Number(argv[++i] || 0) || null;
     if (argv[i] === '--agent-only') args.agentOnly = true;
@@ -960,7 +962,7 @@ async function executeWorkCommentItems(items, args) {
       return results;
     }
 
-    ctx = await createBrowserContext({ headless: false, enableReuse: Boolean(args.keepOpen) && !args.json });
+    ctx = await createBrowserContext({ headless: args.headless, enableReuse: Boolean(args.keepOpen) && !args.json });
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
