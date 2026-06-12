@@ -60,10 +60,10 @@
     "maxReferenceComments": 5,
     "watchPolicy": "seconds",
     "watchSeconds": [3, 3],
-    "waitBetweenUsersMs": [8000, 20000],
-    "waitBetweenLikeAndCommentMs": [500, 1200],
-    "restEveryTasksRange": [8, 12],
-    "restDurationMs": [60000, 180000]
+    "waitBetweenUsersMs": [3000, 5000],
+    "waitBetweenLikeAndCommentMs": [2000, 3000],
+    "restEveryTasksRange": [1, 1],
+    "restDurationMs": [5000, 5000]
   },
   "safety": {
     "stopOnLoginRequired": true,

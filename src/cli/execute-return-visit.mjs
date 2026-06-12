@@ -115,10 +115,10 @@ async function main() {
   const maxWorksToCheck = Number(returnVisitConfig.maxWorksToCheck ?? 3);
   const pageLoadRetryCount = Number(returnVisitConfig.pageLoadRetryCount ?? 1);
   const maxConsecutiveFailures = Number(returnVisitConfig.maxConsecutiveFailures ?? 3);
-  const waitBetweenUsersMs = returnVisitConfig.waitBetweenUsersMs || [8000, 20000];
-  const waitBetweenLikeAndCommentMs = returnVisitConfig.waitBetweenLikeAndCommentMs || [500, 1200];
-  const restEveryTasksRange = getRange(returnVisitConfig.restEveryTasksRange, 8, 12);
-  const restDurationMs = returnVisitConfig.restDurationMs || [60000, 180000];
+  const waitBetweenUsersMs = returnVisitConfig.waitBetweenUsersMs || [3000, 5000];
+  const waitBetweenLikeAndCommentMs = returnVisitConfig.waitBetweenLikeAndCommentMs || [2000, 3000];
+  const restEveryTasksRange = getRange(returnVisitConfig.restEveryTasksRange, 1, 1);
+  const restDurationMs = returnVisitConfig.restDurationMs || [5000, 5000];
 
   // 映射视频观看策略与秒数默认值
   const watchPolicy = args.watchPolicy || returnVisitConfig.watchPolicy || 'seconds';
@@ -288,12 +288,12 @@ async function main() {
       processedSinceRest++;
 
       if (executeMode && index < tasks.length - 1) {
-        const userWaitMs = await waitRandom(page, waitBetweenUsersMs, 8000, 20000);
+        const userWaitMs = await waitRandom(page, waitBetweenUsersMs, 3000, 5000);
         log(args.json, `[return-visit:execute] wait between users: ${userWaitMs}ms`);
       }
 
       if (executeMode && processedSinceRest >= restAfter) {
-        const restMs = await waitRandom(page, restDurationMs, 60000, 180000);
+        const restMs = await waitRandom(page, restDurationMs, 5000, 5000);
         log(args.json, `[return-visit:execute] rest: ${restMs}ms`);
         processedSinceRest = 0;
         restAfter = randomInRange(restEveryTasksRange[0], restEveryTasksRange[1]);

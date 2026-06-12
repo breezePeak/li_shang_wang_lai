@@ -726,7 +726,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     pageLoadRetryCount = 1,
     maxWorksToCheck = 3,
     maxReferenceComments = 5,
-    waitBetweenLikeAndCommentMs = [500, 1200],
+    waitBetweenLikeAndCommentMs = [2000, 3000],
     watchPolicy = 'seconds',
     watchSeconds = [3, 3],
     agentProvider = new LocalAgentProvider(),
@@ -977,7 +977,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
 
   console.error(`${logTag} [4/5] 等待发评论... delay=${waitBetweenLikeAndCommentMs}ms`);
   const likeToCommentStartedAt = Date.now();
-  const likeToCommentMs = await waitRandom(page, waitBetweenLikeAndCommentMs, 500, 1200);
+  const likeToCommentMs = await waitRandom(page, waitBetweenLikeAndCommentMs, 2000, 3000);
   logTimedStep(logTag, 'like_to_comment_delay', 'done', {
     elapsedMs: elapsedMs(likeToCommentStartedAt),
     waitedMs: likeToCommentMs,

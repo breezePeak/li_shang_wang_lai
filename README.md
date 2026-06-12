@@ -58,6 +58,12 @@ npm run auth
 
 默认不设置任何新环境变量时，仍然走现有 CLI 调用。
 
+简单理解：
+
+- `CLI`：每次需要生成评论时，项目直接调用一次 `hermes chat` 或 `openclaw chat`。这是默认模式，开箱即用。
+- `API`：如果你本机已经手动启动了 Hermes 的常驻服务，项目就不必每次都重新拉起 Hermes，批量生成时会更快。这就是“API 加速”。
+- 不想折腾就什么都别配，继续用默认 `CLI` 就行。
+
 ```bash
 # 默认 Hermes
 npm run comments:execute -- --days 7 --limit 50
@@ -90,6 +96,13 @@ $env:HERMES_API_MODEL="hermes-agent"
 
 npm run comments:execute -- --days 7 --limit 50
 ```
+
+如果你要启用 API 加速，按这个顺序理解就够了：
+
+1. 默认模式已经能用，不需要配 API。
+2. 只有你自己手动启动了 `hermes gateway`，`AGENT_TRANSPORT=api` 才有意义。
+3. `HERMES_API_KEY` 不是模型厂商的 key，它只是你本机 Hermes API Server 的访问口令。
+4. API 模式失败时，默认会自动退回 CLI，不会直接把流程卡死。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
