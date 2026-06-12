@@ -16,4 +16,14 @@ describe('createRunContext', () => {
     const { options } = parseCommonArgs(['--headless']);
     expect(options.headless).toBe(true);
   });
+
+  it('parseCommonArgs defaults maxItems to 100', () => {
+    const { options } = parseCommonArgs([]);
+    expect(options.maxItems).toBe(100);
+  });
+
+  it('parseCommonArgs falls back invalid --max-items to 100', () => {
+    const { options } = parseCommonArgs(['--max-items', '0']);
+    expect(options.maxItems).toBe(100);
+  });
 });

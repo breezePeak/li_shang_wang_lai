@@ -12,7 +12,7 @@ import {
   RETURN_VISIT_STATUS,
   updateReturnVisitTask,
 } from '../../src/services/return-visit-task-service.mjs';
-import { summarizePendingReplies, preparePendingVisitTasks } from '../../src/cli/scan-interactions.mjs';
+import { summarizePendingReplies, preparePendingVisitTasks, resolveScanCollectionLimit } from '../../src/cli/scan-interactions.mjs';
 
 const TEST_DB = resolve('data', 'test-scan-pending-visit.db');
 
@@ -168,6 +168,24 @@ describe('summarizePendingReplies', () => {
     expect(summary.nextStep).toContain('comments:execute');
     expect(recent.action).toBe('inserted');
     expect(old.action).toBe('inserted');
+  });
+});
+
+describe('resolveScanCollectionLimit', () => {
+  it('treats maxCount as separate budgets for replies and visits', () => {
+    expect(resolveScanCollectionLimit({
+      maxCount: 100,
+      prepareReplies: true,
+      prepareVisits: true,
+    })).toBe(200);
+  });
+
+  it('keeps a single maxCount budget when only one downstream flow is enabled', () => {
+    expect(resolveScanCollectionLimit({
+      maxCount: 100,
+      prepareReplies: true,
+      prepareVisits: false,
+    })).toBe(100);
   });
 });
 

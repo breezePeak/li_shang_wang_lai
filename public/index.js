@@ -36,6 +36,10 @@ function bindEvents() {
   document.getElementById('btn-refresh').addEventListener('click', refreshAll);
   document.getElementById('btn-close-drawer').addEventListener('click', closeDrawer);
   document.getElementById('drawer-backdrop').addEventListener('click', closeDrawer);
+  document.getElementById('detail-modal-backdrop').addEventListener('click', () => {
+    selectedWorkKey = null;
+    renderDrawer();
+  });
   document.getElementById('btn-back-work').addEventListener('click', () => {
     selectedWorkKey = null;
     renderDrawer();
@@ -251,7 +255,7 @@ function renderFlowGraph() {
         <div class="lane-head">
           <span class="lane-tag">Reply Lane</span>
           <h3>回评线</h3>
-          <p>节点统一走“阶段信息 → 作品列表 → 评论明细”。</p>
+          <p>像编辑流水台一样推进评论处理，先聚合作品，再下钻到每条回复动作。</p>
         </div>
         <div class="lane-track">
           ${renderLane([
@@ -268,7 +272,7 @@ function renderFlowGraph() {
         <div class="lane-head">
           <span class="lane-tag">Visit Lane</span>
           <h3>回访线</h3>
-          <p>从线索、重试、异常到归档，全部统一从作品维度推进。</p>
+          <p>从线索汇入执行链，强调状态推进和结果落点，避免和回评线混成一团。</p>
         </div>
         <div class="lane-track">
           ${renderLane([
@@ -356,11 +360,16 @@ function renderDrawer() {
   const backdrop = document.getElementById('drawer-backdrop');
   const empty = document.getElementById('drawer-empty');
   const frame = document.getElementById('drawer-frame');
-  const track = document.getElementById('drawer-track');
+  const shell = document.getElementById('drawer-shell');
+  const detailBackdrop = document.getElementById('detail-modal-backdrop');
+  const detailPanel = document.getElementById('detail-modal-panel');
 
   if (!selectedStageId) {
     drawer.classList.remove('is-open', 'is-detail-open');
     backdrop.classList.remove('is-visible');
+    shell.classList.remove('has-detail-open');
+    detailBackdrop.classList.remove('is-visible');
+    detailPanel.classList.remove('is-visible');
     empty.style.display = 'flex';
     frame.style.display = 'none';
     return;
@@ -375,7 +384,10 @@ function renderDrawer() {
   backdrop.classList.add('is-visible');
   empty.style.display = 'none';
   frame.style.display = 'flex';
-  track.style.transform = workGroup ? 'translateX(-50%)' : 'translateX(0)';
+  shell.classList.toggle('has-detail-open', Boolean(workGroup));
+  detailBackdrop.classList.toggle('is-visible', Boolean(workGroup));
+  detailPanel.classList.toggle('is-visible', Boolean(workGroup));
+  detailPanel.setAttribute('aria-hidden', workGroup ? 'false' : 'true');
 
   setText('drawer-kicker', dataset.kicker);
   setText('drawer-title', dataset.title);
@@ -432,7 +444,7 @@ function renderWorksList(groups) {
         <p>${escapeHtml(group.subtitle || '点击查看该作品下的评论/回访明细')}</p>
         <div class="work-card-foot">
           <span>${escapeHtml(group.meta || '')}</span>
-          <i class="fa-solid fa-arrow-right"></i>
+          <span class="work-card-action">展开详情 <i class="fa-solid fa-arrow-right"></i></span>
         </div>
       </button>
     `;

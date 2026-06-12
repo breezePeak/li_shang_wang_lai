@@ -912,6 +912,17 @@ export function preparePendingVisitTasks(events, { days = null, maxCount = 100, 
   };
 }
 
+export function resolveScanCollectionLimit(scanPlan = {}) {
+  const maxCount = Number(scanPlan.maxCount || 0);
+  if (!(maxCount > 0)) return null;
+
+  let bucketCount = 0;
+  if (scanPlan.prepareReplies) bucketCount++;
+  if (scanPlan.prepareVisits) bucketCount++;
+
+  return maxCount * Math.max(bucketCount, 1);
+}
+
 function buildPostScanPendingSummaries(scanPlan, allEvents, { days, maxCount }) {
   const pendingReplySummary = scanPlan.prepareReplies
     ? summarizePendingReplies({ days, maxCount: maxCount || 500 })
@@ -950,6 +961,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   const wantReplies = (type === 'all' || type === 'reply');
   const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
   const maxCount = Number(scanPlan.maxCount || 0) > 0 ? Number(scanPlan.maxCount) : null;
+  const scanCollectionLimit = resolveScanCollectionLimit(scanPlan);
   const maxScrollRounds = Number(scanPlan.maxScrollRounds || 100);
   const dedupeContext = buildDedupeContext(notificationDays);
   const processedNoticeIds = new Set();
@@ -1000,8 +1012,8 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       return { counted: false };
     }
 
-    if (maxCount && totalProcessedCount >= maxCount) {
-      logApiNotificationSkip(notificationIndex, normalized, `达到最大采集条数 maxCount=${maxCount}`, notificationId);
+    if (scanCollectionLimit && totalProcessedCount >= scanCollectionLimit) {
+      logApiNotificationSkip(notificationIndex, normalized, `达到最大采集条数 scanCollectionLimit=${scanCollectionLimit}`, notificationId);
       return { counted: false, stop: 'max-count' };
     }
 
@@ -1482,6 +1494,7 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
   const wantFollows = (type === 'all' || type === 'follow');
   const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
   const maxCount = Number(scanPlan.maxCount || 0) > 0 ? Number(scanPlan.maxCount) : null;
+  const scanCollectionLimit = resolveScanCollectionLimit(scanPlan);
   const dedupeContext = buildDedupeContext(notificationDays);
   console.error(
     `[scan] 去重上下文: notifications=${dedupeContext.notificationKeys.size} ` +
@@ -1552,8 +1565,8 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
 
     for (const [itemIndex, n] of notifications.entries()) {
       const notificationIndex = run.scanned + itemIndex + 1;
-      if (maxCount && seenItemKeys.size >= maxCount) {
-        logNotificationSkip(notificationIndex, n, `达到最大采集条数 maxCount=${maxCount}`);
+      if (scanCollectionLimit && seenItemKeys.size >= scanCollectionLimit) {
+        logNotificationSkip(notificationIndex, n, `达到最大采集条数 scanCollectionLimit=${scanCollectionLimit}`);
         stopDueToOldRelevant = true;
         break;
       }

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="index.css?v=4">
+  <link rel="stylesheet" href="index.css?v=5">
 </head>
 <body>
   <div class="backdrop-grid" aria-hidden="true"></div>
@@ -23,7 +23,7 @@
         <div class="brand-copy">
           <span class="brand-eyebrow">Li Shang Wang Lai</span>
           <h1>互动回评 / 回访流程图</h1>
-          <p>点击任意节点，右侧滑出该节点的数量信息与作品列表，再进入作品明细。</p>
+          <p>点击任意节点先看作品池，再从右侧唤起带模态的详情框，把回评和回访的推进动作串成一条连续路径。</p>
         </div>
       </div>
 
@@ -56,12 +56,12 @@
       <div class="hero-card accent-reply">
         <span class="hero-label">回评队列</span>
         <strong id="summary-reply-total">0</strong>
-        <p>待回评、异常、已完成都统一从作品维度展开。</p>
+        <p>回评线更聚焦作品推进和评论处理，异常与已完成状态一眼可辨。</p>
       </div>
       <div class="hero-card accent-visit">
         <span class="hero-label">回访队列</span>
         <strong id="summary-visit-total">0</strong>
-        <p>未处理线索、执行中与已归档统一按作品查看。</p>
+        <p>回访线强化线索汇入和执行落点，点击作品后继续向右展开任务详情。</p>
       </div>
     </section>
 
@@ -70,9 +70,9 @@
         <div class="panel-head">
           <div>
             <span class="section-kicker">Flow Graph</span>
-            <h2>统一的节点 → 作品 → 明细三层流程</h2>
+            <h2>节点总览 / 作品推进 / 详情模态</h2>
           </div>
-          <p>左侧流程图只负责选阶段，右侧所有节点都复用同一套推进面板。</p>
+          <p>左侧只负责选阶段，右侧把作品推进和详情查看拆成更清晰的双层滑移关系。</p>
         </div>
         <div id="graph-root" class="graph-root"></div>
       </section>
@@ -81,7 +81,7 @@
         <div class="drawer-empty" id="drawer-empty">
           <div class="drawer-empty-mark"><i class="fa-solid fa-arrow-pointer"></i></div>
           <h3>先点一个节点</h3>
-          <p>右侧会滑出该节点的数量信息、作品列表，以及作品下的评论/回访明细。</p>
+          <p>右侧会先展开作品池；点击作品后，列表继续向左滑移，右侧再弹出带模态的详情框。</p>
         </div>
 
         <div class="drawer-frame" id="drawer-frame">
@@ -98,8 +98,8 @@
 
           <div class="drawer-breadcrumbs" id="drawer-breadcrumbs"></div>
 
-          <div class="drawer-track" id="drawer-track">
-            <section class="drawer-page">
+          <div class="drawer-shell" id="drawer-shell">
+            <section class="drawer-page drawer-page-master" id="drawer-master-page">
               <div class="drawer-stats" id="drawer-stats"></div>
               <div class="list-section">
                 <div class="list-section-head">
@@ -110,7 +110,9 @@
               </div>
             </section>
 
-            <section class="drawer-page detail-page">
+            <div class="detail-modal-backdrop" id="detail-modal-backdrop" aria-hidden="true"></div>
+
+            <section class="detail-modal-panel" id="detail-modal-panel" aria-hidden="true">
               <div class="detail-head">
                 <button class="back-btn" id="btn-back-work">
                   <i class="fa-solid fa-arrow-left"></i>

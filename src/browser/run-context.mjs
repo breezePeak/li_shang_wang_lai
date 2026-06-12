@@ -10,7 +10,7 @@ const DEFAULT_OPTIONS = {
   keepOpenOnError: true,
   headless: undefined,
   pauseOnError: true,
-  maxItems: 1,
+  maxItems: 100,
   commentMode: 'skill',
   selectedCommentText: null,
   replyMode: null,
@@ -83,7 +83,7 @@ export function parseCommonArgs(argv) {
 
     if (arg === '--max-items' && i + 1 < argv.length) {
       const n = parseInt(argv[++i]);
-      options.maxItems = isNaN(n) || n < 1 ? 1 : n;
+      options.maxItems = isNaN(n) || n < 1 ? DEFAULT_OPTIONS.maxItems : n;
       continue;
     }
 
