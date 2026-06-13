@@ -1,27 +1,13 @@
 function isCommentSubmitUrl(url = '') {
   const text = String(url || '');
-  if (!text.includes('/comment/')) return false;
-  if (text.includes('/comment/list/')) return false;
-  if (text.includes('/comment/digg/')) return false;
-  if (text.includes('/comment/delete/')) return false;
-  return true;
+  return text.includes('/comment/publish');
 }
 
 function isSuccessPayload(json) {
   if (!json || typeof json !== 'object') return false;
-
-  const numericCandidates = [
-    json.status_code,
-    json.statusCode,
-    json.code,
-    json.err_no,
-    json.error_code,
-  ];
-  if (numericCandidates.some((value) => Number(value) === 0)) return true;
-
-  if (json.success === true || json.ok === true) return true;
-
-  return false;
+  const statusCode = json.status_code ?? json.statusCode ?? json.code ?? json.err_no ?? json.error_code;
+  const commentId = json?.comment?.cid || json?.comment?.comment_id || json?.data?.cid || json?.data?.comment_id || null;
+  return Number(statusCode) === 0 && Boolean(commentId);
 }
 
 function normalizeExpectedText(expectedText = '') {
