@@ -759,12 +759,12 @@ textarea {
 .drawer-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
 }
 
 .stat-card {
-  padding: 14px 16px;
-  border-radius: 18px;
+  padding: 12px 14px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.88);
   border: 1px solid rgba(48, 63, 57, 0.08);
 }
@@ -776,20 +776,20 @@ textarea {
 
 .stat-card span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .stat-card strong {
   display: block;
-  margin: 8px 0 6px;
+  margin: 6px 0 4px;
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 30px;
+  font-size: 26px;
 }
 
 .stat-card small {
   color: var(--muted);
   line-height: 1.5;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .stat-card.reply strong { color: var(--reply); }
@@ -803,7 +803,7 @@ textarea {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   flex: 1;
 }
 
@@ -835,15 +835,15 @@ textarea {
   min-height: 0;
   overflow: auto;
   display: grid;
-  gap: 12px;
+  gap: 10px;
   padding-right: 4px;
 }
 
 .work-card {
   border: 1px solid rgba(255, 255, 255, 0.76);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 251, 247, 0.88));
-  border-radius: 20px;
-  padding: 16px;
+  border-radius: 16px;
+  padding: 12px 13px;
   text-align: left;
   cursor: pointer;
   box-shadow: var(--shadow-soft);
@@ -866,13 +866,13 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .work-card h4,
 .detail-item-head strong {
-  margin: 10px 0 6px;
-  font-size: 16px;
+  margin: 8px 0 4px;
+  font-size: 15px;
 }
 
 .work-card p,
@@ -880,14 +880,14 @@ textarea {
 .reply-readonly {
   margin: 0;
   color: var(--muted);
-  line-height: 1.65;
-  font-size: 13px;
+  line-height: 1.55;
+  font-size: 12px;
 }
 
 .work-card-foot {
-  margin-top: 14px;
+  margin-top: 10px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .work-card-action {
@@ -903,10 +903,10 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 28px;
-  padding: 0 10px;
+  min-height: 24px;
+  padding: 0 8px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -985,11 +985,11 @@ textarea {
 .detail-title-block {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .detail-title-block h4 {
-  font-size: 22px;
+  font-size: 20px;
 }
 
 .item-list {
@@ -997,32 +997,32 @@ textarea {
 }
 
 .detail-card-item {
-  padding: 16px;
-  border-radius: 20px;
+  padding: 12px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid rgba(48, 63, 57, 0.08);
   box-shadow: var(--shadow-soft);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
 .detail-item-block {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .detail-item-block label {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .detail-item-block.subtle {
-  padding: 12px;
-  border-radius: 14px;
+  padding: 10px;
+  border-radius: 12px;
   background: rgba(197, 90, 61, 0.08);
 }
 
@@ -1032,19 +1032,19 @@ textarea {
 }
 
 .inline-textarea {
-  min-height: 94px;
+  min-height: 78px;
   resize: vertical;
-  border-radius: 16px;
+  border-radius: 14px;
   border: 1px solid rgba(48, 63, 57, 0.10);
   background: #fffdfa;
   color: var(--text);
-  padding: 12px 14px;
-  line-height: 1.65;
+  padding: 10px 12px;
+  line-height: 1.55;
 }
 
 .reply-readonly {
-  padding: 12px 14px;
-  border-radius: 16px;
+  padding: 10px 12px;
+  border-radius: 14px;
   background: rgba(62, 134, 82, 0.08);
   color: var(--text);
 }
@@ -1058,8 +1058,8 @@ textarea {
 }
 
 .mini-btn {
-  padding: 10px 14px;
-  border-radius: 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
   background: rgba(34, 43, 40, 0.06);
   color: var(--text);
 }
