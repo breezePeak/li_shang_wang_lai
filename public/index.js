@@ -1323,9 +1323,10 @@ function renderCommentDetailItem(comment) {
   const badge = getReplyBadge(comment.reply_status);
   const canEdit = comment.reply_status !== 'succeeded';
   const textareaId = `reply-text-${comment.id}`;
+  const sourceWork = comment.joined_work_title || comment.work_id || comment.modal_id || '未识别到你的作品';
 
   return `
-    <article class="detail-card-item">
+    <article class="detail-card-item journey-card">
       <div class="detail-item-head">
         <div>
           <span class="status-badge ${badge.className}">${badge.text}</span>
@@ -1333,6 +1334,7 @@ function renderCommentDetailItem(comment) {
         </div>
         <span class="detail-time">${escapeHtml(comment.event_time_text || '')}${comment.last_seen_at ? ` · ${formatTime(comment.last_seen_at)}` : ''}</span>
       </div>
+      ${renderCommentTimeline(comment, sourceWork)}
       <div class="detail-item-block">
         <label>原评论</label>
         <p>${escapeHtml(comment.comment_text || '')}</p>
@@ -1368,8 +1370,9 @@ function renderTaskDetailItem(task) {
   const sourceEvents = Array.isArray(task.sourceEvents) ? task.sourceEvents : [];
   const linkedReplies = Array.isArray(task.linkedReplies) ? task.linkedReplies.filter((item) => item.reply_text) : [];
   const workSummary = task.targetWork?.workTitle || task.targetWork?.contentSummary || task.targetWork?.workText || task.lastError || '暂无作品信息';
+  const sourceWork = sourceEvents[0]?.my_work_title || linkedReplies[0]?.joined_work_title || '未识别到你的作品';
   return `
-    <article class="detail-card-item">
+    <article class="detail-card-item journey-card">
       <div class="detail-item-head">
         <div>
           <span class="status-badge ${badge.className}">${badge.text}</span>
@@ -1377,6 +1380,7 @@ function renderTaskDetailItem(task) {
         </div>
         <span class="detail-time">${formatTime(task.updatedAt || task.createdAt)}</span>
       </div>
+      ${renderVisitTaskTimeline(task, sourceWork, workSummary, sourceEvents, linkedReplies)}
       <div class="detail-item-block">
         <label>好友做了什么</label>
         <p>${escapeHtml(summarizeVisitActions(sourceEvents, task.sourceTypes || [task.sourceType]) || '暂无互动摘要')}</p>
@@ -1407,6 +1411,82 @@ function renderTaskDetailItem(task) {
         <button class="mini-btn ghost" onclick="skipTask(${task.id})"><i class="fa-solid fa-circle-xmark"></i> 跳过</button>
       </div>
     </article>
+  `;
+}
+
+function renderCommentTimeline(comment, sourceWork) {
+  const eventTime = comment.event_time_text || '';
+  const touchedAt = formatTime(comment.last_seen_at || comment.replied_at || comment.first_seen_at || '');
+  const hasReply = Boolean(comment.reply_text);
+  const statusText = comment.reply_status === 'succeeded'
+    ? '这条评论已经回评完成'
+    : comment.reply_status === 'skipped'
+      ? '这条评论已被忽略'
+      : ['blocked', 'sent_unverified'].includes(comment.reply_status)
+        ? '这条评论在回评时出现异常'
+        : '这条评论正在等待你处理';
+
+  return `
+    <div class="journey-timeline">
+      <div class="journey-timeline-item">
+        <span class="journey-dot reply"></span>
+        <div class="journey-line-copy">
+          <label>收到评论</label>
+          <strong>好友在你的作品《${escapeHtml(sourceWork)}》下留言</strong>
+          <p>${escapeHtml(eventTime ? `${eventTime} 对方评论了你` : '对方评论了你')}</p>
+        </div>
+      </div>
+      <div class="journey-timeline-item">
+        <span class="journey-dot ${getReplyDotTone(comment.reply_status)}"></span>
+        <div class="journey-line-copy">
+          <label>生成回评</label>
+          <strong>${hasReply ? '我已经准备好这条回评内容' : '我还没有产出清晰回评内容'}</strong>
+          <p>${escapeHtml(hasReply ? comment.reply_text : '当前还没有可发送的回评文案')}</p>
+        </div>
+      </div>
+      <div class="journey-timeline-item">
+        <span class="journey-dot ${getReplyDotTone(comment.reply_status)}"></span>
+        <div class="journey-line-copy">
+          <label>回评结果</label>
+          <strong>${escapeHtml(statusText)}</strong>
+          <p>${escapeHtml(touchedAt ? `${touchedAt} 最近一次处理这条回评` : '这条回评还没有落地处理时间')}</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderVisitTaskTimeline(task, sourceWork, revisitWork, sourceEvents, linkedReplies) {
+  const actionText = summarizeVisitActions(sourceEvents, task.sourceTypes || [task.sourceType]) || '发现互动线索';
+  const replySnapshot = linkedReplies[0] || null;
+  const revisitAt = formatTime(task.updatedAt || task.createdAt || '');
+  return `
+    <div class="journey-timeline">
+      <div class="journey-timeline-item">
+        <span class="journey-dot reply"></span>
+        <div class="journey-line-copy">
+          <label>好友互动</label>
+          <strong>好友先在你的作品《${escapeHtml(sourceWork)}》里有动作</strong>
+          <p>${escapeHtml(actionText)}</p>
+        </div>
+      </div>
+      <div class="journey-timeline-item">
+        <span class="journey-dot ${replySnapshot ? 'done' : 'muted'}"></span>
+        <div class="journey-line-copy">
+          <label>原地回应</label>
+          <strong>${replySnapshot ? '我在原作品侧回应过这位好友' : '原作品侧没有找到明确回评记录'}</strong>
+          <p>${escapeHtml(replySnapshot ? `我回复过：${replySnapshot.reply_text}` : '这次回访链路里没有查到已保存的回评文本')}</p>
+        </div>
+      </div>
+      <div class="journey-timeline-item">
+        <span class="journey-dot ${getTaskStatusTone(task.status)}"></span>
+        <div class="journey-line-copy">
+          <label>回访落地</label>
+          <strong>我去回访了作品《${escapeHtml(revisitWork)}》</strong>
+          <p>${escapeHtml(`${revisitAt || '最近一次'} 处理了这条回访，${humanizeLikeStatus(task.likeStatus)}，${humanizeCommentStatus(task.commentStatus)}，任务${humanizeTaskStatus(task.status)}`)}</p>
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -1860,6 +1940,13 @@ function getTaskStatusTone(status) {
   if (String(status || '').startsWith('failed')) return 'danger';
   if (String(status || '').startsWith('skipped')) return 'muted';
   return 'visit';
+}
+
+function getReplyDotTone(status) {
+  if (status === 'succeeded') return 'done';
+  if (status === 'skipped') return 'muted';
+  if (['blocked', 'sent_unverified'].includes(status)) return 'danger';
+  return 'reply';
 }
 
 function renderEventTypeSummary(batch) {
