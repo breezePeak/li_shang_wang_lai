@@ -45,10 +45,6 @@ function bindEvents() {
     selectedWorkKey = null;
     renderDrawer();
   });
-  document.getElementById('btn-back-work').addEventListener('click', () => {
-    selectedWorkKey = null;
-    renderDrawer();
-  });
 }
 
 async function refreshAll() {
