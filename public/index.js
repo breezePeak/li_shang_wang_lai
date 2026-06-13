@@ -250,58 +250,109 @@ function renderFlowGraph() {
   const root = document.getElementById('graph-root');
   if (!root || root.hasAttribute('hidden')) return;
   const stages = buildStageMeta();
+  const actionItems = buildActionFocusItems(stages);
+  const urgentItems = actionItems.filter((item) => item.count > 0);
+  const totalActionCount = urgentItems.reduce((sum, item) => sum + item.count, 0);
+  const primaryItem = urgentItems[0] || null;
+
   root.innerHTML = `
-    <div class="graph-origin">
-      ${renderNode(stages[STAGE_IDS.COLLECT], true)}
-      <div class="source-pills">
-        ${renderMiniSource('评论', statsData.collectedComments || 0, 'fa-comment')}
-        ${renderMiniSource('点赞', statsData.collectedLikes || 0, 'fa-heart')}
-        ${renderMiniSource('回复', statsData.collectedReplies || 0, 'fa-reply')}
-        ${renderMiniSource('关注', statsData.collectedFollows || 0, 'fa-user-plus')}
+    <section class="action-focus">
+      <div class="action-focus-head">
+        <div>
+          <span class="lane-tag">Action Board</span>
+          <h3>现在要处理什么</h3>
+          <p>${totalActionCount > 0 ? `当前还有 ${totalActionCount} 项需要你推进，先处理数量不为 0 的卡片。` : '当前没有待处理项，下面时间表主要用于回看批次。'} </p>
+        </div>
+        <div class="action-focus-badges">
+          <span class="focus-badge">待回评 ${stages[STAGE_IDS.REPLY_PENDING].count}</span>
+          <span class="focus-badge">回评异常 ${stages[STAGE_IDS.REPLY_EXCEPTIONS].count}</span>
+          <span class="focus-badge">回访待处理 ${stages[STAGE_IDS.VISIT_UNHANDLED].count}</span>
+          <span class="focus-badge">回访异常 ${stages[STAGE_IDS.EXECUTE_ERRORS].count + stages[STAGE_IDS.VISIT_RETRY].count}</span>
+        </div>
       </div>
-    </div>
 
-    <div class="graph-lanes">
-      <section class="lane-card lane-reply">
-        <div class="lane-head">
-          <span class="lane-tag">Reply Lane</span>
-          <h3>回评线</h3>
-          <p>像编辑流水台一样推进评论处理，先聚合作品，再下钻到每条回复动作。</p>
+      ${primaryItem ? `
+        <button class="action-primary ${primaryItem.stage.tone}" onclick="selectStage('${primaryItem.stage.id}')">
+          <span class="action-primary-label">优先处理</span>
+          <strong>${escapeHtml(primaryItem.title)}</strong>
+          <p>${escapeHtml(primaryItem.description)}</p>
+          <span class="action-primary-count">${primaryItem.count}</span>
+        </button>
+      ` : `
+        <div class="action-empty">
+          <strong>当前没有需要立即处理的回评或回访</strong>
+          <p>你可以直接看下面的时间表，按批次回顾最近发生了什么。</p>
         </div>
-        <div class="lane-track">
-          ${renderLane([
-            stages[STAGE_IDS.REPLIES],
-            stages[STAGE_IDS.REPLY_PENDING],
-            stages[STAGE_IDS.REPLY_EXCEPTIONS],
-            stages[STAGE_IDS.REPLY_DONE],
-            stages[STAGE_IDS.REPLY_SKIPPED],
-          ])}
-        </div>
-      </section>
+      `}
 
-      <section class="lane-card lane-visit">
-        <div class="lane-head">
-          <span class="lane-tag">Visit Lane</span>
-          <h3>回访线</h3>
-          <p>从线索汇入执行链，强调状态推进和结果落点，避免和回评线混成一团。</p>
-        </div>
-        <div class="lane-track">
-          ${renderLane([
-            stages[STAGE_IDS.VISITS],
-            stages[STAGE_IDS.VISIT_UNHANDLED],
-            stages[STAGE_IDS.VISIT_RETRY],
-            stages[STAGE_IDS.EXECUTE_ERRORS],
-            stages[STAGE_IDS.VISIT_DONE],
-            stages[STAGE_IDS.VISIT_SKIPPED],
-          ])}
-        </div>
-      </section>
-    </div>
+      <div class="action-grid">
+        ${actionItems.map((item) => renderActionCard(item)).join('')}
+      </div>
+    </section>
+  `;
+}
 
-    <div class="aux-row">
-      ${renderNode(stages[STAGE_IDS.REPLY_EVENTS], false, true)}
-      ${renderNode(stages[STAGE_IDS.FOLLOW_EVENTS], false, true)}
-    </div>
+function buildActionFocusItems(stages) {
+  return [
+    {
+      key: 'reply-pending',
+      title: '待回评',
+      description: '这些评论还没处理，点进去直接看要回哪几条。',
+      count: stages[STAGE_IDS.REPLY_PENDING].count,
+      stage: stages[STAGE_IDS.REPLY_PENDING],
+    },
+    {
+      key: 'reply-exception',
+      title: '回评异常',
+      description: '发送未确认或被阻塞，优先人工确认这批。',
+      count: stages[STAGE_IDS.REPLY_EXCEPTIONS].count,
+      stage: stages[STAGE_IDS.REPLY_EXCEPTIONS],
+    },
+    {
+      key: 'visit-unhandled',
+      title: '待回访线索',
+      description: '这些互动还没真正进入回访处理。',
+      count: stages[STAGE_IDS.VISIT_UNHANDLED].count,
+      stage: stages[STAGE_IDS.VISIT_UNHANDLED],
+    },
+    {
+      key: 'visit-executable',
+      title: '待执行回访',
+      description: '已经形成任务，但还没真正点赞/评论完成。',
+      count: getExecutableVisitCount(),
+      stage: stages[STAGE_IDS.VISITS],
+    },
+    {
+      key: 'visit-retry',
+      title: '待重试回访',
+      description: '作品采集或评论生成失败，重新跑这一批。',
+      count: stages[STAGE_IDS.VISIT_RETRY].count,
+      stage: stages[STAGE_IDS.VISIT_RETRY],
+    },
+    {
+      key: 'visit-error',
+      title: '回访异常',
+      description: '点赞、评论或收尾确认失败，需要人工盯一下。',
+      count: stages[STAGE_IDS.EXECUTE_ERRORS].count,
+      stage: stages[STAGE_IDS.EXECUTE_ERRORS],
+    },
+  ].sort((a, b) => {
+    if ((b.count > 0) !== (a.count > 0)) return (b.count > 0) ? 1 : -1;
+    return b.count - a.count;
+  });
+}
+
+function renderActionCard(item) {
+  const isEmpty = item.count === 0;
+  return `
+    <button class="action-card ${item.stage.tone} ${isEmpty ? 'is-empty' : ''}" onclick="selectStage('${item.stage.id}')">
+      <span class="action-card-top">
+        <span class="action-card-title">${escapeHtml(item.title)}</span>
+        <span class="action-card-count">${item.count}</span>
+      </span>
+      <p>${escapeHtml(item.description)}</p>
+      <small>${isEmpty ? '当前这类不用处理' : '点进去直接处理'}</small>
+    </button>
   `;
 }
 
