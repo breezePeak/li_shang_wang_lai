@@ -333,7 +333,7 @@ textarea {
 .graph-root {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
 }
 
 .action-focus {
@@ -410,7 +410,6 @@ textarea {
 
 .action-primary {
   position: relative;
-  min-height: 220px;
   padding: 18px 92px 18px 18px;
   border-radius: 22px;
   display: grid;
@@ -442,6 +441,10 @@ textarea {
   line-height: 1.6;
   font-size: 13px;
   max-width: 30rem;
+}
+
+.action-primary p:last-of-type {
+  margin-bottom: 0;
 }
 
 .action-primary-count {
