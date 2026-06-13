@@ -9,6 +9,7 @@ let unhandledEvents = [];
 let scanSchedules = [];
 let selectedStageId = null;
 let selectedWorkKey = null;
+const EXECUTION_BATCH_GAP_MS = 2 * 60 * 1000;
 
 const STAGE_IDS = {
   SCAN_SCHEDULES: 'scanSchedules',
@@ -878,16 +879,18 @@ function buildReplyScheduleRows() {
 }
 
 function buildReplyScheduleGroups() {
-  const groups = new Map();
-  for (const comment of pendingComments) {
-    const timeValue = comment.last_seen_at || comment.replied_at || comment.first_seen_at || '';
-    const key = getTimeBucketKey(timeValue) || `reply-${comment.id}`;
-    const workKey = String(comment.joined_work_url || comment.work_url || comment.work_id || comment.modal_id || comment.id);
-    const group = groups.get(key) || {
-      key,
-      anchorAt: timeValue,
-      startAt: timeValue,
-      endAt: timeValue,
+  const batches = clusterItemsByExecutionWindow(
+    pendingComments,
+    (comment) => getReplyBatchTime(comment),
+    'reply-batch'
+  );
+
+  return batches.map((batch) => {
+    const group = {
+      key: batch.key,
+      anchorAt: batch.anchorAt,
+      startAt: batch.startAt,
+      endAt: batch.endAt,
       count: 0,
       workKeys: new Set(),
       pendingCount: 0,
@@ -896,22 +899,20 @@ function buildReplyScheduleGroups() {
       skippedCount: 0,
       items: [],
     };
-    group.count += 1;
-    group.workKeys.add(workKey);
-    if (comment.reply_status === 'succeeded') group.doneCount += 1;
-    else if (comment.reply_status === 'skipped') group.skippedCount += 1;
-    else if (['blocked', 'sent_unverified'].includes(comment.reply_status)) group.exceptionCount += 1;
-    else group.pendingCount += 1;
-    group.startAt = pickEarlierTime(group.startAt, timeValue);
-    group.endAt = pickLaterTime(group.endAt, timeValue);
-    group.anchorAt = pickLaterTime(group.anchorAt, timeValue);
-    group.items.push({ kind: 'comment', createdAt: timeValue, data: comment });
-    groups.set(key, group);
-  }
 
-  return Array.from(groups.values())
-    .sort((a, b) => sortByCreatedDesc({ createdAt: a.anchorAt }, { createdAt: b.anchorAt }))
-    .map((group) => ({
+    for (const comment of batch.items) {
+      const timeValue = getReplyBatchTime(comment);
+      const workKey = String(comment.joined_work_url || comment.work_url || comment.work_id || comment.modal_id || comment.id);
+      group.count += 1;
+      group.workKeys.add(workKey);
+      if (['succeeded', 'manually_replied'].includes(comment.reply_status)) group.doneCount += 1;
+      else if (comment.reply_status === 'skipped') group.skippedCount += 1;
+      else if (['blocked', 'sent_unverified'].includes(comment.reply_status)) group.exceptionCount += 1;
+      else group.pendingCount += 1;
+      group.items.push({ kind: 'comment', createdAt: timeValue, data: comment });
+    }
+
+    return {
       key: group.key,
       anchorAt: group.anchorAt,
       startAt: group.startAt,
@@ -924,9 +925,10 @@ function buildReplyScheduleGroups() {
       workCount: group.workKeys.size,
       summary: summarizeReplySchedule(group),
       helper: buildReplyScheduleHelper(group),
-      secondary: `覆盖 ${group.workKeys.size} 个作品`,
+      secondary: `本次回评 ${group.count} 条`,
       items: group.items.sort(sortByCreatedDesc),
-    }));
+    };
+  });
 }
 
 function buildVisitScheduleDataset() {
@@ -935,12 +937,12 @@ function buildVisitScheduleDataset() {
     kicker: 'Visit Schedule',
     shortLabel: '回访批次',
     title: '回访时间表',
-    subtitle: '按回访推进时间汇总，线索、任务、完成状态都放在同一条时间线上。',
+    subtitle: '按回访执行批次汇总，同一次命令处理了多少任务、成功多少、异常多少一眼可见。',
     listTitle: '回访批次',
     countUnit: '批回访',
     metrics: [
       { label: '回访批次', value: groups.length, helper: '按时间秒级聚合', tone: 'visit' },
-      { label: '回访总量', value: reviewTasks.length + unhandledEvents.length, helper: '任务 + 未处理线索', tone: 'visit' },
+      { label: '回访总量', value: reviewTasks.length, helper: '回访任务总数', tone: 'visit' },
       { label: '成功回访', value: reviewTasks.filter((task) => task.status === 'done').length, helper: '已完成回访', tone: 'done' },
       { label: '待推进 / 异常', value: getExecutableVisitCount() + getVisitErrorCount(), helper: '仍需处理的回访', tone: 'warning' },
     ],
@@ -964,17 +966,18 @@ function buildVisitScheduleRows() {
 }
 
 function buildVisitScheduleGroups() {
-  const groups = new Map();
-  const pushGroupItem = (timeValue, item, itemKind, statusInfo) => {
-    const key = getTimeBucketKey(timeValue) || `${itemKind}-${item.id}`;
-    const personKey = itemKind === 'task'
-      ? String(item.userProfileUrl || item.identityKey || item.userName || item.id)
-      : String(item.actor_profile_url || item.actor_name || item.id);
-    const group = groups.get(key) || {
-      key,
-      anchorAt: timeValue,
-      startAt: timeValue,
-      endAt: timeValue,
+  const batches = clusterItemsByExecutionWindow(
+    reviewTasks,
+    (task) => task.updatedAt || task.createdAt || '',
+    'visit-batch'
+  );
+
+  return batches.map((batch) => {
+    const group = {
+      key: batch.key,
+      anchorAt: batch.anchorAt,
+      startAt: batch.startAt,
+      endAt: batch.endAt,
       count: 0,
       personKeys: new Set(),
       leadCount: 0,
@@ -984,37 +987,21 @@ function buildVisitScheduleGroups() {
       skippedCount: 0,
       items: [],
     };
-    group.count += 1;
-    group.personKeys.add(personKey);
-    group.leadCount += statusInfo.leadCount;
-    group.pendingCount += statusInfo.pendingCount;
-    group.doneCount += statusInfo.doneCount;
-    group.failedCount += statusInfo.failedCount;
-    group.skippedCount += statusInfo.skippedCount;
-    group.startAt = pickEarlierTime(group.startAt, timeValue);
-    group.endAt = pickLaterTime(group.endAt, timeValue);
-    group.anchorAt = pickLaterTime(group.anchorAt, timeValue);
-    group.items.push({ kind: itemKind, createdAt: timeValue, data: item });
-    groups.set(key, group);
-  };
 
-  for (const event of unhandledEvents) {
-    pushGroupItem(event.created_at || '', event, 'event', { leadCount: 1, pendingCount: 0, doneCount: 0, failedCount: 0, skippedCount: 0 });
-  }
-  for (const task of reviewTasks) {
-    const status = String(task.status || '');
-    pushGroupItem(task.updatedAt || task.createdAt || '', task, 'task', {
-      leadCount: 0,
-      pendingCount: !status || ['pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'pending_execute', 'executing'].includes(status) ? 1 : 0,
-      doneCount: status === 'done' ? 1 : 0,
-      failedCount: status.startsWith('failed') ? 1 : 0,
-      skippedCount: status.startsWith('skipped') ? 1 : 0,
-    });
-  }
+    for (const task of batch.items) {
+      const status = String(task.status || '');
+      const timeValue = task.updatedAt || task.createdAt || '';
+      const personKey = String(task.userProfileUrl || task.identityKey || task.userName || task.id);
+      group.count += 1;
+      group.personKeys.add(personKey);
+      group.pendingCount += !status || ['pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'pending_execute', 'executing'].includes(status) ? 1 : 0;
+      group.doneCount += status === 'done' ? 1 : 0;
+      group.failedCount += status.startsWith('failed') ? 1 : 0;
+      group.skippedCount += status.startsWith('skipped') ? 1 : 0;
+      group.items.push({ kind: 'task', createdAt: timeValue, data: task });
+    }
 
-  return Array.from(groups.values())
-    .sort((a, b) => sortByCreatedDesc({ createdAt: a.anchorAt }, { createdAt: b.anchorAt }))
-    .map((group) => ({
+    return {
       key: group.key,
       anchorAt: group.anchorAt,
       startAt: group.startAt,
@@ -1027,9 +1014,46 @@ function buildVisitScheduleGroups() {
       groupCount: group.personKeys.size,
       summary: summarizeVisitSchedule(group),
       helper: buildVisitScheduleHelper(group),
-      secondary: `覆盖 ${group.personKeys.size} 位对象`,
+      secondary: `本次回访 ${group.count} 条`,
       items: group.items.sort(sortByCreatedDesc),
-    }));
+    };
+  });
+}
+
+function clusterItemsByExecutionWindow(items, getTimeValue, keyPrefix) {
+  const sorted = (Array.isArray(items) ? items : [])
+    .map((item) => ({ item, timeValue: getTimeValue(item), timeMs: parseDateValue(getTimeValue(item)) }))
+    .sort((a, b) => (b.timeMs - a.timeMs) || sortByCreatedDesc({ createdAt: b.timeValue }, { createdAt: a.timeValue }));
+
+  const groups = [];
+  let current = null;
+
+  for (const entry of sorted) {
+    if (!current || !entry.timeMs || !current.lastTimeMs || Math.abs(current.lastTimeMs - entry.timeMs) > EXECUTION_BATCH_GAP_MS) {
+      current = {
+        key: `${keyPrefix}-${entry.timeValue || entry.item?.id || groups.length}`,
+        anchorAt: entry.timeValue,
+        startAt: entry.timeValue,
+        endAt: entry.timeValue,
+        lastTimeMs: entry.timeMs,
+        items: [entry.item],
+      };
+      groups.push(current);
+      continue;
+    }
+
+    current.items.push(entry.item);
+    current.startAt = pickEarlierTime(current.startAt, entry.timeValue);
+    current.endAt = pickLaterTime(current.endAt, entry.timeValue);
+    current.anchorAt = pickLaterTime(current.anchorAt, entry.timeValue);
+    current.lastTimeMs = entry.timeMs;
+  }
+
+  return groups;
+}
+
+function getReplyBatchTime(comment) {
+  return comment.replied_at || comment.last_seen_at || comment.first_seen_at || '';
 }
 
 function buildCollectGroups() {

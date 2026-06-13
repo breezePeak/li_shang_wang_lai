@@ -373,6 +373,7 @@ textarea {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
+  align-items: stretch;
 }
 
 .overview-card {
@@ -385,11 +386,24 @@ textarea {
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.32), transparent 34%);
   box-shadow: var(--shadow-soft);
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
   gap: 14px;
 }
 
 .overview-table-wrap {
   min-height: 0;
+}
+
+.overview-card-head {
+  min-height: 86px;
+  align-items: flex-start;
+}
+
+.overview-card-head > div {
+  display: grid;
+  align-content: start;
+  gap: 6px;
 }
 
 .overview-table {
