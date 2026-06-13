@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import {
-  checkLikeState,
   clickLike,
   confirmLikeSucceeded,
   activateCommentComposer,
@@ -978,7 +977,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   }
 
   const checkedWorks = [];
-  let lastUnconfirmedCount = 0;
+  let missingApiLikeStateCount = 0;
 
   for (const candidate of candidates) {
     if (candidate.userDigged === 1) {
@@ -988,6 +987,16 @@ export async function executeReturnVisitTask(page, task, options = {}) {
         action: 'skip',
         reason: 'already_liked_in_post_api',
       }));
+      continue;
+    }
+    if (candidate.userDigged !== 0) {
+      checkedWorks.push(createCheckedWorkEntry(candidate, {
+        likeState: 'unknown',
+        likeStateSource: 'post_api',
+        action: 'skip',
+        reason: 'user_digged_missing_in_post_api',
+      }));
+      missingApiLikeStateCount++;
       continue;
     }
 
@@ -1016,33 +1025,11 @@ export async function executeReturnVisitTask(page, task, options = {}) {
       return { ...openedWorkCheck, checkedWorks };
     }
 
-    const initialLikeState = await checkLikeState(page);
-    if (!initialLikeState.ok || initialLikeState.data?.confidence !== 'confirmed') {
-      checkedWorks.push(createCheckedWorkEntry(candidate, {
-        likeState: 'unknown',
-        likeStateSource: 'dom',
-        action: 'skip',
-        reason: initialLikeState.message || 'like_state_unknown_after_open',
-      }));
-      lastUnconfirmedCount++;
-      continue;
-    }
-
-    if (initialLikeState.data.alreadyLiked) {
-      checkedWorks.push(createCheckedWorkEntry(candidate, {
-        likeState: 'already_liked',
-        likeStateSource: candidate.userDigged == null ? 'dom' : 'dom_recheck',
-        action: 'skip',
-        reason: 'already_liked_after_open',
-      }));
-      continue;
-    }
-
     const selectionMode = 'normal_unliked';
     const tentativeCheckedWorks = checkedWorks.concat([
       createCheckedWorkEntry(candidate, {
         likeState: 'not_liked',
-        likeStateSource: candidate.userDigged === 0 ? 'post_api' : 'dom',
+        likeStateSource: 'post_api',
         action: execute ? 'like_and_comment' : 'plan_like_and_comment',
         reason: 'selected_unliked_candidate',
       }),
@@ -1074,27 +1061,6 @@ export async function executeReturnVisitTask(page, task, options = {}) {
 
     const afterWatchGateWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_watch');
     if (afterWatchGateWorkCheck) return { ...afterWatchGateWorkCheck, selectionMode, checkedWorks: tentativeCheckedWorks };
-
-    const finalLikeState = await checkLikeState(page);
-    if (!finalLikeState.ok || finalLikeState.data?.confidence !== 'confirmed') {
-      checkedWorks.push(createCheckedWorkEntry(candidate, {
-        likeState: 'unknown',
-        likeStateSource: 'dom',
-        action: 'skip',
-        reason: finalLikeState.message || 'like_state_unknown_before_like',
-      }));
-      lastUnconfirmedCount++;
-      continue;
-    }
-    if (finalLikeState.data.alreadyLiked) {
-      checkedWorks.push(createCheckedWorkEntry(candidate, {
-        likeState: 'already_liked',
-        likeStateSource: 'dom',
-        action: 'skip',
-        reason: 'already_liked_before_like',
-      }));
-      continue;
-    }
 
     if (!execute) {
       return {
@@ -1184,11 +1150,12 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     ).then(result => ({ ...result, checkedWorks: fallbackCheckedWorks }));
   }
 
-  const status = lastUnconfirmedCount >= candidates.length ? 'failed_like' : 'skipped_no_suitable_work';
   return {
     ok: false,
-    status,
-    error: status === 'failed_like' ? 'all_candidate_like_state_unknown' : `no_suitable_work_in_first_${candidates.length}`,
+    status: 'skipped_no_suitable_work',
+    error: missingApiLikeStateCount >= candidates.length
+      ? 'all_candidate_user_digged_missing'
+      : `no_suitable_work_in_first_${candidates.length}`,
     likeStatus: task.likeStatus || 'pending',
     commentStatus: task.commentStatus || 'pending',
     checkedWorks,

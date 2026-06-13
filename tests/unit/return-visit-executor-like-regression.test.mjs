@@ -276,23 +276,12 @@ describe('return-visit executor like/comment regressions', () => {
     expect(result.dryRun).toBe(true);
   });
 
-  it('falls back to DOM like-state check when API userDigged is missing', async () => {
+  it('skips the candidate when post API does not provide userDigged', async () => {
     collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
       ok: true,
       candidates: [
         { workId: '111', workUrl: 'https://www.douyin.com/video/111', userDigged: null },
       ],
-    });
-    collectCurrentOpenedWorkMock.mockResolvedValue({
-      ok: true,
-      sufficient: true,
-      work: {
-        workId: '111',
-        workTitle: '第一条作品',
-        workText: '第一条作品正文',
-        contentSummary: '第一条作品正文',
-        visibleFingerprint: '第一条作品|第一条作品正文',
-      },
     });
     const page = {
       url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo?modal_id=111'),
@@ -309,13 +298,15 @@ describe('return-visit executor like/comment regressions', () => {
       commentStatus: 'generated',
     }, { execute: true });
 
-    expect(checkLikeStateMock).toHaveBeenCalled();
-    expect(result.ok).toBe(true);
-    expect(result.selectionMode).toBe('normal_unliked');
+    expect(openProfileWorkByAwemeIdMock).not.toHaveBeenCalled();
+    expect(checkLikeStateMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('skipped_no_suitable_work');
     expect(result.checkedWorks[0]).toMatchObject({
       workId: '111',
-      likeState: 'not_liked',
-      likeStateSource: 'dom',
+      likeState: 'unknown',
+      likeStateSource: 'post_api',
+      reason: 'user_digged_missing_in_post_api',
     });
   });
 
@@ -391,7 +382,7 @@ describe('return-visit executor like/comment regressions', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('wrong_work_after_watch');
-    expect(checkLikeStateMock).toHaveBeenCalledTimes(1);
+    expect(checkLikeStateMock).not.toHaveBeenCalled();
     expect(postWorkModalCommentMock).not.toHaveBeenCalled();
   });
 
