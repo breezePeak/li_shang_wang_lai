@@ -392,7 +392,8 @@ function renderDrawer() {
   setText('drawer-kicker', dataset.kicker);
   setText('drawer-title', dataset.title);
   setText('drawer-subtitle', dataset.subtitle);
-  setText('works-count-text', `${groups.length} 个作品`);
+  setText('list-title', dataset.listTitle || '作品列表');
+  setText('works-count-text', `${groups.length} ${dataset.countUnit || '个作品'}`);
 
   renderBreadcrumbs(dataset, workGroup);
   renderDrawerStats(dataset.metrics || []);
@@ -434,6 +435,7 @@ function renderWorksList(groups) {
   el.innerHTML = groups.map((group) => {
     const active = selectedWorkKey === group.key ? 'is-active' : '';
     const encodedKey = encodeURIComponent(group.key);
+    const metaLabel = parseDateValue(group.meta) ? formatTime(group.meta) : group.meta;
     return `
       <button class="work-card ${active}" onclick="selectWork('${encodedKey}')">
         <div class="work-card-top">
@@ -443,7 +445,7 @@ function renderWorksList(groups) {
         <h4>${escapeHtml(group.title)}</h4>
         <p>${escapeHtml(group.subtitle || '点击查看该作品下的评论/回访明细')}</p>
         <div class="work-card-foot">
-          <span>${escapeHtml(group.meta || '')}</span>
+          <span>${escapeHtml(metaLabel || '')}</span>
           <span class="work-card-action">展开详情 <i class="fa-solid fa-arrow-right"></i></span>
         </div>
       </button>
@@ -544,6 +546,8 @@ function buildReplyDataset(kicker, title, comments, mode) {
     shortLabel: title,
     title,
     subtitle: '先看作品，再进入作品下的评论明细。',
+    listTitle: '作品列表',
+    countUnit: '个作品',
     metrics: [
       { label: '评论数', value: comments.length, helper: '当前节点的评论总量', tone: 'reply' },
       { label: '作品数', value: groupCommentsByWork(comments).length, helper: '按作品聚合', tone: 'reply' },
@@ -560,6 +564,8 @@ function buildEventDataset(kicker, title, events, mode) {
     shortLabel: title,
     title,
     subtitle: '按作品或用户聚合事件，点击进入明细。',
+    listTitle: mode === 'unhandled' ? '回访列表' : '作品列表',
+    countUnit: mode === 'unhandled' ? '位好友' : '个对象',
     metrics: [
       { label: '线索数', value: events.length, helper: '当前节点事件总量', tone: mode === 'unhandled' ? 'visit' : 'muted' },
       { label: '作品数', value: groupEventsByWork(events).length, helper: '可继续展开的作品/用户', tone: 'muted' },
@@ -571,18 +577,21 @@ function buildEventDataset(kicker, title, events, mode) {
 }
 
 function buildVisitDataset(kicker, title, tasks, events, mode) {
+  const groups = buildVisitActionGroups(tasks, events, mode);
   return {
     kicker,
     shortLabel: title,
     title,
-    subtitle: '先看作品，再进入该作品下的回访任务或线索明细。',
+    subtitle: '先看回访好友，再进入这位好友的互动详情与我的回复记录。',
+    listTitle: '回访列表',
+    countUnit: '位好友',
     metrics: [
       { label: '任务数', value: tasks.length, helper: '回访任务总量', tone: 'visit' },
       { label: '线索数', value: events.length, helper: '未处理互动线索', tone: 'muted' },
-      { label: '作品数', value: buildVisitGroups(tasks, events).length, helper: '按作品聚合后的数量', tone: 'visit' },
+      { label: '好友数', value: groups.length, helper: '按好友聚合后的数量', tone: 'visit' },
       { label: '完成数', value: reviewTasks.filter((task) => task.status === 'done').length, helper: '全局回访完成', tone: 'done' },
     ],
-    groups: buildVisitGroups(tasks, events, mode),
+    groups,
   };
 }
 
@@ -720,6 +729,60 @@ function buildVisitGroups(tasks, events, mode = 'all') {
   return Array.from(groups.values()).sort((a, b) => b.count - a.count || a.title.localeCompare(b.title, 'zh-CN'));
 }
 
+function buildVisitActionGroups(tasks, events, mode = 'all') {
+  const groups = new Map();
+
+  for (const task of tasks) {
+    const sourceEvents = Array.isArray(task.sourceEvents) ? task.sourceEvents : [];
+    const canonicalProfileUrl = sourceEvents.find((event) => event?.actor_profile_url)?.actor_profile_url;
+    const canonicalName = sourceEvents.find((event) => event?.actor_name)?.actor_name;
+    const key = String(canonicalProfileUrl || task.userProfileUrl || task.identityKey || canonicalName || task.userName || `task-${task.id}`);
+    const actionSummary = summarizeVisitActions(sourceEvents, task.sourceTypes || [task.sourceType]);
+    const latestTime = pickLatestVisitTime(sourceEvents, task.updatedAt || task.createdAt || '');
+    const group = groups.get(key) || {
+      key,
+      title: canonicalName || task.userName || '未知好友',
+      subtitle: actionSummary || '查看这位好友对你作品的互动和回访处理。',
+      meta: latestTime ? formatTime(latestTime) : modeLabel(mode),
+      kindLabel: '好友',
+      count: 0,
+      items: [],
+    };
+    group.count += sourceEvents.length || 1;
+    group.items.push({
+      kind: 'task',
+      createdAt: latestTime || task.updatedAt || task.createdAt || '',
+      data: task,
+    });
+    groups.set(key, group);
+  }
+
+  for (const event of events) {
+    const key = String(event.actor_profile_url || event.actor_name || `lead-${event.id}`);
+    const group = groups.get(key) || {
+      key,
+      title: event.actor_name || '未知好友',
+      subtitle: describeSingleVisitEvent(event),
+      meta: event.created_at ? formatTime(event.created_at) : '未处理线索',
+      kindLabel: '好友',
+      count: 0,
+      items: [],
+    };
+    group.count += 1;
+    group.title = group.title || event.actor_name || '未知好友';
+    group.subtitle = summarizeVisitActions(group.items.map((item) => item.data).concat(event), []) || group.subtitle || describeSingleVisitEvent(event);
+    group.meta = pickLatestVisitTime(group.items.map((item) => item.data).concat(event), event.created_at || group.meta);
+    group.items.push({
+      kind: 'event',
+      createdAt: event.created_at || '',
+      data: event,
+    });
+    groups.set(key, group);
+  }
+
+  return Array.from(groups.values()).sort((a, b) => sortByCreatedDesc({ createdAt: a.items?.[0]?.createdAt || '' }, { createdAt: b.items?.[0]?.createdAt || '' }) || a.title.localeCompare(b.title, 'zh-CN'));
+}
+
 function renderDetailItem(item) {
   if (item.kind === 'comment') return renderCommentDetailItem(item.data);
   if (item.kind === 'task') return renderTaskDetailItem(item.data);
@@ -773,6 +836,9 @@ function renderCommentDetailItem(comment) {
 function renderTaskDetailItem(task) {
   const badge = getTaskBadge(task);
   const textareaId = `task-text-${task.id}`;
+  const sourceEvents = Array.isArray(task.sourceEvents) ? task.sourceEvents : [];
+  const linkedReplies = Array.isArray(task.linkedReplies) ? task.linkedReplies.filter((item) => item.reply_text) : [];
+  const workSummary = task.targetWork?.workTitle || task.targetWork?.contentSummary || task.targetWork?.workText || task.lastError || '暂无作品信息';
   return `
     <article class="detail-card-item">
       <div class="detail-item-head">
@@ -783,11 +849,23 @@ function renderTaskDetailItem(task) {
         <span class="detail-time">${formatTime(task.updatedAt || task.createdAt)}</span>
       </div>
       <div class="detail-item-block">
-        <label>作品摘要</label>
-        <p>${escapeHtml(task.targetWork?.contentSummary || task.targetWork?.workText || task.lastError || '暂无摘要')}</p>
+        <label>好友做了什么</label>
+        <p>${escapeHtml(summarizeVisitActions(sourceEvents, task.sourceTypes || [task.sourceType]) || '暂无互动摘要')}</p>
       </div>
       <div class="detail-item-block">
-        <label>回访评论草稿</label>
+        <label>我的作品</label>
+        <p>${escapeHtml(workSummary)}</p>
+      </div>
+      <div class="detail-item-block">
+        <label>互动详情</label>
+        ${renderVisitSourceEvents(sourceEvents)}
+      </div>
+      <div class="detail-item-block">
+        <label>我给这位好友回复过的话</label>
+        ${renderLinkedReplies(linkedReplies)}
+      </div>
+      <div class="detail-item-block">
+        <label>本次回访消息</label>
         <textarea id="${textareaId}" class="inline-textarea" placeholder="输入回访评论...">${escapeHtml(task.generatedComment || '')}</textarea>
       </div>
       <div class="task-status-line">
@@ -815,7 +893,15 @@ function renderEventDetailItem(event) {
         <span class="detail-time">${escapeHtml(event.event_time_text || '')}${event.created_at ? ` · ${formatTime(event.created_at)}` : ''}</span>
       </div>
       <div class="detail-item-block">
-        <label>互动内容</label>
+        <label>好友做了什么</label>
+        <p>${describeSingleVisitEvent(event)}</p>
+      </div>
+      <div class="detail-item-block">
+        <label>我的作品</label>
+        <p>${escapeHtml(event.my_work_title || event.target_work_id || '暂未识别到作品')}</p>
+      </div>
+      <div class="detail-item-block">
+        <label>互动详情</label>
         <p>${getEventActionText(event)}</p>
       </div>
       <div class="task-status-line">
@@ -1017,6 +1103,76 @@ function getEventActionText(event) {
   if (event.event_type === 'reply') return event.comment_text ? `回复内容：${escapeHtml(event.comment_text)}` : '回复了你';
   if (event.event_type === 'comment') return event.comment_text ? `评论内容：${escapeHtml(event.comment_text)}` : '评论了你的作品';
   return escapeHtml(event.comment_text || '');
+}
+
+function describeSingleVisitEvent(event) {
+  if (!event) return '暂无互动';
+  if (event.event_type === 'like') return '赞了你的作品';
+  if (event.event_type === 'comment') return event.comment_text ? `评论了你的作品：${event.comment_text}` : '评论了你的作品';
+  if (event.event_type === 'reply') return event.comment_text ? `回复了你的评论：${event.comment_text}` : '回复了你的评论';
+  if (event.event_type === 'follow') return '关注了你';
+  return event.comment_text || '产生了一次互动';
+}
+
+function summarizeVisitActions(events, sourceTypes = []) {
+  const items = Array.isArray(events) ? events : [];
+  const labels = [];
+  const counts = { like: 0, comment: 0, reply: 0, follow: 0 };
+  for (const event of items) {
+    if (counts[event.event_type] !== undefined) counts[event.event_type] += 1;
+  }
+  if (counts.like) labels.push(`点赞 ${counts.like} 次`);
+  if (counts.comment) labels.push(`评论 ${counts.comment} 次`);
+  if (counts.reply) labels.push(`回复 ${counts.reply} 次`);
+  if (counts.follow) labels.push(`关注 ${counts.follow} 次`);
+  if (labels.length) return labels.join('，');
+  const sourceText = (Array.isArray(sourceTypes) ? sourceTypes : [sourceTypes])
+    .filter(Boolean)
+    .map((type) => humanizeVisitSourceType(type))
+    .join(' / ');
+  return sourceText || '';
+}
+
+function humanizeVisitSourceType(type) {
+  if (type === 'like') return '赞了你的作品';
+  if (type === 'comment') return '评论了你的作品';
+  if (type === 'reply') return '回复了你的评论';
+  if (type === 'follow') return '关注了你';
+  return type || '';
+}
+
+function pickLatestVisitTime(events, fallback = '') {
+  const items = Array.isArray(events) ? events : [];
+  const times = items
+    .map((item) => item.created_at || item.event_time_text || '')
+    .filter(Boolean);
+  return times[0] || fallback;
+}
+
+function renderVisitSourceEvents(events) {
+  if (!Array.isArray(events) || !events.length) {
+    return '<p>暂未记录到源互动事件。</p>';
+  }
+  return events.map((event) => `
+    <div class="detail-item-block subtle">
+      <label>${escapeHtml(getEventBadge(event.event_type).text)} · ${escapeHtml(event.actor_name || '未知好友')}</label>
+      <p>${getEventActionText(event)}</p>
+      <p>${escapeHtml(event.my_work_title || event.target_work_id || '未识别作品')}${event.event_time_text ? ` · ${escapeHtml(event.event_time_text)}` : ''}</p>
+    </div>
+  `).join('');
+}
+
+function renderLinkedReplies(replies) {
+  if (!Array.isArray(replies) || !replies.length) {
+    return '<p>暂时没有找到你回复给这位好友的记录。</p>';
+  }
+  return replies.map((reply) => `
+    <div class="detail-item-block subtle">
+      <label>${escapeHtml(reply.joined_work_title || '我的作品')} ${reply.replied_at ? `· ${formatTime(reply.replied_at)}` : ''}</label>
+      <p>对方评论：${escapeHtml(reply.comment_text || '')}</p>
+      <p>我的回复：${escapeHtml(reply.reply_text || '')}</p>
+    </div>
+  `).join('');
 }
 
 function renderEmpty(text) {

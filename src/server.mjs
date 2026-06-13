@@ -13,6 +13,61 @@ function safeJsonParse(str) {
   try { return JSON.parse(str); } catch { return null; }
 }
 
+function parseJsonArray(str) {
+  const parsed = safeJsonParse(str);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+function loadSourceEvents(db, sourceEventIds) {
+  const ids = sourceEventIds
+    .map((value) => Number.parseInt(value, 10))
+    .filter((value) => Number.isInteger(value) && value > 0);
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  return db.prepare(`
+    SELECT
+      id, event_type, actor_name, actor_profile_url, relation,
+      my_work_title, comment_text, event_time_text, status, created_at,
+      target_work_id, target_work_url, platform_event_id, notification_item_key
+    FROM interaction_events
+    WHERE id IN (${placeholders})
+    ORDER BY created_at DESC
+  `).all(...ids);
+}
+
+function loadLinkedReplies(db, sourceEventIds) {
+  const ids = sourceEventIds
+    .map((value) => Number.parseInt(value, 10))
+    .filter((value) => Number.isInteger(value) && value > 0);
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  return db.prepare(`
+    SELECT
+      wc.id,
+      wc.source_event_id,
+      wc.actor_name,
+      wc.comment_text,
+      wc.reply_text,
+      wc.reply_status,
+      wc.reply_reason,
+      wc.event_time_text,
+      wc.replied_at,
+      COALESCE(w_by_work.work_title, w_by_modal.work_title) AS joined_work_title
+    FROM work_comments wc
+    LEFT JOIN works w_by_work
+      ON wc.work_id IS NOT NULL
+      AND wc.work_id != ''
+      AND w_by_work.work_id = wc.work_id
+    LEFT JOIN works w_by_modal
+      ON (wc.work_id IS NULL OR wc.work_id = '' OR w_by_work.id IS NULL)
+      AND wc.modal_id IS NOT NULL
+      AND wc.modal_id != ''
+      AND w_by_modal.modal_id = wc.modal_id
+    WHERE wc.source_event_id IN (${placeholders})
+    ORDER BY wc.replied_at DESC, wc.id DESC
+  `).all(...ids);
+}
+
 app.use(express.json());
 // 映射前端静态页面存放的 public 目录
 app.use(express.static(path.join(__dirname, '../public')));
@@ -161,7 +216,8 @@ app.get('/api/unhandled-events', (req, res) => {
 
     const events = db.prepare(`
       SELECT id, event_type, actor_name, actor_profile_url, relation,
-        my_work_title, comment_text, event_time_text, status, created_at
+        my_work_title, comment_text, event_time_text, status, created_at,
+        target_work_id, target_work_url, platform_event_id, notification_item_key
       FROM interaction_events
       WHERE status = 'new'
       ORDER BY created_at DESC
@@ -198,6 +254,8 @@ app.get('/api/revisit-tasks', (req, res) => {
     `).all(...allowed, limit, offset);
 
     const formatted = tasks.map(row => ({
+      sourceEventIds: parseJsonArray(row.source_event_ids_json),
+      sourceTypes: parseJsonArray(row.source_types_json),
       id: row.id,
       taskId: row.task_id,
       identityKey: row.identity_key,
@@ -215,6 +273,8 @@ app.get('/api/revisit-tasks', (req, res) => {
       },
       generatedComment: row.generated_comment,
       referenceComments: row.reference_comments_json ? safeJsonParse(row.reference_comments_json) : null,
+      sourceEvents: loadSourceEvents(db, parseJsonArray(row.source_event_ids_json)),
+      linkedReplies: loadLinkedReplies(db, parseJsonArray(row.source_event_ids_json)),
       likeStatus: row.like_status,
       commentStatus: row.comment_status,
       retryCount: row.retry_count,
