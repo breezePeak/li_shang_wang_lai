@@ -69,22 +69,14 @@
       <section class="flow-panel">
         <div class="panel-head">
           <div>
-            <span class="section-kicker">Flow Graph</span>
-            <h2>节点总览 / 作品推进 / 连续推页</h2>
+            <span class="section-kicker">Timeline Boards</span>
+            <h2>扫描 / 回评 / 回访时间表</h2>
           </div>
-          <p>左侧只负责选阶段，右侧把作品推进和详情查看拆成更清晰的双层滑移关系。</p>
+          <p>按时间批次看全局，点击任意一行直接联动到对应的回评、回访和通知详情。</p>
         </div>
-        <div id="graph-root" class="graph-root"></div>
+        <div id="graph-root" class="graph-root" hidden></div>
 
         <section class="ops-overview">
-          <div class="overview-head">
-            <div>
-              <span class="section-kicker">Overview Boards</span>
-              <h2>扫描 / 回评 / 回访总览</h2>
-            </div>
-            <p>先从批次和队列看全局，再点击行直接钻进对应详情。</p>
-          </div>
-
           <div class="overview-grid">
             <article class="overview-card">
               <div class="overview-card-head">
@@ -102,10 +94,10 @@
             <article class="overview-card">
               <div class="overview-card-head">
                 <div>
-                  <span class="lane-tag">Reply Board</span>
-                  <h3>回评概览</h3>
+                  <span class="lane-tag">Reply Schedule</span>
+                  <h3>回评时间表</h3>
                 </div>
-                <span id="reply-board-count">0 项</span>
+                <span id="reply-board-count">0 批</span>
               </div>
               <div class="overview-table-wrap">
                 <div class="overview-table" id="reply-overview-table"></div>
@@ -115,10 +107,10 @@
             <article class="overview-card">
               <div class="overview-card-head">
                 <div>
-                  <span class="lane-tag">Visit Board</span>
-                  <h3>回访概览</h3>
+                  <span class="lane-tag">Visit Schedule</span>
+                  <h3>回访时间表</h3>
                 </div>
-                <span id="visit-board-count">0 项</span>
+                <span id="visit-board-count">0 批</span>
               </div>
               <div class="overview-table-wrap">
                 <div class="overview-table" id="visit-overview-table"></div>
