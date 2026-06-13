@@ -1383,7 +1383,9 @@ function renderScanJourneyItem(journey) {
 
 function renderCommentDetailItem(comment) {
   const badge = getReplyBadge(comment.reply_status);
-  const canEdit = comment.reply_status !== 'succeeded';
+  const isLocked = isReplyStatusLocked(comment.reply_status);
+  const isException = ['blocked', 'sent_unverified'].includes(comment.reply_status);
+  const canEdit = !isLocked;
   const textareaId = `reply-text-${comment.id}`;
   const sourceWork = comment.joined_work_title || comment.work_id || comment.modal_id || '未识别到你的作品';
 
@@ -1415,9 +1417,15 @@ function renderCommentDetailItem(comment) {
           <p class="reply-readonly">${escapeHtml(comment.reply_text || '已成功，但没有保存回复文本')}</p>
         `}
       </div>
+      ${isLocked ? `
+        <div class="detail-item-block subtle">
+          <label>当前状态</label>
+          <p>${comment.reply_status === 'skipped' ? '这条评论已被忽略，状态已锁定。' : '这条评论已经处理完成，状态已锁定。'}</p>
+        </div>
+      ` : ''}
       ${canEdit ? `
         <div class="item-actions">
-          <button class="mini-btn primary" onclick="retryComment(${comment.id})"><i class="fa-solid fa-paper-plane"></i> 重试发送</button>
+          ${isException ? `<button class="mini-btn primary" onclick="resetCommentToPending(${comment.id})"><i class="fa-solid fa-rotate-left"></i> 重置为待执行</button>` : ''}
           <button class="mini-btn" onclick="saveCommentReply(${comment.id})"><i class="fa-solid fa-floppy-disk"></i> 保存文本</button>
           <button class="mini-btn ghost" onclick="ignoreComment(${comment.id})"><i class="fa-solid fa-ban"></i> 忽略</button>
         </div>
@@ -1627,7 +1635,7 @@ window.skipTask = async function skipTask(id) {
   }
 };
 
-window.retryComment = async function retryComment(id) {
+window.resetCommentToPending = async function resetCommentToPending(id) {
   const textarea = document.getElementById(`reply-text-${id}`);
   const replyText = textarea ? textarea.value.trim() : '';
   try {
@@ -1638,13 +1646,13 @@ window.retryComment = async function retryComment(id) {
     });
     const json = await res.json();
     if (!json.ok) {
-      showToast(json.error || '重试失败', 'error');
+      showToast(json.error || '重置失败', 'error');
       return;
     }
-    showToast(json.message || '已重新加入待回复队列', 'success');
+    showToast(json.message || '已重置为待执行', 'success');
     await refreshAll();
   } catch (err) {
-    showToast('重试回评失败', 'error');
+    showToast('重置回评状态失败', 'error');
   }
 };
 
@@ -1750,6 +1758,10 @@ function getReplyBadge(status) {
   if (status === 'skipped') return { text: '已跳过', className: 'muted' };
   if (status === 'succeeded') return { text: '已成功', className: 'done' };
   return { text: '待回评', className: 'reply' };
+}
+
+function isReplyStatusLocked(status) {
+  return ['skipped', 'succeeded', 'manually_replied'].includes(String(status || '').trim());
 }
 
 function getTaskBadge(task) {

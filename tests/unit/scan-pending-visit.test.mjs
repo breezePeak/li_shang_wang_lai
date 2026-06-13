@@ -48,6 +48,46 @@ describe('summarizePendingReplies', () => {
     if (existsSync(TEST_DB)) rmSync(TEST_DB, { force: true });
   });
 
+  it('已忽略评论再次扫描时仍保持锁定，不会回到 pending', () => {
+    const first = upsertWorkComment({
+      workId: 'work-skip-lock',
+      workUrl: 'https://www.douyin.com/jingxuan?modal_id=work-skip-lock',
+      modalId: 'work-skip-lock',
+      actorName: '忽略用户',
+      actorProfileUrl: 'https://www.douyin.com/user/skip-lock',
+      actorProfileKey: 'skip-lock',
+      commentText: '这条评论被我忽略了',
+      eventTimeText: '刚刚',
+      commentKey: 'skip-lock-key',
+      sourceEventId: 99,
+      sourceNotificationKey: 'skip-lock-notice',
+    });
+
+    getDb().prepare(
+      "UPDATE work_comments SET reply_status = 'skipped', reply_reason = 'user_ignored' WHERE id = ?"
+    ).run(first.id);
+
+    const second = upsertWorkComment({
+      workId: 'work-skip-lock',
+      workUrl: 'https://www.douyin.com/jingxuan?modal_id=work-skip-lock',
+      modalId: 'work-skip-lock',
+      actorName: '忽略用户',
+      actorProfileUrl: 'https://www.douyin.com/user/skip-lock',
+      actorProfileKey: 'skip-lock',
+      commentText: '这条评论被我忽略了',
+      eventTimeText: '刚刚',
+      commentKey: 'skip-lock-key',
+      sourceEventId: 100,
+      sourceNotificationKey: 'skip-lock-notice-2',
+    });
+
+    expect(second.action).toBe('enriched');
+
+    const row = getDb().prepare('SELECT reply_status, reply_reason FROM work_comments WHERE id = ?').get(first.id);
+    expect(row.reply_status).toBe('skipped');
+    expect(row.reply_reason).toBe('user_ignored');
+  });
+
   it('按主页和作品统计待回评 DB 数据，并过滤缺少 author_profile_url 的作品', () => {
     upsertWorkContext({
       workId: 'work-recent',

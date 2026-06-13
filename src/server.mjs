@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { getDb } from './db/database.mjs';
+import { isLockedReplyStatus } from './db/work-comment-repository.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -16,6 +17,19 @@ function safeJsonParse(str) {
 function parseJsonArray(str) {
   const parsed = safeJsonParse(str);
   return Array.isArray(parsed) ? parsed : [];
+}
+
+function getWorkCommentById(db, id) {
+  return db.prepare('SELECT id, reply_status FROM work_comments WHERE id = ?').get(id);
+}
+
+function ensureCommentStatusEditable(db, id) {
+  const row = getWorkCommentById(db, id);
+  if (!row) return { ok: false, code: 404, error: '未找到该评论' };
+  if (isLockedReplyStatus(row.reply_status)) {
+    return { ok: false, code: 409, error: `当前状态 ${row.reply_status} 已锁定，不能再修改` };
+  }
+  return { ok: true, row };
 }
 
 function loadSourceEvents(db, sourceEventIds) {
@@ -580,6 +594,10 @@ app.post('/api/pending-comments/:id/reply', (req, res) => {
 
   try {
     const db = getDb();
+    const editable = ensureCommentStatusEditable(db, id);
+    if (!editable.ok) {
+      return res.status(editable.code).json({ ok: false, error: editable.error });
+    }
     const now = new Date().toISOString();
     const updates = ["reply_status = 'pending'", 'reply_reason = NULL', 'last_seen_at = ?'];
     const params = [now];
@@ -609,6 +627,10 @@ app.post('/api/pending-comments/:id/update', (req, res) => {
 
   try {
     const db = getDb();
+    const editable = ensureCommentStatusEditable(db, id);
+    if (!editable.ok) {
+      return res.status(editable.code).json({ ok: false, error: editable.error });
+    }
     const now = new Date().toISOString();
     const updates = ['last_seen_at = ?'];
     const params = [now];
@@ -724,11 +746,14 @@ app.post('/api/pending-comments/bulk-update-status', (req, res) => {
     const now = new Date().toISOString();
 
     const bulkUpdate = db.transaction((idList) => {
+      const checkStmt = db.prepare('SELECT reply_status FROM work_comments WHERE id = ?');
       const updateStmt = db.prepare(
         'UPDATE work_comments SET reply_status = ?, reply_reason = NULL, last_seen_at = ? WHERE id = ?'
       );
       let count = 0;
       for (const id of idList) {
+        const row = checkStmt.get(id);
+        if (!row || isLockedReplyStatus(row.reply_status)) continue;
         const result = updateStmt.run(replyStatus, now, id);
         if (result.changes > 0) count++;
       }
@@ -748,6 +773,10 @@ app.post('/api/pending-comments/:id/ignore', (req, res) => {
 
   try {
     const db = getDb();
+    const editable = ensureCommentStatusEditable(db, id);
+    if (!editable.ok) {
+      return res.status(editable.code).json({ ok: false, error: editable.error });
+    }
     const now = new Date().toISOString();
 
     const result = db.prepare(`

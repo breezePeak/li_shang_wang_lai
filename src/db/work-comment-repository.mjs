@@ -1,6 +1,12 @@
 import { getDb } from './database.mjs';
 import { resolveTimeWindowSinceIso } from '../utils/time-window.mjs';
 
+export const LOCKED_REPLY_STATUSES = new Set(['skipped', 'succeeded', 'manually_replied']);
+
+export function isLockedReplyStatus(status) {
+  return LOCKED_REPLY_STATUSES.has(String(status || '').trim());
+}
+
 export function upsertWorkComment(comment) {
   const db = getDb();
   const now = new Date().toISOString();
@@ -24,7 +30,8 @@ export function upsertWorkComment(comment) {
       }
       const updates = [];
       const params = [];
-      if (existing.reply_status !== 'pending' && existing.reply_status !== 'prepared') {
+      const shouldReopen = !['pending', 'prepared', 'skipped'].includes(existing.reply_status);
+      if (shouldReopen) {
         updates.push("reply_status = 'pending'");
         updates.push('reply_reason = NULL');
       }
@@ -35,7 +42,7 @@ export function upsertWorkComment(comment) {
       params.push(now);
       params.push(existing.id);
       db.prepare(`UPDATE work_comments SET ${updates.join(', ')} WHERE id = ?`).run(...params);
-      return { action: existing.reply_status !== 'pending' ? 'reopened' : 'enriched', id: existing.id };
+      return { action: shouldReopen ? 'reopened' : 'enriched', id: existing.id };
     }
   }
 
