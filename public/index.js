@@ -263,12 +263,6 @@ function renderFlowGraph() {
           <h3>现在要处理什么</h3>
           <p>${totalActionCount > 0 ? `当前还有 ${totalActionCount} 项需要你推进，先处理数量不为 0 的卡片。` : '当前没有待处理项，下面时间表主要用于回看批次。'} </p>
         </div>
-        <div class="action-focus-badges">
-          <span class="focus-badge">待回评 ${stages[STAGE_IDS.REPLY_PENDING].count}</span>
-          <span class="focus-badge">回评异常 ${stages[STAGE_IDS.REPLY_EXCEPTIONS].count}</span>
-          <span class="focus-badge">回访待处理 ${stages[STAGE_IDS.VISIT_UNHANDLED].count}</span>
-          <span class="focus-badge">回访异常 ${stages[STAGE_IDS.EXECUTE_ERRORS].count + stages[STAGE_IDS.VISIT_RETRY].count}</span>
-        </div>
       </div>
 
       <div class="action-grid">
