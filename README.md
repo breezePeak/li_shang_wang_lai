@@ -1,6 +1,48 @@
+<p align="center">
+  <a href="https://linux.do" alt="LINUX DO">
+    <img src="https://img.shields.io/badge/LINUX-DO-FFB003.svg?logo=data:image/svg%2bxml;base64,DQo8c3ZnIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiPjxwYXRoIGQ9Ik00Ni44Mi0uMDU1aDYuMjVxMjMuOTY5IDIuMDYyIDM4IDIxLjQyNmM1LjI1OCA3LjY3NiA4LjIxNSAxNi4xNTYgOC44NzUgMjUuNDV2Ni4yNXEtMi4wNjQgMjMuOTY4LTIxLjQzIDM4LTExLjUxMiA3Ljg4NS0yNS40NDUgOC44NzRoLTYuMjVxLTIzLjk3LTIuMDY0LTM4LjAwNC0yMS40M1EuOTcxIDY3LjA1Ni0uMDU0IDUzLjE4di02LjQ3M0MxLjM2MiAzMC43ODEgOC41MDMgMTguMTQ4IDIxLjM3IDguODE3IDI5LjA0NyAzLjU2MiAzNy41MjcuNjA0IDQ2LjgyMS0uMDU2IiBzdHlsZT0ic3Ryb2tlOm5vbmU7ZmlsbC1ydWxlOmV2ZW5vZGQ7ZmlsbDojZWNlY2VjO2ZpbGwtb3BhY2l0eToxIi8+PHBhdGggZD0iTTQ3LjI2NiAyLjk1N3EyMi41My0uNjUgMzcuNzc3IDE1LjczOGE0OS43IDQ5LjcgMCAwIDEgNi44NjcgMTAuMTU3cS00MS45NjQuMjIyLTgzLjkzIDAgOS43NS0xOC42MTYgMzAuMDI0LTI0LjM4N2E2MSA2MSAwIDAgMSA5LjI2Mi0xLjUwOCIgc3R5bGU9InN0cm9rZTpub25lO2ZpbGwtcnVsZTpldmVub2RkO2ZpbGw6IzE5MTkxOTtmaWxsLW9wYWNpdHk6MSIvPjxwYXRoIGQ9Ik03Ljk4IDcwLjkyNmMyNy45NzctLjAzNSA1NS45NTQgMCA4My45My4xMTNRODMuNDI2IDg3LjQ3MyA2Ni4xMyA5NC4wODZxLTE4LjgxIDYuNTQ0LTM2LjgzMi0xLjg5OC0xNC4yMDMtNy4wOS0yMS4zMTctMjEuMjYyIiBzdHlsZT0ic3Ryb2tlOm5vbmU7ZmlsbC1ydWxlOmV2ZW5vZGQ7ZmlsbDojZjlhZjAwO2ZpbGwtb3BhY2l0eToxIi8+PC9zdmc+" />
+  </a>
+  <img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" />
+  <img alt="Node >=20" src="https://img.shields.io/badge/node-%3E%3D20-3C873A.svg" />
+</p>
+
 # 礼尚往来 · li_shang_wang_lai
 
-基于 Node.js、Playwright 和 SQLite 的抖音创作者互动助手，支持 Hermes / OpenClaw Skill 加载。
+基于 Node.js、Playwright 和 SQLite 的抖音创作者互动助手。
+
+它的目标不是“批量刷互动”，而是把创作者每天真实会做的几件事串起来：扫描互动、识别评论、生成回评、执行回访，并把过程沉淀到本地数据库和可视化面板里。
+
+## 项目定位
+
+- 扫描抖音通知页中的真实点赞与评论
+- 只处理“别人评论了我的作品”这类可回评对象
+- 借助 Hermes / OpenClaw / Direct API 生成回评文案
+- 在回评异常时支持人工介入、重置待执行、忽略锁定
+- 按规则对好友或互关用户执行作品回访
+- 用本地控制台统一查看扫描、回评、回访三条时间线
+
+## 适合谁
+
+- 想把“回评 + 回访”流程做成可重复工具的创作者
+- 想研究 Playwright + SQLite + 本地自动化工作流的人
+- 想给 Hermes / OpenClaw Skill 生态提供可复用项目样板的人
+
+## 不适合什么
+
+- 不适合刷量、引流、群控、批量互关
+- 不承诺绕过风控
+- 不承诺对任意平台变更长期稳定
+
+## 功能概览
+
+| 模块 | 能力 |
+|---|---|
+| 互动扫描 | 从通知页抓取点赞/评论，去重并落库 |
+| 回评执行 | 为待回评评论生成回复，并以 API 成功回执为准确认发送结果 |
+| 异常处理 | 支持把异常评论重置为 `pending`，或忽略为 `skipped`；已忽略/已成功状态会锁定 |
+| 回访流程 | 基于互动关系和作品上下文，生成并执行回访任务 |
+| Web 控制台 | 查看扫描时间表、回评时间表、回访时间表与异常卡片 |
+| 本地存储 | 使用 SQLite 保存评论、任务、作品、状态流转 |
 
 ## 环境要求
 
@@ -12,23 +54,47 @@
 | 数据库 | SQLite |
 | 账号 | 抖音创作者账号，需完成浏览器登录 |
 
-## Skill 入口
+## 快速开始
 
-- 主 Skill：`SKILL.md`
-- 规则文件：`references/comment-safety-rules.md`
-- 如果别人问怎么获得这个技能，直接让他去 GitHub 搜索 `breezePeak/li_shang_wang_lai`
-
-## 安装
+### 1. 克隆项目
 
 ```bash
-# 以 Hermes 为例，OpenClaw 替换目录即可
-git clone https://github.com/breezePeak/li_shang_wang_lai.git ~/.hermes/skills/li-shang-wang-lai
-cd ~/.hermes/skills/li-shang-wang-lai
+git clone https://github.com/breezePeak/li_shang_wang_lai.git
+cd li_shang_wang_lai
+```
+
+### 2. 安装依赖
+
+```bash
 npm install
 npx playwright install chromium
+```
+
+### 3. 初始化数据库
+
+```bash
 npm run db:init
+```
+
+### 4. 登录账号
+
+```bash
 npm run auth
 ```
+
+`npm run auth` 会先检查登录态；未登录时才打开浏览器等待扫码，最长等待 5 分钟。
+
+### 5. 开始跑一轮最小流程
+
+```bash
+npm run interactions:scan -- --hours 6
+npm run comments:execute -- --hours 6 --limit 20
+npm run visit:run -- --execute
+```
+
+## Skill / 引擎安装
+
+如果你是把它作为 Hermes / OpenClaw Skill 使用，可以放到这些目录：
 
 | 引擎 | 安装目录 |
 |---|---|
@@ -37,7 +103,16 @@ npm run auth
 | OpenClaw (macOS/Linux) | `~/.openclaw/skills/li-shang-wang-lai` |
 | OpenClaw (Windows) | `$env:USERPROFILE\.openclaw\skills\li-shang-wang-lai` |
 
-`npm run auth` 先以 headless 检查登录态，已登录直接返回；未登录才弹出浏览器供扫码，最多等待 5 分钟。
+示例：
+
+```bash
+git clone https://github.com/breezePeak/li_shang_wang_lai.git ~/.hermes/skills/li-shang-wang-lai
+cd ~/.hermes/skills/li-shang-wang-lai
+npm install
+npx playwright install chromium
+npm run db:init
+npm run auth
+```
 
 ## 常用命令
 
@@ -48,12 +123,36 @@ npm run auth
 | 清空表数据 | `npm run db:reset` |
 | 只看互动 | `npm run interactions:scan -- --display-only` |
 | 扫描互动入库 | `npm run interactions:scan -- --days 7` |
-| 评论回复 | `npm run comments:execute -- --days 7 --limit 50` |
+| 扫描最近几小时 | `npm run interactions:scan -- --hours 6` |
+| 评论回复 | `npm run comments:execute -- --hours 6 --limit 50` |
 | 准备回访任务 | `npm run interactions:scan -- --days 7 --prepare-visits` |
 | 执行回访 | `npm run visit:run -- --execute` |
+| 启动控制台 | `npm run server` |
 | 运行测试 | `npm test` |
 
-完整参数见 `docs/COMMANDS.md`，流程细节见 `SKILL.md`。
+完整参数见 [docs/COMMANDS.md](docs/COMMANDS.md)，完整 Skill 约束见 [SKILL.md](SKILL.md)。
+
+## Web 控制台
+
+启动方式：
+
+```bash
+npm run server
+```
+
+默认地址：
+
+```text
+http://localhost:3000
+```
+
+控制台目前主要覆盖：
+
+- 扫描时间表
+- 回评时间表
+- 回访时间表
+- 异常卡片处理
+- 回评详情与回访详情
 
 ## 浏览器模式
 
@@ -63,11 +162,11 @@ npm run auth
 - 长期启用无头模式：在 `config/local.json` 中设置 `"browser": { "headless": true }`
 - CLI 参数优先于配置文件；不传时默认仍是 `false`
 
-常见示例：
+示例：
 
 ```bash
 npm run interactions:scan -- --days 7 --headless
-npm run comments:execute -- --days 7 --limit 50 --headless
+npm run comments:execute -- --hours 6 --limit 20 --headless
 npm run visit:run -- --execute --headless
 ```
 
@@ -75,36 +174,28 @@ npm run visit:run -- --execute --headless
 
 默认不设置任何新环境变量时，仍然走现有 CLI 调用，不会自动切到 API 或 direct-api。
 
-三种模式的区别：
+三种模式：
 
 - `CLI`
   - `AGENT_TRANSPORT=cli`
   - 默认模式
-  - 不需要任何 API 配置
   - 直接调用 `hermes chat` / `openclaw chat`
-  - 最稳定，但每次会拉起一次 Agent 进程
 - `Hermes API`
   - `AGENT_TRANSPORT=api`
   - 调用本机 `hermes gateway`
   - 使用 `HERMES_API_KEY`
-  - `HERMES_API_KEY` 本质上等于 Hermes 本地 `.env` 里的 `API_SERVER_KEY`
-  - 不是模型供应商 key
 - `Direct API`
   - `AGENT_TRANSPORT=direct-api`
   - 直接调用模型供应商的 OpenAI-compatible `/v1/chat/completions`
   - 使用 `DIRECT_API_KEY`
-  - `DIRECT_API_KEY` 是模型供应商 API key，不是 `API_SERVER_KEY`
-  - 不经过 Hermes gateway
-  - 只会手动注入 `SOUL.md`、`references/comment-safety-rules.md` 和评论上下文
-  - 不会自动加载 Hermes memory / skills / tools
+
+示例：
 
 ```bash
-# 默认 Hermes
 npm run comments:execute -- --days 7 --limit 50
 ```
 
 ```bash
-# 切换 OpenClaw
 AGENT_PROVIDER=openclaw npm run comments:execute -- --days 7 --limit 50
 ```
 
@@ -116,113 +207,65 @@ npm run comments:execute -- --days 7 --limit 50
 ```
 
 ```powershell
-# 强制 CLI
-$env:AGENT_TRANSPORT="cli"
-npm run comments:execute -- --days 7 --limit 50
-```
-
-```powershell
-# 可选 Hermes API Server 加速
 $env:AGENT_TRANSPORT="api"
 $env:HERMES_API_BASE_URL="http://127.0.0.1:8642/v1"
 $env:HERMES_API_KEY="和 Hermes 本地 API_SERVER_KEY 相同"
 $env:HERMES_API_MODEL="hermes-agent"
-
 npm run comments:execute -- --days 7 --limit 50
 ```
 
 ```powershell
-# direct-api：优先读 DIRECT_API_*，其次尝试读 Hermes 本地 .env 里的供应商 key / model
 $env:AGENT_TRANSPORT="direct-api"
-
-# 如果 Hermes .env 里已经有 OPENROUTER_API_KEY / HERMES_INFERENCE_MODEL，
-# 可以先只设置 transport。自动推断不出来时，再显式补下面三项：
 $env:DIRECT_API_PROVIDER="openrouter"
 $env:DIRECT_API_BASE_URL="https://openrouter.ai/api/v1"
 $env:DIRECT_API_KEY="<模型供应商 API key>"
 $env:DIRECT_API_MODEL="<模型名>"
-
-npm run comments:execute -- --days 7 --limit 20 --agent-only
+npm run comments:execute -- --hours 6 --limit 20 --agent-only
 ```
 
-如果你要启用 Hermes API 加速，按这个顺序理解就够了：
+更多配置细节保留在旧文档和 Skill 内：
 
-1. 默认模式已经能用，不需要配 API。
-2. 只有你自己手动启动了 `hermes gateway`，`AGENT_TRANSPORT=api` 才有意义。
-3. `HERMES_API_KEY` 不是模型厂商的 key，它只是你本机 Hermes API Server 的访问口令。
-4. API 模式失败时，默认会自动退回 CLI，不会直接把流程卡死。
+- [SKILL.md](SKILL.md)
+- [references/comment-safety-rules.md](references/comment-safety-rules.md)
 
-如果你要启用 direct-api，按这个顺序理解就够了：
+## 项目结构
 
-1. 必须显式设置 `AGENT_TRANSPORT=direct-api` 才会启用。
-2. `direct-api` 会优先读 `DIRECT_API_*`，其次读取 Hermes 本地 `.env` 中的供应商 key / 模型配置。
-3. `direct-api` 不会使用 `HERMES_API_KEY`，也不会使用 `API_SERVER_KEY` 作为模型 key。
-4. `direct-api` 默认失败后会 fallback 回 CLI；设置 `DIRECT_API_FALLBACK=none` 可关闭 fallback。
-
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `AGENT_PROVIDER` | `hermes` | 可选 `hermes` / `openclaw` |
-| `AGENT_TRANSPORT` | `cli` | 可选 `cli` / `api` / `direct-api` |
-| `HERMES_BIN` | `hermes` | Hermes 命令路径 |
-| `OPENCLAW_BIN` | `openclaw` | OpenClaw 命令路径 |
-| `HERMES_ARGS` | `chat -Q -q {prompt}` | Hermes 参数模板 |
-| `OPENCLAW_ARGS` | `chat -Q -q {prompt}` | OpenClaw 参数模板 |
-| `HERMES_API_BASE_URL` | `http://127.0.0.1:8642/v1` | Hermes 本地 API Server 地址 |
-| `HERMES_API_KEY` | `''` | Hermes 本地 API Server 的 Bearer token；未设置时会尝试读取本地 `.env` 中的 `API_SERVER_KEY` |
-| `HERMES_API_MODEL` | `hermes-agent` | API 模式使用的模型名 |
-| `AGENT_API_TIMEOUT_MS` | `60000` | API 请求超时，未设置时回退到 `AGENT_TIMEOUT_MS` |
-| `AGENT_API_FALLBACK` | `cli` | `cli` / `none`，API 失败时默认回退到 CLI |
-| `DIRECT_API_PROVIDER` | 自动推断 | 可选 `openai` / `openrouter` / `deepseek` / `dashscope` / `qwen` |
-| `DIRECT_API_BASE_URL` | 自动推断 | 模型供应商 `/v1` 根路径；不会读取 `HERMES_API_BASE_URL` |
-| `DIRECT_API_KEY` | `''` | 模型供应商 API key；不会读取 `HERMES_API_KEY` 或 `API_SERVER_KEY` |
-| `DIRECT_API_MODEL` | 自动推断 | direct-api 使用的模型名 |
-| `DIRECT_API_TIMEOUT_MS` | `60000` | direct-api 请求超时，未设置时回退到 `AGENT_TIMEOUT_MS` |
-| `DIRECT_API_TEMPERATURE` | `0.6` | direct-api 采样温度 |
-| `DIRECT_API_MAX_TOKENS` | 自动计算 | 单条默认 256，批量按条数自动放大 |
-| `DIRECT_API_FALLBACK` | `cli` | `cli` / `none`，direct-api 失败时默认回退到 CLI |
-| `DIRECT_API_SOUL_PATH` | `''` | 手动指定 `SOUL.md` 路径 |
-| `DIRECT_API_REQUIRE_SOUL` | `0` | 设为 `1` 时，找不到 `SOUL.md` 直接失败 |
-| `COMMENT_MAX_LENGTH` | `30` | 回访评论最大长度 |
-| `REPLY_MIN_LENGTH` | `15` | 回评回复最小长度 |
-| `REPLY_MAX_LENGTH` | `60` | 回评回复最大长度 |
-| `AGENT_TIMEOUT_MS` | `60000` | 通用超时 |
-| `REPLY_BATCH_SIZE` | `8` | 回评批量生成时每批请求条数 |
-
-`direct-api` 的配置读取优先级是：
-
-1. 显式传入的 options
-2. `process.env`
-3. Hermes 本地 `.env`
-4. provider 默认推断
-
-Hermes 本地 `.env` 候选路径：
-
-1. Windows：`%LOCALAPPDATA%\hermes\.env`
-2. Windows：`%USERPROFILE%\.hermes\.env`
-3. macOS / Linux：`~/.hermes/.env`
-
-`SOUL.md` 会按下面顺序查找：
-
-1. `options.soul`
-2. `options.soulPath`
-3. `DIRECT_API_SOUL_PATH`
-4. 当前工作目录 `SOUL.md`
-5. `%LOCALAPPDATA%\hermes\SOUL.md`
-6. `%USERPROFILE%\.hermes\SOUL.md`
-7. `~/.hermes/SOUL.md`
-
-找不到 `SOUL.md` 时默认继续运行；设置 `DIRECT_API_REQUIRE_SOUL=1` 时会直接报错。
-
-性能上，`direct-api` 只是绕过 Hermes CLI / gateway 编排，不会减少模型本身的推理耗时。是否明显加速，仍取决于模型响应速度、prompt 大小、批量大小和网络延迟。
-
-Hermes API Server 是可选加速模式，不是安装必需项。需要用户自己配置并手动启动 `hermes gateway`；如果 API 不可用，默认会 fallback 回 CLI。
+```text
+src/
+  adapters/      页面交互与平台适配
+  cli/           扫描、回评、回访等命令入口
+  db/            SQLite 表、迁移与仓储
+  services/      业务流程编排
+  agent/         Hermes / OpenClaw / Direct API 集成
+public/          Web 控制台静态资源
+tests/unit/      单元测试
+docs/            补充文档
+references/      规则与参考资料
+```
 
 ## 文档边界
 
-- `README.md`：项目介绍、安装方式、环境要求、命令速查。
-- `SKILL.md`：主 Skill，完整互动流程与 Agent 约束。
-- `references/comment-safety-rules.md`：评论安全规则。
-- `docs/COMMANDS.md`：命令参考手册。
+- `README.md`：项目介绍、安装方式、环境要求、命令速查
+- `SKILL.md`：主 Skill，完整互动流程与 Agent 约束
+- `references/comment-safety-rules.md`：评论安全规则
+- `docs/COMMANDS.md`：命令参考手册
+
+## 开源说明
+
+本项目以 [Apache License 2.0](LICENSE) 开源。
+
+你可以：
+
+- 使用
+- 修改
+- 分发
+- 在保留许可证与声明的前提下二次开发
+
+提交贡献前建议先阅读：
+
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [SECURITY.md](SECURITY.md)
+- [CHANGELOG.md](CHANGELOG.md)
 
 ## 免责声明
 
