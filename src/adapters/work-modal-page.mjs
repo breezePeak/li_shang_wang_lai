@@ -2500,8 +2500,12 @@ export async function verifyWorkReplyVisible(page, item, replyText, { timeoutMs 
   }, { replyNeedle, replyPrefix }).catch(() => ({ ok: false }));
 
   if (accepted.ok) {
-    console.error('[work-modal] 未在列表中看到回复，但输入框已清空，按发送已被页面接受处理');
-    return success({ verified: true, method: 'editor_cleared_after_send' });
+    console.error('[work-modal] 输入框已清空，但评论区仍未看到回复，按未确认处理');
+    return blocking(
+      RESULT_CODES.COMMENT_SEND_UNCONFIRMED,
+      '回复未出现在评论区（仅检测到输入框清空）',
+      { recoverable: true, data: accepted }
+    );
   }
 
   console.error(`[work-modal] 验证超时`);
