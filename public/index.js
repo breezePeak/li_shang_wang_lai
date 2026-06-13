@@ -330,8 +330,8 @@ function renderScanScheduleBoard() {
     ${scanSchedules.slice(0, 8).map((batch) => `
       <button class="overview-row scan-accent" onclick="openScanBatch('${encodeURIComponent(batch.key)}')">
         <div>
-          <strong>${escapeHtml(formatTime(batch.scannedStartAt) || batch.key)}</strong>
-          <span>${escapeHtml(formatTimeRange(batch.eventWindowStartAt, batch.eventWindowEndAt))}</span>
+          <strong>${escapeHtml(formatTime(batch.scannedEndAt || batch.scannedStartAt) || batch.key)}</strong>
+          <span>${escapeHtml(formatNamedTimeRange(batch.scannedStartAt, batch.scannedEndAt))}</span>
         </div>
         <div>
           <strong class="overview-cell-count">${batch.totalEvents || 0}</strong>
@@ -366,7 +366,7 @@ function renderReplyOverviewBoard() {
       <button class="overview-row reply-accent" onclick="openScheduleBatch('${STAGE_IDS.REPLY_SCHEDULES}', '${encodeURIComponent(row.key)}')">
         <div>
           <strong>${escapeHtml(formatTime(row.anchorAt) || row.key)}</strong>
-          <span>${escapeHtml(formatTimeRange(row.startAt, row.endAt))}</span>
+          <span>${escapeHtml(formatNamedTimeRange(row.startAt, row.endAt))}</span>
         </div>
         <div>
           <strong class="overview-status">${escapeHtml(row.summary)}</strong>
@@ -401,7 +401,7 @@ function renderVisitOverviewBoard() {
       <button class="overview-row visit-accent" onclick="openScheduleBatch('${STAGE_IDS.VISIT_SCHEDULES}', '${encodeURIComponent(row.key)}')">
         <div>
           <strong>${escapeHtml(formatTime(row.anchorAt) || row.key)}</strong>
-          <span>${escapeHtml(formatTimeRange(row.startAt, row.endAt))}</span>
+          <span>${escapeHtml(formatNamedTimeRange(row.startAt, row.endAt))}</span>
         </div>
         <div>
           <strong class="overview-status">${escapeHtml(row.summary)}</strong>
@@ -607,16 +607,24 @@ function renderWorkDetail(dataset, workGroup) {
     return;
   }
 
+  const summaryChips = [`${workGroup.count} 条明细`];
+  const rangeText = workGroup.startAt || workGroup.endAt
+    ? formatNamedTimeRange(workGroup.startAt, workGroup.endAt)
+    : '';
+  if (rangeText) summaryChips.push(rangeText);
+  else if (workGroup.meta) summaryChips.push(workGroup.meta);
+  if (Number.isInteger(workGroup.workCount) && workGroup.workCount > 0) summaryChips.push(`${workGroup.workCount} 个作品`);
+  if (Number.isInteger(workGroup.groupCount) && workGroup.groupCount > 0) summaryChips.push(`${workGroup.groupCount} 位对象`);
+
   meta.innerHTML = `
-    <div class="detail-title-block">
+    <div class="detail-title-inline">
       <span class="work-chip">${workGroup.kindLabel}</span>
       <h4>${escapeHtml(workGroup.title)}</h4>
-      <p>${escapeHtml(workGroup.subtitle || dataset.title)}</p>
     </div>
-    <div class="detail-summary">
-      <span>${workGroup.count} 条明细</span>
-      ${workGroup.meta ? `<span>${escapeHtml(workGroup.meta)}</span>` : ''}
+    <div class="detail-summary detail-summary-compact">
+      ${summaryChips.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}
     </div>
+    <p class="detail-inline-note">${escapeHtml(workGroup.subtitle || dataset.title)}</p>
   `;
 
   const items = (workGroup.items || []).slice().sort(sortByCreatedDesc);
@@ -769,9 +777,12 @@ function buildScanScheduleGroups() {
 
     return {
       key: batch.key,
+      anchorAt: batch.scannedEndAt || batch.scannedStartAt,
+      startAt: batch.scannedStartAt,
+      endAt: batch.scannedEndAt,
       title: `${formatTime(batch.scannedStartAt) || batch.key} 扫描批次`,
       subtitle: `${renderEventTypeSummary(batch)}，整理成 ${items.length} 条互动链`,
-      meta: formatTimeRange(batch.eventWindowStartAt, batch.eventWindowEndAt),
+      meta: `线索时间 ${formatTimeRange(batch.eventWindowStartAt, batch.eventWindowEndAt)}`,
       kindLabel: '扫描',
       count: items.length,
       items: items.sort(sortByCreatedDesc),
@@ -2043,6 +2054,15 @@ function formatTimeRange(start, end) {
     return startText === endText ? startText : `${startText} - ${endText}`;
   }
   return startText || endText || '时间范围未知';
+}
+
+function formatNamedTimeRange(start, end) {
+  const startText = formatTime(start);
+  const endText = formatTime(end);
+  if (startText && endText) return `开始 ${startText} · 结束 ${endText}`;
+  if (startText) return `开始 ${startText}`;
+  if (endText) return `结束 ${endText}`;
+  return '开始/结束时间未知';
 }
 
 function findLatestValue(items, getter) {
