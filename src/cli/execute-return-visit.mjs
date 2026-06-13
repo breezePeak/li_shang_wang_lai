@@ -25,6 +25,7 @@ function parseArgs(argv) {
     execute: true,
     watchPolicy: null,
     watchSeconds: null,
+    maxWorksToCheck: null,
     unsupportedItemsFile: false,
   };
 
@@ -37,6 +38,7 @@ function parseArgs(argv) {
     else if (arg === '--execute') { args.execute = true; args.dryRun = false; }
     else if (arg === '--watch-policy' && i + 1 < argv.length) args.watchPolicy = argv[++i];
     else if (arg === '--watch-seconds' && i + 1 < argv.length) args.watchSeconds = argv[++i];
+    else if (arg === '--max-works-to-check' && i + 1 < argv.length) args.maxWorksToCheck = argv[++i];
     else if (arg === '--items-file') {
       args.unsupportedItemsFile = true;
       if (argv[i + 1] && !String(argv[i + 1]).startsWith('--')) i++;
@@ -65,6 +67,17 @@ function getRange(range, fallbackMin, fallbackMax) {
 function randomInRange(min, max) {
   if (max <= min) return min;
   return Math.floor(min + Math.random() * (max - min + 1));
+}
+
+function resolveMaxWorksToCheck(cliValue, configValue, fallbackValue = 3) {
+  const candidates = [cliValue, configValue, fallbackValue];
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (Number.isFinite(value) && value > 0) {
+      return Math.floor(value);
+    }
+  }
+  return fallbackValue;
 }
 
 export function getReturnVisitTaskExecutionIssue(task) {
@@ -112,7 +125,7 @@ async function main() {
 
   const executeMode = args.execute;
   const maxRetryCount = Number(returnVisitConfig.maxRetryCount ?? 2);
-  const maxWorksToCheck = Number(returnVisitConfig.maxWorksToCheck ?? 3);
+  const maxWorksToCheck = resolveMaxWorksToCheck(args.maxWorksToCheck, returnVisitConfig.maxWorksToCheck, 3);
   const pageLoadRetryCount = Number(returnVisitConfig.pageLoadRetryCount ?? 1);
   const maxConsecutiveFailures = Number(returnVisitConfig.maxConsecutiveFailures ?? 3);
   const waitBetweenUsersMs = returnVisitConfig.waitBetweenUsersMs || [3000, 5000];
@@ -227,6 +240,8 @@ async function main() {
         watchPolicy,
         watchSeconds,
         agentProvider,
+        allLikedFallbackEnabled: returnVisitConfig.allLikedFallbackEnabled,
+        allLikedFallbackComments: returnVisitConfig.allLikedFallbackComments,
       });
 
       if (result.resolvedWork) {
@@ -239,6 +254,17 @@ async function main() {
             workText: result.resolvedWork.workText,
             contentSummary: result.resolvedWork.contentSummary,
             publishTime: result.resolvedWork.publishTime,
+            shareUrl: result.resolvedWork.shareUrl,
+            desc: result.resolvedWork.desc,
+            itemTitle: result.resolvedWork.itemTitle,
+            createTime: result.resolvedWork.createTime,
+            isTop: result.resolvedWork.isTop,
+            userDigged: result.resolvedWork.userDigged,
+            diggCount: result.resolvedWork.diggCount,
+            commentCount: result.resolvedWork.commentCount,
+            awemeType: result.resolvedWork.awemeType,
+            mediaType: result.resolvedWork.mediaType,
+            isMultiContent: result.resolvedWork.isMultiContent,
           },
           referenceComments: result.resolvedWork.referenceComments || [],
         });
@@ -249,7 +275,14 @@ async function main() {
           likeStatus: result.likeStatus,
           commentStatus: result.commentStatus,
         });
-        taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.DONE, likeStatus: result.likeStatus, commentStatus: result.commentStatus });
+        taskResults.push({
+          taskId: task.taskId,
+          status: RETURN_VISIT_STATUS.DONE,
+          likeStatus: result.likeStatus,
+          commentStatus: result.commentStatus,
+          selectionMode: result.selectionMode,
+          checkedWorks: result.checkedWorks,
+        });
         done++;
         consecutiveFailures = 0;
         log(args.json, '[return-visit:execute] task done');
@@ -259,7 +292,14 @@ async function main() {
           likeStatus: result.likeStatus,
           commentStatus: result.commentStatus,
         });
-        taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.PENDING_EXECUTE, dryRun: true });
+        taskResults.push({
+          taskId: task.taskId,
+          status: RETURN_VISIT_STATUS.PENDING_EXECUTE,
+          dryRun: true,
+          selectionMode: result.selectionMode,
+          checkedWorks: result.checkedWorks,
+          plannedAction: result.plannedAction,
+        });
         consecutiveFailures = 0;
       } else if (!result.ok && String(result.status || '').startsWith('skipped_')) {
         updateReturnVisitTask(task.taskId, {
@@ -268,7 +308,13 @@ async function main() {
           commentStatus: result.commentStatus || task.commentStatus,
           lastError: result.error || result.status,
         });
-        taskResults.push({ taskId: task.taskId, status: result.status, reason: result.error || result.status });
+        taskResults.push({
+          taskId: task.taskId,
+          status: result.status,
+          reason: result.error || result.status,
+          selectionMode: result.selectionMode,
+          checkedWorks: result.checkedWorks,
+        });
         skipped++;
         consecutiveFailures = 0;
       } else {
@@ -279,7 +325,13 @@ async function main() {
           likeStatus: result.likeStatus || task.likeStatus,
           commentStatus: result.commentStatus || task.commentStatus,
         });
-        taskResults.push({ taskId: task.taskId, status: result.status || RETURN_VISIT_STATUS.FAILED, reason: result.error || 'execute_failed' });
+        taskResults.push({
+          taskId: task.taskId,
+          status: result.status || RETURN_VISIT_STATUS.FAILED,
+          reason: result.error || 'execute_failed',
+          selectionMode: result.selectionMode,
+          checkedWorks: result.checkedWorks,
+        });
         failed++;
         consecutiveFailures++;
         log(args.json, `[return-visit:execute] failed: ${result.error || result.status || 'unknown'}`);

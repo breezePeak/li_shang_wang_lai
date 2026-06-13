@@ -17,8 +17,8 @@ import {
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 import { canMarkDone } from './return-visit-task-service.mjs';
 import {
+  collectCandidateAwemesFromProfile,
   collectCurrentOpenedWork,
-  collectFirstNonTopAwemeFromProfile,
   extractWorkIdFromUrl,
   openProfileWorkByAwemeId,
 } from './return-visit-work-collector.mjs';
@@ -584,41 +584,156 @@ async function refreshVisibleWorkForComment(page, task, resolvedWork, maxReferen
   };
 }
 
+function createCheckedWorkEntry(candidate = {}, patch = {}) {
+  return {
+    workId: candidate.workId || candidate.awemeId || '',
+    workUrl: candidate.workUrl || '',
+    userDigged: candidate.userDigged ?? null,
+    likeState: patch.likeState || null,
+    likeStateSource: patch.likeStateSource || null,
+    action: patch.action || 'skip',
+    reason: patch.reason || null,
+  };
+}
+
+function getSafeFallbackComments(comments = []) {
+  const cleaned = (Array.isArray(comments) ? comments : [])
+    .map(item => String(item || '').trim())
+    .filter(Boolean);
+  return cleaned.length > 0 ? cleaned : [
+    '期待更新呀～',
+    '蹲一个新作品～',
+    '好久没更新啦，等你更新～',
+  ];
+}
+
+function pickRandomComment(comments = []) {
+  const list = getSafeFallbackComments(comments);
+  const index = Math.floor(Math.random() * list.length);
+  return list[index] || list[0];
+}
+
+function areAllCheckedWorksAlreadyLiked(checkedWorks = [], candidateCount = 0) {
+  return candidateCount > 0
+    && checkedWorks.length >= candidateCount
+    && checkedWorks.every(item => item?.likeState === 'already_liked');
+}
+
 async function resolveWorkForExecution(page, task, options = {}) {
-  const { pageLoadRetryCount = 1, maxReferenceComments = 5 } = options;
-  const knownWorkId = String(task?.targetWork?.workId || '').trim();
+  const { pageLoadRetryCount = 1, maxWorksToCheck = 3 } = options;
   const profileUrl = task?.userProfileUrl;
 
-  async function openFallbackProfileWork(reason) {
-    console.error(`[visit] task=${task.taskId} 改为从主页选择回访作品 reason=${reason || 'no_known_work'}`);
-    const selected = await collectFirstNonTopAwemeFromProfile(page, profileUrl, {
-      pageLoadRetryCount,
-    });
+  if (!profileUrl) {
+    console.error('[resolve] [FAIL] 缺少 profileUrl');
+    return { ok: false, status: 'failed_collect', reason: 'missing_profile_url' };
+  }
 
-    if (!selected.ok) {
-      const selectedReason = selected.reason || 'select_profile_work_failed';
-      if (selectedReason === 'skip_no_aweme' || selectedReason === 'skip_only_top_aweme') {
-        return { ok: false, status: 'skipped_no_work', reason: selectedReason };
-      }
-      if (selectedReason === 'skip_aweme_id_missing') {
-        return { ok: false, status: 'skipped_no_suitable_work', reason: selectedReason };
-      }
-      return { ok: false, status: 'failed_collect', reason: selectedReason };
+  console.error(`[visit] task=${task.taskId} 打开用户主页 profileUrl=${profileUrl}`);
+  const selected = await collectCandidateAwemesFromProfile(page, profileUrl, {
+    pageLoadRetryCount,
+    maxWorksToCheck,
+  });
+
+  if (!selected.ok) {
+    const reason = selected.reason || 'select_profile_work_failed';
+    if (selected.status === 'skipped_private') {
+      return { ok: false, status: 'skipped_private', reason };
     }
-
-    const fallbackWorkId = String(selected.aweme?.workId || selected.aweme?.awemeId || '').trim();
-    if (!fallbackWorkId) {
-      return { ok: false, status: 'skipped_no_suitable_work', reason: 'fallback_work_id_missing' };
+    if (selected.status === 'skipped_no_work') {
+      return { ok: false, status: 'skipped_no_work', reason };
     }
+    if (selected.status === 'skipped_no_suitable_work') {
+      return { ok: false, status: 'skipped_no_suitable_work', reason };
+    }
+    return { ok: false, status: 'failed_collect', reason };
+  }
 
-    console.error(`[visit] task=${task.taskId} 选择主页作品 workId=${fallbackWorkId}`);
-    const opened = await openProfileWorkByAwemeId(page, profileUrl, fallbackWorkId, {
+  return {
+    ok: true,
+    candidates: selected.candidates || [],
+    stats: selected.stats || null,
+  };
+}
+
+export async function executeReturnVisitTask(page, task, options = {}) {
+  const {
+    execute = true,
+    pageLoadRetryCount = 1,
+    maxWorksToCheck = 3,
+    maxReferenceComments = 5,
+    waitBetweenLikeAndCommentMs = [2000, 3000],
+    watchPolicy = 'seconds',
+    watchSeconds = [3, 3],
+    agentProvider = new LocalAgentProvider(),
+    allLikedFallbackEnabled = true,
+    allLikedFallbackComments = [],
+  } = options;
+
+  const taskId = task.taskId;
+  const userName = task.userName || task.actorName || '';
+  const logTag = `[visit][${taskId}]`;
+
+  const taskStartedAt = Date.now();
+
+  console.error(`${logTag} ========== 开始回访: ${userName} ==========`);
+  logTimedStep(logTag, 'task_total', 'start', { user: userName || '(unknown)' });
+
+  // [1/5] 解析作品
+  console.error(`${logTag} [1/5] 解析作品: 从用户主页打开目标作品...`);
+  const resolveStartedAt = Date.now();
+  const resolved = await resolveWorkForExecution(page, task, {
+    pageLoadRetryCount,
+    maxWorksToCheck,
+  });
+  logTimedStep(logTag, 'resolve_work', resolved.ok ? 'done' : 'error', {
+    elapsedMs: elapsedMs(resolveStartedAt),
+    status: resolved.status || '',
+    reason: resolved.reason || '',
+  });
+
+  if (!resolved.ok) {
+    console.error(`${logTag} [FAIL] 作品解析失败: ${resolved.reason || resolved.status}`);
+    const status = resolved.status || 'failed_collect';
+    if (status.startsWith('skipped_')) {
+      return {
+        ok: false,
+        status,
+        error: resolved.reason || status,
+        likeStatus: task.likeStatus || 'pending',
+        commentStatus: task.commentStatus || 'pending',
+        checkedWorks: [],
+      };
+    }
+    return {
+      ok: false,
+      status: 'failed_collect',
+      error: resolved.reason || 'resolve_work_failed',
+      likeStatus: task.likeStatus || 'pending',
+      commentStatus: task.commentStatus || 'pending',
+      checkedWorks: [],
+    };
+  }
+
+  const candidates = Array.isArray(resolved.candidates) ? resolved.candidates : [];
+  if (candidates.length === 0) {
+    return {
+      ok: false,
+      status: 'skipped_no_work',
+      error: 'no_candidate_work',
+      likeStatus: task.likeStatus || 'pending',
+      commentStatus: task.commentStatus || 'pending',
+      checkedWorks: [],
+    };
+  }
+
+  async function openCandidateWork(candidate) {
+    const candidateWorkId = String(candidate?.workId || candidate?.awemeId || '').trim();
+    const opened = await openProfileWorkByAwemeId(page, task.userProfileUrl, candidateWorkId, {
       pageLoadRetryCount,
       reuseCurrentProfile: true,
     });
-
     if (!opened.ok) {
-      return { ok: false, status: 'failed_collect', reason: opened.reason || 'open_fallback_profile_work_failed' };
+      return { ok: false, status: 'failed_collect', reason: opened.reason || 'open_profile_work_failed' };
     }
 
     let autoPlayChecked = false;
@@ -632,515 +747,451 @@ async function resolveWorkForExecution(page, task, options = {}) {
 
     const fromCurrent = await collectCurrentOpenedWork(page, { maxReferenceComments });
     if (!fromCurrent.ok) {
-      return { ok: false, status: 'failed_collect', reason: 'fallback_work_collect_failed' };
+      return { ok: false, status: 'failed_collect', reason: 'opened_work_collect_failed' };
     }
 
     const currentWorkId = normalizeWorkId(fromCurrent.work?.workId || '');
-    if (currentWorkId && currentWorkId !== normalizeWorkId(fallbackWorkId)) {
+    if (currentWorkId && currentWorkId !== normalizeWorkId(candidateWorkId)) {
       return {
         ok: false,
         status: 'failed_collect',
         reason: 'opened_work_id_mismatch',
-        expectedWorkId: fallbackWorkId,
+        expectedWorkId: candidateWorkId,
         actualWorkId: fromCurrent.work.workId,
       };
     }
 
-    const resolvedVisibleWork = mergeWorkContext(selected.aweme || {}, fromCurrent.work, fallbackWorkId);
-    console.error(`[resolve] 回访作品收集完成: title="${String(resolvedVisibleWork.workTitle || '').slice(0, 30)}"`);
     return {
       ok: true,
-      work: resolvedVisibleWork,
-      fromFallback: true,
-      openedFromProfile: true,
+      work: mergeWorkContext(opened.aweme || candidate, fromCurrent.work, candidateWorkId),
       autoPlayChecked,
     };
   }
 
-  if (profileUrl && !knownWorkId) {
-    return openFallbackProfileWork('missing_known_work_id');
-  }
-
-  if (profileUrl && knownWorkId) {
-    console.error(`[visit] task=${task.taskId} 打开用户主页 profileUrl=${profileUrl}`);
-    const opened = await openProfileWorkByAwemeId(page, profileUrl, knownWorkId, {
-      pageLoadRetryCount,
-    });
-    if (opened.ok) {
-      const count = opened.stats?.awemeCount ?? opened.stats?.responseCount ?? 0;
-      console.error(`[visit] task=${task.taskId} 已监听到主页作品列表 API count=${count}`);
-      console.error(`[visit] task=${task.taskId} 匹配作品成功 workId=${knownWorkId} index=${opened.index}`);
-      console.error(`[visit] task=${task.taskId} 已点击目标作品`);
-      console.error(`[visit] task=${task.taskId} 已进入作品页`);
-      let autoPlayChecked = false;
-      if (String(page.url?.() || '').includes('modal_id=')) {
-        const modalReady = await waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true, openCommentArea: false });
-        if (!modalReady?.ok) {
-          return { ok: false, status: 'failed_collect', reason: modalReady?.message || modalReady?.code || 'work_modal_not_ready' };
-        }
-        autoPlayChecked = true;
-      }
-      const fromCurrent = await collectCurrentOpenedWork(page, { maxReferenceComments });
-      if (fromCurrent.ok) {
-        const currentWorkId = normalizeWorkId(fromCurrent.work?.workId || '');
-        if (currentWorkId && currentWorkId !== normalizeWorkId(knownWorkId)) {
-          return {
-            ok: false,
-            status: 'failed_collect',
-            reason: 'opened_work_id_mismatch',
-            expectedWorkId: knownWorkId,
-            actualWorkId: fromCurrent.work.workId,
-          };
-        }
-
-        const resolvedVisibleWork = mergeWorkContext(opened.aweme || {}, fromCurrent.work, knownWorkId);
-        console.error(`[resolve] 作品收集完成: title="${String(resolvedVisibleWork.workTitle || '').slice(0, 30)}"`);
-        return {
-          ok: true,
-          work: resolvedVisibleWork,
-          fromFallback: false,
-          openedFromProfile: true,
-          autoPlayChecked,
-        };
-      }
-      console.error(`[resolve] [FAIL] 当前页收集失败`);
-    } else {
-      if (opened.reason === 'target_work_not_found_in_profile_post_api') {
-        console.error(`[visit] task=${task.taskId} failed reason=未在主页作品列表中找到目标作品`);
-        return openFallbackProfileWork(opened.reason);
-      } else {
-        console.error(`[visit] task=${task.taskId} failed reason=${opened.reason || '主页打开作品失败'}`);
-      }
-      return { ok: false, status: 'failed_collect', reason: opened.reason || 'open_profile_work_failed' };
+  async function generateNormalComment(resolvedWork) {
+    let commentText = String(task.generatedComment || '').trim();
+    if (commentText && canReuseGeneratedCommentForWork(task, resolvedWork)) {
+      console.error(`[agent] task=${taskId} 复用已生成评论 comment=${commentText}`);
+      return { ok: true, commentText };
     }
-    return { ok: false, status: 'failed_collect', reason: 'opened_work_collect_failed' };
-  }
-
-  console.error(`[resolve] [FAIL] 缺少 profileUrl 或 workId`);
-  return { ok: false, status: 'failed_collect', reason: 'missing_profile_url_or_work_id' };
-}
-
-export async function executeReturnVisitTask(page, task, options = {}) {
-  const {
-    execute = true,
-    pageLoadRetryCount = 1,
-    maxWorksToCheck = 3,
-    maxReferenceComments = 5,
-    waitBetweenLikeAndCommentMs = [2000, 3000],
-    watchPolicy = 'seconds',
-    watchSeconds = [3, 3],
-    agentProvider = new LocalAgentProvider(),
-  } = options;
-
-  const taskId = task.taskId;
-  const userName = task.userName || task.actorName || '';
-  const logTag = `[visit][${taskId}]`;
-
-  let commentText = '';
-  const taskStartedAt = Date.now();
-
-  console.error(`${logTag} ========== 开始回访: ${userName} ==========`);
-  logTimedStep(logTag, 'task_total', 'start', { user: userName || '(unknown)' });
-
-  // [1/5] 解析作品
-  console.error(`${logTag} [1/5] 解析作品: 从用户主页打开目标作品...`);
-  const resolveStartedAt = Date.now();
-  const resolved = await resolveWorkForExecution(page, task, {
-    pageLoadRetryCount,
-    maxWorksToCheck,
-    maxReferenceComments,
-  });
-  logTimedStep(logTag, 'resolve_work', resolved.ok ? 'done' : 'error', {
-    elapsedMs: elapsedMs(resolveStartedAt),
-    status: resolved.status || '',
-    reason: resolved.reason || '',
-  });
-
-  if (!resolved.ok) {
-    console.error(`${logTag} [FAIL] 作品解析失败: ${resolved.reason || resolved.status}`);
-    const status = resolved.status || 'failed_collect';
-    if (status.startsWith('skipped_')) {
-      return { ok: false, status, error: resolved.reason || status, likeStatus: task.likeStatus || 'pending', commentStatus: task.commentStatus || 'pending' };
-    }
-    return { ok: false, status: 'failed_collect', error: resolved.reason || 'resolve_work_failed', likeStatus: task.likeStatus || 'pending', commentStatus: task.commentStatus || 'pending' };
-  }
-
-  const resolvedWork = resolved.work;
-  console.error(`${logTag} [1/5] 作品解析完成: workId=${resolvedWork.workId} title="${String(resolvedWork.workTitle || '').slice(0, 30)}"`);
-  const openedWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_open');
-  if (openedWorkCheck) return openedWorkCheck;
-
-  // 作品一打开并通过上下文校验后，立刻启动 Agent 生成评论。
-  // 后续 3 秒播放门槛、点赞检测/点击都与这段生成并行。
-  commentText = String(task.generatedComment || '').trim();
-  if (commentText && canReuseGeneratedCommentForWork(task, resolvedWork)) {
-    console.error(`[agent] task=${taskId} 复用已生成评论 comment=${commentText}`);
-  } else {
     if (commentText) {
       console.error(`[agent] task=${taskId} 丢弃已生成评论: 当前作品上下文已变化`);
-      commentText = '';
     }
-  }
 
-  // 启动评论生成（后台并行，不阻塞视频观看）
-  let commentGenPromise = null;
-  let commentGenVisibleError = null;
-  let commentGenStartedAt = null;
-  let commentGenFinishedAt = null;
-  if (!commentText) {
-    commentGenStartedAt = Date.now();
-    logTimedStep(logTag, 'agent_generate_comment', 'start', {
-      phase: 'after_open',
-      workId: resolvedWork.workId || '',
-    });
-    commentGenPromise = (async () => {
-      try {
-        const contextStartedAt = Date.now();
-        const visibleForAgent = await refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, 'before_agent');
-        logTimedStep(logTag, 'agent_visible_context', visibleForAgent.ok ? 'done' : 'error', {
-          elapsedMs: elapsedMs(contextStartedAt),
-          error: visibleForAgent.error || '',
-          reason: visibleForAgent.reason || '',
-        });
-        if (!visibleForAgent.ok) {
-          commentGenVisibleError = visibleForAgent;
-          return null;
-        }
-        const commentContext = buildCommentContext(task, visibleForAgent.work);
-        console.error(`[agent] task=${taskId} 打开作品后立即请求生成评论（并行于播放/点赞）`);
-        const requestStartedAt = Date.now();
-        const text = await agentProvider.generateComment(commentContext);
-        commentGenFinishedAt = Date.now();
-        logTimedStep(logTag, 'agent_generate_comment', 'done', {
-          elapsedMs: elapsedMs(commentGenStartedAt),
-          requestMs: elapsedMs(requestStartedAt),
-          length: String(text || '').length,
-        });
-        console.error(`[agent] task=${taskId} 评论生成成功 comment=${text}`);
-        return text;
-      } catch (err) {
-        commentGenFinishedAt = Date.now();
-        logTimedStep(logTag, 'agent_generate_comment', 'error', {
-          elapsedMs: elapsedMs(commentGenStartedAt),
-          error: err.message,
-        });
-        commentGenVisibleError = { ok: false, error: 'agent_comment_failed', reason: err.message };
-        return null;
-      }
-    })();
-  } else {
-    logTimedStep(logTag, 'agent_generate_comment', 'skipped', { reason: 'reuse_generated_comment', length: commentText.length });
-  }
-
-  // [2/5] 检测页面类型 + 启动视频播放/最短观看门槛（与评论生成并行）
-  const presentationStartedAt = Date.now();
-  const presentation = await detectWorkPresentationKind(page, resolvedWork);
-  logTimedStep(logTag, 'detect_presentation', 'done', {
-    elapsedMs: elapsedMs(presentationStartedAt),
-    isModal: presentation.isModalPage,
-    isNote: presentation.isNotePage,
-    hasVideo: presentation.hasVideoElement,
-  });
-  const currentUrl = presentation.currentUrl;
-  const isNotePage = presentation.isNotePage;
-  console.error(`${logTag} [2/5] 页面类型: isModal=${presentation.isModalPage} isNote=${isNotePage} hasVideo=${presentation.hasVideoElement}`);
-
-  if (presentation.isModalPage && !resolved.autoPlayChecked) {
-    const modalStartedAt = Date.now();
-    const modalReady = await waitWithProgress(
-      waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true, openCommentArea: false }),
-      {
-        logTag,
-        step: 'modal_ready_before_watch',
-        startedAt: modalStartedAt,
-        fields: { timeoutMs: 8000, openCommentArea: false },
-      }
-    );
-    if (!modalReady?.ok) {
-      console.error(`${logTag} [2/5] [FAIL] modal未就绪: ${modalReady?.message || modalReady?.code}`);
-      return { ok: false, status: 'failed_collect', error: modalReady?.message || 'work_modal_not_ready', likeStatus: task.likeStatus || 'pending', commentStatus: task.commentStatus || 'pending', resolvedWork };
-    }
-    const beforeWatchWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_watch');
-    if (beforeWatchWorkCheck) return beforeWatchWorkCheck;
-  }
-
-  // 最短观看门槛（与评论生成并行）
-  if (!isNotePage) {
-    console.error(`${logTag} [2/5] 等待最短观看门槛... policy=${watchPolicy} seconds=${watchSeconds}`);
-    const watchStartedAt = Date.now();
-    await waitForInteractionWatchGate(page, watchPolicy, watchSeconds);
-    logTimedStep(logTag, 'watch_gate', 'done', {
-      elapsedMs: elapsedMs(watchStartedAt),
-      agentDone: Boolean(commentGenFinishedAt),
-      agentElapsedMs: commentGenStartedAt ? elapsedMs(commentGenStartedAt) : '',
-    });
-    console.error(`${logTag} [2/5] 已达到互动门槛，进入点赞评论阶段`);
-  } else {
-    logTimedStep(logTag, 'watch_gate', 'skipped', { reason: 'note_page' });
-    console.error(`${logTag} [2/5] 图文/note，跳过观看门槛`);
-  }
-
-  const afterWatchGateWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_watch');
-  if (afterWatchGateWorkCheck) return afterWatchGateWorkCheck;
-
-  const nextLikeStatus = { value: task.likeStatus || 'pending' };
-  const nextCommentStatus = { value: task.commentStatus || 'pending' };
-
-  // [3/5] 点赞
-  console.error(`${logTag} [3/5] 检测点赞状态... execute=${execute}`);
-  const likeStateStartedAt = Date.now();
-  const beforeLikeWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_like', {
-    likeStatus: nextLikeStatus.value,
-    commentStatus: nextCommentStatus.value,
-  });
-  if (beforeLikeWorkCheck) return beforeLikeWorkCheck;
-  const likeState = await checkLikeState(page);
-  logTimedStep(logTag, 'check_like_state', likeState.ok ? 'done' : 'error', {
-    elapsedMs: elapsedMs(likeStateStartedAt),
-    confidence: likeState.data?.confidence || '',
-    message: likeState.message || '',
-  });
-  if (!likeState.ok || likeState.data?.confidence !== 'confirmed') {
-    console.error(`${logTag} [3/5] [FAIL] 点赞状态无法确认 confidence=${likeState.data?.confidence}`);
-    let debugCandidates = [];
-    try {
-      debugCandidates = await page.evaluate(() => {
-        const buttons = document.querySelectorAll('button, [role="button"], a, svg');
-        return Array.from(buttons).slice(0, 20).map(el => {
-          const rect = el.getBoundingClientRect();
-          return { tag: el.tagName.toLowerCase(), className: (el.className || '') + '', ariaLabel: el.getAttribute('aria-label') || '', role: el.getAttribute('role') || '', text: (el.innerText || '').slice(0, 20), visible: rect.width > 0 && rect.height > 0 };
-        });
-      });
-    } catch (err) {
-      console.error(`${logTag} 收集点赞 debug 细节异常: ${err.message}`);
-    }
-    console.error(`${logTag} 页面候选元素:`, JSON.stringify(debugCandidates));
-    await saveDebugScreenshot(page, task.taskId, 'like');
-    return { ok: false, status: 'failed_like', error: likeState.message || 'like_state_unknown', likeStatus: 'failed', commentStatus: nextCommentStatus.value, resolvedWork };
-  }
-
-  const alreadyLiked = likeState.data.alreadyLiked;
-  console.error(`${logTag} [3/5] 点赞状态: ${alreadyLiked ? '已赞' : '未赞'}`);
-
-  if (alreadyLiked) {
-    nextLikeStatus.value = 'already_liked';
-    console.error(`${logTag} [3/5] 跳过点赞(已赞)`);
-  } else if (!execute) {
-    nextLikeStatus.value = 'pending';
-    console.error(`${logTag} [3/5] 跳过点赞(dry-run)`);
-  } else {
-    console.error(`${logTag} [3/5] 执行点赞点击...`);
-    const clickLikeStartedAt = Date.now();
-    const clickResult = await clickLike(page, { execute: true });
-    logTimedStep(logTag, 'click_like', clickResult.ok ? 'done' : 'error', {
-      elapsedMs: elapsedMs(clickLikeStartedAt),
-      code: clickResult.code || '',
-      message: clickResult.message || '',
-    });
-    if (!clickResult.ok) {
-      if (clickResult.code === 'ALREADY_LIKED') {
-        nextLikeStatus.value = 'already_liked';
-        console.error(`${logTag} [3/5] 点赞结果: 已赞(接口返回)`);
-      } else {
-        console.error(`${logTag} [3/5] [FAIL] 点赞失败: ${clickResult.message}`);
-        await saveDebugScreenshot(page, task.taskId, 'like_click');
-        return { ok: false, status: 'failed_like', error: clickResult.message || 'click_like_failed', likeStatus: 'failed', commentStatus: nextCommentStatus.value, resolvedWork };
-      }
-    } else {
-      console.error(`${logTag} [3/5] 点赞点击完成，确认中...`);
-      const confirmLikeStartedAt = Date.now();
-      const confirmResult = await confirmLikeSucceeded(page);
-      logTimedStep(logTag, 'confirm_like', confirmResult.ok ? 'done' : 'error', {
-        elapsedMs: elapsedMs(confirmLikeStartedAt),
-        message: confirmResult.message || '',
-      });
-      if (!confirmResult.ok) {
-        console.error(`${logTag} [3/5] 点赞确认未通过: ${confirmResult.message}，继续后续操作`);
-        await saveDebugScreenshot(page, task.taskId, 'like_confirm');
-      } else {
-        console.error(`${logTag} [3/5] 点赞确认通过`);
-      }
-      nextLikeStatus.value = 'liked';
-    }
-  }
-
-  // [4/5] 评论
-  if (!execute) {
-    console.error(`${logTag} [4/5] 跳过评论(dry-run)`);
-    return { ok: true, status: 'pending_execute', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork, dryRun: true };
-  }
-
-  if (task.commentStatus === 'posted') {
-    console.error(`[visit] task=${taskId} skipped reason=已评论过`);
-    return { ok: false, status: 'skipped_no_suitable_work', error: '已评论过', likeStatus: nextLikeStatus.value, commentStatus: 'posted', resolvedWork };
-  }
-
-  console.error(`${logTag} [4/5] 等待发评论... delay=${waitBetweenLikeAndCommentMs}ms`);
-  const likeToCommentStartedAt = Date.now();
-  const likeToCommentMs = await waitRandom(page, waitBetweenLikeAndCommentMs, 2000, 3000);
-  logTimedStep(logTag, 'like_to_comment_delay', 'done', {
-    elapsedMs: elapsedMs(likeToCommentStartedAt),
-    waitedMs: likeToCommentMs,
-  });
-
-  const pauseStartedAt = Date.now();
-  await pauseCurrentVideo(page);
-  logTimedStep(logTag, 'pause_video_before_comment', 'done', { elapsedMs: elapsedMs(pauseStartedAt) });
-
-  const beforeCommentBoxWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_comment_box', {
-    likeStatus: nextLikeStatus.value,
-    commentStatus: nextCommentStatus.value,
-  });
-  if (beforeCommentBoxWorkCheck) return beforeCommentBoxWorkCheck;
-
-  const commentBoxStartedAt = Date.now();
-  const boxReady = await waitWithProgress(
-    ensureReturnVisitCommentBoxReady(page, presentation),
-    {
-      logTag,
-      step: 'comment_box_ready',
-      startedAt: commentBoxStartedAt,
-      fields: {
-        isModal: presentation.isModalPage,
-        currentUrl: typeof page?.url === 'function' ? page.url() : '',
-      },
-    }
-  );
-  if (!boxReady.ok) {
-    logTimedStep(logTag, 'comment_box_ready', 'failed', {
-      elapsedMs: elapsedMs(commentBoxStartedAt),
-      reason: boxReady.reason || '',
-      method: boxReady.method || '',
-    });
-    console.error(`[visit] task=${taskId} failed reason=评论框不存在 detail=${boxReady.reason || ''}`);
-    await saveDebugScreenshot(page, task.taskId, 'comment_box');
-    return { ok: false, status: 'failed_comment', error: boxReady.reason || 'comment_box_not_found', likeStatus: nextLikeStatus.value, commentStatus: 'failed', resolvedWork };
-  }
-  logTimedStep(logTag, 'comment_box_ready', 'ready', {
-    elapsedMs: elapsedMs(commentBoxStartedAt),
-    method: boxReady.method || '',
-    reason: boxReady.reason || '',
-  });
-  console.error(`[visit] task=${taskId} 评论框可用`);
-
-  // 评论生成可能仍在后台进行。点赞已经在 3 秒观看门槛后完成，
-  // 到真正发送评论前再等待生成结果，避免 Agent 延迟阻塞点赞动作。
-  if (commentGenPromise) {
-    const waitAgentStartedAt = Date.now();
-    logTimedStep(logTag, 'agent_result_before_comment', 'inspect', {
-      alreadyDone: Boolean(commentGenFinishedAt),
-      agentElapsedMs: commentGenStartedAt ? elapsedMs(commentGenStartedAt) : '',
-    });
-    const generated = await waitWithProgress(commentGenPromise, {
-      logTag,
-      step: 'agent_result_before_comment',
-      startedAt: waitAgentStartedAt,
-      fields: {
-        agentTotalElapsedMs: commentGenStartedAt ? elapsedMs(commentGenStartedAt) : '',
-      },
-    });
-    if (commentGenVisibleError) {
-      console.error(`[visit] task=${taskId} failed reason=${commentGenVisibleError.error} detail=${commentGenVisibleError.reason || ''}`);
-      await saveDebugScreenshot(page, task.taskId, commentGenVisibleError.error || 'visible_work_before_agent');
+    const visibleForAgent = await refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, 'before_agent');
+    if (!visibleForAgent.ok) {
       return {
         ok: false,
         status: 'failed_generate_comment',
-        error: commentGenVisibleError.error,
-        likeStatus: nextLikeStatus.value,
-        commentStatus: nextCommentStatus.value,
-        resolvedWork,
-        data: commentGenVisibleError,
+        error: visibleForAgent.error,
+        data: visibleForAgent,
       };
     }
-    if (!generated) {
-      console.error(`[visit] task=${taskId} failed reason=Agent 生成评论失败`);
-      return { ok: false, status: 'failed_generate_comment', error: 'agent_comment_failed', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork };
+
+    const commentContext = buildCommentContext(task, visibleForAgent.work);
+    console.error(`[agent] task=${taskId} 请求生成普通回访评论`);
+    try {
+      const generated = await agentProvider.generateComment(commentContext);
+      const text = String(generated || '').trim();
+      if (!text) {
+        return { ok: false, status: 'failed_generate_comment', error: 'comment_text_empty' };
+      }
+      return { ok: true, commentText: text };
+    } catch (err) {
+      return { ok: false, status: 'failed_generate_comment', error: 'agent_comment_failed', data: { reason: err.message } };
     }
-    commentText = generated;
-    logTimedStep(logTag, 'agent_result_before_comment', 'accepted', {
-      waitElapsedMs: elapsedMs(waitAgentStartedAt),
-      agentTotalElapsedMs: commentGenStartedAt ? elapsedMs(commentGenStartedAt) : '',
-      length: String(commentText || '').length,
+  }
+
+  async function postCommentForResolvedWork(resolvedWork, presentation, likeStatus, selectionMode, commentText) {
+    if (task.commentStatus === 'posted') {
+      console.error(`[visit] task=${taskId} skipped reason=已评论过`);
+      return {
+        ok: false,
+        status: 'skipped_no_suitable_work',
+        error: '已评论过',
+        likeStatus,
+        commentStatus: 'posted',
+        resolvedWork,
+        selectionMode,
+      };
+    }
+
+    if (!execute) {
+      return {
+        ok: true,
+        status: 'pending_execute',
+        likeStatus,
+        commentStatus: task.commentStatus || 'pending',
+        resolvedWork,
+        selectionMode,
+        checkedWorks,
+        dryRun: true,
+        plannedAction: selectionMode === 'all_liked_update_request' ? 'update_request_comment' : 'like_and_comment',
+        generatedComment: commentText || null,
+      };
+    }
+
+    console.error(`${logTag} [4/5] 等待发评论... delay=${waitBetweenLikeAndCommentMs}ms`);
+    const likeToCommentMs = await waitRandom(page, waitBetweenLikeAndCommentMs, 2000, 3000);
+    logTimedStep(logTag, 'like_to_comment_delay', 'done', { waitedMs: likeToCommentMs });
+
+    await pauseCurrentVideo(page);
+
+    const beforeCommentBoxWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_comment_box', {
+      likeStatus,
+      commentStatus: task.commentStatus || 'pending',
     });
-  }
+    if (beforeCommentBoxWorkCheck) return { ...beforeCommentBoxWorkCheck, selectionMode, checkedWorks };
 
-  if (!commentText) {
-    console.error(`[visit] task=${taskId} failed reason=评论文本为空`);
-    return { ok: false, status: 'failed_generate_comment', error: 'comment_text_empty', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork };
-  }
-  console.error(`${logTag} [4/5] 评论已生成: "${commentText.slice(0, 40)}"`);
+    const boxReady = await ensureReturnVisitCommentBoxReady(page, presentation);
+    if (!boxReady.ok) {
+      await saveDebugScreenshot(page, task.taskId, 'comment_box');
+      return {
+        ok: false,
+        status: 'failed_comment',
+        error: boxReady.reason || 'comment_box_not_found',
+        likeStatus,
+        commentStatus: 'failed',
+        resolvedWork,
+        selectionMode,
+        checkedWorks,
+      };
+    }
 
-  console.error(`${logTag} [5/5] 发送评论: "${commentText.slice(0, 40)}"`);
-  const beforeCommentSendWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_comment_send', {
-    likeStatus: nextLikeStatus.value,
-    commentStatus: nextCommentStatus.value,
-  });
-  if (beforeCommentSendWorkCheck) return beforeCommentSendWorkCheck;
-  const visibleBeforeSendStartedAt = Date.now();
-  const visibleBeforeSend = await refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, 'before_comment_send');
-  logTimedStep(logTag, 'visible_context_before_send', visibleBeforeSend.ok ? 'done' : 'error', {
-    elapsedMs: elapsedMs(visibleBeforeSendStartedAt),
-    error: visibleBeforeSend.error || '',
-    reason: visibleBeforeSend.reason || '',
-  });
-  if (!visibleBeforeSend.ok) {
-    console.error(`[visit] task=${taskId} failed reason=${visibleBeforeSend.error} detail=${visibleBeforeSend.reason || ''}`);
-    await saveDebugScreenshot(page, task.taskId, visibleBeforeSend.error || 'visible_work_before_comment_send');
-    return {
-      ok: false,
-      status: 'failed_comment',
-      error: visibleBeforeSend.error,
-      likeStatus: nextLikeStatus.value,
-      commentStatus: 'failed',
-      resolvedWork,
-      generatedComment: commentText,
-      data: visibleBeforeSend,
-    };
-  }
-  const postCommentStartedAt = Date.now();
-  const commentResult = await waitWithProgress(
-    postReturnVisitComment(page, commentText, presentation, {
+    let finalCommentText = String(commentText || '').trim();
+    if (!finalCommentText && selectionMode === 'normal_unliked') {
+      const generated = await generateNormalComment(resolvedWork);
+      if (!generated.ok) {
+        return {
+          ok: false,
+          status: generated.status,
+          error: generated.error,
+          likeStatus,
+          commentStatus: task.commentStatus || 'pending',
+          resolvedWork,
+          selectionMode,
+          checkedWorks,
+          data: generated.data,
+        };
+      }
+      finalCommentText = generated.commentText;
+    }
+
+    if (!finalCommentText) {
+      return {
+        ok: false,
+        status: 'failed_generate_comment',
+        error: 'comment_text_empty',
+        likeStatus,
+        commentStatus: task.commentStatus || 'pending',
+        resolvedWork,
+        selectionMode,
+        checkedWorks,
+      };
+    }
+
+    const beforeCommentSendWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_comment_send', {
+      likeStatus,
+      commentStatus: task.commentStatus || 'pending',
+    });
+    if (beforeCommentSendWorkCheck) return { ...beforeCommentSendWorkCheck, selectionMode, checkedWorks };
+
+    if (selectionMode === 'normal_unliked') {
+      const visibleBeforeSend = await refreshVisibleWorkForComment(page, task, resolvedWork, maxReferenceComments, 'before_comment_send');
+      if (!visibleBeforeSend.ok) {
+        await saveDebugScreenshot(page, task.taskId, visibleBeforeSend.error || 'visible_work_before_comment_send');
+        return {
+          ok: false,
+          status: 'failed_comment',
+          error: visibleBeforeSend.error,
+          likeStatus,
+          commentStatus: 'failed',
+          resolvedWork,
+          selectionMode,
+          checkedWorks,
+          generatedComment: finalCommentText,
+          data: visibleBeforeSend,
+        };
+      }
+    }
+
+    const commentResult = await postReturnVisitComment(page, finalCommentText, presentation, {
       execute: true,
       expectedWorkId: resolvedWork.workId,
       commentBoxReady: true,
-    }),
-    {
-      logTag,
-      step: 'post_comment',
-      startedAt: postCommentStartedAt,
-      fields: { isModal: presentation.isModalPage },
+    });
+    if (!commentResult.ok) {
+      await saveDebugScreenshot(page, task.taskId, 'comment');
+      return {
+        ok: false,
+        status: 'failed_comment',
+        error: commentResult.message || 'post_comment_failed',
+        likeStatus,
+        commentStatus: 'failed',
+        resolvedWork,
+        selectionMode,
+        checkedWorks,
+      };
     }
-  );
-  logTimedStep(logTag, 'post_comment', commentResult.ok ? 'done_result_ok' : 'done_result_error', {
-    elapsedMs: elapsedMs(postCommentStartedAt),
-    message: commentResult.message || '',
-    code: commentResult.code || '',
-  });
-  if (!commentResult.ok) {
-    console.error(`${logTag} [5/5] [FAIL] 评论失败: ${commentResult.message} url=${page.url()}`);
-    console.error(`${logTag} 评论失败详情:`, JSON.stringify(commentResult.data || {}));
-    await saveDebugScreenshot(page, task.taskId, 'comment');
-    return { ok: false, status: 'failed_comment', error: commentResult.message || 'post_comment_failed', likeStatus: nextLikeStatus.value, commentStatus: 'failed', resolvedWork };
+
+    if (commentResult.data?.unconfirmed) {
+      await saveDebugScreenshot(page, task.taskId, 'comment_unconfirmed');
+      return {
+        ok: false,
+        status: 'failed',
+        error: 'comment_unconfirmed',
+        likeStatus,
+        commentStatus: 'failed',
+        resolvedWork,
+        selectionMode,
+        checkedWorks,
+        generatedComment: finalCommentText,
+      };
+    }
+
+    const finalCommentStatus = 'posted';
+    const done = canMarkDone({ likeStatus, commentStatus: finalCommentStatus });
+    if (!done) {
+      return {
+        ok: false,
+        status: 'failed',
+        error: 'done_condition_not_met',
+        likeStatus,
+        commentStatus: finalCommentStatus,
+        resolvedWork,
+        selectionMode,
+        checkedWorks,
+      };
+    }
+
+    return {
+      ok: true,
+      status: 'done',
+      likeStatus,
+      commentStatus: finalCommentStatus,
+      resolvedWork,
+      selectionMode,
+      checkedWorks,
+      generatedComment: finalCommentText,
+      executedAt: new Date().toISOString(),
+    };
   }
 
-  if (commentResult.data?.unconfirmed) {
-    console.error(`${logTag} [5/5] [FAIL] 评论未确认(已发送但未在评论区找到)`);
-    await saveDebugScreenshot(page, task.taskId, 'comment_unconfirmed');
-    return { ok: false, status: 'failed', error: 'comment_unconfirmed', likeStatus: nextLikeStatus.value, commentStatus: 'failed', resolvedWork, generatedComment: commentText };
+  const checkedWorks = [];
+  let lastUnconfirmedCount = 0;
+
+  for (const candidate of candidates) {
+    if (candidate.userDigged === 1) {
+      checkedWorks.push(createCheckedWorkEntry(candidate, {
+        likeState: 'already_liked',
+        likeStateSource: 'post_api',
+        action: 'skip',
+        reason: 'already_liked_in_post_api',
+      }));
+      continue;
+    }
+
+    const opened = await openCandidateWork(candidate);
+    if (!opened.ok) {
+      if (opened.reason === 'opened_work_id_mismatch' || opened.reason === 'work_modal_not_ready') {
+        return {
+          ok: false,
+          status: opened.status || 'failed_collect',
+          error: opened.reason || 'open_candidate_failed',
+          likeStatus: task.likeStatus || 'pending',
+          commentStatus: task.commentStatus || 'pending',
+          checkedWorks,
+        };
+      }
+      checkedWorks.push(createCheckedWorkEntry(candidate, {
+        action: 'skip',
+        reason: opened.reason || 'open_candidate_failed',
+      }));
+      continue;
+    }
+
+    const resolvedWork = opened.work;
+    const openedWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_open');
+    if (openedWorkCheck) {
+      return { ...openedWorkCheck, checkedWorks };
+    }
+
+    const initialLikeState = await checkLikeState(page);
+    if (!initialLikeState.ok || initialLikeState.data?.confidence !== 'confirmed') {
+      checkedWorks.push(createCheckedWorkEntry(candidate, {
+        likeState: 'unknown',
+        likeStateSource: 'dom',
+        action: 'skip',
+        reason: initialLikeState.message || 'like_state_unknown_after_open',
+      }));
+      lastUnconfirmedCount++;
+      continue;
+    }
+
+    if (initialLikeState.data.alreadyLiked) {
+      checkedWorks.push(createCheckedWorkEntry(candidate, {
+        likeState: 'already_liked',
+        likeStateSource: candidate.userDigged == null ? 'dom' : 'dom_recheck',
+        action: 'skip',
+        reason: 'already_liked_after_open',
+      }));
+      continue;
+    }
+
+    const selectionMode = 'normal_unliked';
+    const tentativeCheckedWorks = checkedWorks.concat([
+      createCheckedWorkEntry(candidate, {
+        likeState: 'not_liked',
+        likeStateSource: candidate.userDigged === 0 ? 'post_api' : 'dom',
+        action: execute ? 'like_and_comment' : 'plan_like_and_comment',
+        reason: 'selected_unliked_candidate',
+      }),
+    ]);
+
+    const presentation = await detectWorkPresentationKind(page, resolvedWork);
+    const isNotePage = presentation.isNotePage;
+    console.error(`${logTag} [2/5] 页面类型: isModal=${presentation.isModalPage} isNote=${isNotePage} hasVideo=${presentation.hasVideoElement}`);
+
+    if (presentation.isModalPage && !opened.autoPlayChecked) {
+      const modalReady = await waitForWorkModal(page, { timeoutMs: 8000, closeAutoPlay: true, openCommentArea: false });
+      if (!modalReady?.ok) {
+        return {
+          ok: false,
+          status: 'failed_collect',
+          error: modalReady?.message || 'work_modal_not_ready',
+          likeStatus: task.likeStatus || 'pending',
+          commentStatus: task.commentStatus || 'pending',
+          resolvedWork,
+          selectionMode,
+          checkedWorks: tentativeCheckedWorks,
+        };
+      }
+    }
+
+    if (!isNotePage) {
+      await waitForInteractionWatchGate(page, watchPolicy, watchSeconds);
+    }
+
+    const afterWatchGateWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'after_watch');
+    if (afterWatchGateWorkCheck) return { ...afterWatchGateWorkCheck, selectionMode, checkedWorks: tentativeCheckedWorks };
+
+    const finalLikeState = await checkLikeState(page);
+    if (!finalLikeState.ok || finalLikeState.data?.confidence !== 'confirmed') {
+      checkedWorks.push(createCheckedWorkEntry(candidate, {
+        likeState: 'unknown',
+        likeStateSource: 'dom',
+        action: 'skip',
+        reason: finalLikeState.message || 'like_state_unknown_before_like',
+      }));
+      lastUnconfirmedCount++;
+      continue;
+    }
+    if (finalLikeState.data.alreadyLiked) {
+      checkedWorks.push(createCheckedWorkEntry(candidate, {
+        likeState: 'already_liked',
+        likeStateSource: 'dom',
+        action: 'skip',
+        reason: 'already_liked_before_like',
+      }));
+      continue;
+    }
+
+    if (!execute) {
+      return {
+        ok: true,
+        status: 'pending_execute',
+        likeStatus: 'pending',
+        commentStatus: task.commentStatus || 'pending',
+        resolvedWork,
+        selectionMode,
+        checkedWorks: tentativeCheckedWorks,
+        dryRun: true,
+        plannedAction: 'like_and_comment',
+      };
+    }
+
+    const clickResult = await clickLike(page, { execute: true });
+    if (!clickResult.ok) {
+      if (clickResult.code === 'ALREADY_LIKED') {
+        checkedWorks.push(createCheckedWorkEntry(candidate, {
+          likeState: 'already_liked',
+          likeStateSource: 'dom',
+          action: 'skip',
+          reason: 'already_liked_on_click',
+        }));
+        continue;
+      }
+      await saveDebugScreenshot(page, task.taskId, 'like_click');
+      return {
+        ok: false,
+        status: 'failed_like',
+        error: clickResult.message || 'click_like_failed',
+        likeStatus: 'failed',
+        commentStatus: task.commentStatus || 'pending',
+        resolvedWork,
+        selectionMode,
+        checkedWorks: tentativeCheckedWorks,
+      };
+    }
+
+    const confirmResult = await confirmLikeSucceeded(page);
+    if (!confirmResult.ok) {
+      await saveDebugScreenshot(page, task.taskId, 'like_confirm');
+    }
+
+    return postCommentForResolvedWork(
+      resolvedWork,
+      presentation,
+      'liked',
+      selectionMode,
+      '',
+    ).then(result => ({ ...result, checkedWorks: tentativeCheckedWorks }));
   }
 
-  console.error(`${logTag} [5/5] 评论成功 confirmed=true`);
-  console.error(`[visit] task=${taskId} 评论填写完成`);
-  console.error(`[visit] task=${taskId} 评论提交成功`);
-  nextCommentStatus.value = 'posted';
+  if (areAllCheckedWorksAlreadyLiked(checkedWorks, candidates.length) && allLikedFallbackEnabled) {
+    const fallbackCandidate = candidates[0];
+    const opened = await openCandidateWork(fallbackCandidate);
+    if (!opened.ok) {
+      return {
+        ok: false,
+        status: opened.status || 'failed_collect',
+        error: opened.reason || 'open_fallback_profile_work_failed',
+        likeStatus: 'already_liked',
+        commentStatus: task.commentStatus || 'pending',
+        checkedWorks,
+      };
+    }
 
-  const done = canMarkDone({ likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value });
-  if (!done) {
-    console.error(`${logTag} [DONE?] 条件不满足 done=false like=${nextLikeStatus.value} comment=${nextCommentStatus.value}`);
-    return { ok: false, status: 'failed', error: 'done_condition_not_met', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork };
+    const resolvedWork = opened.work;
+    const selectionMode = 'all_liked_update_request';
+    const presentation = await detectWorkPresentationKind(page, resolvedWork);
+    const fallbackComment = pickRandomComment(allLikedFallbackComments);
+    const fallbackCheckedWorks = checkedWorks.slice();
+    if (fallbackCheckedWorks.length > 0) {
+      fallbackCheckedWorks[0] = {
+        ...fallbackCheckedWorks[0],
+        action: execute ? 'update_request_comment' : 'plan_update_request_comment',
+        reason: 'all_candidates_already_liked',
+      };
+    }
+
+    return postCommentForResolvedWork(
+      resolvedWork,
+      presentation,
+      'already_liked',
+      selectionMode,
+      fallbackComment,
+    ).then(result => ({ ...result, checkedWorks: fallbackCheckedWorks }));
   }
 
-  console.error(`${logTag} [DONE] 回访完成 like=${nextLikeStatus.value} comment=${nextCommentStatus.value}`);
-  logTimedStep(logTag, 'task_total', 'done', { elapsedMs: elapsedMs(taskStartedAt) });
-  return { ok: true, status: 'done', likeStatus: nextLikeStatus.value, commentStatus: nextCommentStatus.value, resolvedWork, generatedComment: commentText, executedAt: new Date().toISOString() };
+  const status = lastUnconfirmedCount >= candidates.length ? 'failed_like' : 'skipped_no_suitable_work';
+  return {
+    ok: false,
+    status,
+    error: status === 'failed_like' ? 'all_candidate_like_state_unknown' : `no_suitable_work_in_first_${candidates.length}`,
+    likeStatus: task.likeStatus || 'pending',
+    commentStatus: task.commentStatus || 'pending',
+    checkedWorks,
+    selectionMode: null,
+  };
 }

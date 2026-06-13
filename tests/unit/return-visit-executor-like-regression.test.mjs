@@ -9,9 +9,7 @@ const ensureWorkModalCommentBoxReadyMock = vi.fn();
 const postWorkModalCommentMock = vi.fn();
 const collectCurrentOpenedWorkMock = vi.fn();
 const openProfileWorkByAwemeIdMock = vi.fn();
-const collectFirstNonTopAwemeFromProfileMock = vi.fn();
-const collectWorkFromUrlMock = vi.fn();
-const collectCandidateWorkFromProfileMock = vi.fn();
+const collectCandidateAwemesFromProfileMock = vi.fn();
 
 vi.mock('../../src/adapters/video-page.mjs', () => ({
   checkLikeState: checkLikeStateMock,
@@ -27,8 +25,8 @@ vi.mock('../../src/adapters/work-modal-page.mjs', () => ({
 }));
 
 vi.mock('../../src/services/return-visit-work-collector.mjs', () => ({
+  collectCandidateAwemesFromProfile: collectCandidateAwemesFromProfileMock,
   collectCurrentOpenedWork: collectCurrentOpenedWorkMock,
-  collectFirstNonTopAwemeFromProfile: collectFirstNonTopAwemeFromProfileMock,
   extractWorkIdFromUrl: (url) => {
     const text = String(url || '');
     return text.match(/[?&]modal_id=(\d+)/)?.[1]
@@ -36,8 +34,6 @@ vi.mock('../../src/services/return-visit-work-collector.mjs', () => ({
       || null;
   },
   openProfileWorkByAwemeId: openProfileWorkByAwemeIdMock,
-  collectWorkFromUrl: collectWorkFromUrlMock,
-  collectCandidateWorkFromProfile: collectCandidateWorkFromProfileMock,
 }));
 
 const { buildCommentContext, executeReturnVisitTask } = await import('../../src/services/return-visit-executor.mjs');
@@ -46,7 +42,10 @@ describe('return-visit executor like/comment regressions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     openProfileWorkByAwemeIdMock.mockResolvedValue({ ok: true });
-    collectFirstNonTopAwemeFromProfileMock.mockResolvedValue({ ok: true, aweme: { workId: '7647191897097693115' } });
+    collectCandidateAwemesFromProfileMock.mockResolvedValue({
+      ok: true,
+      candidates: [{ workId: '7647191897097693115', workUrl: 'https://www.douyin.com/video/7647191897097693115', userDigged: 0 }],
+    });
     collectCurrentOpenedWorkMock.mockResolvedValue({
       ok: true,
       sufficient: true,
@@ -85,6 +84,239 @@ describe('return-visit executor like/comment regressions', () => {
     expect(clickLikeMock).toHaveBeenCalledTimes(1);
     expect(result.ok).toBe(true);
     expect(result.likeStatus).toBe('liked');
+  });
+
+  it('selects the first unliked candidate within the first N works', async () => {
+    collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
+      ok: true,
+      candidates: [
+        { workId: '111', workUrl: 'https://www.douyin.com/video/111', userDigged: 0 },
+        { workId: '222', workUrl: 'https://www.douyin.com/video/222', userDigged: 0 },
+      ],
+    });
+    collectCurrentOpenedWorkMock.mockResolvedValue({
+      ok: true,
+      sufficient: true,
+      work: {
+        workId: '111',
+        workTitle: '第一条作品',
+        workText: '第一条作品正文',
+        contentSummary: '第一条作品正文',
+        visibleFingerprint: '第一条作品|第一条作品正文',
+      },
+    });
+    const page = {
+      url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo?modal_id=111'),
+      evaluate: vi.fn().mockResolvedValue({ hasVideoElement: false }),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await executeReturnVisitTask(page, {
+      taskId: 'pick-a',
+      userProfileUrl: 'https://www.douyin.com/user/demo',
+      targetWork: { workId: '111', userDigged: 1 },
+      generatedComment: '测试评论',
+      likeStatus: 'pending',
+      commentStatus: 'generated',
+    }, { execute: true, maxWorksToCheck: 2 });
+
+    expect(openProfileWorkByAwemeIdMock).toHaveBeenCalledWith(
+      page,
+      'https://www.douyin.com/user/demo',
+      '111',
+      expect.objectContaining({ reuseCurrentProfile: true })
+    );
+    expect(result.ok).toBe(true);
+    expect(result.selectionMode).toBe('normal_unliked');
+    expect(result.resolvedWork.workId).toBe('111');
+  });
+
+  it('skips an already liked first candidate and selects the next unliked work', async () => {
+    collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
+      ok: true,
+      candidates: [
+        { workId: '111', workUrl: 'https://www.douyin.com/video/111', userDigged: 1 },
+        { workId: '222', workUrl: 'https://www.douyin.com/video/222', userDigged: 0 },
+      ],
+    });
+    collectCurrentOpenedWorkMock.mockResolvedValue({
+      ok: true,
+      sufficient: true,
+      work: {
+        workId: '222',
+        workTitle: '第二条作品',
+        workText: '第二条作品正文',
+        contentSummary: '第二条作品正文',
+        visibleFingerprint: '第二条作品|第二条作品正文',
+      },
+    });
+    const page = {
+      url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo?modal_id=222'),
+      evaluate: vi.fn().mockResolvedValue({ hasVideoElement: false }),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await executeReturnVisitTask(page, {
+      taskId: 'pick-b',
+      userProfileUrl: 'https://www.douyin.com/user/demo',
+      targetWork: { workId: '222', workUrl: 'https://www.douyin.com/video/222' },
+      generatedComment: '测试评论',
+      likeStatus: 'pending',
+      commentStatus: 'generated',
+    }, { execute: true, maxWorksToCheck: 2 });
+
+    expect(openProfileWorkByAwemeIdMock).toHaveBeenCalledTimes(1);
+    expect(openProfileWorkByAwemeIdMock).toHaveBeenCalledWith(
+      page,
+      'https://www.douyin.com/user/demo',
+      '222',
+      expect.objectContaining({ reuseCurrentProfile: true })
+    );
+    expect(result.ok).toBe(true);
+    expect(result.resolvedWork.workId).toBe('222');
+    expect(result.checkedWorks[0]).toMatchObject({
+      workId: '111',
+      likeState: 'already_liked',
+      likeStateSource: 'post_api',
+      action: 'skip',
+    });
+  });
+
+  it('uses update-request fallback when all checked works are already liked', async () => {
+    collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
+      ok: true,
+      candidates: [
+        { workId: '111', workUrl: 'https://www.douyin.com/video/111', userDigged: 1 },
+        { workId: '222', workUrl: 'https://www.douyin.com/video/222', userDigged: 1 },
+      ],
+    });
+    collectCurrentOpenedWorkMock.mockResolvedValue({
+      ok: true,
+      sufficient: true,
+      work: {
+        workId: '111',
+        workTitle: '第一条作品',
+        workText: '第一条作品正文',
+        contentSummary: '第一条作品正文',
+        visibleFingerprint: '第一条作品|第一条作品正文',
+      },
+    });
+    const agentProvider = { generateComment: vi.fn() };
+    const page = {
+      url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo?modal_id=111'),
+      evaluate: vi.fn().mockResolvedValue({ hasVideoElement: false }),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await executeReturnVisitTask(page, {
+      taskId: 'pick-c',
+      userProfileUrl: 'https://www.douyin.com/user/demo',
+      targetWork: { workId: '', workUrl: '' },
+      likeStatus: 'pending',
+      commentStatus: 'pending',
+    }, {
+      execute: true,
+      agentProvider,
+      allLikedFallbackComments: ['蹲一个新作品～'],
+    });
+
+    expect(clickLikeMock).not.toHaveBeenCalled();
+    expect(agentProvider.generateComment).not.toHaveBeenCalled();
+    expect(postWorkModalCommentMock).toHaveBeenCalledWith(page, '蹲一个新作品～');
+    expect(result.ok).toBe(true);
+    expect(result.selectionMode).toBe('all_liked_update_request');
+    expect(result.likeStatus).toBe('already_liked');
+  });
+
+  it('does not process unliked works beyond the first N candidates', async () => {
+    collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
+      ok: true,
+      candidates: [
+        { workId: '111', workUrl: 'https://www.douyin.com/video/111', userDigged: 1 },
+        { workId: '222', workUrl: 'https://www.douyin.com/video/222', userDigged: 1 },
+      ],
+    });
+    collectCurrentOpenedWorkMock.mockResolvedValue({
+      ok: true,
+      sufficient: true,
+      work: {
+        workId: '111',
+        workTitle: '第一条作品',
+        workText: '第一条作品正文',
+        contentSummary: '第一条作品正文',
+        visibleFingerprint: '第一条作品|第一条作品正文',
+      },
+    });
+    const page = {
+      url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo?modal_id=111'),
+      evaluate: vi.fn().mockResolvedValue({ hasVideoElement: false }),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await executeReturnVisitTask(page, {
+      taskId: 'pick-d',
+      userProfileUrl: 'https://www.douyin.com/user/demo',
+      targetWork: { workId: '', workUrl: '' },
+      likeStatus: 'pending',
+      commentStatus: 'pending',
+    }, {
+      execute: false,
+      maxWorksToCheck: 2,
+      allLikedFallbackComments: ['期待更新呀～'],
+    });
+
+    expect(openProfileWorkByAwemeIdMock).toHaveBeenCalledTimes(1);
+    expect(openProfileWorkByAwemeIdMock).not.toHaveBeenCalledWith(
+      page,
+      'https://www.douyin.com/user/demo',
+      '333',
+      expect.anything()
+    );
+    expect(result.selectionMode).toBe('all_liked_update_request');
+    expect(result.dryRun).toBe(true);
+  });
+
+  it('falls back to DOM like-state check when API userDigged is missing', async () => {
+    collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
+      ok: true,
+      candidates: [
+        { workId: '111', workUrl: 'https://www.douyin.com/video/111', userDigged: null },
+      ],
+    });
+    collectCurrentOpenedWorkMock.mockResolvedValue({
+      ok: true,
+      sufficient: true,
+      work: {
+        workId: '111',
+        workTitle: '第一条作品',
+        workText: '第一条作品正文',
+        contentSummary: '第一条作品正文',
+        visibleFingerprint: '第一条作品|第一条作品正文',
+      },
+    });
+    const page = {
+      url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo?modal_id=111'),
+      evaluate: vi.fn().mockResolvedValue({ hasVideoElement: false }),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await executeReturnVisitTask(page, {
+      taskId: 'pick-e',
+      userProfileUrl: 'https://www.douyin.com/user/demo',
+      targetWork: { workId: '111', workUrl: 'https://www.douyin.com/video/111' },
+      generatedComment: '测试评论',
+      likeStatus: 'pending',
+      commentStatus: 'generated',
+    }, { execute: true });
+
+    expect(checkLikeStateMock).toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    expect(result.selectionMode).toBe('normal_unliked');
+    expect(result.checkedWorks[0]).toMatchObject({
+      workId: '111',
+      likeState: 'not_liked',
+      likeStateSource: 'dom',
+    });
   });
 
   it('treats unconfirmed modal comment as failed_comment', async () => {
@@ -126,7 +358,7 @@ describe('return-visit executor like/comment regressions', () => {
       commentStatus: 'generated',
     }, { execute: true });
 
-    expect(collectFirstNonTopAwemeFromProfileMock).toHaveBeenCalledTimes(1);
+    expect(collectCandidateAwemesFromProfileMock).toHaveBeenCalledTimes(1);
     expect(openProfileWorkByAwemeIdMock).toHaveBeenCalledWith(
       page,
       'https://www.douyin.com/user/demo',
@@ -159,7 +391,7 @@ describe('return-visit executor like/comment regressions', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('wrong_work_after_watch');
-    expect(checkLikeStateMock).not.toHaveBeenCalled();
+    expect(checkLikeStateMock).toHaveBeenCalledTimes(1);
     expect(postWorkModalCommentMock).not.toHaveBeenCalled();
   });
 
@@ -293,7 +525,46 @@ describe('return-visit executor like/comment regressions', () => {
     expect(context.work.desc).toBe('');
   });
 
+  it('does not call agent or post a normal comment when the selected work is already liked and fallback is disabled', async () => {
+    collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
+      ok: true,
+      candidates: [
+        { workId: '111', workUrl: 'https://www.douyin.com/video/111', userDigged: 1 },
+      ],
+    });
+    const agentProvider = { generateComment: vi.fn() };
+    const page = {
+      url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo?modal_id=111'),
+      evaluate: vi.fn().mockResolvedValue({ hasVideoElement: false }),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await executeReturnVisitTask(page, {
+      taskId: 'liked-no-comment',
+      userProfileUrl: 'https://www.douyin.com/user/demo',
+      targetWork: { workId: '', workUrl: '' },
+      likeStatus: 'pending',
+      commentStatus: 'pending',
+    }, {
+      execute: true,
+      agentProvider,
+      allLikedFallbackEnabled: false,
+    });
+
+    expect(agentProvider.generateComment).not.toHaveBeenCalled();
+    expect(postWorkModalCommentMock).not.toHaveBeenCalled();
+    expect(postVideoCommentMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('skipped_no_suitable_work');
+  });
+
   it('regenerates cached comment when target context changed and uses matched post API aweme text', async () => {
+    collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
+      ok: true,
+      candidates: [
+        { workId: '7648591042014994938', workUrl: 'https://www.douyin.com/video/7648591042014994938', userDigged: 0 },
+      ],
+    });
     openProfileWorkByAwemeIdMock.mockResolvedValueOnce({
       ok: true,
       aweme: {

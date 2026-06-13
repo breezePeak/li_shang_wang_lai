@@ -45,6 +45,22 @@ describe('return-visit work collector url normalization', () => {
     expect(result.workUrl).toBe('https://www.douyin.com/jingxuan?modal_id=7647191897097693115');
   });
 
+  it('保留 user_digged 映射为 userDigged，并在字段缺失时返回 null', () => {
+    expect(normalizeAwemeForVisit({
+      aweme_id: '7647191897097693115',
+      user_digged: 1,
+    }).userDigged).toBe(1);
+
+    expect(normalizeAwemeForVisit({
+      aweme_id: '7647191897097693116',
+      user_digged: 0,
+    }).userDigged).toBe(0);
+
+    expect(normalizeAwemeForVisit({
+      aweme_id: '7647191897097693117',
+    }).userDigged).toBeNull();
+  });
+
   it('extractWorkIdFromUrl 支持从 modal_id 提取纯 awemeId', () => {
     expect(extractWorkIdFromUrl('https://www.douyin.com/jingxuan?modal_id=7647191897097693115')).toBe('7647191897097693115');
     expect(extractWorkIdFromUrl('https://www.douyin.com/video/7647191897097693115')).toBe('7647191897097693115');
