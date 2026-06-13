@@ -271,20 +271,6 @@ function renderFlowGraph() {
         </div>
       </div>
 
-      ${primaryItem ? `
-        <button class="action-primary ${primaryItem.stage.tone}" onclick="selectStage('${primaryItem.stage.id}')">
-          <span class="action-primary-label">优先处理</span>
-          <strong>${escapeHtml(primaryItem.title)}</strong>
-          <p>${escapeHtml(primaryItem.description)}</p>
-          <span class="action-primary-count">${primaryItem.count}</span>
-        </button>
-      ` : `
-        <div class="action-empty">
-          <strong>当前没有需要立即处理的回评或回访</strong>
-          <p>你可以直接看下面的时间表，按批次回顾最近发生了什么。</p>
-        </div>
-      `}
-
       <div class="action-grid">
         ${actionItems.map((item) => renderActionCard(item)).join('')}
       </div>
