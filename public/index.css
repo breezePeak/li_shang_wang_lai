@@ -413,13 +413,23 @@ textarea {
 
 .overview-row {
   width: 100%;
+  min-height: 96px;
   padding: 12px 12px;
   border: 1px solid rgba(48, 63, 57, 0.08);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.88);
   text-align: left;
   cursor: pointer;
+  align-items: stretch;
   transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.overview-row > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
 }
 
 .overview-row:hover {
@@ -441,6 +451,19 @@ textarea {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.45;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.overview-row small {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .overview-cell-count {
