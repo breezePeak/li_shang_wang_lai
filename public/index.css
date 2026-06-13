@@ -228,8 +228,8 @@ textarea {
 }
 
 .hero-card {
-  padding: 20px 22px;
-  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.72);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 250, 243, 0.76)),
@@ -253,9 +253,9 @@ textarea {
 
 .hero-card strong {
   display: block;
-  margin: 8px 0 10px;
+  margin: 6px 0 8px;
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 38px;
+  font-size: 30px;
   line-height: 1;
 }
 
@@ -273,8 +273,8 @@ textarea {
 
 .hero-card p {
   color: var(--muted);
-  line-height: 1.6;
-  font-size: 13px;
+  line-height: 1.5;
+  font-size: 12px;
 }
 
 .accent-main strong { color: var(--gold); }
@@ -391,8 +391,8 @@ textarea {
 }
 
 .lane-card {
-  padding: 18px 18px 20px;
-  border-radius: 28px;
+  padding: 14px 14px 16px;
+  border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, 0.58);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(250, 246, 238, 0.62)),
@@ -412,7 +412,7 @@ textarea {
 }
 
 .lane-head {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .lane-reply .lane-tag { color: var(--reply); }
@@ -474,14 +474,14 @@ textarea {
 }
 
 .flow-node {
-  min-width: 220px;
-  padding: 16px;
-  border-radius: 24px;
+  min-width: 186px;
+  padding: 12px;
+  border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.72);
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   text-align: left;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 252, 247, 0.82));
   box-shadow: var(--shadow-soft);
@@ -522,8 +522,8 @@ textarea {
 
 .flow-node.node-root {
   min-width: 100%;
-  grid-template-columns: 66px minmax(0, 1fr) auto;
-  padding: 18px 20px;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  padding: 14px 16px;
 }
 
 .flow-node.node-compact {
@@ -531,12 +531,12 @@ textarea {
 }
 
 .node-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 18px;
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
   display: grid;
   place-items: center;
-  font-size: 20px;
+  font-size: 16px;
 }
 
 .node-copy {
@@ -545,23 +545,23 @@ textarea {
 
 .node-copy strong {
   display: block;
-  font-size: 16px;
-  margin-bottom: 4px;
+  font-size: 14px;
+  margin-bottom: 2px;
 }
 
 .node-copy small {
   display: block;
   color: var(--muted);
-  line-height: 1.55;
-  font-size: 12px;
+  line-height: 1.45;
+  font-size: 11px;
 }
 
 .node-count {
-  min-width: 54px;
-  padding: 12px 14px;
+  min-width: 42px;
+  padding: 8px 10px;
   border-radius: 999px;
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 22px;
+  font-size: 18px;
   text-align: center;
 }
 
@@ -759,12 +759,12 @@ textarea {
 .drawer-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .stat-card {
-  padding: 12px 14px;
-  border-radius: 16px;
+  padding: 8px 10px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.88);
   border: 1px solid rgba(48, 63, 57, 0.08);
 }
@@ -776,20 +776,21 @@ textarea {
 
 .stat-card span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .stat-card strong {
   display: block;
-  margin: 6px 0 4px;
+  margin: 3px 0 2px;
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 26px;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .stat-card small {
   color: var(--muted);
-  line-height: 1.5;
-  font-size: 10px;
+  line-height: 1.35;
+  font-size: 9px;
 }
 
 .stat-card.reply strong { color: var(--reply); }
@@ -842,8 +843,8 @@ textarea {
 .work-card {
   border: 1px solid rgba(255, 255, 255, 0.76);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 251, 247, 0.88));
-  border-radius: 16px;
-  padding: 12px 13px;
+  border-radius: 14px;
+  padding: 10px 11px;
   text-align: left;
   cursor: pointer;
   box-shadow: var(--shadow-soft);
@@ -871,8 +872,8 @@ textarea {
 
 .work-card h4,
 .detail-item-head strong {
-  margin: 8px 0 4px;
-  font-size: 15px;
+  margin: 6px 0 3px;
+  font-size: 14px;
 }
 
 .work-card p,
@@ -880,14 +881,14 @@ textarea {
 .reply-readonly {
   margin: 0;
   color: var(--muted);
-  line-height: 1.55;
-  font-size: 12px;
+  line-height: 1.45;
+  font-size: 11px;
 }
 
 .work-card-foot {
-  margin-top: 10px;
+  margin-top: 8px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .work-card-action {
@@ -903,10 +904,10 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 24px;
-  padding: 0 8px;
+  min-height: 20px;
+  padding: 0 7px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -989,7 +990,7 @@ textarea {
 }
 
 .detail-title-block h4 {
-  font-size: 20px;
+  font-size: 18px;
 }
 
 .item-list {
@@ -997,20 +998,20 @@ textarea {
 }
 
 .detail-card-item {
-  padding: 12px;
-  border-radius: 16px;
+  padding: 10px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid rgba(48, 63, 57, 0.08);
   box-shadow: var(--shadow-soft);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .detail-item-block {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .detail-item-block label {
@@ -1021,8 +1022,8 @@ textarea {
 }
 
 .detail-item-block.subtle {
-  padding: 10px;
-  border-radius: 12px;
+  padding: 8px;
+  border-radius: 10px;
   background: rgba(197, 90, 61, 0.08);
 }
 
@@ -1032,18 +1033,19 @@ textarea {
 }
 
 .inline-textarea {
-  min-height: 78px;
+  min-height: 64px;
   resize: vertical;
   border-radius: 14px;
   border: 1px solid rgba(48, 63, 57, 0.10);
   background: #fffdfa;
   color: var(--text);
-  padding: 10px 12px;
-  line-height: 1.55;
+  padding: 8px 10px;
+  line-height: 1.45;
+  font-size: 11px;
 }
 
 .reply-readonly {
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-radius: 14px;
   background: rgba(62, 134, 82, 0.08);
   color: var(--text);
@@ -1058,10 +1060,11 @@ textarea {
 }
 
 .mini-btn {
-  padding: 8px 12px;
+  padding: 7px 10px;
   border-radius: 10px;
   background: rgba(34, 43, 40, 0.06);
   color: var(--text);
+  font-size: 11px;
 }
 
 .mini-btn.primary {
