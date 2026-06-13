@@ -299,7 +299,7 @@ textarea {
 }
 
 .flow-panel {
-  padding: 24px;
+  padding: 18px;
   overflow: hidden;
 }
 
@@ -308,14 +308,14 @@ textarea {
   align-items: end;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 22px;
+  margin-bottom: 14px;
 }
 
 .panel-head h2,
 .lane-head h3,
 .drawer-head h3 {
-  margin: 8px 0 0;
-  font-size: 26px;
+  margin: 6px 0 0;
+  font-size: 22px;
   line-height: 1.2;
 }
 
