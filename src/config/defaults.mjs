@@ -1,3 +1,5 @@
+export const DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK = 3;
+
 // 默认配置常量 — 占位，由 config/local.json 覆盖
 export const DEFAULTS = {
   self: {
@@ -55,7 +57,7 @@ export const DEFAULTS = {
   returnVisit: {
     enabled: true,
     eventSourceStatus: 'new',
-    maxWorksToCheck: 3,
+    maxWorksToCheck: DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK,
     allLikedFallbackEnabled: true,
     allLikedFallbackComments: [
       '期待更新呀～',

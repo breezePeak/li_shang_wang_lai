@@ -1,6 +1,7 @@
 import { runMigrations } from '../db/migrations.mjs';
 import { createBrowserContext } from '../browser/browser-context.mjs';
 import { loadConfig } from '../config/user-config.mjs';
+import { DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK } from '../config/defaults.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 import {
@@ -69,7 +70,11 @@ function randomInRange(min, max) {
   return Math.floor(min + Math.random() * (max - min + 1));
 }
 
-function resolveMaxWorksToCheck(cliValue, configValue, fallbackValue = 3) {
+function resolveMaxWorksToCheck(
+  cliValue,
+  configValue,
+  fallbackValue = DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK,
+) {
   const candidates = [cliValue, configValue, fallbackValue];
   for (const candidate of candidates) {
     const value = Number(candidate);
@@ -125,7 +130,11 @@ async function main() {
 
   const executeMode = args.execute;
   const maxRetryCount = Number(returnVisitConfig.maxRetryCount ?? 2);
-  const maxWorksToCheck = resolveMaxWorksToCheck(args.maxWorksToCheck, returnVisitConfig.maxWorksToCheck, 3);
+  const maxWorksToCheck = resolveMaxWorksToCheck(
+    args.maxWorksToCheck,
+    returnVisitConfig.maxWorksToCheck,
+    DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK,
+  );
   const pageLoadRetryCount = Number(returnVisitConfig.pageLoadRetryCount ?? 1);
   const maxConsecutiveFailures = Number(returnVisitConfig.maxConsecutiveFailures ?? 3);
   const waitBetweenUsersMs = returnVisitConfig.waitBetweenUsersMs || [3000, 5000];

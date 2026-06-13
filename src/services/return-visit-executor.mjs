@@ -22,6 +22,7 @@ import {
   openProfileWorkByAwemeId,
 } from './return-visit-work-collector.mjs';
 import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
+import { DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK } from '../config/defaults.mjs';
 
 async function saveDebugScreenshot(page, taskId, phase) {
   try {
@@ -619,7 +620,10 @@ function areAllCheckedWorksAlreadyLiked(checkedWorks = [], candidateCount = 0) {
 }
 
 async function resolveWorkForExecution(page, task, options = {}) {
-  const { pageLoadRetryCount = 1, maxWorksToCheck = 3 } = options;
+  const {
+    pageLoadRetryCount = 1,
+    maxWorksToCheck = DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK,
+  } = options;
   const profileUrl = task?.userProfileUrl;
 
   if (!profileUrl) {
@@ -658,7 +662,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   const {
     execute = true,
     pageLoadRetryCount = 1,
-    maxWorksToCheck = 3,
+    maxWorksToCheck = DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK,
     maxReferenceComments = 5,
     waitBetweenLikeAndCommentMs = [2000, 3000],
     watchPolicy = 'seconds',

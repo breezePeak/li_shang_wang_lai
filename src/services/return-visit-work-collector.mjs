@@ -1,4 +1,5 @@
 import { buildPreferredDouyinWorkUrl, normalizeDouyinUrl } from '../utils/douyin-url.mjs';
+import { DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK } from '../config/defaults.mjs';
 import {
   navigateToVideo,
   checkLikeState,
@@ -714,7 +715,7 @@ export async function collectCurrentOpenedWork(page, options = {}) {
 
 export async function collectCandidateWorkFromProfile(page, profileUrl, options = {}) {
   const {
-    maxWorksToCheck = 2,
+    maxWorksToCheck = DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK,
     pageLoadRetryCount = 1,
     maxReferenceComments = 5,
     validateWork = null,
@@ -860,7 +861,7 @@ export async function collectCandidateAwemesFromProfile(page, profileUrl, option
   const {
     pageLoadRetryCount = 1,
     waitTimeoutMs = 3000,
-    maxWorksToCheck = 3,
+    maxWorksToCheck = DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK,
   } = options;
 
   const profile = normalizeDouyinUrl(profileUrl || '') || profileUrl;
@@ -870,7 +871,7 @@ export async function collectCandidateAwemesFromProfile(page, profileUrl, option
 
   const normalizedMaxWorksToCheck = Number.isFinite(Number(maxWorksToCheck)) && Number(maxWorksToCheck) > 0
     ? Math.floor(Number(maxWorksToCheck))
-    : 3;
+    : DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK;
 
   const collector = createProfilePostApiCollector(page);
   try {
