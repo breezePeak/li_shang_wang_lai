@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   closeCurrentWorkModalToProfile,
+  collectCandidateAwemesFromProfile,
   extractWorkIdFromUrl,
   findCardIndexByAwemeId,
   findAwemeIndexInList,
@@ -43,6 +44,22 @@ describe('return-visit work collector url normalization', () => {
     });
 
     expect(result.workUrl).toBe('https://www.douyin.com/jingxuan?modal_id=7647191897097693115');
+  });
+
+  it('保留 user_digged 映射为 userDigged，并在字段缺失时返回 null', () => {
+    expect(normalizeAwemeForVisit({
+      aweme_id: '7647191897097693115',
+      user_digged: 1,
+    }).userDigged).toBe(1);
+
+    expect(normalizeAwemeForVisit({
+      aweme_id: '7647191897097693116',
+      user_digged: 0,
+    }).userDigged).toBe(0);
+
+    expect(normalizeAwemeForVisit({
+      aweme_id: '7647191897097693117',
+    }).userDigged).toBeNull();
   });
 
   it('extractWorkIdFromUrl 支持从 modal_id 提取纯 awemeId', () => {
@@ -294,5 +311,39 @@ describe('return-visit work collector url normalization', () => {
     const result = await closeCurrentWorkModalToProfile(fakePage, 'https://www.douyin.com/user/author-a');
     expect(result.ok).toBe(true);
     expect(result.method).toBe('escape');
+  });
+
+  it('collectCandidateAwemesFromProfile 默认保留置顶并取主页前 5 条', async () => {
+    const awemeList = [
+      { aweme_id: 'top-1', is_top: 1, desc: '置顶1' },
+      { aweme_id: 'n-2', is_top: 0, desc: '普通2' },
+      { aweme_id: 'n-3', is_top: 0, desc: '普通3' },
+      { aweme_id: 'n-4', is_top: 0, desc: '普通4' },
+      { aweme_id: 'n-5', is_top: 0, desc: '普通5' },
+      { aweme_id: 'n-6', is_top: 0, desc: '普通6' },
+    ];
+    const fakePage = {
+      goto: async () => {},
+      waitForTimeout: async () => {},
+      mouse: { wheel: async () => {} },
+      evaluate: async () => false,
+      on: () => {},
+      off: () => {},
+    };
+    const result = await collectCandidateAwemesFromProfile(fakePage, 'https://www.douyin.com/user/author-a', {
+      collectorFactory: () => ({
+        getAwemes: () => awemeList,
+        getStats: () => ({ responseCount: 1, awemeCount: awemeList.length }),
+        waitForAwemes: async () => true,
+        stop: () => {},
+      }),
+      gotoProfile: async () => ({ ok: true }),
+      detectPrivate: async () => false,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.candidates).toHaveLength(5);
+    expect(result.candidates.map(item => item.workId)).toEqual(['top-1', 'n-2', 'n-3', 'n-4', 'n-5']);
+    expect(result.candidates[0].isTop).toBe(1);
   });
 });

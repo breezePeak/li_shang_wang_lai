@@ -6,10 +6,14 @@ let statsData = {};
 let reviewTasks = [];
 let pendingComments = [];
 let unhandledEvents = [];
+let scanSchedules = [];
 let selectedStageId = null;
 let selectedWorkKey = null;
 
 const STAGE_IDS = {
+  SCAN_SCHEDULES: 'scanSchedules',
+  REPLY_SCHEDULES: 'replySchedules',
+  VISIT_SCHEDULES: 'visitSchedules',
   COLLECT: 'collect',
   REPLIES: 'replies',
   REPLY_PENDING: 'replyPending',
@@ -29,7 +33,7 @@ const STAGE_IDS = {
 async function initApp() {
   bindEvents();
   await refreshAll();
-  window.setInterval(fetchStatsAndRefreshHeader, 10000);
+  window.setInterval(refreshAll, 10000);
 }
 
 function bindEvents() {
@@ -49,19 +53,14 @@ function bindEvents() {
 async function refreshAll() {
   await Promise.all([
     fetchStats(),
+    fetchScanSchedules(),
     fetchReviewTasks(),
     fetchPendingComments(),
     fetchUnhandledEvents(),
   ]);
   renderHeaderStats();
   renderFlowGraph();
-  renderDrawer();
-}
-
-async function fetchStatsAndRefreshHeader() {
-  await fetchStats();
-  renderHeaderStats();
-  renderFlowGraph();
+  renderOpsBoards();
   renderDrawer();
 }
 
@@ -72,6 +71,16 @@ async function fetchStats() {
     if (json.ok) statsData = json.data || {};
   } catch (err) {
     console.error('获取统计失败:', err);
+  }
+}
+
+async function fetchScanSchedules() {
+  try {
+    const res = await fetch('/api/scan-schedules?limit=40');
+    const json = await res.json();
+    if (json.ok) scanSchedules = json.data || [];
+  } catch (err) {
+    console.error('获取扫描批次失败:', err);
   }
 }
 
@@ -238,6 +247,7 @@ function buildStageMeta() {
 
 function renderFlowGraph() {
   const root = document.getElementById('graph-root');
+  if (!root || root.hasAttribute('hidden')) return;
   const stages = buildStageMeta();
   root.innerHTML = `
     <div class="graph-origin">
@@ -294,6 +304,121 @@ function renderFlowGraph() {
   `;
 }
 
+function renderOpsBoards() {
+  renderScanScheduleBoard();
+  renderReplyOverviewBoard();
+  renderVisitOverviewBoard();
+}
+
+function renderScanScheduleBoard() {
+  setText('scan-schedule-count', `${scanSchedules.length} 批`);
+  const el = document.getElementById('scan-schedule-table');
+  if (!el) return;
+  if (!scanSchedules.length) {
+    el.innerHTML = '<div class="overview-empty">暂时还没有扫描批次数据。</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="overview-table-head">
+      <span>批次</span>
+      <span>通知</span>
+      <span>待回评</span>
+      <span>待回访</span>
+    </div>
+    ${scanSchedules.slice(0, 8).map((batch) => `
+      <button class="overview-row scan-accent" onclick="openScanBatch('${encodeURIComponent(batch.key)}')">
+        <div>
+          <strong>${escapeHtml(formatTime(batch.scannedStartAt) || batch.key)}</strong>
+          <span>${escapeHtml(formatTimeRange(batch.eventWindowStartAt, batch.eventWindowEndAt))}</span>
+        </div>
+        <div>
+          <strong class="overview-cell-count">${batch.totalEvents || 0}</strong>
+          <small>${escapeHtml(renderEventTypeSummary(batch))}</small>
+        </div>
+        <div>
+          <strong class="overview-cell-count">${batch.pendingReplies || 0}</strong>
+          <small>共 ${batch.linkedReplyCount || 0} 条回评</small>
+        </div>
+        <div>
+          <strong class="overview-cell-count">${batch.pendingVisits || 0}</strong>
+          <small>共 ${batch.linkedVisitCount || 0} 条回访</small>
+        </div>
+      </button>
+    `).join('')}
+  `;
+}
+
+function renderReplyOverviewBoard() {
+  const rows = buildReplyScheduleRows();
+  setText('reply-board-count', `${rows.length} 批`);
+  const el = document.getElementById('reply-overview-table');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="overview-table-head">
+      <span>批次</span>
+      <span>状态</span>
+      <span>评论</span>
+      <span>作品</span>
+    </div>
+    ${rows.map((row) => `
+      <button class="overview-row reply-accent" onclick="openScheduleBatch('${STAGE_IDS.REPLY_SCHEDULES}', '${encodeURIComponent(row.key)}')">
+        <div>
+          <strong>${escapeHtml(formatTime(row.anchorAt) || row.key)}</strong>
+          <span>${escapeHtml(formatTimeRange(row.startAt, row.endAt))}</span>
+        </div>
+        <div>
+          <strong class="overview-status">${escapeHtml(row.summary)}</strong>
+          <small>${escapeHtml(row.helper)}</small>
+        </div>
+        <div>
+          <strong class="overview-cell-count">${row.count}</strong>
+          <small>${escapeHtml(row.secondary)}</small>
+        </div>
+        <div>
+          <strong>${row.workCount}</strong>
+          <small>按作品聚合</small>
+        </div>
+      </button>
+    `).join('')}
+  `;
+}
+
+function renderVisitOverviewBoard() {
+  const rows = buildVisitScheduleRows();
+  setText('visit-board-count', `${rows.length} 批`);
+  const el = document.getElementById('visit-overview-table');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="overview-table-head">
+      <span>批次</span>
+      <span>状态</span>
+      <span>任务</span>
+      <span>对象</span>
+    </div>
+    ${rows.map((row) => `
+      <button class="overview-row visit-accent" onclick="openScheduleBatch('${STAGE_IDS.VISIT_SCHEDULES}', '${encodeURIComponent(row.key)}')">
+        <div>
+          <strong>${escapeHtml(formatTime(row.anchorAt) || row.key)}</strong>
+          <span>${escapeHtml(formatTimeRange(row.startAt, row.endAt))}</span>
+        </div>
+        <div>
+          <strong class="overview-status">${escapeHtml(row.summary)}</strong>
+          <small>${escapeHtml(row.helper)}</small>
+        </div>
+        <div>
+          <strong class="overview-cell-count">${row.count}</strong>
+          <small>${escapeHtml(row.secondary)}</small>
+        </div>
+        <div>
+          <strong>${row.groupCount}</strong>
+          <small>${escapeHtml(row.groupLabel)}</small>
+        </div>
+      </button>
+    `).join('')}
+  `;
+}
+
 function renderLane(stageList) {
   return stageList.map((stage, index) => {
     const connector = index < stageList.length - 1
@@ -332,6 +457,24 @@ function renderNode(stage, isRoot = false, isCompact = false) {
 window.selectStage = function selectStage(stageId) {
   selectedStageId = stageId;
   selectedWorkKey = null;
+  renderFlowGraph();
+  renderDrawer();
+};
+
+window.openBoardStage = function openBoardStage(stageId) {
+  window.selectStage(stageId);
+};
+
+window.openScanBatch = function openScanBatch(encodedKey) {
+  selectedStageId = STAGE_IDS.SCAN_SCHEDULES;
+  selectedWorkKey = decodeURIComponent(encodedKey);
+  renderFlowGraph();
+  renderDrawer();
+};
+
+window.openScheduleBatch = function openScheduleBatch(stageId, encodedKey) {
+  selectedStageId = stageId;
+  selectedWorkKey = decodeURIComponent(encodedKey);
   renderFlowGraph();
   renderDrawer();
 };
@@ -483,6 +626,12 @@ function renderWorkDetail(dataset, workGroup) {
 
 function buildStageDataset(stageId) {
   switch (stageId) {
+    case STAGE_IDS.SCAN_SCHEDULES:
+      return buildScanScheduleDataset();
+    case STAGE_IDS.REPLY_SCHEDULES:
+      return buildReplyScheduleDataset();
+    case STAGE_IDS.VISIT_SCHEDULES:
+      return buildVisitScheduleDataset();
     case STAGE_IDS.COLLECT:
       return {
         kicker: 'Collect',
@@ -593,6 +742,294 @@ function buildVisitDataset(kicker, title, tasks, events, mode) {
     ],
     groups,
   };
+}
+
+function buildScanScheduleDataset() {
+  return {
+    kicker: 'Scan Schedule',
+    shortLabel: '扫描批次',
+    title: '扫描时间表',
+    subtitle: '每一批扫描都能反查到对应回评、回访和通知明细。',
+    listTitle: '扫描批次',
+    countUnit: '批扫描',
+    metrics: [
+      { label: '扫描批次', value: scanSchedules.length, helper: '按扫描秒级批次聚合', tone: 'gold' },
+      { label: '待回评', value: sumBy(scanSchedules, 'pendingReplies'), helper: '批次关联的待回评', tone: 'reply' },
+      { label: '待回访', value: sumBy(scanSchedules, 'pendingVisits'), helper: '批次关联的待回访', tone: 'visit' },
+      { label: '通知总量', value: sumBy(scanSchedules, 'totalEvents'), helper: '批次内通知入库数', tone: 'muted' },
+    ],
+    groups: buildScanScheduleGroups(),
+  };
+}
+
+function buildScanScheduleGroups() {
+  return scanSchedules.map((batch) => {
+    const items = buildScanJourneyItems(batch);
+
+    return {
+      key: batch.key,
+      title: `${formatTime(batch.scannedStartAt) || batch.key} 扫描批次`,
+      subtitle: `${renderEventTypeSummary(batch)}，整理成 ${items.length} 条互动链`,
+      meta: formatTimeRange(batch.eventWindowStartAt, batch.eventWindowEndAt),
+      kindLabel: '扫描',
+      count: items.length,
+      items: items.sort(sortByCreatedDesc),
+    };
+  });
+}
+
+function buildScanJourneyItems(batch) {
+  const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
+  const comments = Array.isArray(batch.comments) ? batch.comments : [];
+  const events = Array.isArray(batch.events) ? batch.events : [];
+  const items = [];
+  const usedEventIds = new Set();
+  const usedCommentIds = new Set();
+
+  for (const task of tasks) {
+    const sourceEvents = Array.isArray(task.sourceEvents) ? task.sourceEvents : [];
+    const sourceEventIds = sourceEvents
+      .map((event) => Number(event?.id))
+      .filter((id) => Number.isInteger(id) && id > 0);
+    sourceEventIds.forEach((id) => usedEventIds.add(id));
+
+    const relatedComments = comments.filter((comment) => {
+      const sourceEventId = Number(comment.source_event_id);
+      return Number.isInteger(sourceEventId) && sourceEventIds.includes(sourceEventId);
+    });
+    relatedComments.forEach((comment) => usedCommentIds.add(comment.id));
+
+    items.push({
+      kind: 'scanJourney',
+      createdAt: task.updatedAt || task.createdAt || sourceEvents[0]?.created_at || '',
+      data: {
+        primaryEvent: sourceEvents[0] || null,
+        sourceEvents,
+        comments: relatedComments,
+        task,
+      },
+    });
+  }
+
+  for (const comment of comments) {
+    if (usedCommentIds.has(comment.id)) continue;
+    const sourceEvent = events.find((event) => Number(event.id) === Number(comment.source_event_id)) || null;
+    if (sourceEvent?.id) usedEventIds.add(Number(sourceEvent.id));
+    items.push({
+      kind: 'scanJourney',
+      createdAt: comment.last_seen_at || comment.first_seen_at || sourceEvent?.created_at || '',
+      data: {
+        primaryEvent: sourceEvent,
+        sourceEvents: sourceEvent ? [sourceEvent] : [],
+        comments: [comment],
+        task: null,
+      },
+    });
+  }
+
+  for (const event of events) {
+    if (usedEventIds.has(Number(event.id))) continue;
+    items.push({
+      kind: 'scanJourney',
+      createdAt: event.created_at || event.scanned_at || '',
+      data: {
+        primaryEvent: event,
+        sourceEvents: [event],
+        comments: [],
+        task: null,
+      },
+    });
+  }
+
+  return items;
+}
+
+function buildReplyScheduleDataset() {
+  const groups = buildReplyScheduleGroups();
+  return {
+    kicker: 'Reply Schedule',
+    shortLabel: '回评批次',
+    title: '回评时间表',
+    subtitle: '按回评时间批次汇总，点开就能看到当批次下的评论与回复明细。',
+    listTitle: '回评批次',
+    countUnit: '批回评',
+    metrics: [
+      { label: '回评批次', value: groups.length, helper: '按时间秒级聚合', tone: 'reply' },
+      { label: '回评总数', value: pendingComments.length, helper: '当前所有回评记录', tone: 'reply' },
+      { label: '成功回评', value: countCommentsByStatus(['succeeded']), helper: '已成功回复', tone: 'done' },
+      { label: '异常 / 待处理', value: countCommentsByStatus(['pending', 'blocked', 'sent_unverified']), helper: '还需关注的回评', tone: 'warning' },
+    ],
+    groups,
+  };
+}
+
+function buildReplyScheduleRows() {
+  return buildReplyScheduleGroups().map((group) => ({
+    key: group.key,
+    anchorAt: group.anchorAt,
+    startAt: group.startAt,
+    endAt: group.endAt,
+    count: group.count,
+    workCount: group.workCount,
+    summary: group.summary,
+    helper: group.helper,
+    secondary: group.secondary,
+  }));
+}
+
+function buildReplyScheduleGroups() {
+  const groups = new Map();
+  for (const comment of pendingComments) {
+    const timeValue = comment.last_seen_at || comment.replied_at || comment.first_seen_at || '';
+    const key = getTimeBucketKey(timeValue) || `reply-${comment.id}`;
+    const workKey = String(comment.joined_work_url || comment.work_url || comment.work_id || comment.modal_id || comment.id);
+    const group = groups.get(key) || {
+      key,
+      anchorAt: timeValue,
+      startAt: timeValue,
+      endAt: timeValue,
+      count: 0,
+      workKeys: new Set(),
+      pendingCount: 0,
+      exceptionCount: 0,
+      doneCount: 0,
+      skippedCount: 0,
+      items: [],
+    };
+    group.count += 1;
+    group.workKeys.add(workKey);
+    if (comment.reply_status === 'succeeded') group.doneCount += 1;
+    else if (comment.reply_status === 'skipped') group.skippedCount += 1;
+    else if (['blocked', 'sent_unverified'].includes(comment.reply_status)) group.exceptionCount += 1;
+    else group.pendingCount += 1;
+    group.startAt = pickEarlierTime(group.startAt, timeValue);
+    group.endAt = pickLaterTime(group.endAt, timeValue);
+    group.anchorAt = pickLaterTime(group.anchorAt, timeValue);
+    group.items.push({ kind: 'comment', createdAt: timeValue, data: comment });
+    groups.set(key, group);
+  }
+
+  return Array.from(groups.values())
+    .sort((a, b) => sortByCreatedDesc({ createdAt: a.anchorAt }, { createdAt: b.anchorAt }))
+    .map((group) => ({
+      key: group.key,
+      anchorAt: group.anchorAt,
+      startAt: group.startAt,
+      endAt: group.endAt,
+      title: `${formatTime(group.anchorAt) || group.key} 回评批次`,
+      subtitle: summarizeReplySchedule(group),
+      meta: formatTimeRange(group.startAt, group.endAt),
+      kindLabel: '回评',
+      count: group.count,
+      workCount: group.workKeys.size,
+      summary: summarizeReplySchedule(group),
+      helper: buildReplyScheduleHelper(group),
+      secondary: `覆盖 ${group.workKeys.size} 个作品`,
+      items: group.items.sort(sortByCreatedDesc),
+    }));
+}
+
+function buildVisitScheduleDataset() {
+  const groups = buildVisitScheduleGroups();
+  return {
+    kicker: 'Visit Schedule',
+    shortLabel: '回访批次',
+    title: '回访时间表',
+    subtitle: '按回访推进时间汇总，线索、任务、完成状态都放在同一条时间线上。',
+    listTitle: '回访批次',
+    countUnit: '批回访',
+    metrics: [
+      { label: '回访批次', value: groups.length, helper: '按时间秒级聚合', tone: 'visit' },
+      { label: '回访总量', value: reviewTasks.length + unhandledEvents.length, helper: '任务 + 未处理线索', tone: 'visit' },
+      { label: '成功回访', value: reviewTasks.filter((task) => task.status === 'done').length, helper: '已完成回访', tone: 'done' },
+      { label: '待推进 / 异常', value: getExecutableVisitCount() + getVisitErrorCount(), helper: '仍需处理的回访', tone: 'warning' },
+    ],
+    groups,
+  };
+}
+
+function buildVisitScheduleRows() {
+  return buildVisitScheduleGroups().map((group) => ({
+    key: group.key,
+    anchorAt: group.anchorAt,
+    startAt: group.startAt,
+    endAt: group.endAt,
+    count: group.count,
+    groupCount: group.groupCount,
+    groupLabel: '位对象',
+    summary: group.summary,
+    helper: group.helper,
+    secondary: group.secondary,
+  }));
+}
+
+function buildVisitScheduleGroups() {
+  const groups = new Map();
+  const pushGroupItem = (timeValue, item, itemKind, statusInfo) => {
+    const key = getTimeBucketKey(timeValue) || `${itemKind}-${item.id}`;
+    const personKey = itemKind === 'task'
+      ? String(item.userProfileUrl || item.identityKey || item.userName || item.id)
+      : String(item.actor_profile_url || item.actor_name || item.id);
+    const group = groups.get(key) || {
+      key,
+      anchorAt: timeValue,
+      startAt: timeValue,
+      endAt: timeValue,
+      count: 0,
+      personKeys: new Set(),
+      leadCount: 0,
+      pendingCount: 0,
+      doneCount: 0,
+      failedCount: 0,
+      skippedCount: 0,
+      items: [],
+    };
+    group.count += 1;
+    group.personKeys.add(personKey);
+    group.leadCount += statusInfo.leadCount;
+    group.pendingCount += statusInfo.pendingCount;
+    group.doneCount += statusInfo.doneCount;
+    group.failedCount += statusInfo.failedCount;
+    group.skippedCount += statusInfo.skippedCount;
+    group.startAt = pickEarlierTime(group.startAt, timeValue);
+    group.endAt = pickLaterTime(group.endAt, timeValue);
+    group.anchorAt = pickLaterTime(group.anchorAt, timeValue);
+    group.items.push({ kind: itemKind, createdAt: timeValue, data: item });
+    groups.set(key, group);
+  };
+
+  for (const event of unhandledEvents) {
+    pushGroupItem(event.created_at || '', event, 'event', { leadCount: 1, pendingCount: 0, doneCount: 0, failedCount: 0, skippedCount: 0 });
+  }
+  for (const task of reviewTasks) {
+    const status = String(task.status || '');
+    pushGroupItem(task.updatedAt || task.createdAt || '', task, 'task', {
+      leadCount: 0,
+      pendingCount: !status || ['pending_visit', 'collecting_content', 'content_collected', 'comment_generated', 'pending_execute', 'executing'].includes(status) ? 1 : 0,
+      doneCount: status === 'done' ? 1 : 0,
+      failedCount: status.startsWith('failed') ? 1 : 0,
+      skippedCount: status.startsWith('skipped') ? 1 : 0,
+    });
+  }
+
+  return Array.from(groups.values())
+    .sort((a, b) => sortByCreatedDesc({ createdAt: a.anchorAt }, { createdAt: b.anchorAt }))
+    .map((group) => ({
+      key: group.key,
+      anchorAt: group.anchorAt,
+      startAt: group.startAt,
+      endAt: group.endAt,
+      title: `${formatTime(group.anchorAt) || group.key} 回访批次`,
+      subtitle: summarizeVisitSchedule(group),
+      meta: formatTimeRange(group.startAt, group.endAt),
+      kindLabel: '回访',
+      count: group.count,
+      groupCount: group.personKeys.size,
+      summary: summarizeVisitSchedule(group),
+      helper: buildVisitScheduleHelper(group),
+      secondary: `覆盖 ${group.personKeys.size} 位对象`,
+      items: group.items.sort(sortByCreatedDesc),
+    }));
 }
 
 function buildCollectGroups() {
@@ -784,10 +1221,102 @@ function buildVisitActionGroups(tasks, events, mode = 'all') {
 }
 
 function renderDetailItem(item) {
+  if (item.kind === 'scanJourney') return renderScanJourneyItem(item.data);
   if (item.kind === 'comment') return renderCommentDetailItem(item.data);
   if (item.kind === 'task') return renderTaskDetailItem(item.data);
   if (item.kind === 'event') return renderEventDetailItem(item.data);
   return '';
+}
+
+function renderScanJourneyItem(journey) {
+  const sourceEvents = Array.isArray(journey?.sourceEvents) ? journey.sourceEvents : [];
+  const comments = Array.isArray(journey?.comments) ? journey.comments : [];
+  const task = journey?.task || null;
+  const primaryEvent = journey?.primaryEvent || sourceEvents[0] || null;
+  const actorName = primaryEvent?.actor_name || task?.userName || comments[0]?.actor_name || '未知好友';
+  const sourceWork = primaryEvent?.my_work_title || comments[0]?.joined_work_title || comments[0]?.work_id || '未识别到你的作品';
+  const revisitWork = task?.targetWork?.workTitle || task?.targetWork?.contentSummary || task?.targetWork?.workText || '还没有找到回访作品';
+  const journeyBadge = getScanJourneyBadge(task, comments);
+  const replySnapshot = pickBestReplyRecord(task, comments);
+  const replySummary = buildReplySummary(replySnapshot);
+  const visitSummary = buildVisitSummary(task);
+
+  return `
+    <article class="detail-card-item journey-card">
+      <div class="detail-item-head">
+        <div>
+          <span class="status-badge ${journeyBadge.className}">${journeyBadge.text}</span>
+          <strong>${escapeHtml(actorName)}</strong>
+        </div>
+        <span class="detail-time">${escapeHtml(formatJourneyTime(primaryEvent, task, comments))}</span>
+      </div>
+
+      ${renderJourneyTimeline({
+        actorName,
+        sourceWork,
+        revisitWork,
+        sourceEvents,
+        primaryEvent,
+        replySnapshot,
+        task,
+      })}
+
+      <div class="journey-grid">
+        <section class="journey-panel journey-source">
+          <div class="journey-panel-head">
+            <span class="journey-step">1</span>
+            <div>
+              <strong>好友在你这里做了什么</strong>
+              <p>${escapeHtml(sourceWork)}</p>
+            </div>
+          </div>
+          <div class="journey-summary">
+            <span>${escapeHtml(summarizeVisitActions(sourceEvents, task?.sourceTypes || []) || describeSingleVisitEvent(primaryEvent) || '发现了一条互动')}</span>
+            <small>${escapeHtml(buildSourceEventTimeline(sourceEvents, primaryEvent))}</small>
+          </div>
+          ${renderSourceEventList(sourceEvents, primaryEvent)}
+          ${replySummary ? `
+            <div class="journey-note">
+              <label>我在这条作品里的回复</label>
+              <p>${escapeHtml(replySummary)}</p>
+            </div>
+          ` : ''}
+        </section>
+
+        <section class="journey-panel journey-target">
+          <div class="journey-panel-head">
+            <span class="journey-step">2</span>
+            <div>
+              <strong>我后来怎么处理</strong>
+              <p>${escapeHtml(revisitWork)}</p>
+            </div>
+          </div>
+          ${task ? `
+            <div class="journey-summary">
+              <span>${escapeHtml(visitSummary.title)}</span>
+              <small>${escapeHtml(visitSummary.meta)}</small>
+            </div>
+            <div class="journey-status-chips">
+              <span class="journey-chip ${getLikeStatusTone(task.likeStatus)}">点赞：${escapeHtml(humanizeLikeStatus(task.likeStatus))}</span>
+              <span class="journey-chip ${getCommentStatusTone(task.commentStatus)}">评论：${escapeHtml(humanizeCommentStatus(task.commentStatus))}</span>
+              <span class="journey-chip ${getTaskStatusTone(task.status)}">任务：${escapeHtml(humanizeTaskStatus(task.status))}</span>
+            </div>
+            ${task.generatedComment ? `
+              <div class="journey-note">
+                <label>本次回访评论</label>
+                <p>${escapeHtml(task.generatedComment)}</p>
+              </div>
+            ` : ''}
+          ` : `
+            <div class="journey-summary empty">
+              <span>这一条互动还没有进入回访任务</span>
+              <small>${replySummary ? '目前只记录到回评处理。' : '目前只有扫描线索，还没有回访动作。'}</small>
+            </div>
+          `}
+        </section>
+      </div>
+    </article>
+  `;
 }
 
 function renderCommentDetailItem(comment) {
@@ -1162,6 +1691,64 @@ function renderVisitSourceEvents(events) {
   `).join('');
 }
 
+function renderSourceEventList(events, fallbackEvent) {
+  const items = Array.isArray(events) && events.length ? events : (fallbackEvent ? [fallbackEvent] : []);
+  if (!items.length) {
+    return '<div class="journey-event-list"><div class="journey-event-row"><span class="journey-event-type">线索</span><p>暂无源互动明细</p></div></div>';
+  }
+  return `
+    <div class="journey-event-list">
+      ${items.map((event) => `
+        <div class="journey-event-row">
+          <span class="journey-event-type">${escapeHtml(getEventBadge(event.event_type).text)}</span>
+          <p>${getEventActionText(event)}${event.event_time_text ? ` · ${escapeHtml(event.event_time_text)}` : ''}</p>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderJourneyTimeline({ actorName, sourceWork, revisitWork, sourceEvents, primaryEvent, replySnapshot, task }) {
+  const sourceText = summarizeVisitActions(sourceEvents, task?.sourceTypes || []) || describeSingleVisitEvent(primaryEvent) || '发现互动';
+  const replyTime = formatTime(replySnapshot?.replied_at || replySnapshot?.last_seen_at || '');
+  const replyText = replySnapshot?.reply_text
+    ? `${replyTime ? `${replyTime} ` : ''}你回了对方一句：${replySnapshot.reply_text}`
+    : '这条互动还没有形成明确回评记录';
+  const visitTime = formatTime(task?.updatedAt || task?.createdAt || '');
+  const visitText = task
+    ? `${visitTime ? `${visitTime} ` : ''}你去回访了作品《${revisitWork}》，${humanizeLikeStatus(task.likeStatus)}，${humanizeCommentStatus(task.commentStatus)}`
+    : '这条互动还没有进入回访任务';
+
+  return `
+    <div class="journey-timeline">
+      <div class="journey-timeline-item">
+        <span class="journey-dot reply"></span>
+        <div class="journey-line-copy">
+          <label>发现互动</label>
+          <strong>${escapeHtml(actorName)} 在你的作品《${sourceWork}》里有互动</strong>
+          <p>${escapeHtml(sourceText)}</p>
+        </div>
+      </div>
+      <div class="journey-timeline-item">
+        <span class="journey-dot ${replySnapshot?.reply_text ? 'done' : 'muted'}"></span>
+        <div class="journey-line-copy">
+          <label>回评处理</label>
+          <strong>${replySnapshot?.reply_text ? '我已经在原作品里做过回应' : '原作品侧暂未完成清晰回应'}</strong>
+          <p>${escapeHtml(replyText)}</p>
+        </div>
+      </div>
+      <div class="journey-timeline-item">
+        <span class="journey-dot ${task ? getTaskStatusTone(task.status) : 'muted'}"></span>
+        <div class="journey-line-copy">
+          <label>回访处理</label>
+          <strong>${task ? `我回访了对方作品《${escapeHtml(revisitWork)}》` : '这条互动还没推进到回访'}</strong>
+          <p>${escapeHtml(visitText)}</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderLinkedReplies(replies) {
   if (!Array.isArray(replies) || !replies.length) {
     return '<p>暂时没有找到你回复给这位好友的记录。</p>';
@@ -1173,6 +1760,201 @@ function renderLinkedReplies(replies) {
       <p>我的回复：${escapeHtml(reply.reply_text || '')}</p>
     </div>
   `).join('');
+}
+
+function getScanJourneyBadge(task, comments) {
+  if (task?.status === 'done') return { text: '回访已完成', className: 'done' };
+  if (task) {
+    if (String(task.status || '').startsWith('failed')) return { text: '回访异常', className: 'danger' };
+    if (String(task.status || '').startsWith('skipped')) return { text: '回访已跳过', className: 'muted' };
+    return { text: '已生成回访', className: 'visit' };
+  }
+  if (comments.some((comment) => comment.reply_status === 'succeeded')) return { text: '已回评', className: 'done' };
+  if (comments.some((comment) => ['blocked', 'sent_unverified'].includes(comment.reply_status))) return { text: '回评异常', className: 'warning' };
+  if (comments.length) return { text: '待回评', className: 'reply' };
+  return { text: '仅扫描到线索', className: 'muted' };
+}
+
+function formatJourneyTime(primaryEvent, task, comments) {
+  const interactionAt = primaryEvent?.event_time_text || formatTime(primaryEvent?.created_at || '');
+  const revisitAt = formatTime(task?.updatedAt || task?.createdAt || '');
+  const replyAt = formatTime(comments[0]?.last_seen_at || comments[0]?.replied_at || '');
+  const parts = [];
+  if (interactionAt) parts.push(`互动 ${interactionAt}`);
+  if (replyAt) parts.push(`回评 ${replyAt}`);
+  if (revisitAt && task) parts.push(`回访 ${revisitAt}`);
+  return parts.join(' · ');
+}
+
+function buildSourceEventTimeline(events, fallbackEvent) {
+  const items = Array.isArray(events) && events.length ? events : (fallbackEvent ? [fallbackEvent] : []);
+  return items
+    .map((event) => `${getEventBadge(event.event_type).text}${event.event_time_text ? ` ${event.event_time_text}` : ''}`)
+    .join(' / ');
+}
+
+function pickBestReplyRecord(task, comments) {
+  const taskReplies = Array.isArray(task?.linkedReplies) ? task.linkedReplies.filter((item) => item.reply_text) : [];
+  if (taskReplies.length) return taskReplies[0];
+  return comments.find((comment) => comment.reply_text) || null;
+}
+
+function buildReplySummary(reply) {
+  if (!reply) return '';
+  const parts = [];
+  if (reply.comment_text) parts.push(`对方说：${reply.comment_text}`);
+  if (reply.reply_text) parts.push(`我回复：${reply.reply_text}`);
+  return parts.join('；');
+}
+
+function buildVisitSummary(task) {
+  const at = formatTime(task?.updatedAt || task?.createdAt || '');
+  const work = task?.targetWork?.workTitle || task?.targetWork?.contentSummary || task?.targetWork?.workText || '未识别作品';
+  return {
+    title: at ? `${at} 开始处理这次回访` : '已经进入回访任务',
+    meta: `回访作品：${work}`,
+  };
+}
+
+function humanizeLikeStatus(status) {
+  if (status === 'already_liked') return '原本已赞';
+  if (status === 'liked') return '已点赞';
+  if (status === 'failed') return '失败';
+  return '待处理';
+}
+
+function humanizeCommentStatus(status) {
+  if (status === 'posted') return '已评论';
+  if (status === 'generated') return '已生成待发';
+  if (status === 'failed') return '失败';
+  return '待处理';
+}
+
+function humanizeTaskStatus(status) {
+  if (status === 'done') return '完成';
+  if (status === 'pending_execute') return '待执行';
+  if (status === 'executing') return '执行中';
+  if (status === 'comment_generated') return '已生成文案';
+  if (status === 'content_collected') return '已收集作品';
+  if (status === 'collecting_content') return '收集中';
+  if (status === 'pending_visit') return '待回访';
+  if (String(status || '').startsWith('failed')) return '异常';
+  if (String(status || '').startsWith('skipped')) return '已跳过';
+  return status || '未开始';
+}
+
+function getLikeStatusTone(status) {
+  if (status === 'already_liked' || status === 'liked') return 'done';
+  if (status === 'failed') return 'danger';
+  return 'visit';
+}
+
+function getCommentStatusTone(status) {
+  if (status === 'posted') return 'done';
+  if (status === 'failed') return 'danger';
+  return 'reply';
+}
+
+function getTaskStatusTone(status) {
+  if (status === 'done') return 'done';
+  if (String(status || '').startsWith('failed')) return 'danger';
+  if (String(status || '').startsWith('skipped')) return 'muted';
+  return 'visit';
+}
+
+function renderEventTypeSummary(batch) {
+  const parts = [];
+  if (batch.totalComments) parts.push(`评论 ${batch.totalComments}`);
+  if (batch.totalLikes) parts.push(`点赞 ${batch.totalLikes}`);
+  if (batch.totalReplies) parts.push(`回复 ${batch.totalReplies}`);
+  if (batch.totalFollows) parts.push(`关注 ${batch.totalFollows}`);
+  return parts.join(' / ') || '暂无通知';
+}
+
+function summarizeReplySchedule(group) {
+  const parts = [];
+  if (group.pendingCount) parts.push(`待回评 ${group.pendingCount}`);
+  if (group.exceptionCount) parts.push(`异常 ${group.exceptionCount}`);
+  if (group.doneCount) parts.push(`成功 ${group.doneCount}`);
+  if (group.skippedCount) parts.push(`忽略 ${group.skippedCount}`);
+  return parts.join(' / ') || '暂无回评';
+}
+
+function buildReplyScheduleHelper(group) {
+  if (group.pendingCount) return '这一批里还有待处理回评';
+  if (group.exceptionCount) return '这一批里有异常回评';
+  if (group.doneCount) return '这一批回评都已经成功';
+  if (group.skippedCount) return '这一批已被忽略';
+  return '暂无回评记录';
+}
+
+function summarizeVisitSchedule(group) {
+  const parts = [];
+  if (group.leadCount) parts.push(`线索 ${group.leadCount}`);
+  if (group.pendingCount) parts.push(`待推进 ${group.pendingCount}`);
+  if (group.doneCount) parts.push(`成功 ${group.doneCount}`);
+  if (group.failedCount) parts.push(`异常 ${group.failedCount}`);
+  if (group.skippedCount) parts.push(`跳过 ${group.skippedCount}`);
+  return parts.join(' / ') || '暂无回访';
+}
+
+function buildVisitScheduleHelper(group) {
+  if (group.pendingCount) return '这一批里还有待推进任务';
+  if (group.failedCount) return '这一批里有异常任务';
+  if (group.leadCount) return '这一批里还有未转任务线索';
+  if (group.doneCount) return '这一批回访已经完成';
+  if (group.skippedCount) return '这一批已进入跳过状态';
+  return '暂无回访记录';
+}
+
+function getTimeBucketKey(value) {
+  const ms = parseDateValue(value);
+  if (ms) return new Date(ms).toISOString().slice(0, 19);
+  return String(value || '').slice(0, 19);
+}
+
+function pickEarlierTime(current, candidate) {
+  if (!current) return candidate;
+  if (!candidate) return current;
+  return parseDateValue(candidate) < parseDateValue(current) ? candidate : current;
+}
+
+function pickLaterTime(current, candidate) {
+  if (!current) return candidate;
+  if (!candidate) return current;
+  return parseDateValue(candidate) > parseDateValue(current) ? candidate : current;
+}
+
+function formatTimeRange(start, end) {
+  const startText = formatTime(start);
+  const endText = formatTime(end);
+  if (startText && endText) {
+    return startText === endText ? startText : `${startText} - ${endText}`;
+  }
+  return startText || endText || '时间范围未知';
+}
+
+function findLatestValue(items, getter) {
+  let winner = '';
+  let winnerMs = 0;
+  for (const item of items || []) {
+    const value = getter(item);
+    const ms = parseDateValue(value);
+    if (ms >= winnerMs) {
+      winner = value;
+      winnerMs = ms;
+    }
+  }
+  return winner;
+}
+
+function sumBy(items, key) {
+  return (items || []).reduce((total, item) => total + Number(item?.[key] || 0), 0);
+}
+
+function toPercent(value, total) {
+  if (!total) return '0%';
+  return `${Math.round((value / total) * 100)}%`;
 }
 
 function renderEmpty(text) {

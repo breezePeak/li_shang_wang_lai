@@ -1,4 +1,5 @@
 import { buildPreferredDouyinWorkUrl, normalizeDouyinUrl } from '../utils/douyin-url.mjs';
+import { DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK } from '../config/defaults.mjs';
 import {
   navigateToVideo,
   checkLikeState,
@@ -276,6 +277,11 @@ export function normalizeAwemeForVisit(aweme = {}) {
   const isMultiContent = aweme?.is_multi_content != null
     ? Number(aweme.is_multi_content)
     : ((Array.isArray(aweme?.images) && aweme.images.length > 1) ? 1 : 0);
+  const hasUserDigged = aweme && Object.prototype.hasOwnProperty.call(aweme, 'user_digged');
+  const rawUserDigged = hasUserDigged ? Number(aweme?.user_digged) : null;
+  const userDigged = hasUserDigged && Number.isFinite(rawUserDigged) && (rawUserDigged === 0 || rawUserDigged === 1)
+    ? rawUserDigged
+    : null;
 
   return {
     awemeId,
@@ -295,7 +301,7 @@ export function normalizeAwemeForVisit(aweme = {}) {
     publishTime: aweme?.create_time ? String(aweme.create_time) : null,
     createTime: aweme?.create_time || null,
     isTop: Number(aweme?.is_top || 0),
-    userDigged: Number(aweme?.user_digged || 0),
+    userDigged,
     diggCount: Number(aweme?.statistics?.digg_count ?? aweme?.digg_count ?? 0),
     commentCount: Number(aweme?.statistics?.comment_count ?? aweme?.comment_count ?? 0),
     awemeType: aweme?.aweme_type ?? null,
@@ -709,7 +715,7 @@ export async function collectCurrentOpenedWork(page, options = {}) {
 
 export async function collectCandidateWorkFromProfile(page, profileUrl, options = {}) {
   const {
-    maxWorksToCheck = 2,
+    maxWorksToCheck = DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK,
     pageLoadRetryCount = 1,
     maxReferenceComments = 5,
     validateWork = null,
@@ -824,18 +830,7 @@ export async function collectFirstNonTopAwemeFromProfile(page, profileUrl, optio
       return { ok: false, status: 'skipped', reason: 'skip_post_api_empty', stats };
     }
 
-    const nonTop = awemeList.filter(aweme => Number(aweme?.is_top) !== 1);
-    if (nonTop.length === 0) {
-      const hadAnyAweme = awemeList.some(aweme => String(aweme?.aweme_id || '').trim());
-      return {
-        ok: false,
-        status: 'skipped',
-        reason: hadAnyAweme ? 'skip_only_top_aweme' : 'skip_no_aweme',
-        stats,
-      };
-    }
-
-    const selected = normalizeAwemeForVisit(nonTop[0]);
+    const selected = normalizeAwemeForVisit(awemeList[0]);
     if (!selected.awemeId) {
       return { ok: false, status: 'skipped', reason: 'skip_aweme_id_missing', stats };
     }
@@ -845,6 +840,81 @@ export async function collectFirstNonTopAwemeFromProfile(page, profileUrl, optio
       status: 'ready',
       stats,
       aweme: selected,
+    };
+  } finally {
+    collector.stop();
+  }
+}
+
+export async function collectCandidateAwemesFromProfile(page, profileUrl, options = {}) {
+  const {
+    pageLoadRetryCount = 1,
+    waitTimeoutMs = 3000,
+    maxWorksToCheck = DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK,
+    collectorFactory = createProfilePostApiCollector,
+    gotoProfile = gotoWithRetry,
+    detectPrivate = detectPrivateProfile,
+  } = options;
+
+  const profile = normalizeDouyinUrl(profileUrl || '') || profileUrl;
+  if (!profile) {
+    return { ok: false, status: 'failed_collect', reason: 'skip_no_homepage_url', candidates: [], stats: null };
+  }
+
+  const normalizedMaxWorksToCheck = Number.isFinite(Number(maxWorksToCheck)) && Number(maxWorksToCheck) > 0
+    ? Math.floor(Number(maxWorksToCheck))
+    : DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK;
+
+  const collector = collectorFactory(page);
+  try {
+    const open = await gotoProfile(page, profile, { pageLoadRetryCount });
+    if (!open.ok) {
+      return { ok: false, status: 'failed_collect', reason: 'skip_homepage_load_failed', candidates: [], stats: null };
+    }
+
+    const isPrivate = await detectPrivate(page);
+    if (isPrivate) {
+      return { ok: false, status: 'skipped_private', reason: 'private_profile', candidates: [], stats: null };
+    }
+
+    const beforeCount = collector.getAwemes().length;
+    await page.waitForTimeout(1200);
+    await collector.waitForAwemes({ beforeCount, timeoutMs: waitTimeoutMs });
+
+    if (collector.getAwemes().length === 0) {
+      await page.mouse.wheel(0, 900).catch(() => {});
+      await page.waitForTimeout(1000);
+      await collector.waitForAwemes({ beforeCount, timeoutMs: waitTimeoutMs });
+    }
+
+    const awemeList = collector.getAwemes();
+    const stats = collector.getStats();
+    if (stats.responseCount === 0 || awemeList.length === 0) {
+      return { ok: false, status: 'failed_collect', reason: 'profile_post_api_empty', candidates: [], stats };
+    }
+
+    const candidates = awemeList
+      .slice(0, normalizedMaxWorksToCheck)
+      .map(normalizeAwemeForVisit)
+      .filter(aweme => String(aweme?.workId || '').trim());
+
+    if (candidates.length === 0) {
+      const hadAnyAweme = awemeList.some(aweme => String(aweme?.aweme_id || '').trim());
+      return {
+        ok: false,
+        status: hadAnyAweme ? 'skipped_no_work' : 'skipped_no_suitable_work',
+        reason: hadAnyAweme ? 'skip_aweme_id_missing' : 'skip_no_aweme',
+        candidates: [],
+        stats,
+      };
+    }
+
+    return {
+      ok: true,
+      status: 'ready',
+      reason: 'ready',
+      candidates,
+      stats,
     };
   } finally {
     collector.stop();

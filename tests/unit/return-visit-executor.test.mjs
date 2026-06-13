@@ -30,13 +30,10 @@ describe('return-visit executor work presentation detection', () => {
 });
 
 describe('return-visit executor interaction watch gate', () => {
-  it('打开作品后先启动 Agent，再等待观看门槛', () => {
+  it('普通评论改为在点赞确认后再生成，避免已赞作品继续评论', () => {
     const source = fs.readFileSync(resolve(import.meta.dirname, '../../src/services/return-visit-executor.mjs'), 'utf8');
-    const agentStart = source.indexOf('打开作品后立即请求生成评论');
-    const watchGate = source.indexOf('等待最短观看门槛');
-
-    expect(agentStart).toBeGreaterThan(0);
-    expect(watchGate).toBeGreaterThan(agentStart);
+    expect(source.includes('打开作品后立即请求生成评论')).toBe(false);
+    expect(source.includes('请求生成普通回访评论')).toBe(true);
   });
 
   it('默认只观看 3 秒就进入互动', async () => {
