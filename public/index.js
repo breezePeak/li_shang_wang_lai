@@ -764,21 +764,84 @@ function buildScanScheduleDataset() {
 
 function buildScanScheduleGroups() {
   return scanSchedules.map((batch) => {
-    const items = []
-      .concat((batch.comments || []).map((comment) => ({ kind: 'comment', createdAt: comment.last_seen_at || comment.first_seen_at || '', data: comment })))
-      .concat((batch.tasks || []).map((task) => ({ kind: 'task', createdAt: task.updatedAt || task.createdAt || '', data: task })))
-      .concat((batch.events || []).map((event) => ({ kind: 'event', createdAt: event.created_at || event.scanned_at || '', data: event })));
+    const items = buildScanJourneyItems(batch);
 
     return {
       key: batch.key,
       title: `${formatTime(batch.scannedStartAt) || batch.key} 扫描批次`,
-      subtitle: `${renderEventTypeSummary(batch)}，关联 ${batch.linkedReplyCount || 0} 条回评 / ${batch.linkedVisitCount || 0} 条回访`,
+      subtitle: `${renderEventTypeSummary(batch)}，整理成 ${items.length} 条互动链`,
       meta: formatTimeRange(batch.eventWindowStartAt, batch.eventWindowEndAt),
       kindLabel: '扫描',
       count: items.length,
       items: items.sort(sortByCreatedDesc),
     };
   });
+}
+
+function buildScanJourneyItems(batch) {
+  const tasks = Array.isArray(batch.tasks) ? batch.tasks : [];
+  const comments = Array.isArray(batch.comments) ? batch.comments : [];
+  const events = Array.isArray(batch.events) ? batch.events : [];
+  const items = [];
+  const usedEventIds = new Set();
+  const usedCommentIds = new Set();
+
+  for (const task of tasks) {
+    const sourceEvents = Array.isArray(task.sourceEvents) ? task.sourceEvents : [];
+    const sourceEventIds = sourceEvents
+      .map((event) => Number(event?.id))
+      .filter((id) => Number.isInteger(id) && id > 0);
+    sourceEventIds.forEach((id) => usedEventIds.add(id));
+
+    const relatedComments = comments.filter((comment) => {
+      const sourceEventId = Number(comment.source_event_id);
+      return Number.isInteger(sourceEventId) && sourceEventIds.includes(sourceEventId);
+    });
+    relatedComments.forEach((comment) => usedCommentIds.add(comment.id));
+
+    items.push({
+      kind: 'scanJourney',
+      createdAt: task.updatedAt || task.createdAt || sourceEvents[0]?.created_at || '',
+      data: {
+        primaryEvent: sourceEvents[0] || null,
+        sourceEvents,
+        comments: relatedComments,
+        task,
+      },
+    });
+  }
+
+  for (const comment of comments) {
+    if (usedCommentIds.has(comment.id)) continue;
+    const sourceEvent = events.find((event) => Number(event.id) === Number(comment.source_event_id)) || null;
+    if (sourceEvent?.id) usedEventIds.add(Number(sourceEvent.id));
+    items.push({
+      kind: 'scanJourney',
+      createdAt: comment.last_seen_at || comment.first_seen_at || sourceEvent?.created_at || '',
+      data: {
+        primaryEvent: sourceEvent,
+        sourceEvents: sourceEvent ? [sourceEvent] : [],
+        comments: [comment],
+        task: null,
+      },
+    });
+  }
+
+  for (const event of events) {
+    if (usedEventIds.has(Number(event.id))) continue;
+    items.push({
+      kind: 'scanJourney',
+      createdAt: event.created_at || event.scanned_at || '',
+      data: {
+        primaryEvent: event,
+        sourceEvents: [event],
+        comments: [],
+        task: null,
+      },
+    });
+  }
+
+  return items;
 }
 
 function buildReplyScheduleDataset() {
@@ -1158,10 +1221,102 @@ function buildVisitActionGroups(tasks, events, mode = 'all') {
 }
 
 function renderDetailItem(item) {
+  if (item.kind === 'scanJourney') return renderScanJourneyItem(item.data);
   if (item.kind === 'comment') return renderCommentDetailItem(item.data);
   if (item.kind === 'task') return renderTaskDetailItem(item.data);
   if (item.kind === 'event') return renderEventDetailItem(item.data);
   return '';
+}
+
+function renderScanJourneyItem(journey) {
+  const sourceEvents = Array.isArray(journey?.sourceEvents) ? journey.sourceEvents : [];
+  const comments = Array.isArray(journey?.comments) ? journey.comments : [];
+  const task = journey?.task || null;
+  const primaryEvent = journey?.primaryEvent || sourceEvents[0] || null;
+  const actorName = primaryEvent?.actor_name || task?.userName || comments[0]?.actor_name || '未知好友';
+  const sourceWork = primaryEvent?.my_work_title || comments[0]?.joined_work_title || comments[0]?.work_id || '未识别到你的作品';
+  const revisitWork = task?.targetWork?.workTitle || task?.targetWork?.contentSummary || task?.targetWork?.workText || '还没有找到回访作品';
+  const journeyBadge = getScanJourneyBadge(task, comments);
+  const replySnapshot = pickBestReplyRecord(task, comments);
+  const replySummary = buildReplySummary(replySnapshot);
+  const visitSummary = buildVisitSummary(task);
+
+  return `
+    <article class="detail-card-item journey-card">
+      <div class="detail-item-head">
+        <div>
+          <span class="status-badge ${journeyBadge.className}">${journeyBadge.text}</span>
+          <strong>${escapeHtml(actorName)}</strong>
+        </div>
+        <span class="detail-time">${escapeHtml(formatJourneyTime(primaryEvent, task, comments))}</span>
+      </div>
+
+      ${renderJourneyTimeline({
+        actorName,
+        sourceWork,
+        revisitWork,
+        sourceEvents,
+        primaryEvent,
+        replySnapshot,
+        task,
+      })}
+
+      <div class="journey-grid">
+        <section class="journey-panel journey-source">
+          <div class="journey-panel-head">
+            <span class="journey-step">1</span>
+            <div>
+              <strong>好友在你这里做了什么</strong>
+              <p>${escapeHtml(sourceWork)}</p>
+            </div>
+          </div>
+          <div class="journey-summary">
+            <span>${escapeHtml(summarizeVisitActions(sourceEvents, task?.sourceTypes || []) || describeSingleVisitEvent(primaryEvent) || '发现了一条互动')}</span>
+            <small>${escapeHtml(buildSourceEventTimeline(sourceEvents, primaryEvent))}</small>
+          </div>
+          ${renderSourceEventList(sourceEvents, primaryEvent)}
+          ${replySummary ? `
+            <div class="journey-note">
+              <label>我在这条作品里的回复</label>
+              <p>${escapeHtml(replySummary)}</p>
+            </div>
+          ` : ''}
+        </section>
+
+        <section class="journey-panel journey-target">
+          <div class="journey-panel-head">
+            <span class="journey-step">2</span>
+            <div>
+              <strong>我后来怎么处理</strong>
+              <p>${escapeHtml(revisitWork)}</p>
+            </div>
+          </div>
+          ${task ? `
+            <div class="journey-summary">
+              <span>${escapeHtml(visitSummary.title)}</span>
+              <small>${escapeHtml(visitSummary.meta)}</small>
+            </div>
+            <div class="journey-status-chips">
+              <span class="journey-chip ${getLikeStatusTone(task.likeStatus)}">点赞：${escapeHtml(humanizeLikeStatus(task.likeStatus))}</span>
+              <span class="journey-chip ${getCommentStatusTone(task.commentStatus)}">评论：${escapeHtml(humanizeCommentStatus(task.commentStatus))}</span>
+              <span class="journey-chip ${getTaskStatusTone(task.status)}">任务：${escapeHtml(humanizeTaskStatus(task.status))}</span>
+            </div>
+            ${task.generatedComment ? `
+              <div class="journey-note">
+                <label>本次回访评论</label>
+                <p>${escapeHtml(task.generatedComment)}</p>
+              </div>
+            ` : ''}
+          ` : `
+            <div class="journey-summary empty">
+              <span>这一条互动还没有进入回访任务</span>
+              <small>${replySummary ? '目前只记录到回评处理。' : '目前只有扫描线索，还没有回访动作。'}</small>
+            </div>
+          `}
+        </section>
+      </div>
+    </article>
+  `;
 }
 
 function renderCommentDetailItem(comment) {
@@ -1536,6 +1691,64 @@ function renderVisitSourceEvents(events) {
   `).join('');
 }
 
+function renderSourceEventList(events, fallbackEvent) {
+  const items = Array.isArray(events) && events.length ? events : (fallbackEvent ? [fallbackEvent] : []);
+  if (!items.length) {
+    return '<div class="journey-event-list"><div class="journey-event-row"><span class="journey-event-type">线索</span><p>暂无源互动明细</p></div></div>';
+  }
+  return `
+    <div class="journey-event-list">
+      ${items.map((event) => `
+        <div class="journey-event-row">
+          <span class="journey-event-type">${escapeHtml(getEventBadge(event.event_type).text)}</span>
+          <p>${getEventActionText(event)}${event.event_time_text ? ` · ${escapeHtml(event.event_time_text)}` : ''}</p>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderJourneyTimeline({ actorName, sourceWork, revisitWork, sourceEvents, primaryEvent, replySnapshot, task }) {
+  const sourceText = summarizeVisitActions(sourceEvents, task?.sourceTypes || []) || describeSingleVisitEvent(primaryEvent) || '发现互动';
+  const replyTime = formatTime(replySnapshot?.replied_at || replySnapshot?.last_seen_at || '');
+  const replyText = replySnapshot?.reply_text
+    ? `${replyTime ? `${replyTime} ` : ''}你回了对方一句：${replySnapshot.reply_text}`
+    : '这条互动还没有形成明确回评记录';
+  const visitTime = formatTime(task?.updatedAt || task?.createdAt || '');
+  const visitText = task
+    ? `${visitTime ? `${visitTime} ` : ''}你去回访了作品《${revisitWork}》，${humanizeLikeStatus(task.likeStatus)}，${humanizeCommentStatus(task.commentStatus)}`
+    : '这条互动还没有进入回访任务';
+
+  return `
+    <div class="journey-timeline">
+      <div class="journey-timeline-item">
+        <span class="journey-dot reply"></span>
+        <div class="journey-line-copy">
+          <label>发现互动</label>
+          <strong>${escapeHtml(actorName)} 在你的作品《${sourceWork}》里有互动</strong>
+          <p>${escapeHtml(sourceText)}</p>
+        </div>
+      </div>
+      <div class="journey-timeline-item">
+        <span class="journey-dot ${replySnapshot?.reply_text ? 'done' : 'muted'}"></span>
+        <div class="journey-line-copy">
+          <label>回评处理</label>
+          <strong>${replySnapshot?.reply_text ? '我已经在原作品里做过回应' : '原作品侧暂未完成清晰回应'}</strong>
+          <p>${escapeHtml(replyText)}</p>
+        </div>
+      </div>
+      <div class="journey-timeline-item">
+        <span class="journey-dot ${task ? getTaskStatusTone(task.status) : 'muted'}"></span>
+        <div class="journey-line-copy">
+          <label>回访处理</label>
+          <strong>${task ? `我回访了对方作品《${escapeHtml(revisitWork)}》` : '这条互动还没推进到回访'}</strong>
+          <p>${escapeHtml(visitText)}</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderLinkedReplies(replies) {
   if (!Array.isArray(replies) || !replies.length) {
     return '<p>暂时没有找到你回复给这位好友的记录。</p>';
@@ -1547,6 +1760,106 @@ function renderLinkedReplies(replies) {
       <p>我的回复：${escapeHtml(reply.reply_text || '')}</p>
     </div>
   `).join('');
+}
+
+function getScanJourneyBadge(task, comments) {
+  if (task?.status === 'done') return { text: '回访已完成', className: 'done' };
+  if (task) {
+    if (String(task.status || '').startsWith('failed')) return { text: '回访异常', className: 'danger' };
+    if (String(task.status || '').startsWith('skipped')) return { text: '回访已跳过', className: 'muted' };
+    return { text: '已生成回访', className: 'visit' };
+  }
+  if (comments.some((comment) => comment.reply_status === 'succeeded')) return { text: '已回评', className: 'done' };
+  if (comments.some((comment) => ['blocked', 'sent_unverified'].includes(comment.reply_status))) return { text: '回评异常', className: 'warning' };
+  if (comments.length) return { text: '待回评', className: 'reply' };
+  return { text: '仅扫描到线索', className: 'muted' };
+}
+
+function formatJourneyTime(primaryEvent, task, comments) {
+  const interactionAt = primaryEvent?.event_time_text || formatTime(primaryEvent?.created_at || '');
+  const revisitAt = formatTime(task?.updatedAt || task?.createdAt || '');
+  const replyAt = formatTime(comments[0]?.last_seen_at || comments[0]?.replied_at || '');
+  const parts = [];
+  if (interactionAt) parts.push(`互动 ${interactionAt}`);
+  if (replyAt) parts.push(`回评 ${replyAt}`);
+  if (revisitAt && task) parts.push(`回访 ${revisitAt}`);
+  return parts.join(' · ');
+}
+
+function buildSourceEventTimeline(events, fallbackEvent) {
+  const items = Array.isArray(events) && events.length ? events : (fallbackEvent ? [fallbackEvent] : []);
+  return items
+    .map((event) => `${getEventBadge(event.event_type).text}${event.event_time_text ? ` ${event.event_time_text}` : ''}`)
+    .join(' / ');
+}
+
+function pickBestReplyRecord(task, comments) {
+  const taskReplies = Array.isArray(task?.linkedReplies) ? task.linkedReplies.filter((item) => item.reply_text) : [];
+  if (taskReplies.length) return taskReplies[0];
+  return comments.find((comment) => comment.reply_text) || null;
+}
+
+function buildReplySummary(reply) {
+  if (!reply) return '';
+  const parts = [];
+  if (reply.comment_text) parts.push(`对方说：${reply.comment_text}`);
+  if (reply.reply_text) parts.push(`我回复：${reply.reply_text}`);
+  return parts.join('；');
+}
+
+function buildVisitSummary(task) {
+  const at = formatTime(task?.updatedAt || task?.createdAt || '');
+  const work = task?.targetWork?.workTitle || task?.targetWork?.contentSummary || task?.targetWork?.workText || '未识别作品';
+  return {
+    title: at ? `${at} 开始处理这次回访` : '已经进入回访任务',
+    meta: `回访作品：${work}`,
+  };
+}
+
+function humanizeLikeStatus(status) {
+  if (status === 'already_liked') return '原本已赞';
+  if (status === 'liked') return '已点赞';
+  if (status === 'failed') return '失败';
+  return '待处理';
+}
+
+function humanizeCommentStatus(status) {
+  if (status === 'posted') return '已评论';
+  if (status === 'generated') return '已生成待发';
+  if (status === 'failed') return '失败';
+  return '待处理';
+}
+
+function humanizeTaskStatus(status) {
+  if (status === 'done') return '完成';
+  if (status === 'pending_execute') return '待执行';
+  if (status === 'executing') return '执行中';
+  if (status === 'comment_generated') return '已生成文案';
+  if (status === 'content_collected') return '已收集作品';
+  if (status === 'collecting_content') return '收集中';
+  if (status === 'pending_visit') return '待回访';
+  if (String(status || '').startsWith('failed')) return '异常';
+  if (String(status || '').startsWith('skipped')) return '已跳过';
+  return status || '未开始';
+}
+
+function getLikeStatusTone(status) {
+  if (status === 'already_liked' || status === 'liked') return 'done';
+  if (status === 'failed') return 'danger';
+  return 'visit';
+}
+
+function getCommentStatusTone(status) {
+  if (status === 'posted') return 'done';
+  if (status === 'failed') return 'danger';
+  return 'reply';
+}
+
+function getTaskStatusTone(status) {
+  if (status === 'done') return 'done';
+  if (String(status || '').startsWith('failed')) return 'danger';
+  if (String(status || '').startsWith('skipped')) return 'muted';
+  return 'visit';
 }
 
 function renderEventTypeSummary(batch) {
