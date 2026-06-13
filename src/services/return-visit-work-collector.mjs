@@ -830,18 +830,7 @@ export async function collectFirstNonTopAwemeFromProfile(page, profileUrl, optio
       return { ok: false, status: 'skipped', reason: 'skip_post_api_empty', stats };
     }
 
-    const nonTop = awemeList.filter(aweme => Number(aweme?.is_top) !== 1);
-    if (nonTop.length === 0) {
-      const hadAnyAweme = awemeList.some(aweme => String(aweme?.aweme_id || '').trim());
-      return {
-        ok: false,
-        status: 'skipped',
-        reason: hadAnyAweme ? 'skip_only_top_aweme' : 'skip_no_aweme',
-        stats,
-      };
-    }
-
-    const selected = normalizeAwemeForVisit(nonTop[0]);
+    const selected = normalizeAwemeForVisit(awemeList[0]);
     if (!selected.awemeId) {
       return { ok: false, status: 'skipped', reason: 'skip_aweme_id_missing', stats };
     }
@@ -862,6 +851,9 @@ export async function collectCandidateAwemesFromProfile(page, profileUrl, option
     pageLoadRetryCount = 1,
     waitTimeoutMs = 3000,
     maxWorksToCheck = DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK,
+    collectorFactory = createProfilePostApiCollector,
+    gotoProfile = gotoWithRetry,
+    detectPrivate = detectPrivateProfile,
   } = options;
 
   const profile = normalizeDouyinUrl(profileUrl || '') || profileUrl;
@@ -873,14 +865,14 @@ export async function collectCandidateAwemesFromProfile(page, profileUrl, option
     ? Math.floor(Number(maxWorksToCheck))
     : DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK;
 
-  const collector = createProfilePostApiCollector(page);
+  const collector = collectorFactory(page);
   try {
-    const open = await gotoWithRetry(page, profile, { pageLoadRetryCount });
+    const open = await gotoProfile(page, profile, { pageLoadRetryCount });
     if (!open.ok) {
       return { ok: false, status: 'failed_collect', reason: 'skip_homepage_load_failed', candidates: [], stats: null };
     }
 
-    const isPrivate = await detectPrivateProfile(page);
+    const isPrivate = await detectPrivate(page);
     if (isPrivate) {
       return { ok: false, status: 'skipped_private', reason: 'private_profile', candidates: [], stats: null };
     }
@@ -902,7 +894,6 @@ export async function collectCandidateAwemesFromProfile(page, profileUrl, option
     }
 
     const candidates = awemeList
-      .filter(aweme => Number(aweme?.is_top) !== 1)
       .slice(0, normalizedMaxWorksToCheck)
       .map(normalizeAwemeForVisit)
       .filter(aweme => String(aweme?.workId || '').trim());
@@ -912,7 +903,7 @@ export async function collectCandidateAwemesFromProfile(page, profileUrl, option
       return {
         ok: false,
         status: hadAnyAweme ? 'skipped_no_work' : 'skipped_no_suitable_work',
-        reason: hadAnyAweme ? 'skip_only_top_aweme' : 'skip_no_aweme',
+        reason: hadAnyAweme ? 'skip_aweme_id_missing' : 'skip_no_aweme',
         candidates: [],
         stats,
       };

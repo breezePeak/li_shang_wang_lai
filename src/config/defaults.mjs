@@ -1,4 +1,4 @@
-export const DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK = 3;
+export const DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK = 5;
 
 // 默认配置常量 — 占位，由 config/local.json 覆盖
 export const DEFAULTS = {

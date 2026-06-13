@@ -619,6 +619,11 @@ function areAllCheckedWorksAlreadyLiked(checkedWorks = [], candidateCount = 0) {
     && checkedWorks.every(item => item?.likeState === 'already_liked');
 }
 
+function pickFallbackUpdateRequestCandidate(candidates = []) {
+  const firstNonTop = candidates.find(candidate => Number(candidate?.isTop) !== 1);
+  return firstNonTop || candidates[0] || null;
+}
+
 async function resolveWorkForExecution(page, task, options = {}) {
   const {
     pageLoadRetryCount = 1,
@@ -1119,7 +1124,8 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   }
 
   if (areAllCheckedWorksAlreadyLiked(checkedWorks, candidates.length) && allLikedFallbackEnabled) {
-    const fallbackCandidate = candidates[0];
+    const fallbackCandidate = pickFallbackUpdateRequestCandidate(candidates);
+    const fallbackIndex = candidates.findIndex(candidate => candidate?.workId === fallbackCandidate?.workId);
     const opened = await openCandidateWork(fallbackCandidate);
     if (!opened.ok) {
       return {
@@ -1137,9 +1143,9 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     const presentation = await detectWorkPresentationKind(page, resolvedWork);
     const fallbackComment = pickRandomComment(allLikedFallbackComments);
     const fallbackCheckedWorks = checkedWorks.slice();
-    if (fallbackCheckedWorks.length > 0) {
-      fallbackCheckedWorks[0] = {
-        ...fallbackCheckedWorks[0],
+    if (fallbackIndex >= 0 && fallbackCheckedWorks[fallbackIndex]) {
+      fallbackCheckedWorks[fallbackIndex] = {
+        ...fallbackCheckedWorks[fallbackIndex],
         action: execute ? 'update_request_comment' : 'plan_update_request_comment',
         reason: 'all_candidates_already_liked',
       };

@@ -228,6 +228,55 @@ describe('return-visit executor like/comment regressions', () => {
     expect(result.likeStatus).toBe('already_liked');
   });
 
+  it('uses the first non-top candidate for update-request fallback when the first candidate is pinned', async () => {
+    collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
+      ok: true,
+      candidates: [
+        { workId: '111', workUrl: 'https://www.douyin.com/video/111', userDigged: 1, isTop: 1 },
+        { workId: '222', workUrl: 'https://www.douyin.com/video/222', userDigged: 1, isTop: 0 },
+      ],
+    });
+    collectCurrentOpenedWorkMock.mockResolvedValue({
+      ok: true,
+      sufficient: true,
+      work: {
+        workId: '222',
+        workTitle: '第二条作品',
+        workText: '第二条作品正文',
+        contentSummary: '第二条作品正文',
+        visibleFingerprint: '第二条作品|第二条作品正文',
+      },
+    });
+    const page = {
+      url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo?modal_id=222'),
+      evaluate: vi.fn().mockResolvedValue({ hasVideoElement: false }),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await executeReturnVisitTask(page, {
+      taskId: 'pick-c2',
+      userProfileUrl: 'https://www.douyin.com/user/demo',
+      targetWork: { workId: '', workUrl: '' },
+      likeStatus: 'pending',
+      commentStatus: 'pending',
+    }, {
+      execute: true,
+      allLikedFallbackComments: ['蹲一个新作品～'],
+    });
+
+    expect(openProfileWorkByAwemeIdMock).toHaveBeenCalledWith(
+      page,
+      'https://www.douyin.com/user/demo',
+      '222',
+      expect.objectContaining({ reuseCurrentProfile: true })
+    );
+    expect(result.checkedWorks[1]).toMatchObject({
+      workId: '222',
+      action: 'update_request_comment',
+      reason: 'all_candidates_already_liked',
+    });
+  });
+
   it('does not process unliked works beyond the first N candidates', async () => {
     collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
       ok: true,
