@@ -1,5 +1,5 @@
 import { runMigrations } from '../db/migrations.mjs';
-import { createBrowserContext } from '../browser/browser-context.mjs';
+import { createBrowserContext, replaceContextPage } from '../browser/browser-context.mjs';
 import { loadConfig } from '../config/user-config.mjs';
 import { DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK } from '../config/defaults.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
@@ -202,15 +202,29 @@ async function main() {
   let browser = null;
   let page = null;
   const agentProvider = createAgentProvider();
+
+  function isFatalPageError(err) {
+    const msg = String(err?.message || '').toLowerCase();
+    return msg.includes('target page, context or browser has been closed')
+      || msg.includes('execution context was destroyed');
+  }
+
+  async function recreatePage(ctx, currentPage) {
+    if (!ctx?.context) return currentPage;
+    page = await replaceContextPage(ctx.context, currentPage);
+    console.error('[return-visit:execute] 已切换到新页面');
+    return page;
+  }
+
   try {
+    let ctx = null;
     try {
-      const ctx = await createBrowserContext({
+      ctx = await createBrowserContext({
         headless: args.headless,
         enableReuse: args.keepOpen,
       });
       browser = ctx.browser;
-      const pages = ctx.context.pages();
-      page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
+      page = await replaceContextPage(ctx.context, ctx.context.pages()[0] || null);
     } catch (err) {
       const msg = `浏览器启动失败: ${err.message}`;
       if (args.json) {
@@ -226,6 +240,9 @@ async function main() {
 
     for (let index = 0; index < tasks.length; index++) {
       const task = tasks[index];
+      if (index > 0) {
+        page = await recreatePage(ctx, page);
+      }
       if (consecutiveFailures >= maxConsecutiveFailures) {
         log(args.json, `[return-visit:execute] 连续失败 ${consecutiveFailures} 个任务，暂停本轮执行`);
         break;
@@ -241,17 +258,34 @@ async function main() {
         log(args.json, `[return-visit:execute] opening workUrl: ${task.targetWork.workUrl}`);
       }
 
-      const result = await executeReturnVisitTask(page, task, {
-        execute: executeMode,
-        pageLoadRetryCount,
-        maxWorksToCheck,
-        waitBetweenLikeAndCommentMs,
-        watchPolicy,
-        watchSeconds,
-        agentProvider,
-        allLikedFallbackEnabled: returnVisitConfig.allLikedFallbackEnabled,
-        allLikedFallbackComments: returnVisitConfig.allLikedFallbackComments,
-      });
+      let result;
+      try {
+        result = await executeReturnVisitTask(page, task, {
+          execute: executeMode,
+          pageLoadRetryCount,
+          maxWorksToCheck,
+          waitBetweenLikeAndCommentMs,
+          watchPolicy,
+          watchSeconds,
+          agentProvider,
+          allLikedFallbackEnabled: returnVisitConfig.allLikedFallbackEnabled,
+          allLikedFallbackComments: returnVisitConfig.allLikedFallbackComments,
+        });
+      } catch (err) {
+        const message = err?.message || 'execute_return_visit_task_failed';
+        log(args.json, `[return-visit:execute] 执行异常 ${task.taskId}: ${message}`);
+        result = {
+          ok: false,
+          status: 'failed_collect',
+          error: message,
+          likeStatus: task.likeStatus || 'pending',
+          commentStatus: task.commentStatus || 'pending',
+          checkedWorks: [],
+        };
+        if (isFatalPageError(err)) {
+          await recreatePage(ctx, page);
+        }
+      }
 
       if (result.resolvedWork) {
         updateReturnVisitTask(task.taskId, {

@@ -179,3 +179,21 @@ export async function createBrowserContext(options = {}) {
     reused: false,
   };
 }
+
+export async function replaceContextPage(context, previousPage = null) {
+  if (!context || typeof context.newPage !== 'function') {
+    throw new Error('browser context 不可用，无法创建新页面');
+  }
+
+  const nextPage = await context.newPage();
+
+  if (previousPage && previousPage !== nextPage) {
+    try {
+      if (typeof previousPage.isClosed !== 'function' || !previousPage.isClosed()) {
+        await previousPage.close().catch(() => {});
+      }
+    } catch {}
+  }
+
+  return nextPage;
+}

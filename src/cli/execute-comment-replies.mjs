@@ -15,7 +15,7 @@ import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, 
 import { findWorkByIdentity } from '../db/work-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
-import { createBrowserContext } from '../browser/browser-context.mjs';
+import { createBrowserContext, replaceContextPage } from '../browser/browser-context.mjs';
 import { createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
 import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { buildDouyinWorkUrl } from '../utils/douyin-url.mjs';
@@ -914,6 +914,7 @@ async function executeWorkCommentItems(items, args) {
   let browser = null;
   let ctx = null;
   let page = null;
+  let groupIndex = -1;
   const results = [];
 
   function isFatalPageError(err) {
@@ -923,12 +924,9 @@ async function executeWorkCommentItems(items, args) {
   }
 
   async function recreatePage() {
-    if (page && !page.isClosed()) {
-      try { await page.close().catch(() => {}); } catch {}
-    }
     if (ctx && ctx.context) {
       try {
-        page = await ctx.context.newPage();
+        page = await replaceContextPage(ctx.context, page);
         console.error('[comments:execute] 已重建页面');
         return true;
       } catch {
@@ -964,14 +962,19 @@ async function executeWorkCommentItems(items, args) {
 
     ctx = await createBrowserContext({ headless: args.headless, enableReuse: Boolean(args.keepOpen) && !args.json });
     browser = ctx.browser;
-    const pages = ctx.context.pages();
-    page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
+    page = await replaceContextPage(ctx.context, ctx.context.pages()[0] || null);
 
     const workGroups = groupExecutableItemsByWork(executable);
     let activeHomepageUrl = '';
     for (const group of workGroups) {
+      groupIndex++;
       const currentWork = group[0];
       try {
+        if (groupIndex > 0) {
+          page = await replaceContextPage(ctx.context, page);
+          activeHomepageUrl = '';
+          console.error(`[comments:execute] 切换到新页面执行作品组 group_index=${groupIndex + 1}/${workGroups.length}`);
+        }
         if (page.isClosed()) {
           throw new Error('Target page, context or browser has been closed');
         }
