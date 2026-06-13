@@ -169,6 +169,55 @@ describe('summarizePendingReplies', () => {
     expect(recent.action).toBe('inserted');
     expect(old.action).toBe('inserted');
   });
+
+  it('支持按小时统计待回评摘要', () => {
+    upsertWorkContext({
+      workId: 'hour-window-work',
+      modalId: 'hour-window-work',
+      workUrl: 'https://www.douyin.com/jingxuan?modal_id=hour-window-work',
+      authorName: '作者小时',
+      authorProfileUrl: 'https://www.douyin.com/user/hour-author',
+      authorProfileKey: 'hour-author',
+    });
+
+    const recent = upsertWorkComment({
+      workId: 'hour-window-work',
+      workUrl: 'https://www.douyin.com/jingxuan?modal_id=hour-window-work',
+      modalId: 'hour-window-work',
+      actorName: '最近评论',
+      actorProfileUrl: 'https://www.douyin.com/user/hour-recent',
+      actorProfileKey: 'hour-recent',
+      commentText: '最近一小时评论',
+      eventTimeText: '1小时前',
+      commentKey: 'hour-recent-key',
+      sourceEventId: 11,
+      sourceNotificationKey: 'hour-recent-notice',
+    });
+    const stale = upsertWorkComment({
+      workId: 'hour-window-work',
+      workUrl: 'https://www.douyin.com/jingxuan?modal_id=hour-window-work',
+      modalId: 'hour-window-work',
+      actorName: '过期评论',
+      actorProfileUrl: 'https://www.douyin.com/user/hour-stale',
+      actorProfileKey: 'hour-stale',
+      commentText: '三小时前评论',
+      eventTimeText: '3小时前',
+      commentKey: 'hour-stale-key',
+      sourceEventId: 12,
+      sourceNotificationKey: 'hour-stale-notice',
+    });
+
+    const staleSeenAt = new Date(Date.now() - 3 * 3600000).toISOString();
+    getDb().prepare('UPDATE work_comments SET first_seen_at = ?, last_seen_at = ? WHERE id = ?').run(staleSeenAt, staleSeenAt, stale.id);
+
+    const summary = summarizePendingReplies({ hours: 2 });
+
+    expect(summary.homepageCount).toBe(1);
+    expect(summary.workCount).toBe(1);
+    expect(summary.totalComments).toBe(1);
+    expect(summary.nextStep).toContain('comments:execute');
+    expect(recent.action).toBe('inserted');
+  });
 });
 
 describe('preparePendingVisitTasks', () => {
@@ -768,6 +817,51 @@ describe('listReturnVisitScanTasks', () => {
       RETURN_VISIT_STATUS.PENDING_VISIT, oldDate, oldDate);
 
     const result = listReturnVisitScanTasks({ days: 1, limit: 10 });
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].taskId).toBe(recentTaskId);
+    expect(result.filteredDaysCount).toBe(1);
+  });
+
+  it('respects hours filter', () => {
+    const db = getDb();
+    const now = new Date().toISOString();
+    const oldDate = new Date(Date.now() - 3 * 3600000).toISOString();
+
+    const recentTaskId = taskIdFor('recent-hour-user', 'https://www.douyin.com/user/recent-hour-user', '最近小时用户');
+    db.prepare(`
+      INSERT INTO return_visit_tasks (
+        task_id, identity_key, user_id, user_name, user_profile_url,
+        source_type, source_types_json, source_event_ids_json,
+        action_type, status, like_status, comment_status,
+        retry_count, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?,
+        'like', '["like"]', '[]',
+        'like_and_comment', ?, 'pending', 'pending',
+        0, ?, ?
+      )
+    `).run(recentTaskId, 'recent-hour-key', 'recent-hour-user', '最近小时用户',
+      'https://www.douyin.com/user/recent-hour-user',
+      RETURN_VISIT_STATUS.PENDING_VISIT, now, now);
+
+    const oldTaskId = taskIdFor('old-hour-user', 'https://www.douyin.com/user/old-hour-user', '旧小时用户');
+    db.prepare(`
+      INSERT INTO return_visit_tasks (
+        task_id, identity_key, user_id, user_name, user_profile_url,
+        source_type, source_types_json, source_event_ids_json,
+        action_type, status, like_status, comment_status,
+        retry_count, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?,
+        'like', '["like"]', '[]',
+        'like_and_comment', ?, 'pending', 'pending',
+        0, ?, ?
+      )
+    `).run(oldTaskId, 'old-hour-key', 'old-hour-user', '旧小时用户',
+      'https://www.douyin.com/user/old-hour-user',
+      RETURN_VISIT_STATUS.PENDING_VISIT, oldDate, oldDate);
+
+    const result = listReturnVisitScanTasks({ hours: 2, limit: 10 });
     expect(result.tasks).toHaveLength(1);
     expect(result.tasks[0].taskId).toBe(recentTaskId);
     expect(result.filteredDaysCount).toBe(1);

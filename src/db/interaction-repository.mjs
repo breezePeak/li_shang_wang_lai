@@ -1,4 +1,5 @@
 import { getDb } from './database.mjs';
+import { resolveTimeWindowSinceIso } from '../utils/time-window.mjs';
 import { normalizeDouyinUrl } from '../utils/douyin-url.mjs';
 
 const KEY_FIELD_MAP = [
@@ -281,7 +282,7 @@ export function getEvent(eventId) {
 
 export function listEventsForDedupe(options = {}) {
   const db = getDb();
-  const { days = null, limit = 2000 } = options;
+  const { limit = 2000 } = options;
   const params = [];
   let sql = `
     SELECT id, event_type, actor_name, actor_profile_key, actor_profile_url,
@@ -290,8 +291,8 @@ export function listEventsForDedupe(options = {}) {
     FROM interaction_events
     WHERE 1=1
   `;
-  if (Number(days) > 0) {
-    const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
+  const since = resolveTimeWindowSinceIso(options);
+  if (since) {
     sql += ' AND scanned_at >= ?';
     params.push(since);
   }

@@ -147,7 +147,7 @@ describe('comments:execute refactored logic', () => {
     const parsed = parseStdout(result);
     expect(parsed).not.toBeNull();
     expect(parsed.ok).toBe(false);
-    expect(parsed.message).toContain('--days 7 --limit 50');
+    expect(parsed.message).toContain('--hours 6 --limit 50');
   });
 
   it('rejects --items-file because comments:execute is DB-only', async () => {
@@ -234,6 +234,44 @@ describe('comments:execute refactored logic', () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe(102);
+  });
+
+  it('支持按最近几个小时筛选待回评评论', () => {
+    const db = getDb(testDb);
+    const nowIso = new Date().toISOString();
+    const oldIso = new Date(Date.now() - 3 * 3600000).toISOString();
+
+    db.prepare(`
+      INSERT INTO work_comments (
+        id, work_id, modal_id, work_url, actor_name, actor_profile_url, actor_profile_key,
+        comment_text, event_time_text, comment_key, reply_status, first_seen_at, last_seen_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    `).run(
+      103,
+      'hour-old-work', 'hour-old-work', 'https://www.douyin.com/video/hour-old-work',
+      '三小时前用户', 'https://www.douyin.com/user/hour-old', 'hour-old',
+      '这是三小时前采集的评论', '3小时前', 'hour-old-key',
+      oldIso, oldIso
+    );
+
+    db.prepare(`
+      INSERT INTO work_comments (
+        id, work_id, modal_id, work_url, actor_name, actor_profile_url, actor_profile_key,
+        comment_text, event_time_text, comment_key, reply_status, first_seen_at, last_seen_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    `).run(
+      104,
+      'hour-recent-work', 'hour-recent-work', 'https://www.douyin.com/video/hour-recent-work',
+      '一小时前用户', 'https://www.douyin.com/user/hour-recent', 'hour-recent',
+      '这是最近一小时采集的评论', '1小时前', 'hour-recent-key',
+      nowIso, nowIso
+    );
+
+    const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: 10, hours: 2 });
+    const ids = rows.map(row => row.id);
+
+    expect(ids).toContain(104);
+    expect(ids).not.toContain(103);
   });
 
   it('resolveWorkUrlFromItem 优先使用现有字段并回退到 workId/modalId', () => {
@@ -371,6 +409,12 @@ describe('comments:execute refactored logic', () => {
     const args = parseArgs(['--days', '7', '--limit', '2', '--keep-open']);
     expect(args.keepOpen).toBe(true);
     expect(args.days).toBe(7);
+    expect(args.limit).toBe(2);
+  });
+
+  it('parseArgs 支持 --hours，允许按小时查询待回评', () => {
+    const args = parseArgs(['--hours', '6', '--limit', '2']);
+    expect(args.hours).toBe(6);
     expect(args.limit).toBe(2);
   });
 

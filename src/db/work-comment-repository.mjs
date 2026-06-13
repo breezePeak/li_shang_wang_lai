@@ -1,4 +1,5 @@
 import { getDb } from './database.mjs';
+import { resolveTimeWindowSinceIso } from '../utils/time-window.mjs';
 
 export function upsertWorkComment(comment) {
   const db = getDb();
@@ -58,11 +59,11 @@ export function upsertWorkComment(comment) {
 
 export function listPendingCommentsGroupedByWork(options = {}) {
   const db = getDb();
-  const { limit = null, days = null } = options;
+  const { limit = null } = options;
   const params = [];
   let sql = "SELECT * FROM work_comments WHERE reply_status = 'pending'";
-  if (Number(days) > 0) {
-    const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
+  const since = resolveTimeWindowSinceIso(options);
+  if (since) {
     sql += ' AND COALESCE(first_seen_at, last_seen_at) >= ?';
     params.push(since);
   }
@@ -84,7 +85,7 @@ export function listPendingCommentsGroupedByWork(options = {}) {
 
 export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
   const db = getDb();
-  const { limit = null, days = null } = options;
+  const { limit = null } = options;
   const params = [];
   let sql = `
     SELECT
@@ -114,8 +115,8 @@ export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
     WHERE wc.reply_status = 'pending'
   `;
 
-  if (Number(days) > 0) {
-    const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
+  const since = resolveTimeWindowSinceIso(options);
+  if (since) {
     sql += ' AND COALESCE(wc.first_seen_at, wc.last_seen_at) >= ?';
     params.push(since);
   }
@@ -333,7 +334,7 @@ export function findCollectedCommentForWork({ workId, modalId, actorName, commen
 
 export function listCommentsForDedupe(options = {}) {
   const db = getDb();
-  const { days = null, limit = 5000 } = options;
+  const { limit = 5000 } = options;
   const params = [];
   let sql = `
     SELECT id, work_id, modal_id, actor_name, actor_profile_key, actor_profile_url,
@@ -341,8 +342,8 @@ export function listCommentsForDedupe(options = {}) {
     FROM work_comments
     WHERE 1=1
   `;
-  if (Number(days) > 0) {
-    const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
+  const since = resolveTimeWindowSinceIso(options);
+  if (since) {
     sql += ' AND last_seen_at >= ?';
     params.push(since);
   }

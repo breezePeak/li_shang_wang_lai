@@ -26,4 +26,9 @@ describe('createRunContext', () => {
     const { options } = parseCommonArgs(['--max-items', '0']);
     expect(options.maxItems).toBe(100);
   });
+
+  it('parseCommonArgs supports --hours', () => {
+    const { options } = parseCommonArgs(['--hours', '6']);
+    expect(options.hours).toBe(6);
+  });
 });

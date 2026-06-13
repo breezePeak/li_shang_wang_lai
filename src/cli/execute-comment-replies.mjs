@@ -53,6 +53,7 @@ export function parseArgs(argv) {
     headless: undefined,
     limit: null,
     days: null,
+    hours: null,
     agentOnly: false,
   };
 
@@ -67,6 +68,7 @@ export function parseArgs(argv) {
     if (argv[i] === '--headless') args.headless = true;
     if ((argv[i] === '--limit' || argv[i] === '--max-count') && argv[i + 1]) args.limit = Number(argv[++i] || 0) || null;
     if (argv[i] === '--days' && argv[i + 1]) args.days = Number(argv[++i] || 0) || null;
+    if (argv[i] === '--hours' && argv[i + 1]) args.hours = Number(argv[++i] || 0) || null;
     if (argv[i] === '--agent-only') args.agentOnly = true;
   }
 
@@ -1125,18 +1127,18 @@ async function main() {
   let loaded = { items: [] };
   let agentResults = [];
 
-  if (!Number(args.days || 0) || !Number(args.limit || 0)) {
+  if ((!Number(args.days || 0) && !Number(args.hours || 0)) || !Number(args.limit || 0)) {
     printJsonError(
       'comments:execute',
       RESULT_CODES.INVALID_ARGUMENTS,
-      'comments:execute 必须手动输入采集天数和最大条数限制，例如：comments:execute --days 7 --limit 50',
+      'comments:execute 必须手动输入采集时间范围和最大条数限制，例如：comments:execute --hours 6 --limit 50 或 comments:execute --days 7 --limit 50',
       { recoverable: false }
     );
     return;
   }
 
   runMigrations();
-  const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: args.limit, days: args.days });
+  const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: args.limit, days: args.days, hours: args.hours });
   loaded = { items: buildWorkCommentItemsFromDbRows(rows) };
   console.log(`[comments:execute] loaded pending comments from db: ${loaded.items.length}`);
 

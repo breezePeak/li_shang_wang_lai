@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveNotificationEventTime,
+  isNotificationOutsideWindow,
   isNotificationOlderThanDays,
 } from '../../src/cli/scan-interactions.mjs';
 
@@ -53,5 +54,19 @@ describe('scan interactions notification time window', () => {
 
     expect(result.older).toBe(false);
     expect(result.source).toBe('unknown');
+  });
+
+  it('支持按小时窗口判断通知是否超窗', () => {
+    const nowMs = Date.UTC(2026, 5, 11, 12, 0, 0);
+    const threeHoursAgoSec = Math.floor((nowMs - 3 * 3600000) / 1000);
+
+    const result = isNotificationOutsideWindow({
+      eventTimestamp: threeHoursAgoSec,
+      timeText: '刚刚',
+    }, { hours: 2 }, { nowMs });
+
+    expect(result.older).toBe(true);
+    expect(result.outsideWindow).toBe(true);
+    expect(result.source).toBe('create_time');
   });
 });

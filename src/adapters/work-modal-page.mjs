@@ -1373,9 +1373,12 @@ export async function findCommentInWorkModal(page, item, { maxScrolls = 10 } = {
   }
 }
 
-export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alreadyRepliedKeys = new Set(), selfNickname = '', maxAgeDays = null, oldCommentStopCount = 3 } = {}) {
+export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alreadyRepliedKeys = new Set(), selfNickname = '', maxAgeDays = null, maxAgeHours = null, oldCommentStopCount = 3 } = {}) {
   const allComments = [];
-  const cutoffMs = maxAgeDays ? Date.now() - maxAgeDays * 86400000 : null;
+  const cutoffMs = Number(maxAgeHours) > 0
+    ? Date.now() - Number(maxAgeHours) * 3600000
+    : (Number(maxAgeDays) > 0 ? Date.now() - Number(maxAgeDays) * 86400000 : null);
+  const windowLabel = Number(maxAgeHours) > 0 ? `${Number(maxAgeHours)} 小时` : (Number(maxAgeDays) > 0 ? `${Number(maxAgeDays)} 天` : '');
 
   const isOlderThanWindow = (comment) => {
     if (!cutoffMs || !comment.eventTimeText) return false;
@@ -1504,7 +1507,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
     result.comments.forEach(c => console.error(`  [${c.commentKey}] actor="${c.actorName}" isSelf=${c.isSelfComment} hasReply=${c.hasMyReply} text="${c.commentText.slice(0, 40)}"`));
 
     if (hasConsecutiveOldAtTail()) {
-      console.error(`[work-modal] 连续 ${oldCommentStopCount} 条评论超过 ${maxAgeDays} 天，停止该作品评论采集`);
+      console.error(`[work-modal] 连续 ${oldCommentStopCount} 条评论超过 ${windowLabel}，停止该作品评论采集`);
     } else if (result.canScroll) {
       for (let s = 0; s < maxScrolls; s++) {
         const scrolled = await page.evaluate(() => {
@@ -1571,7 +1574,7 @@ export async function findUnrepliedCommentsInModal(page, { maxScrolls = 50, alre
         }
 
         if (hasConsecutiveOldAtTail()) {
-          console.error(`[work-modal] 连续 ${oldCommentStopCount} 条评论超过 ${maxAgeDays} 天，停止该作品评论采集`);
+          console.error(`[work-modal] 连续 ${oldCommentStopCount} 条评论超过 ${windowLabel}，停止该作品评论采集`);
           break;
         }
 

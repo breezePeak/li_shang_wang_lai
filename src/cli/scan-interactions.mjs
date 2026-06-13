@@ -25,6 +25,7 @@ import {
   createOrUpdateReturnVisitTasksFromItems,
   listReturnVisitScanTasks,
 } from '../services/return-visit-task-service.mjs';
+import { resolveTimeWindow } from '../utils/time-window.mjs';
 
 async function runCommentScan(page, run) {
   console.error('[scan] === 评论扫描 ===');
@@ -171,10 +172,12 @@ export function resolveNotificationEventTime(notification = {}, { nowMs = Date.n
   };
 }
 
-export function isNotificationOlderThanDays(notification = {}, days, { nowMs = Date.now() } = {}) {
-  if (!Number(days)) {
+export function isNotificationOutsideWindow(notification = {}, { days = null, hours = null } = {}, { nowMs = Date.now() } = {}) {
+  const timeWindow = resolveTimeWindow({ days, hours });
+  if (!timeWindow) {
     return {
       older: false,
+      outsideWindow: false,
       eventMs: 0,
       source: 'disabled',
       detail: '',
@@ -185,14 +188,20 @@ export function isNotificationOlderThanDays(notification = {}, days, { nowMs = D
   if (!(resolved.eventMs > 0)) {
     return {
       older: false,
+      outsideWindow: false,
       ...resolved,
     };
   }
 
   return {
-    older: resolved.eventMs < nowMs - Number(days) * 86400000,
+    older: resolved.eventMs < timeWindow.sinceMs,
+    outsideWindow: resolved.eventMs < timeWindow.sinceMs,
     ...resolved,
   };
+}
+
+export function isNotificationOlderThanDays(notification = {}, days, context = {}) {
+  return isNotificationOutsideWindow(notification, { days }, context);
 }
 
 function buildNotificationFallbackKey(n) {
@@ -262,13 +271,13 @@ function buildCommentKey({ workId, modalId, comment }) {
   return stableHash(raw);
 }
 
-function buildDedupeContext(days) {
+function buildDedupeContext({ days = null, hours = null } = {}) {
   const notificationKeys = new Set();
   const workKeys = new Set();
   const commentKeys = new Set();
   const commentWorkHints = new Map();
 
-  for (const row of listEventsForDedupe({ days })) {
+  for (const row of listEventsForDedupe({ days, hours })) {
     if (row.platform_event_id) notificationKeys.add(row.platform_event_id);
     if (row.notification_item_key) notificationKeys.add(row.notification_item_key);
     if (row.fingerprint) notificationKeys.add(row.fingerprint);
@@ -282,14 +291,14 @@ function buildDedupeContext(days) {
     notificationKeys.add(fallback);
   }
 
-  for (const row of listWorksForDedupe({ days })) {
+  for (const row of listWorksForDedupe({ days, hours })) {
     if (row.work_id) workKeys.add(`work_id:${row.work_id}`);
     if (row.modal_id) workKeys.add(`modal_id:${row.modal_id}`);
     if (row.work_url) workKeys.add(`work_url:${row.work_url}`);
     if (row.thumbnail_key) workKeys.add(`thumbnail_key:${row.thumbnail_key}`);
   }
 
-  for (const row of listCommentsForDedupe({ days })) {
+  for (const row of listCommentsForDedupe({ days, hours })) {
     if (row.work_id) workKeys.add(`work_id:${row.work_id}`);
     if (row.modal_id) workKeys.add(`modal_id:${row.modal_id}`);
     if (row.comment_key) commentKeys.add(`${row.work_id || row.modal_id || '__unknown__'}:${row.comment_key}`);
@@ -432,7 +441,7 @@ async function restoreNotificationPanel(page, panelTools, panelBox) {
   }
 }
 
-async function collectCommentsFromNotificationWork(page, n, { sourceEventId, notificationDays, dedupeContext, runtimeCollectedWorkKeys }) {
+async function collectCommentsFromNotificationWork(page, n, { sourceEventId, notificationDays, notificationHours, dedupeContext, runtimeCollectedWorkKeys }) {
   const {
     waitForWorkModal,
     extractWorkModalContext,
@@ -653,6 +662,7 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
     alreadyRepliedKeys,
     selfNickname: context.authorName || '',
     maxAgeDays: notificationDays,
+    maxAgeHours: notificationHours,
     oldCommentStopCount: 3,
   });
   if (!commentsResult.ok) {
@@ -725,8 +735,8 @@ async function collectCommentsFromNotificationWork(page, n, { sourceEventId, not
   }
 }
 
-export function summarizePendingReplies({ days = null } = {}) {
-  const rows = listPendingCommentsGroupedByHomepageAndWork({ days });
+export function summarizePendingReplies({ days = null, hours = null } = {}) {
+  const rows = listPendingCommentsGroupedByHomepageAndWork({ days, hours });
   const homepageKeys = new Set();
   const workKeys = new Set();
   const missingHomepageWorkMap = new Map();
@@ -763,13 +773,13 @@ export function summarizePendingReplies({ days = null } = {}) {
   }
 
   console.error(`[scan] pending_reply_homepage_count=${homepageKeys.size} pending_reply_work_count=${workKeys.size} pending_reply_comment_count=${totalComments} skip_missing_author_profile_url=${skippedMissingHomepageWorkCount}`);
-  console.error('[scan] 待回评数据已入库；直接执行 comments:execute --days N --limit M');
+  console.error('[scan] 待回评数据已入库；直接执行 comments:execute --hours N --limit M，或继续使用 --days N');
   return {
     totalComments,
     workCount: workKeys.size,
     homepageCount: homepageKeys.size,
     skippedMissingHomepageWorkCount,
-    nextStep: 'npm run comments:execute -- --days N --limit M',
+    nextStep: 'npm run comments:execute -- --hours N --limit M',
   };
 }
 
@@ -781,7 +791,7 @@ function getVisitSourceType(event) {
   return 'other';
 }
 
-export function preparePendingVisitTasks(events, { days = null, maxCount = null, collectTypes = ['like', 'comment', 'reply', 'follow'] } = {}) {
+export function preparePendingVisitTasks(events, { days = null, hours = null, maxCount = null, collectTypes = ['like', 'comment', 'reply', 'follow'] } = {}) {
   const allowed = new Set((collectTypes || []).map(type => String(type || '').trim()).filter(Boolean));
   const stats = {
     skipDbDuplicate: 0,
@@ -871,6 +881,7 @@ export function preparePendingVisitTasks(events, { days = null, maxCount = null,
   // 从数据库全量查询所有符合扫描参数的待回访任务，不限定本轮 taskIds。
   const dbResult = listReturnVisitScanTasks({
     days,
+    hours,
     limit: Number(maxCount) > 0 ? maxCount : null,
   });
   stats.dbCandidate = dbResult.candidateCount;
@@ -912,16 +923,16 @@ export function preparePendingVisitTasks(events, { days = null, maxCount = null,
   };
 }
 
-function buildPostScanPendingSummaries(scanPlan, allEvents, { days }) {
+function buildPostScanPendingSummaries(scanPlan, allEvents, { days, hours }) {
   const pendingReplySummary = scanPlan.prepareReplies
-    ? summarizePendingReplies({ days })
+    ? summarizePendingReplies({ days, hours })
     : null;
   if (!pendingReplySummary) {
     console.error('[scan] 本次计划不查询待回评评论');
   }
 
   const pendingVisitSummary = scanPlan.prepareVisits
-    ? preparePendingVisitTasks(allEvents, { days, collectTypes: scanPlan.collectTypes })
+    ? preparePendingVisitTasks(allEvents, { days, hours, collectTypes: scanPlan.collectTypes })
     : null;
   if (!pendingVisitSummary) {
     console.error('[scan] 本次计划不准备待回访任务');
@@ -949,8 +960,9 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
   const wantLikes = (type === 'all' || type === 'like');
   const wantReplies = (type === 'all' || type === 'reply');
   const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
+  const notificationHours = Number(run.options?.hours || 0) > 0 ? Number(run.options.hours) : null;
   const maxScrollRounds = Number(scanPlan.maxScrollRounds || 100);
-  const dedupeContext = buildDedupeContext(notificationDays);
+  const dedupeContext = buildDedupeContext({ days: notificationDays, hours: notificationHours });
   const processedNoticeIds = new Set();
   const allEvents = [];
   const ambiguousEvents = [];
@@ -999,18 +1011,19 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       return { counted: false };
     }
 
-    if (notificationDays && (normalized.eventType === 'comment' || normalized.eventType === 'like' || normalized.eventType === 'reply')) {
-      const timeCheck = isNotificationOlderThanDays(normalized, notificationDays);
+    if ((notificationDays || notificationHours) && (normalized.eventType === 'comment' || normalized.eventType === 'like' || normalized.eventType === 'reply')) {
+      const timeCheck = isNotificationOutsideWindow(normalized, { days: notificationDays, hours: notificationHours });
       if (timeCheck.older) {
         consecutiveOldRelevantCount++;
+        const windowLabel = notificationHours ? `${notificationHours} 小时` : `${notificationDays} 天`;
         logApiNotificationSkip(
           notificationIndex,
           normalized,
-          `超过 ${notificationDays} 天时间窗口 ${timeCheck.detail}`,
+          `超过 ${windowLabel} 时间窗口 ${timeCheck.detail}`,
           notificationId
         );
         if (consecutiveOldRelevantCount >= 3) {
-          console.error(`[scan] 连续 3 条评论/点赞通知超过 ${notificationDays} 天，停止继续滚动`);
+          console.error(`[scan] 连续 3 条评论/点赞通知超过 ${windowLabel}，停止继续滚动`);
           return { counted: false, stop: 'old-relevant' };
         }
         return { counted: false };
@@ -1237,7 +1250,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
         if (result?.counted) roundProcessed++;
         if (result?.stop === 'old-relevant') {
           scrollRounds = round;
-          const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays });
+          const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays, hours: notificationHours });
           if (!run.options?.keepOpen) await closeNotificationPanel(page);
           return success({
             inserted: totalInserted,
@@ -1312,7 +1325,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       await closeNotificationPanel(page);
     }
 
-    const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays });
+    const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays, hours: notificationHours });
 
     console.error(
       `[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalAmbiguousCount} 歧义 | ` +
@@ -1450,11 +1463,12 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
   const wantReplies = (type === 'all' || type === 'reply');
   const wantFollows = (type === 'all' || type === 'follow');
   const notificationDays = Number(run.options?.days || 0) > 0 ? Number(run.options.days) : null;
-  const dedupeContext = buildDedupeContext(notificationDays);
+  const notificationHours = Number(run.options?.hours || 0) > 0 ? Number(run.options.hours) : null;
+  const dedupeContext = buildDedupeContext({ days: notificationDays, hours: notificationHours });
   console.error(
     `[scan] 去重上下文: notifications=${dedupeContext.notificationKeys.size} ` +
-    `works=${dedupeContext.workKeys.size} comments=${dedupeContext.commentKeys.size}` +
-    (notificationDays ? ` days=${notificationDays}` : '')
+      `works=${dedupeContext.workKeys.size} comments=${dedupeContext.commentKeys.size}` +
+      (notificationHours ? ` hours=${notificationHours}` : (notificationDays ? ` days=${notificationDays}` : ''))
   );
 
   let totalInserted = 0;
@@ -1557,18 +1571,19 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
         }
 
         const isRelevantEvent = n.eventType === 'comment' || n.eventType === 'like';
-        const timeCheck = notificationDays && isRelevantEvent
-          ? isNotificationOlderThanDays(n, notificationDays)
+        const timeCheck = (notificationDays || notificationHours) && isRelevantEvent
+          ? isNotificationOutsideWindow(n, { days: notificationDays, hours: notificationHours })
           : { older: false, detail: '' };
-        if (isRelevantEvent && notificationDays) {
+        if (isRelevantEvent && (notificationDays || notificationHours)) {
           if (timeCheck.older) {
             consecutiveOldRelevantCount++;
+            const windowLabel = notificationHours ? `${notificationHours} 小时` : `${notificationDays} 天`;
             if (consecutiveOldRelevantCount >= 3) {
-              console.error(`[scan]   连续 ${consecutiveOldRelevantCount} 条评论/点赞通知超过 ${notificationDays} 天，停止继续滚动`);
+              console.error(`[scan]   连续 ${consecutiveOldRelevantCount} 条评论/点赞通知超过 ${windowLabel}，停止继续滚动`);
               stopDueToOldRelevant = true;
               break;
             }
-            logNotificationSkip(notificationIndex, n, `超过 ${notificationDays} 天时间窗口 (${timeCheck.detail})`, notificationDedupeKey);
+            logNotificationSkip(notificationIndex, n, `超过 ${windowLabel} 时间窗口 (${timeCheck.detail})`, notificationDedupeKey);
             continue;
           }
           consecutiveOldRelevantCount = 0;
@@ -1750,6 +1765,7 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
           const collectResult = await collectCommentsFromNotificationWork(page, n, {
             sourceEventId: result.eventId || null,
             notificationDays,
+            notificationHours,
             dedupeContext,
             runtimeCollectedWorkKeys,
           });
@@ -1829,7 +1845,7 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
     await closeNotificationPanel(page);
   }
 
-  const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays });
+  const { pendingReplySummary, pendingVisitSummary } = buildPostScanPendingSummaries(scanPlan, allEvents, { days: notificationDays, hours: notificationHours });
 
   console.error(`[scan] 通知扫描完成: ${totalInserted} 条入库 | ${totalDuplicateCount} 重复 | ${totalEnrichedCount} 补全信息 | ${totalAmbiguousCount} 歧义 | ${totalProfileResolved} 主页已解析 | ${totalProfileUnresolved} 主页未解析 | work_comments ${totalWorkCommentInserted} 新增/${totalWorkCommentEnriched} 补全/${totalWorkCommentDuplicate} 重复 | ${parseFailedCount} 条解析失败 | ${scrollRounds} 轮滚动`);
   return success({
@@ -1861,6 +1877,7 @@ async function main() {
   const pauseAfterOpen = pauseIdx >= 0 ? parseInt(remaining[pauseIdx + 1], 10) || 0 : 0;
   const debugNotificationDom = remaining.includes('--debug-notification-dom');
   const hasExplicitDays = argv.includes('--days');
+  const hasExplicitHours = argv.includes('--hours');
   const collectTypesIdx = remaining.indexOf('--collect-types');
   const collectTypes = collectTypesIdx >= 0 && remaining[collectTypesIdx + 1]
     ? remaining[collectTypesIdx + 1].split(',').map(type => type.trim()).filter(Boolean)
@@ -1884,8 +1901,8 @@ async function main() {
     prepareReplies: displayOnly ? false : (explicitPrepareReplies || noExplicitPrepareFlags),
     prepareVisits: displayOnly ? false : (explicitPrepareVisits || noExplicitPrepareFlags),
   };
-  if ((scanPlan.prepareReplies || scanPlan.prepareVisits) && !hasExplicitDays) {
-    const message = '查询待回评或待回访范围必须手动输入采集天数，例如：interactions:scan --days 7';
+  if ((scanPlan.prepareReplies || scanPlan.prepareVisits) && !hasExplicitDays && !hasExplicitHours) {
+    const message = '查询待回评或待回访范围必须手动输入采集时间范围，例如：interactions:scan --hours 6 或 interactions:scan --days 7';
     if (options.json) {
       printJsonError('interactions:scan', RESULT_CODES.INVALID_ARGUMENTS, message, { recoverable: false });
     } else {

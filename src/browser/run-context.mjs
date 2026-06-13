@@ -31,6 +31,7 @@ const DEFAULT_OPTIONS = {
   replyMaxLength: 40,
   revisitLikeOnly: true,
   days: 7,
+  hours: null,
   writeRunFiles: false,
 };
 
@@ -126,6 +127,12 @@ export function parseCommonArgs(argv) {
     if (arg === '--days' && i + 1 < argv.length) {
       const n = parseInt(argv[++i]);
       options.days = isNaN(n) || n < 1 ? null : n;
+      continue;
+    }
+
+    if (arg === '--hours' && i + 1 < argv.length) {
+      const n = parseInt(argv[++i]);
+      options.hours = isNaN(n) || n < 1 ? null : n;
       continue;
     }
 

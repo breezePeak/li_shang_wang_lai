@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { getDb } from '../db/database.mjs';
+import { resolveTimeWindow } from '../utils/time-window.mjs';
 import { normalizeDouyinUrl } from '../utils/douyin-url.mjs';
 
 export const RETURN_VISIT_STATUS = Object.freeze({
@@ -634,6 +635,7 @@ export function listReturnVisitTasksByIds(taskIds = []) {
 
 export function listReturnVisitPendingPrepareTasksByIds(taskIds = [], {
   days = null,
+  hours = null,
   limit = null,
   maxRetryCount = 2,
 } = {}) {
@@ -660,8 +662,8 @@ export function listReturnVisitPendingPrepareTasksByIds(taskIds = [], {
   `).all(...ids, maxRetryCount);
 
   const statusSet = new Set(RETURN_VISIT_SCAN_STATUS);
-  const nowMs = Date.now();
-  const minUpdatedAtMs = Number(days || 0) > 0 ? nowMs - Number(days) * 86400000 : null;
+  const timeWindow = resolveTimeWindow({ days, hours });
+  const minUpdatedAtMs = timeWindow?.sinceMs ?? null;
   let filteredStatusCount = 0;
   let filteredDaysCount = 0;
   const tasks = [];
@@ -700,20 +702,22 @@ export function listReturnVisitPendingPrepareTasksByIds(taskIds = [], {
  * 也不输出 done / skipped_* / failed_like / failed_comment 等终态。
  *
  * @param {Object} options
- * @param {number|null} options.days - 时间窗口（天），基于 updated_at，>0 生效
+ * @param {number|null} options.days - 时间窗口（天），基于 updated_at，>0 生效；若同时传 hours，则 hours 优先
+ * @param {number|null} options.hours - 时间窗口（小时），基于 updated_at，>0 生效
  * @param {number} options.limit - 最大输出条数
  * @param {number} options.maxRetryCount - 最大重试次数
  * @returns {{ tasks: Array, candidateCount: number, filteredStatusCount: number, filteredDaysCount: number }}
  */
 export function listReturnVisitScanTasks({
   days = null,
+  hours = null,
   limit = null,
   maxRetryCount = 2,
 } = {}) {
   const db = getDb();
   const statusSet = new Set(RETURN_VISIT_SCAN_STATUS);
-  const nowMs = Date.now();
-  const minUpdatedAtMs = Number(days || 0) > 0 ? nowMs - Number(days) * 86400000 : null;
+  const timeWindow = resolveTimeWindow({ days, hours });
+  const minUpdatedAtMs = timeWindow?.sinceMs ?? null;
 
   const allRows = db.prepare(`
     SELECT *

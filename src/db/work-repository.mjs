@@ -1,4 +1,5 @@
 import { getDb } from './database.mjs';
+import { resolveTimeWindowSinceIso } from '../utils/time-window.mjs';
 
 export function upsertWorkContext(workContext) {
   const db = getDb();
@@ -106,15 +107,15 @@ export function listRecentlySeenWorks(limit = 20) {
 
 export function listWorksForDedupe(options = {}) {
   const db = getDb();
-  const { days = null, limit = 2000 } = options;
+  const { limit = 2000 } = options;
   const params = [];
   let sql = `
     SELECT id, work_id, modal_id, work_url, thumbnail_key, last_seen_at
     FROM works
     WHERE 1=1
   `;
-  if (Number(days) > 0) {
-    const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
+  const since = resolveTimeWindowSinceIso(options);
+  if (since) {
     sql += ' AND last_seen_at >= ?';
     params.push(since);
   }
