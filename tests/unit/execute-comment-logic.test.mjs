@@ -775,6 +775,69 @@ describe('comments:execute single-pass per work', () => {
     expect(collectCandidates.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('回评提交 API 成功时直接判定 succeeded，不再依赖 DOM 回显', async () => {
+    const listeners = new Map();
+    const page = {
+      keyboard: { press: vi.fn(async () => {}) },
+      waitForTimeout: vi.fn(async () => {}),
+      on: vi.fn((event, handler) => {
+        if (!listeners.has(event)) listeners.set(event, new Set());
+        listeners.get(event).add(handler);
+      }),
+      off: vi.fn((event, handler) => {
+        listeners.get(event)?.delete(handler);
+      }),
+    };
+
+    const collectCandidates = vi.fn(async () => ({
+      ok: true,
+      candidates: [
+        { domIndex: 0, cid: 'A', actorName: 'u1', commentText: 'A', timeText: '', hasReplyButton: true },
+      ],
+    }));
+    const openMatchedReplyBox = vi.fn(async () => ({ ok: true }));
+    const fillReply = vi.fn(async () => ({ ok: true }));
+    const clickSend = vi.fn(async () => {
+      const response = {
+        url: () => 'https://www.douyin.com/aweme/v1/web/comment/publish/',
+        status: () => 200,
+        json: async () => ({ status_code: 0, comment: { cid: 'reply-cid-1' } }),
+        request: () => ({
+          method: () => 'POST',
+          postData: () => 'text=Hermes代看后觉得这条回复可以直接算成功',
+        }),
+      };
+      for (const handler of listeners.get('response') || []) {
+        await handler(response);
+      }
+      return { ok: true };
+    });
+    const verifyReply = vi.fn(async () => ({ ok: false, message: 'dom should not be used after api success' }));
+    const saveSucceeded = vi.fn();
+
+    const results = await executeSinglePassForWorkGroup(page, [
+      { commentId: 1, replyText: 'Hermes代看后觉得这条回复可以直接算成功', targetCommentId: 'A', actorName: 'u1', commentText: 'A' },
+    ], { getByCid: () => null, getStats: () => ({ hasMore: 1 }) }, {
+      collectCandidates,
+      scrollOnce: vi.fn(async () => ({ ok: true })),
+      openMatchedReplyBox,
+      fillReply,
+      clickSend,
+      verifyReply,
+      saveSucceeded,
+      saveBlocked: vi.fn(),
+      saveSentUnverified: vi.fn(),
+      onResult: vi.fn(),
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(true);
+    expect(results[0].status).toBe('succeeded');
+    expect(results[0].matchedBy).toBe('submit_api_success');
+    expect(verifyReply).not.toHaveBeenCalled();
+    expect(saveSucceeded).toHaveBeenCalledTimes(1);
+  });
+
   it('not_unique 会阻断当前项，但无 cid 的 actor_not_verified 会继续往下找其他 pending', async () => {
     const page = createFakePage();
     let round = 0;

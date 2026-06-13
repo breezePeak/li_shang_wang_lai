@@ -34,6 +34,7 @@ import {
   waitForWorkModal,
   verifyWorkReplyVisible,
 } from '../adapters/work-modal-page.mjs';
+import { createCommentSubmitApiWatcher } from '../adapters/comment-submit-api-listener.mjs';
 import { createCommentListApiCollector } from '../adapters/comment-list-api-listener.mjs';
 import { closeCurrentWorkModalToProfile, openProfileWorkByAwemeIdFromPostApi } from '../services/return-visit-work-collector.mjs';
 import { writeFileSync, mkdirSync } from 'fs';
@@ -688,6 +689,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
   saveManuallyReplied = (item, reason) => {
     markCommentManuallyReplied(item.commentId, reason);
   },
+  createSubmitWatcher = (currentPage, expectedText) => createCommentSubmitApiWatcher(currentPage, { expectedText }),
   onResult = () => {},
 } = {}) {
   const currentWork = group[0] || {};
@@ -780,33 +782,42 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
         continue;
       }
 
-      const sent = await clickSend(page);
-      if (!sent.ok) {
-        const reason = sent.message || sent.code || 'send_failed';
-        saveRetryable(nextAction.item, `send_failed:${reason}`);
-        pendingMap.delete(nextAction.item.commentId);
-        progressedInViewport = true;
-        const result = { ...nextAction.item, ok: false, status: 'pending', error: reason };
-        localResults.push(result);
-        onResult(result);
-        console.log(`[comments:execute] pending_retry commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
-        continue;
-      }
+      const submitWatcher = createSubmitWatcher(page, nextAction.item.replyText);
+      let apiConfirmed = null;
+      try {
+        const sent = await clickSend(page);
+        if (!sent.ok) {
+          const reason = sent.message || sent.code || 'send_failed';
+          saveRetryable(nextAction.item, `send_failed:${reason}`);
+          pendingMap.delete(nextAction.item.commentId);
+          progressedInViewport = true;
+          const result = { ...nextAction.item, ok: false, status: 'pending', error: reason };
+          localResults.push(result);
+          onResult(result);
+          console.log(`[comments:execute] pending_retry commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
+          continue;
+        }
 
-      const verified = await verifyReply(page, {
-        commentText: nextAction.target.commentText,
-        actorName: nextAction.target.actorName,
-      }, nextAction.item.replyText, { timeoutMs: 20000 });
-      if (!verified.ok) {
-        const reason = verified.message || verified.code || 'send_unverified';
-        saveSentUnverified(nextAction.item, reason);
-        pendingMap.delete(nextAction.item.commentId);
-        progressedInViewport = true;
-        const result = { ...nextAction.item, ok: false, status: 'sent_unverified', error: reason };
-        localResults.push(result);
-        onResult(result);
-        console.log(`[comments:execute] sent_unverified commentId=${nextAction.item.commentId} pending=${pendingMap.size}`);
-        continue;
+        apiConfirmed = await submitWatcher.waitForSuccess({ timeoutMs: 2500 });
+        if (!apiConfirmed) {
+          const verified = await verifyReply(page, {
+            commentText: nextAction.target.commentText,
+            actorName: nextAction.target.actorName,
+          }, nextAction.item.replyText, { timeoutMs: 20000 });
+          if (!verified.ok) {
+            const reason = verified.message || verified.code || 'send_unverified';
+            saveSentUnverified(nextAction.item, reason);
+            pendingMap.delete(nextAction.item.commentId);
+            progressedInViewport = true;
+            const result = { ...nextAction.item, ok: false, status: 'sent_unverified', error: reason };
+            localResults.push(result);
+            onResult(result);
+            console.log(`[comments:execute] sent_unverified commentId=${nextAction.item.commentId} pending=${pendingMap.size}`);
+            continue;
+          }
+        }
+      } finally {
+        submitWatcher.stop();
       }
 
       saveSucceeded(nextAction.item);
@@ -818,7 +829,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
         ok: true,
         status: 'succeeded',
         mode: 'execute',
-        matchedBy: nextAction.picked.matchedBy,
+        matchedBy: apiConfirmed ? 'submit_api_success' : nextAction.picked.matchedBy,
       };
       localResults.push(result);
       onResult(result);
