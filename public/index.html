@@ -75,6 +75,57 @@
           <p>左侧只负责选阶段，右侧把作品推进和详情查看拆成更清晰的双层滑移关系。</p>
         </div>
         <div id="graph-root" class="graph-root"></div>
+
+        <section class="ops-overview">
+          <div class="overview-head">
+            <div>
+              <span class="section-kicker">Overview Boards</span>
+              <h2>扫描 / 回评 / 回访总览</h2>
+            </div>
+            <p>先从批次和队列看全局，再点击行直接钻进对应详情。</p>
+          </div>
+
+          <div class="overview-grid">
+            <article class="overview-card">
+              <div class="overview-card-head">
+                <div>
+                  <span class="lane-tag">Scan Schedule</span>
+                  <h3>扫描时间表</h3>
+                </div>
+                <span id="scan-schedule-count">0 批</span>
+              </div>
+              <div class="overview-table-wrap">
+                <div class="overview-table" id="scan-schedule-table"></div>
+              </div>
+            </article>
+
+            <article class="overview-card">
+              <div class="overview-card-head">
+                <div>
+                  <span class="lane-tag">Reply Board</span>
+                  <h3>回评概览</h3>
+                </div>
+                <span id="reply-board-count">0 项</span>
+              </div>
+              <div class="overview-table-wrap">
+                <div class="overview-table" id="reply-overview-table"></div>
+              </div>
+            </article>
+
+            <article class="overview-card">
+              <div class="overview-card-head">
+                <div>
+                  <span class="lane-tag">Visit Board</span>
+                  <h3>回访概览</h3>
+                </div>
+                <span id="visit-board-count">0 项</span>
+              </div>
+              <div class="overview-table-wrap">
+                <div class="overview-table" id="visit-overview-table"></div>
+              </div>
+            </article>
+          </div>
+        </section>
       </section>
 
       <aside id="stage-drawer" class="stage-drawer">

@@ -6,10 +6,12 @@ let statsData = {};
 let reviewTasks = [];
 let pendingComments = [];
 let unhandledEvents = [];
+let scanSchedules = [];
 let selectedStageId = null;
 let selectedWorkKey = null;
 
 const STAGE_IDS = {
+  SCAN_SCHEDULES: 'scanSchedules',
   COLLECT: 'collect',
   REPLIES: 'replies',
   REPLY_PENDING: 'replyPending',
@@ -29,7 +31,7 @@ const STAGE_IDS = {
 async function initApp() {
   bindEvents();
   await refreshAll();
-  window.setInterval(fetchStatsAndRefreshHeader, 10000);
+  window.setInterval(refreshAll, 10000);
 }
 
 function bindEvents() {
@@ -49,19 +51,14 @@ function bindEvents() {
 async function refreshAll() {
   await Promise.all([
     fetchStats(),
+    fetchScanSchedules(),
     fetchReviewTasks(),
     fetchPendingComments(),
     fetchUnhandledEvents(),
   ]);
   renderHeaderStats();
   renderFlowGraph();
-  renderDrawer();
-}
-
-async function fetchStatsAndRefreshHeader() {
-  await fetchStats();
-  renderHeaderStats();
-  renderFlowGraph();
+  renderOpsBoards();
   renderDrawer();
 }
 
@@ -72,6 +69,16 @@ async function fetchStats() {
     if (json.ok) statsData = json.data || {};
   } catch (err) {
     console.error('获取统计失败:', err);
+  }
+}
+
+async function fetchScanSchedules() {
+  try {
+    const res = await fetch('/api/scan-schedules?limit=40');
+    const json = await res.json();
+    if (json.ok) scanSchedules = json.data || [];
+  } catch (err) {
+    console.error('获取扫描批次失败:', err);
   }
 }
 
@@ -294,6 +301,121 @@ function renderFlowGraph() {
   `;
 }
 
+function renderOpsBoards() {
+  renderScanScheduleBoard();
+  renderReplyOverviewBoard();
+  renderVisitOverviewBoard();
+}
+
+function renderScanScheduleBoard() {
+  setText('scan-schedule-count', `${scanSchedules.length} 批`);
+  const el = document.getElementById('scan-schedule-table');
+  if (!el) return;
+  if (!scanSchedules.length) {
+    el.innerHTML = '<div class="overview-empty">暂时还没有扫描批次数据。</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="overview-table-head">
+      <span>批次</span>
+      <span>通知</span>
+      <span>待回评</span>
+      <span>待回访</span>
+    </div>
+    ${scanSchedules.slice(0, 8).map((batch) => `
+      <button class="overview-row scan-accent" onclick="openScanBatch('${encodeURIComponent(batch.key)}')">
+        <div>
+          <strong>${escapeHtml(formatTime(batch.scannedStartAt) || batch.key)}</strong>
+          <span>${escapeHtml(formatTimeRange(batch.eventWindowStartAt, batch.eventWindowEndAt))}</span>
+        </div>
+        <div>
+          <strong class="overview-cell-count">${batch.totalEvents || 0}</strong>
+          <small>${escapeHtml(renderEventTypeSummary(batch))}</small>
+        </div>
+        <div>
+          <strong class="overview-cell-count">${batch.pendingReplies || 0}</strong>
+          <small>共 ${batch.linkedReplyCount || 0} 条回评</small>
+        </div>
+        <div>
+          <strong class="overview-cell-count">${batch.pendingVisits || 0}</strong>
+          <small>共 ${batch.linkedVisitCount || 0} 条回访</small>
+        </div>
+      </button>
+    `).join('')}
+  `;
+}
+
+function renderReplyOverviewBoard() {
+  const rows = buildReplyBoardRows();
+  setText('reply-board-count', `${rows.length} 项`);
+  const el = document.getElementById('reply-overview-table');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="overview-table-head">
+      <span>阶段</span>
+      <span>评论</span>
+      <span>作品</span>
+      <span>最新</span>
+    </div>
+    ${rows.map((row) => `
+      <button class="overview-row reply-accent" onclick="openBoardStage('${row.stageId}')">
+        <div>
+          <strong class="overview-status">${escapeHtml(row.label)}</strong>
+          <span>${escapeHtml(row.helper)}</span>
+        </div>
+        <div>
+          <strong class="overview-cell-count">${row.count}</strong>
+          <small>${escapeHtml(row.secondary)}</small>
+        </div>
+        <div>
+          <strong>${row.workCount}</strong>
+          <small>按作品聚合</small>
+        </div>
+        <div>
+          <strong>${escapeHtml(row.latest || '--')}</strong>
+          <small>最近入列</small>
+        </div>
+      </button>
+    `).join('')}
+  `;
+}
+
+function renderVisitOverviewBoard() {
+  const rows = buildVisitBoardRows();
+  setText('visit-board-count', `${rows.length} 项`);
+  const el = document.getElementById('visit-overview-table');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="overview-table-head">
+      <span>阶段</span>
+      <span>任务</span>
+      <span>对象</span>
+      <span>最新</span>
+    </div>
+    ${rows.map((row) => `
+      <button class="overview-row visit-accent" onclick="openBoardStage('${row.stageId}')">
+        <div>
+          <strong class="overview-status">${escapeHtml(row.label)}</strong>
+          <span>${escapeHtml(row.helper)}</span>
+        </div>
+        <div>
+          <strong class="overview-cell-count">${row.count}</strong>
+          <small>${escapeHtml(row.secondary)}</small>
+        </div>
+        <div>
+          <strong>${row.groupCount}</strong>
+          <small>${escapeHtml(row.groupLabel)}</small>
+        </div>
+        <div>
+          <strong>${escapeHtml(row.latest || '--')}</strong>
+          <small>最近推进</small>
+        </div>
+      </button>
+    `).join('')}
+  `;
+}
+
 function renderLane(stageList) {
   return stageList.map((stage, index) => {
     const connector = index < stageList.length - 1
@@ -332,6 +454,17 @@ function renderNode(stage, isRoot = false, isCompact = false) {
 window.selectStage = function selectStage(stageId) {
   selectedStageId = stageId;
   selectedWorkKey = null;
+  renderFlowGraph();
+  renderDrawer();
+};
+
+window.openBoardStage = function openBoardStage(stageId) {
+  window.selectStage(stageId);
+};
+
+window.openScanBatch = function openScanBatch(encodedKey) {
+  selectedStageId = STAGE_IDS.SCAN_SCHEDULES;
+  selectedWorkKey = decodeURIComponent(encodedKey);
   renderFlowGraph();
   renderDrawer();
 };
@@ -483,6 +616,8 @@ function renderWorkDetail(dataset, workGroup) {
 
 function buildStageDataset(stageId) {
   switch (stageId) {
+    case STAGE_IDS.SCAN_SCHEDULES:
+      return buildScanScheduleDataset();
     case STAGE_IDS.COLLECT:
       return {
         kicker: 'Collect',
@@ -592,6 +727,97 @@ function buildVisitDataset(kicker, title, tasks, events, mode) {
       { label: '完成数', value: reviewTasks.filter((task) => task.status === 'done').length, helper: '全局回访完成', tone: 'done' },
     ],
     groups,
+  };
+}
+
+function buildScanScheduleDataset() {
+  return {
+    kicker: 'Scan Schedule',
+    shortLabel: '扫描批次',
+    title: '扫描时间表',
+    subtitle: '每一批扫描都能反查到对应回评、回访和通知明细。',
+    listTitle: '扫描批次',
+    countUnit: '批扫描',
+    metrics: [
+      { label: '扫描批次', value: scanSchedules.length, helper: '按扫描秒级批次聚合', tone: 'gold' },
+      { label: '待回评', value: sumBy(scanSchedules, 'pendingReplies'), helper: '批次关联的待回评', tone: 'reply' },
+      { label: '待回访', value: sumBy(scanSchedules, 'pendingVisits'), helper: '批次关联的待回访', tone: 'visit' },
+      { label: '通知总量', value: sumBy(scanSchedules, 'totalEvents'), helper: '批次内通知入库数', tone: 'muted' },
+    ],
+    groups: buildScanScheduleGroups(),
+  };
+}
+
+function buildScanScheduleGroups() {
+  return scanSchedules.map((batch) => {
+    const items = []
+      .concat((batch.comments || []).map((comment) => ({ kind: 'comment', createdAt: comment.last_seen_at || comment.first_seen_at || '', data: comment })))
+      .concat((batch.tasks || []).map((task) => ({ kind: 'task', createdAt: task.updatedAt || task.createdAt || '', data: task })))
+      .concat((batch.events || []).map((event) => ({ kind: 'event', createdAt: event.created_at || event.scanned_at || '', data: event })));
+
+    return {
+      key: batch.key,
+      title: `${formatTime(batch.scannedStartAt) || batch.key} 扫描批次`,
+      subtitle: `${renderEventTypeSummary(batch)}，关联 ${batch.linkedReplyCount || 0} 条回评 / ${batch.linkedVisitCount || 0} 条回访`,
+      meta: formatTimeRange(batch.eventWindowStartAt, batch.eventWindowEndAt),
+      kindLabel: '扫描',
+      count: items.length,
+      items: items.sort(sortByCreatedDesc),
+    };
+  });
+}
+
+function buildReplyBoardRows() {
+  const rows = [
+    buildReplyBoardRow(STAGE_IDS.REPLY_PENDING, '待回评', pendingComments.filter((item) => item.reply_status === 'pending'), '等待自动或人工回复'),
+    buildReplyBoardRow(STAGE_IDS.REPLY_EXCEPTIONS, '回评异常', pendingComments.filter((item) => ['blocked', 'sent_unverified'].includes(item.reply_status)), '阻塞或发送未确认'),
+    buildReplyBoardRow(STAGE_IDS.REPLY_DONE, '回评成功', pendingComments.filter((item) => item.reply_status === 'succeeded'), '已经成功回评'),
+    buildReplyBoardRow(STAGE_IDS.REPLY_SKIPPED, '忽略回评', pendingComments.filter((item) => item.reply_status === 'skipped'), '本轮不再处理'),
+  ];
+  return rows;
+}
+
+function buildReplyBoardRow(stageId, label, comments, helper) {
+  return {
+    stageId,
+    label,
+    helper,
+    count: comments.length,
+    workCount: groupCommentsByWork(comments).length,
+    latest: formatTime(findLatestValue(comments, (item) => item.last_seen_at || item.first_seen_at || '')) || '--',
+    secondary: comments.length ? `占总回评 ${toPercent(comments.length, pendingComments.length)}` : '暂无记录',
+  };
+}
+
+function buildVisitBoardRows() {
+  const allVisitItems = reviewTasks.length + unhandledEvents.length;
+  const unhandled = unhandledEvents.slice();
+  const retry = getRetryVisitTasks();
+  const errors = getErrorVisitTasks();
+  const done = reviewTasks.filter((task) => task.status === 'done');
+  const skipped = getSkippedVisitTasks();
+  return [
+    buildVisitBoardRow(STAGE_IDS.VISIT_UNHANDLED, '未处理线索', unhandled, [], '还没转任务的互动线索', allVisitItems, '位好友'),
+    buildVisitBoardRow(STAGE_IDS.VISIT_RETRY, '待重试', [], retry, '收集内容或生成评论失败', allVisitItems, '位好友'),
+    buildVisitBoardRow(STAGE_IDS.EXECUTE_ERRORS, '回访异常', [], errors, '执行点赞 / 评论失败', allVisitItems, '位好友'),
+    buildVisitBoardRow(STAGE_IDS.VISIT_DONE, '回访成功', [], done, '点赞评论都已完成', allVisitItems, '位好友'),
+    buildVisitBoardRow(STAGE_IDS.VISIT_SKIPPED, '其他 / 已跳过', [], skipped, '无合适作品或主动跳过', allVisitItems, '位好友'),
+  ];
+}
+
+function buildVisitBoardRow(stageId, label, events, tasks, helper, baseCount, groupLabel) {
+  const groups = buildVisitActionGroups(tasks, events);
+  const latest = findLatestValue(tasks, (item) => item.updatedAt || item.createdAt || '')
+    || findLatestValue(events, (item) => item.created_at || '');
+  return {
+    stageId,
+    label,
+    helper,
+    count: tasks.length + events.length,
+    groupCount: groups.length,
+    groupLabel,
+    latest: formatTime(latest) || '--',
+    secondary: (tasks.length + events.length) ? `占总回访 ${toPercent(tasks.length + events.length, baseCount)}` : '暂无记录',
   };
 }
 
@@ -1173,6 +1399,47 @@ function renderLinkedReplies(replies) {
       <p>我的回复：${escapeHtml(reply.reply_text || '')}</p>
     </div>
   `).join('');
+}
+
+function renderEventTypeSummary(batch) {
+  const parts = [];
+  if (batch.totalComments) parts.push(`评论 ${batch.totalComments}`);
+  if (batch.totalLikes) parts.push(`点赞 ${batch.totalLikes}`);
+  if (batch.totalReplies) parts.push(`回复 ${batch.totalReplies}`);
+  if (batch.totalFollows) parts.push(`关注 ${batch.totalFollows}`);
+  return parts.join(' / ') || '暂无通知';
+}
+
+function formatTimeRange(start, end) {
+  const startText = formatTime(start);
+  const endText = formatTime(end);
+  if (startText && endText) {
+    return startText === endText ? startText : `${startText} - ${endText}`;
+  }
+  return startText || endText || '时间范围未知';
+}
+
+function findLatestValue(items, getter) {
+  let winner = '';
+  let winnerMs = 0;
+  for (const item of items || []) {
+    const value = getter(item);
+    const ms = parseDateValue(value);
+    if (ms >= winnerMs) {
+      winner = value;
+      winnerMs = ms;
+    }
+  }
+  return winner;
+}
+
+function sumBy(items, key) {
+  return (items || []).reduce((total, item) => total + Number(item?.[key] || 0), 0);
+}
+
+function toPercent(value, total) {
+  if (!total) return '0%';
+  return `${Math.round((value / total) * 100)}%`;
 }
 
 function renderEmpty(text) {

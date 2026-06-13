@@ -68,6 +68,43 @@ function loadLinkedReplies(db, sourceEventIds) {
   `).all(...ids);
 }
 
+function formatTaskRow(db, row) {
+  const sourceEventIds = parseJsonArray(row.source_event_ids_json);
+  return {
+    sourceEventIds,
+    sourceTypes: parseJsonArray(row.source_types_json),
+    id: row.id,
+    taskId: row.task_id,
+    identityKey: row.identity_key,
+    userName: row.user_name,
+    userProfileUrl: row.user_profile_url,
+    sourceType: row.source_type,
+    status: row.status,
+    targetWork: {
+      workId: row.target_work_id,
+      workUrl: row.target_work_url,
+      workTitle: row.target_work_title,
+      workText: row.target_work_text,
+      contentSummary: row.target_work_summary,
+      publishTime: row.target_work_publish_time,
+    },
+    generatedComment: row.generated_comment,
+    referenceComments: row.reference_comments_json ? safeJsonParse(row.reference_comments_json) : null,
+    sourceEvents: loadSourceEvents(db, sourceEventIds),
+    linkedReplies: loadLinkedReplies(db, sourceEventIds),
+    likeStatus: row.like_status,
+    commentStatus: row.comment_status,
+    retryCount: row.retry_count,
+    lastError: row.last_error,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function getScanBatchKey(scannedAt) {
+  return String(scannedAt || '').slice(0, 19);
+}
+
 app.use(express.json());
 // 映射前端静态页面存放的 public 目录
 app.use(express.static(path.join(__dirname, '../public')));
@@ -230,6 +267,108 @@ app.get('/api/unhandled-events', (req, res) => {
   }
 });
 
+app.get('/api/scan-schedules', (req, res) => {
+  try {
+    const db = getDb();
+    const limit = Math.min(120, Math.max(1, parseInt(req.query.limit, 10) || 30));
+    const events = db.prepare(`
+      SELECT
+        id, event_type, actor_name, actor_profile_url, relation,
+        my_work_title, comment_text, event_time_text, status, created_at, scanned_at,
+        target_work_id, target_work_url, platform_event_id, notification_item_key
+      FROM interaction_events
+      WHERE event_type IN ('like', 'comment', 'reply', 'follow')
+      ORDER BY scanned_at DESC, id DESC
+    `).all();
+
+    const comments = db.prepare(`
+      SELECT
+        wc.*,
+        COALESCE(w_by_work.work_url, w_by_modal.work_url, wc.work_url) AS joined_work_url,
+        COALESCE(w_by_work.work_title, w_by_modal.work_title) AS joined_work_title,
+        COALESCE(w_by_work.work_desc, w_by_modal.work_desc) AS joined_work_desc,
+        COALESCE(w_by_work.author_profile_url, w_by_modal.author_profile_url) AS joined_author_profile_url,
+        COALESCE(w_by_work.published_at, w_by_modal.published_at) AS joined_work_published_at
+      FROM work_comments wc
+      LEFT JOIN works w_by_work
+        ON wc.work_id IS NOT NULL
+        AND wc.work_id != ''
+        AND w_by_work.work_id = wc.work_id
+      LEFT JOIN works w_by_modal
+        ON (wc.work_id IS NULL OR wc.work_id = '' OR w_by_work.id IS NULL)
+        AND wc.modal_id IS NOT NULL
+        AND wc.modal_id != ''
+        AND w_by_modal.modal_id = wc.modal_id
+      ORDER BY wc.last_seen_at DESC, wc.id DESC
+    `).all();
+
+    const tasks = db.prepare(`
+      SELECT *
+      FROM return_visit_tasks
+      ORDER BY updated_at DESC, id DESC
+    `).all().map((row) => formatTaskRow(db, row));
+
+    const batches = new Map();
+    for (const event of events) {
+      const batchKey = getScanBatchKey(event.scanned_at || event.created_at);
+      const batch = batches.get(batchKey) || {
+        key: batchKey,
+        scannedStartAt: event.scanned_at || event.created_at || '',
+        scannedEndAt: event.scanned_at || event.created_at || '',
+        eventWindowStartAt: event.created_at || event.scanned_at || '',
+        eventWindowEndAt: event.created_at || event.scanned_at || '',
+        events: [],
+      };
+      batch.events.push(event);
+      if ((event.scanned_at || '') < batch.scannedStartAt) batch.scannedStartAt = event.scanned_at;
+      if ((event.scanned_at || '') > batch.scannedEndAt) batch.scannedEndAt = event.scanned_at;
+      if ((event.created_at || '') < batch.eventWindowStartAt) batch.eventWindowStartAt = event.created_at;
+      if ((event.created_at || '') > batch.eventWindowEndAt) batch.eventWindowEndAt = event.created_at;
+      batches.set(batchKey, batch);
+    }
+
+    const rows = Array.from(batches.values())
+      .sort((a, b) => String(b.scannedEndAt || '').localeCompare(String(a.scannedEndAt || '')))
+      .slice(0, limit)
+      .map((batch) => {
+        const eventIds = new Set(batch.events.map((event) => Number(event.id)).filter((id) => Number.isInteger(id) && id > 0));
+        const linkedComments = comments.filter((comment) => eventIds.has(Number(comment.source_event_id)));
+        const linkedTasks = tasks.filter((task) => task.sourceEventIds.some((id) => eventIds.has(Number(id))));
+        const statusCounts = {
+          pendingReplies: linkedComments.filter((item) => item.reply_status === 'pending').length,
+          exceptionReplies: linkedComments.filter((item) => ['blocked', 'sent_unverified'].includes(item.reply_status)).length,
+          succeededReplies: linkedComments.filter((item) => item.reply_status === 'succeeded').length,
+          pendingVisits: linkedTasks.filter((item) => !['done', 'skipped_no_work', 'skipped_private', 'skipped_no_suitable_work'].includes(item.status)).length,
+          completedVisits: linkedTasks.filter((item) => item.status === 'done').length,
+          failedVisits: linkedTasks.filter((item) => String(item.status || '').startsWith('failed')).length,
+        };
+
+        return {
+          key: batch.key,
+          scannedStartAt: batch.scannedStartAt,
+          scannedEndAt: batch.scannedEndAt,
+          eventWindowStartAt: batch.eventWindowStartAt,
+          eventWindowEndAt: batch.eventWindowEndAt,
+          totalEvents: batch.events.length,
+          totalComments: batch.events.filter((item) => item.event_type === 'comment').length,
+          totalLikes: batch.events.filter((item) => item.event_type === 'like').length,
+          totalReplies: batch.events.filter((item) => item.event_type === 'reply').length,
+          totalFollows: batch.events.filter((item) => item.event_type === 'follow').length,
+          linkedReplyCount: linkedComments.length,
+          linkedVisitCount: linkedTasks.length,
+          ...statusCounts,
+          events: batch.events,
+          comments: linkedComments,
+          tasks: linkedTasks,
+        };
+      });
+
+    res.json({ ok: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // 2. GET /api/revisit-tasks: 获取可执行/可重试/异常回访任务（支持分页）
 app.get('/api/revisit-tasks', (req, res) => {
   try {
@@ -253,35 +392,7 @@ app.get('/api/revisit-tasks', (req, res) => {
       LIMIT ? OFFSET ?
     `).all(...allowed, limit, offset);
 
-    const formatted = tasks.map(row => ({
-      sourceEventIds: parseJsonArray(row.source_event_ids_json),
-      sourceTypes: parseJsonArray(row.source_types_json),
-      id: row.id,
-      taskId: row.task_id,
-      identityKey: row.identity_key,
-      userName: row.user_name,
-      userProfileUrl: row.user_profile_url,
-      sourceType: row.source_type,
-      status: row.status,
-      targetWork: {
-        workId: row.target_work_id,
-        workUrl: row.target_work_url,
-        workTitle: row.target_work_title,
-        workText: row.target_work_text,
-        contentSummary: row.target_work_summary,
-        publishTime: row.target_work_publish_time,
-      },
-      generatedComment: row.generated_comment,
-      referenceComments: row.reference_comments_json ? safeJsonParse(row.reference_comments_json) : null,
-      sourceEvents: loadSourceEvents(db, parseJsonArray(row.source_event_ids_json)),
-      linkedReplies: loadLinkedReplies(db, parseJsonArray(row.source_event_ids_json)),
-      likeStatus: row.like_status,
-      commentStatus: row.comment_status,
-      retryCount: row.retry_count,
-      lastError: row.last_error,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    }));
+    const formatted = tasks.map((row) => formatTaskRow(db, row));
 
     res.json({ ok: true, data: formatted, page, limit, total, totalPages: Math.ceil(total / limit) });
   } catch (err) {
