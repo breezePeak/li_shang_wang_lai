@@ -331,7 +331,7 @@ function renderScanScheduleBoard() {
       <button class="overview-row scan-accent" onclick="openScanBatch('${encodeURIComponent(batch.key)}')">
         <div>
           <strong>${escapeHtml(formatTime(batch.scannedEndAt || batch.scannedStartAt) || batch.key)}</strong>
-          <span>${escapeHtml(formatNamedTimeRange(batch.scannedStartAt, batch.scannedEndAt))}</span>
+          <span>${escapeHtml(formatEndedAt(batch.scannedEndAt || batch.scannedStartAt))}</span>
         </div>
         <div>
           <strong class="overview-cell-count">${batch.totalEvents || 0}</strong>
@@ -366,7 +366,7 @@ function renderReplyOverviewBoard() {
       <button class="overview-row reply-accent" onclick="openScheduleBatch('${STAGE_IDS.REPLY_SCHEDULES}', '${encodeURIComponent(row.key)}')">
         <div>
           <strong>${escapeHtml(formatTime(row.anchorAt) || row.key)}</strong>
-          <span>${escapeHtml(formatNamedTimeRange(row.startAt, row.endAt))}</span>
+          <span>${escapeHtml(formatEndedAt(row.endAt || row.anchorAt))}</span>
         </div>
         <div>
           <strong class="overview-status">${escapeHtml(row.summary)}</strong>
@@ -401,7 +401,7 @@ function renderVisitOverviewBoard() {
       <button class="overview-row visit-accent" onclick="openScheduleBatch('${STAGE_IDS.VISIT_SCHEDULES}', '${encodeURIComponent(row.key)}')">
         <div>
           <strong>${escapeHtml(formatTime(row.anchorAt) || row.key)}</strong>
-          <span>${escapeHtml(formatNamedTimeRange(row.startAt, row.endAt))}</span>
+          <span>${escapeHtml(formatEndedAt(row.endAt || row.anchorAt))}</span>
         </div>
         <div>
           <strong class="overview-status">${escapeHtml(row.summary)}</strong>
@@ -2063,6 +2063,11 @@ function formatNamedTimeRange(start, end) {
   if (startText) return `开始 ${startText}`;
   if (endText) return `结束 ${endText}`;
   return '开始/结束时间未知';
+}
+
+function formatEndedAt(value) {
+  const timeText = formatTime(value);
+  return timeText ? `结束 ${timeText}` : '结束时间未知';
 }
 
 function findLatestValue(items, getter) {
