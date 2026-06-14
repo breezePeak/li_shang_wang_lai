@@ -357,7 +357,7 @@ describe('CLI --json mode keepOpen enforcement', () => {
     expect(result.error).toBeFalsy();
   });
 
-  it('comments:execute --json with missing range exits cleanly', () => {
+  it('comments:execute --json with missing limit exits cleanly', () => {
     const result = runCli('execute-comment-replies.mjs', ['--json'], 10_000);
     const parsed = parseStdout(result);
     expect(parsed).not.toBeNull();

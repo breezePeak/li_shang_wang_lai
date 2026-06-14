@@ -2,8 +2,8 @@
 // 默认从数据库查询 pending 回评，直接调用 Hermes/OpenClaw 生成 reply_text 后执行回复。
 //
 // 用法：
-//   npm run comments:execute -- --days 7 --limit 50
-//   npm run comments:execute -- --days 7 --limit 50 --agent-only
+//   npm run comments:execute -- --limit 50
+//   npm run comments:execute -- --limit 50 --agent-only
 //
 // 输入要求：
 //   命令只从数据库查询待回评评论，并自动生成缺失的 reply_text。
@@ -53,8 +53,6 @@ export function parseArgs(argv) {
     keepOpen: false,
     headless: undefined,
     limit: null,
-    days: null,
-    hours: null,
     agentOnly: false,
   };
 
@@ -68,8 +66,6 @@ export function parseArgs(argv) {
     if (argv[i] === '--keep-open') args.keepOpen = true;
     if (argv[i] === '--headless') args.headless = true;
     if ((argv[i] === '--limit' || argv[i] === '--max-count') && argv[i + 1]) args.limit = Number(argv[++i] || 0) || null;
-    if (argv[i] === '--days' && argv[i + 1]) args.days = Number(argv[++i] || 0) || null;
-    if (argv[i] === '--hours' && argv[i + 1]) args.hours = Number(argv[++i] || 0) || null;
     if (argv[i] === '--agent-only') args.agentOnly = true;
   }
 
@@ -1129,7 +1125,7 @@ async function main() {
     printJsonError(
       'comments:execute',
       RESULT_CODES.INVALID_ARGUMENTS,
-      'comments:execute 不再支持 --items-file；请使用 --days N --limit M 从数据库查询并执行',
+      'comments:execute 不再支持 --items-file；请使用 --limit M 从数据库查询并执行',
       { recoverable: false }
     );
     return;
@@ -1138,18 +1134,18 @@ async function main() {
   let loaded = { items: [] };
   let agentResults = [];
 
-  if ((!Number(args.days || 0) && !Number(args.hours || 0)) || !Number(args.limit || 0)) {
+  if (!Number(args.limit || 0)) {
     printJsonError(
       'comments:execute',
       RESULT_CODES.INVALID_ARGUMENTS,
-      'comments:execute 必须手动输入采集时间范围和最大条数限制，例如：comments:execute --hours 6 --limit 50 或 comments:execute --days 7 --limit 50',
+      'comments:execute 必须手动输入最大条数限制，例如：comments:execute --limit 50',
       { recoverable: false }
     );
     return;
   }
 
   runMigrations();
-  const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: args.limit, days: args.days, hours: args.hours });
+  const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: args.limit });
   loaded = { items: buildWorkCommentItemsFromDbRows(rows) };
   console.log(`[comments:execute] loaded pending comments from db: ${loaded.items.length}`);
 

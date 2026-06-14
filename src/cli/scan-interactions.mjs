@@ -773,13 +773,13 @@ export function summarizePendingReplies({ days = null, hours = null } = {}) {
   }
 
   console.error(`[scan] pending_reply_homepage_count=${homepageKeys.size} pending_reply_work_count=${workKeys.size} pending_reply_comment_count=${totalComments} skip_missing_author_profile_url=${skippedMissingHomepageWorkCount}`);
-  console.error('[scan] 待回评数据已入库；直接执行 comments:execute --hours N --limit M，或继续使用 --days N');
+  console.error('[scan] 待回评数据已入库；直接执行 comments:execute --limit M');
   return {
     totalComments,
     workCount: workKeys.size,
     homepageCount: homepageKeys.size,
     skippedMissingHomepageWorkCount,
-    nextStep: 'npm run comments:execute -- --hours N --limit M',
+    nextStep: 'npm run comments:execute -- --limit M',
   };
 }
 

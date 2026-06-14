@@ -27,6 +27,7 @@ function parseArgs(argv) {
     watchPolicy: null,
     watchSeconds: null,
     maxWorksToCheck: null,
+    limit: null,
     unsupportedItemsFile: false,
   };
 
@@ -40,6 +41,7 @@ function parseArgs(argv) {
     else if (arg === '--watch-policy' && i + 1 < argv.length) args.watchPolicy = argv[++i];
     else if (arg === '--watch-seconds' && i + 1 < argv.length) args.watchSeconds = argv[++i];
     else if (arg === '--max-works-to-check' && i + 1 < argv.length) args.maxWorksToCheck = argv[++i];
+    else if ((arg === '--limit' || arg === '--max-count') && i + 1 < argv.length) args.limit = Number(argv[++i] || 0) || null;
     else if (arg === '--items-file') {
       args.unsupportedItemsFile = true;
       if (argv[i + 1] && !String(argv[i + 1]).startsWith('--')) i++;
@@ -120,7 +122,7 @@ async function main() {
     printJsonError(
       'return-visit:execute',
       RESULT_CODES.INVALID_ARGUMENTS,
-      'return-visit:execute 不再支持 --items-file；请先执行 interactions:scan --days N --prepare-visits 入库，然后直接运行 visit:run/return-visit:execute',
+      'return-visit:execute 不再支持 --items-file；请先执行 interactions:scan --prepare-visits 入库，然后直接运行 visit:run/return-visit:execute --limit M',
       { recoverable: false }
     );
     return;
@@ -167,6 +169,7 @@ async function main() {
 
   const allTasks = listReturnVisitExecuteTasks({
     maxRetryCount,
+    limit: args.limit,
   });
 
   const tasks = [];

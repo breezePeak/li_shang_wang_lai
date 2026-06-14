@@ -594,7 +594,7 @@ export function createOrUpdateReturnVisitTasksFromItems(items = []) {
   };
 }
 
-function listTasksByStatuses(statuses, { maxRetryCount = 2 } = {}) {
+function listTasksByStatuses(statuses, { maxRetryCount = 2, limit = null } = {}) {
   if (!Array.isArray(statuses) || statuses.length === 0) return [];
   const db = getDb();
   const placeholders = statuses.map(() => '?').join(',');
@@ -606,7 +606,9 @@ function listTasksByStatuses(statuses, { maxRetryCount = 2 } = {}) {
     ORDER BY updated_at ASC, id ASC
   `;
   const rows = db.prepare(sql).all(...params);
-  return rows.map(mapRowToTask);
+  const tasks = rows.map(mapRowToTask);
+  if (Number(limit) > 0) return tasks.slice(0, Number(limit));
+  return tasks;
 }
 
 export function listReturnVisitPrepareTasks(options = {}) {

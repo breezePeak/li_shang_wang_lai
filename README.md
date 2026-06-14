@@ -88,8 +88,8 @@ npm run auth
 
 ```bash
 npm run interactions:scan -- --hours 6
-npm run comments:execute -- --hours 6 --limit 20
-npm run visit:run -- --execute
+npm run comments:execute -- --limit 20
+npm run visit:run -- --execute --limit 20
 ```
 
 ## Skill / 引擎安装
@@ -124,9 +124,9 @@ npm run auth
 | 只看互动 | `npm run interactions:scan -- --display-only` |
 | 扫描互动入库 | `npm run interactions:scan -- --days 7` |
 | 扫描最近几小时 | `npm run interactions:scan -- --hours 6` |
-| 评论回复 | `npm run comments:execute -- --hours 6 --limit 50` |
+| 评论回复 | `npm run comments:execute -- --limit 50` |
 | 准备回访任务 | `npm run interactions:scan -- --days 7 --prepare-visits` |
-| 执行回访 | `npm run visit:run -- --execute` |
+| 执行回访 | `npm run visit:run -- --execute --limit 50` |
 | 启动控制台 | `npm run server` |
 | 运行测试 | `npm test` |
 
@@ -166,8 +166,8 @@ http://localhost:3000
 
 ```bash
 npm run interactions:scan -- --days 7 --headless
-npm run comments:execute -- --hours 6 --limit 20 --headless
-npm run visit:run -- --execute --headless
+npm run comments:execute -- --limit 20 --headless
+npm run visit:run -- --execute --limit 20 --headless
 ```
 
 ## Agent 配置
@@ -192,18 +192,18 @@ npm run visit:run -- --execute --headless
 示例：
 
 ```bash
-npm run comments:execute -- --days 7 --limit 50
+npm run comments:execute -- --limit 50
 ```
 
 ```bash
-AGENT_PROVIDER=openclaw npm run comments:execute -- --days 7 --limit 50
+AGENT_PROVIDER=openclaw npm run comments:execute -- --limit 50
 ```
 
 Windows PowerShell：
 
 ```powershell
 $env:AGENT_PROVIDER="openclaw"
-npm run comments:execute -- --days 7 --limit 50
+npm run comments:execute -- --limit 50
 ```
 
 ```powershell
@@ -211,7 +211,7 @@ $env:AGENT_TRANSPORT="api"
 $env:HERMES_API_BASE_URL="http://127.0.0.1:8642/v1"
 $env:HERMES_API_KEY="和 Hermes 本地 API_SERVER_KEY 相同"
 $env:HERMES_API_MODEL="hermes-agent"
-npm run comments:execute -- --days 7 --limit 50
+npm run comments:execute -- --limit 50
 ```
 
 ```powershell
@@ -220,7 +220,7 @@ $env:DIRECT_API_PROVIDER="openrouter"
 $env:DIRECT_API_BASE_URL="https://openrouter.ai/api/v1"
 $env:DIRECT_API_KEY="<模型供应商 API key>"
 $env:DIRECT_API_MODEL="<模型名>"
-npm run comments:execute -- --hours 6 --limit 20 --agent-only
+npm run comments:execute -- --limit 20 --agent-only
 ```
 
 更多配置细节保留在旧文档和 Skill 内：
