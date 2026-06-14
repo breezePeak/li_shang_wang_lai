@@ -23,6 +23,9 @@ import {
 } from './return-visit-work-collector.mjs';
 import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
 import { DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK } from '../config/defaults.mjs';
+import { getDb } from '../db/database.mjs';
+
+const FIXED_UPDATE_REQUEST_COMMENT = '期待更新呀～';
 
 async function saveDebugScreenshot(page, taskId, phase) {
   try {
@@ -596,21 +599,8 @@ function createCheckedWorkEntry(candidate = {}, patch = {}) {
   };
 }
 
-function getSafeFallbackComments(comments = []) {
-  const cleaned = (Array.isArray(comments) ? comments : [])
-    .map(item => String(item || '').trim())
-    .filter(Boolean);
-  return cleaned.length > 0 ? cleaned : [
-    '期待更新呀～',
-    '蹲一个新作品～',
-    '好久没更新啦，等你更新～',
-  ];
-}
-
-function pickRandomComment(comments = []) {
-  const list = getSafeFallbackComments(comments);
-  const index = Math.floor(Math.random() * list.length);
-  return list[index] || list[0];
+function getFixedUpdateRequestComment() {
+  return FIXED_UPDATE_REQUEST_COMMENT;
 }
 
 function areAllCheckedWorksAlreadyLiked(checkedWorks = [], candidateCount = 0) {
@@ -622,6 +612,32 @@ function areAllCheckedWorksAlreadyLiked(checkedWorks = [], candidateCount = 0) {
 function pickFallbackUpdateRequestCandidate(candidates = []) {
   const firstNonTop = candidates.find(candidate => Number(candidate?.isTop) !== 1);
   return firstNonTop || candidates[0] || null;
+}
+
+export function findPostedUpdateRequestCommentByWork(workId, commentText = FIXED_UPDATE_REQUEST_COMMENT) {
+  const normalizedWorkId = String(workId || '').trim();
+  const normalizedComment = String(commentText || '').trim();
+  if (!normalizedWorkId || !normalizedComment) return null;
+
+  const db = getDb();
+  return db.prepare(`
+    SELECT
+      id,
+      task_id,
+      user_name,
+      target_work_id,
+      generated_comment,
+      comment_status,
+      status,
+      executed_at,
+      updated_at
+    FROM return_visit_tasks
+    WHERE target_work_id = ?
+      AND comment_status = 'posted'
+      AND generated_comment = ?
+    ORDER BY COALESCE(executed_at, updated_at) DESC, id DESC
+    LIMIT 1
+  `).get(normalizedWorkId, normalizedComment) || null;
 }
 
 async function resolveWorkForExecution(page, task, options = {}) {
@@ -898,6 +914,28 @@ export async function executeReturnVisitTask(page, task, options = {}) {
       };
     }
 
+    if (selectionMode === 'all_liked_update_request') {
+      const existingUpdateRequest = findPostedUpdateRequestCommentByWork(resolvedWork.workId, finalCommentText);
+      if (existingUpdateRequest) {
+        console.error(
+          `[visit] task=${taskId} 数据库已记录该作品发过期待更新评论，跳过重复发送` +
+          ` previous_task=${existingUpdateRequest.task_id || ''} work=${existingUpdateRequest.target_work_id || ''}`
+        );
+        return {
+          ok: true,
+          status: 'done',
+          likeStatus,
+          commentStatus: 'posted',
+          resolvedWork,
+          selectionMode,
+          checkedWorks,
+          generatedComment: finalCommentText,
+          skipPostBecauseExistingComment: true,
+          existingCommentMatch: existingUpdateRequest,
+        };
+      }
+    }
+
     const beforeCommentSendWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_comment_send', {
       likeStatus,
       commentStatus: task.commentStatus || 'pending',
@@ -1141,7 +1179,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     const resolvedWork = opened.work;
     const selectionMode = 'all_liked_update_request';
     const presentation = await detectWorkPresentationKind(page, resolvedWork);
-    const fallbackComment = pickRandomComment(allLikedFallbackComments);
+    const fallbackComment = getFixedUpdateRequestComment();
     const fallbackCheckedWorks = checkedWorks.slice();
     if (fallbackIndex >= 0 && fallbackCheckedWorks[fallbackIndex]) {
       fallbackCheckedWorks[fallbackIndex] = {

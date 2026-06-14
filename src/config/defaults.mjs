@@ -61,8 +61,6 @@ export const DEFAULTS = {
     allLikedFallbackEnabled: true,
     allLikedFallbackComments: [
       '期待更新呀～',
-      '蹲一个新作品～',
-      '好久没更新啦，等你更新～',
     ],
     maxRetryCount: 2,
     maxConsecutiveFailures: 3,

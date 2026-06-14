@@ -10,6 +10,7 @@ const postWorkModalCommentMock = vi.fn();
 const collectCurrentOpenedWorkMock = vi.fn();
 const openProfileWorkByAwemeIdMock = vi.fn();
 const collectCandidateAwemesFromProfileMock = vi.fn();
+const getDbMock = vi.fn();
 
 vi.mock('../../src/adapters/video-page.mjs', () => ({
   checkLikeState: checkLikeStateMock,
@@ -36,11 +37,20 @@ vi.mock('../../src/services/return-visit-work-collector.mjs', () => ({
   openProfileWorkByAwemeId: openProfileWorkByAwemeIdMock,
 }));
 
+vi.mock('../../src/db/database.mjs', () => ({
+  getDb: getDbMock,
+}));
+
 const { buildCommentContext, executeReturnVisitTask } = await import('../../src/services/return-visit-executor.mjs');
 
 describe('return-visit executor like/comment regressions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getDbMock.mockReturnValue({
+      prepare: vi.fn().mockReturnValue({
+        get: vi.fn().mockReturnValue(null),
+      }),
+    });
     openProfileWorkByAwemeIdMock.mockResolvedValue({ ok: true });
     collectCandidateAwemesFromProfileMock.mockResolvedValue({
       ok: true,
@@ -217,12 +227,11 @@ describe('return-visit executor like/comment regressions', () => {
     }, {
       execute: true,
       agentProvider,
-      allLikedFallbackComments: ['蹲一个新作品～'],
     });
 
     expect(clickLikeMock).not.toHaveBeenCalled();
     expect(agentProvider.generateComment).not.toHaveBeenCalled();
-    expect(postWorkModalCommentMock).toHaveBeenCalledWith(page, '蹲一个新作品～');
+    expect(postWorkModalCommentMock).toHaveBeenCalledWith(page, '期待更新呀～');
     expect(result.ok).toBe(true);
     expect(result.selectionMode).toBe('all_liked_update_request');
     expect(result.likeStatus).toBe('already_liked');
@@ -261,7 +270,6 @@ describe('return-visit executor like/comment regressions', () => {
       commentStatus: 'pending',
     }, {
       execute: true,
-      allLikedFallbackComments: ['蹲一个新作品～'],
     });
 
     expect(openProfileWorkByAwemeIdMock).toHaveBeenCalledWith(
@@ -311,7 +319,6 @@ describe('return-visit executor like/comment regressions', () => {
     }, {
       execute: false,
       maxWorksToCheck: 2,
-      allLikedFallbackComments: ['期待更新呀～'],
     });
 
     expect(openProfileWorkByAwemeIdMock).toHaveBeenCalledTimes(1);
@@ -323,6 +330,63 @@ describe('return-visit executor like/comment regressions', () => {
     );
     expect(result.selectionMode).toBe('all_liked_update_request');
     expect(result.dryRun).toBe(true);
+  });
+
+  it('does not post duplicate fixed update-request comment when db already has one for the same work', async () => {
+    getDbMock.mockReturnValue({
+      prepare: vi.fn().mockReturnValue({
+        get: vi.fn().mockReturnValue({
+          id: 501,
+          task_id: 'return_visit_old_fixed_comment',
+          user_name: '老用户',
+          target_work_id: '222',
+          generated_comment: '期待更新呀～',
+          comment_status: 'posted',
+          status: 'done',
+          executed_at: '2026-06-13T10:00:00.000Z',
+          updated_at: '2026-06-13T10:00:00.000Z',
+        }),
+      }),
+    });
+    collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
+      ok: true,
+      candidates: [
+        { workId: '111', workUrl: 'https://www.douyin.com/video/111', userDigged: 1, isTop: 1 },
+        { workId: '222', workUrl: 'https://www.douyin.com/video/222', userDigged: 1, isTop: 0 },
+      ],
+    });
+    collectCurrentOpenedWorkMock.mockResolvedValue({
+      ok: true,
+      sufficient: true,
+      work: {
+        workId: '222',
+        workTitle: '第二条作品',
+        workText: '第二条作品正文',
+        contentSummary: '第二条作品正文',
+        visibleFingerprint: '第二条作品|第二条作品正文',
+      },
+    });
+    const page = {
+      url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo?modal_id=222'),
+      evaluate: vi.fn().mockResolvedValue({ hasVideoElement: false }),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await executeReturnVisitTask(page, {
+      taskId: 'pick-c3',
+      userProfileUrl: 'https://www.douyin.com/user/demo',
+      targetWork: { workId: '', workUrl: '' },
+      likeStatus: 'pending',
+      commentStatus: 'pending',
+    }, {
+      execute: true,
+    });
+
+    expect(postWorkModalCommentMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe('done');
+    expect(result.commentStatus).toBe('posted');
+    expect(result.skipPostBecauseExistingComment).toBe(true);
   });
 
   it('skips the candidate when post API does not provide userDigged', async () => {
