@@ -87,6 +87,14 @@ function resolveMaxWorksToCheck(
   return fallbackValue;
 }
 
+export function resolveRestartBrowserEveryTasks(value, fallbackValue = 5) {
+  const parsed = Number(value);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return Math.floor(parsed);
+  }
+  return fallbackValue;
+}
+
 export function getReturnVisitTaskExecutionIssue(task) {
   const hasWorkUrl = task?.targetWork?.workUrl && String(task.targetWork.workUrl).trim();
   const hasWorkId = task?.targetWork?.workId && String(task.targetWork.workId).trim();
@@ -139,6 +147,10 @@ async function main() {
   );
   const pageLoadRetryCount = Number(returnVisitConfig.pageLoadRetryCount ?? 1);
   const maxConsecutiveFailures = Number(returnVisitConfig.maxConsecutiveFailures ?? 3);
+  const restartBrowserEveryTasks = resolveRestartBrowserEveryTasks(
+    returnVisitConfig.restartBrowserEveryTasks,
+    5,
+  );
   const waitBetweenUsersMs = returnVisitConfig.waitBetweenUsersMs || [3000, 5000];
   const waitBetweenLikeAndCommentMs = returnVisitConfig.waitBetweenLikeAndCommentMs || [2000, 3000];
   const restEveryTasksRange = getRange(returnVisitConfig.restEveryTasksRange, 1, 1);
@@ -209,6 +221,10 @@ async function main() {
   function isFatalPageError(err) {
     const msg = String(err?.message || '').toLowerCase();
     return msg.includes('target page, context or browser has been closed')
+      || msg.includes('browser has been closed')
+      || msg.includes('page crashed')
+      || msg.includes('browser closed')
+      || msg.includes('crash')
       || msg.includes('execution context was destroyed');
   }
 
@@ -219,15 +235,42 @@ async function main() {
     return page;
   }
 
+  async function closeBrowserSession(currentBrowser) {
+    if (!currentBrowser) return;
+    await currentBrowser.close().catch(() => {});
+  }
+
+  async function openBrowserSession() {
+    const nextCtx = await createBrowserContext({
+      headless: args.headless,
+      enableReuse: args.keepOpen,
+    });
+    const nextBrowser = nextCtx.browser;
+    const nextPage = await replaceContextPage(nextCtx.context, nextCtx.context.pages()[0] || null);
+    return { ctx: nextCtx, browser: nextBrowser, page: nextPage };
+  }
+
+  async function restartBrowserSession(reason, currentCtx, currentBrowser, currentPage) {
+    console.error(`[return-visit:execute] 重启浏览器会话 reason=${reason}`);
+    if (currentPage) {
+      try {
+        if (typeof currentPage.isClosed !== 'function' || !currentPage.isClosed()) {
+          await currentPage.close().catch(() => {});
+        }
+      } catch {}
+    }
+    await closeBrowserSession(currentBrowser);
+    const nextSession = await openBrowserSession();
+    return nextSession;
+  }
+
   try {
     let ctx = null;
     try {
-      ctx = await createBrowserContext({
-        headless: args.headless,
-        enableReuse: args.keepOpen,
-      });
-      browser = ctx.browser;
-      page = await replaceContextPage(ctx.context, ctx.context.pages()[0] || null);
+      const session = await openBrowserSession();
+      ctx = session.ctx;
+      browser = session.browser;
+      page = session.page;
     } catch (err) {
       const msg = `浏览器启动失败: ${err.message}`;
       if (args.json) {
@@ -239,6 +282,7 @@ async function main() {
 
     let consecutiveFailures = 0;
     let processedSinceRest = 0;
+    let processedSinceBrowserRestart = 0;
     let restAfter = randomInRange(restEveryTasksRange[0], restEveryTasksRange[1]);
 
     for (let index = 0; index < tasks.length; index++) {
@@ -286,7 +330,14 @@ async function main() {
           checkedWorks: [],
         };
         if (isFatalPageError(err)) {
-          await recreatePage(ctx, page);
+          try {
+            const nextSession = await restartBrowserSession('fatal_page_error', ctx, browser, page);
+            ctx = nextSession.ctx;
+            browser = nextSession.browser;
+            page = nextSession.page;
+          } catch (restartErr) {
+            console.error(`[return-visit:execute] 致命错误后重启浏览器失败: ${restartErr.message}`);
+          }
         }
       }
 
@@ -384,10 +435,31 @@ async function main() {
       }
 
       processedSinceRest++;
+      processedSinceBrowserRestart++;
+
+      const shouldRestartBrowser = !args.keepOpen
+        && executeMode
+        && restartBrowserEveryTasks > 0
+        && processedSinceBrowserRestart > 0
+        && index < tasks.length - 1
+        && processedSinceBrowserRestart % restartBrowserEveryTasks === 0;
 
       if (executeMode && index < tasks.length - 1) {
         const userWaitMs = await waitRandom(page, waitBetweenUsersMs, 3000, 5000);
         log(args.json, `[return-visit:execute] wait between users: ${userWaitMs}ms`);
+      }
+
+      if (shouldRestartBrowser) {
+        const nextSession = await restartBrowserSession(
+          `periodic_after_${processedSinceBrowserRestart}_tasks`,
+          ctx,
+          browser,
+          page,
+        );
+        ctx = nextSession.ctx;
+        browser = nextSession.browser;
+        page = nextSession.page;
+        processedSinceBrowserRestart = 0;
       }
 
       if (executeMode && processedSinceRest >= restAfter) {
@@ -408,7 +480,7 @@ async function main() {
     log(args.json, `[return-visit:execute] summary done=${done} skipped=${skipped} failed=${failed}`);
 
     if (browser && !args.keepOpen) {
-      await browser.close();
+      await closeBrowserSession(browser);
     }
     if (args.json) {
       printJsonResult('return-visit:execute', { tasks: taskResults }, summary);

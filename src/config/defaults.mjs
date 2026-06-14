@@ -58,6 +58,7 @@ export const DEFAULTS = {
     enabled: true,
     eventSourceStatus: 'new',
     maxWorksToCheck: DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK,
+    restartBrowserEveryTasks: 5,
     allLikedFallbackEnabled: true,
     allLikedFallbackComments: [
       '期待更新呀～',

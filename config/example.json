@@ -54,6 +54,7 @@
     "enabled": true,
     "eventSourceStatus": "new",
     "maxWorksToCheck": 3,
+    "restartBrowserEveryTasks": 5,
     "maxRetryCount": 2,
     "maxConsecutiveFailures": 3,
     "pageLoadRetryCount": 1,

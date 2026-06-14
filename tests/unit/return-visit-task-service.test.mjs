@@ -4,7 +4,7 @@ import {
   buildTaskId,
   canMarkDone,
 } from '../../src/services/return-visit-task-service.mjs';
-import { getReturnVisitTaskExecutionIssue } from '../../src/cli/execute-return-visit.mjs';
+import { getReturnVisitTaskExecutionIssue, resolveRestartBrowserEveryTasks } from '../../src/cli/execute-return-visit.mjs';
 
 describe('return-visit task identity', () => {
   it('prefers userId over url and name', () => {
@@ -55,6 +55,13 @@ describe('done condition', () => {
 });
 
 describe('return-visit execute filtering & state flow logic', () => {
+  it('resolveRestartBrowserEveryTasks falls back to safe default', () => {
+    expect(resolveRestartBrowserEveryTasks(5, 3)).toBe(5);
+    expect(resolveRestartBrowserEveryTasks('8', 3)).toBe(8);
+    expect(resolveRestartBrowserEveryTasks(0, 3)).toBe(3);
+    expect(resolveRestartBrowserEveryTasks(null, 3)).toBe(3);
+  });
+
   it('correctly identifies dirty tasks that should be skipped/marked', () => {
     const checkExecutable = (task) => {
       const hasComment = task.generatedComment && String(task.generatedComment).trim();

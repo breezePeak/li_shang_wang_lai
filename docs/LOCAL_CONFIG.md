@@ -122,6 +122,7 @@
     "enabled": true,
     "eventSourceStatus": "new",
     "maxWorksToCheck": 3,
+    "restartBrowserEveryTasks": 5,
     "maxRetryCount": 2,
     "maxConsecutiveFailures": 3,
     "pageLoadRetryCount": 1,
@@ -300,6 +301,9 @@
   - 从事件表里读取哪些状态的源事件
 - `maxWorksToCheck`
   - 从用户主页最多检查多少个作品
+- `restartBrowserEveryTasks`
+  - 每处理多少个回访对象后，主动关闭并重启一次浏览器
+  - 仍然复用同一个 `profileDir`，默认不会丢登录态
 - `maxRetryCount`
   - 任务最大重试次数
 - `maxConsecutiveFailures`
