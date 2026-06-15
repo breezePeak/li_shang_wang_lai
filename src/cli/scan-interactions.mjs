@@ -5,7 +5,6 @@ import {
   extractComments,
   getSelectedWorkTitle,
 } from '../adapters/comment-page.mjs';
-import { parseDouyinTimeText } from '../adapters/work-modal-page.mjs';
 import { commentFingerprint, commentInitialStatus, normalizeTimeText, notificationFingerprint } from '../domain/event-fingerprint.mjs';
 import { normalizeCommentEvent, buildRawPayloadJson } from '../domain/comment-event-normalization.mjs';
 import { classifyNotificationAction } from '../domain/notification-action-router.mjs';
@@ -149,25 +148,10 @@ export function resolveNotificationEventTime(notification = {}, { nowMs = Date.n
     };
   }
 
-  const parsedTime = parseDouyinTimeText(
-    notification?.eventTimeText ||
-    notification?.timeText ||
-    ''
-  );
-  const parsedMs = parsedTime ? new Date(parsedTime).getTime() : 0;
-
-  if (parsedMs > 0) {
-    return {
-      eventMs: parsedMs,
-      source: 'parsed_text',
-      detail: `解析时间: ${new Date(parsedMs).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`,
-    };
-  }
-
   return {
     eventMs: 0,
     source: 'unknown',
-    detail: '时间不可解析',
+    detail: '缺少 create_time',
     nowMs,
   };
 }
@@ -1011,7 +995,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
       return { counted: false };
     }
 
-    if ((notificationDays || notificationHours) && (normalized.eventType === 'comment' || normalized.eventType === 'like' || normalized.eventType === 'reply')) {
+    if ((notificationDays || notificationHours) && (normalized.eventType === 'comment' || normalized.eventType === 'like')) {
       const timeCheck = isNotificationOutsideWindow(normalized, { days: notificationDays, hours: notificationHours });
       if (timeCheck.older) {
         consecutiveOldRelevantCount++;
