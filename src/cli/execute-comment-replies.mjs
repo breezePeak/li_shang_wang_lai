@@ -2,8 +2,9 @@
 // 默认从数据库查询 pending 回评，直接调用 Hermes/OpenClaw 生成 reply_text 后执行回复。
 //
 // 用法：
+//   npm run comments:execute
 //   npm run comments:execute -- --limit 50
-//   npm run comments:execute -- --limit 50 --agent-only
+//   npm run comments:execute -- --agent-only
 //
 // 输入要求：
 //   命令只从数据库查询待回评评论，并自动生成缺失的 reply_text。
@@ -1213,7 +1214,7 @@ async function main() {
     printJsonError(
       'comments:execute',
       RESULT_CODES.INVALID_ARGUMENTS,
-      'comments:execute 不再支持 --items-file；请使用 --limit M 从数据库查询并执行',
+      'comments:execute 不再支持 --items-file；请直接从数据库执行，--limit 可选，不传默认处理全部 pending',
       { recoverable: false }
     );
     return;
@@ -1221,16 +1222,6 @@ async function main() {
 
   let loaded = { items: [] };
   let agentResults = [];
-
-  if (!Number(args.limit || 0)) {
-    printJsonError(
-      'comments:execute',
-      RESULT_CODES.INVALID_ARGUMENTS,
-      'comments:execute 必须手动输入最大条数限制，例如：comments:execute --limit 50',
-      { recoverable: false }
-    );
-    return;
-  }
 
   runMigrations();
   const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: args.limit });

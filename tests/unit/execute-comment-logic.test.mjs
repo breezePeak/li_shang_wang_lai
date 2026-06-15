@@ -142,12 +142,12 @@ describe('comments:execute refactored logic', () => {
     setup();
   });
 
-  it('exits with error when missing limit argument', async () => {
-    const result = await runCli('execute-comment-replies.mjs', ['--json']);
-    const parsed = parseStdout(result);
-    expect(parsed).not.toBeNull();
-    expect(parsed.ok).toBe(false);
-    expect(parsed.message).toContain('--limit 50');
+  it('allows omitting limit and defaults to querying all pending comments', () => {
+    const args = parseArgs(['--json']);
+    const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: args.limit });
+
+    expect(args.limit).toBeNull();
+    expect(rows.map(row => row.id)).toEqual([2, 1]);
   });
 
   it('rejects --items-file because comments:execute is DB-only', async () => {

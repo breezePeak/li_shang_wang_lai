@@ -27,7 +27,7 @@ Agent 生成或填写评论时，必须遵守 `references/comment-safety-rules.m
 | 用户意图 | 采集命令 | 后续动作 |
 |---|---|---|
 | 只看互动 | `npm run interactions:scan -- --type all --days N --display-only` | 只展示互动数据 |
-| 评论回复 | `npm run interactions:scan -- --type comment --days N --prepare-replies` | `comments:execute --days N --limit M` |
+| 评论回复 | `npm run interactions:scan -- --type comment --days N --prepare-replies` | `comments:execute` |
 | 明确回访 | `npm run interactions:scan -- --type all --days N --prepare-visits` | `visit:run --execute` |
 | 评论回复并回访 | `npm run interactions:scan -- --type all --days N` | 先回评，再按用户明确要求回访 |
 
@@ -44,7 +44,7 @@ npm run interactions:scan -- --type comment --days N --prepare-replies
 **步骤 2**：执行评论回复：
 
 ```bash
-npm run comments:execute -- --days N --limit M
+npm run comments:execute
 ```
 
 `comments:execute` 从 `work_comments` 读取待回评评论，生成 `reply_text`，到作品评论区定位目标评论并填写发送。

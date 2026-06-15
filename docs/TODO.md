@@ -42,7 +42,7 @@
       └─ 不能识别: UNKNOWN_LOGGED，打印未知类型日志
 
 2. 回评主流程（无中间 JSON）
-   comments:execute --days N --limit M
+   comments:execute [--limit M]
    ├─ 从 work_comments 查询待回评
    ├─ 进程内调用 Hermes/OpenClaw 写回 reply_text
    └─ CLI 打开作品、定位评论、填写并提交回复
@@ -368,7 +368,7 @@ comments:execute（默认 DB + 本地 AgentProvider + 执行）
 
 - 主流程不再使用创作者评论管理页，也不再按 `commentIndex` 点回复。
 - Agent 只负责生成 `reply_text`；浏览器打开主页、点击作品、定位评论、填写和提交都由 CLI 执行。
-- 默认流程不生成待回评文件，采集入库后运行 `comments:execute --days N --limit M`。
+- 默认流程不生成待回评文件，采集入库后运行 `comments:execute`；如需限量再传 `--limit M`。
 - 同作品多条 pending 必须在同一个作品会话里处理，回复成功后不会主动 `Escape` 关闭作品 modal。
 - `comment/list` 只作为旁路数据源辅助确认 / 补全，不负责驱动逐条滚动查找。
 - 当前屏多条 pending 可同时命中时，必须当前屏处理完再滚动下一屏。
@@ -528,7 +528,7 @@ pending_visit → executing → done
 采集模块 (interactions:scan) — 通知面板唯一入口，负责入库；查询待处理范围时必须显式输入 --days；不生成中间 JSON
 LocalAgentProvider — 进程内调用 Hermes/OpenClaw 生成 comment/reply 文本，可通过 AGENT_PROVIDER=hermes|openclaw 切换
 agent-server — 可选 HTTP 调试/外部集成入口，不属于主流程
-回评模块 (comments:execute) — 默认从 DB 查询待回评，只要求显式输入 --limit/--max-count，调用 LocalAgentProvider 生成 reply_text，再由 CLI 执行浏览器动作
+回评模块 (comments:execute) — 默认从 DB 查询全部 pending 待回评；如需限量可传 --limit/--max-count，调用 LocalAgentProvider 生成 reply_text，再由 CLI 执行浏览器动作
 回访模块 (visit:run / return-visit:execute) — 打开主页监听作品列表 API，匹配 workId，进入作品页后调用 LocalAgentProvider 生成 comment，再由 CLI 填写提交
 
 actions:pending 不属于主流程；第一步已把评论和回访任务写入 DB。
@@ -541,11 +541,11 @@ return-visit:prepare 不属于推荐主流程。
 ```text
 只看互动:   interactions:scan --display-only
 评论回复:   interactions:scan --days N
-           → comments:execute --days N --limit M
+           → comments:execute [--limit M]
 明确回访:   interactions:scan --days N --prepare-visits
            → visit:run --execute
 评论+回访:  interactions:scan --days N
-           → comments:execute --days N --limit M
+           → comments:execute [--limit M]
            → visit:run --execute
 ```
 
@@ -556,7 +556,7 @@ return-visit:prepare 不属于推荐主流程。
    - `reply` / `follow` 只入库并进入分类统计，暂不触发后续回评/回访执行
 2. 新互动采集入口以通知中心为准，主路径使用 notice API（拦截 /aweme/v1/web/notice/），DOM 解析为降级路径
 3. 采集业务数据通过 `upsertNotificationEvent()` 写入 `interaction_events`
-4. 评论回复由 `comments:execute --days N --limit M` 调用 LocalAgentProvider 写入 `reply_text` 到 `work_comments` 并执行
+4. 评论回复由 `comments:execute` 调用 LocalAgentProvider 写入 `reply_text` 到 `work_comments` 并执行；如需限量可追加 `--limit M`
 5. 回访任务由 `interactions:scan --prepare-visits` 或 `return-visit:prepare` 创建/更新，默认执行入口是 `visit:run`
 6. `return-visit:prepare` 仅从 DB 事件创建/查询任务，默认读取 `new`，可通过 `--event-status` 覆盖
 7. 日志里 `newInBatch` 不是"新入库数量"，是"本次扫描内未见过且通过过滤"

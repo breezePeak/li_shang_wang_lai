@@ -1,5 +1,5 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
-[![Node >=20](https://img.shields.io/badge/node-%3E%3D20-3C873A.svg)](https://nodejs.org/)
+[![Node >=24](https://img.shields.io/badge/node-%3E%3D24-3C873A.svg)](https://nodejs.org/)
 [![LINUX DO](https://img.shields.io/badge/LINUX-DO-FFB003.svg)](https://linux.do)
 
 # 礼尚往来 · li_shang_wang_lai
@@ -44,7 +44,7 @@
 
 | 环境 | 要求 |
 |---|---|
-| Node.js | 20+ |
+| Node.js | 24+ |
 | npm | 随 Node.js 安装 |
 | 浏览器 | Playwright Chromium |
 | 数据库 | SQLite |
@@ -84,8 +84,8 @@ npm run auth
 
 ```bash
 npm run interactions:scan -- --hours 6
-npm run comments:execute -- --limit 20
-npm run visit:run -- --execute --limit 20
+npm run comments:execute
+npm run visit:run -- --execute
 ```
 
 ## Skill / 引擎安装
@@ -120,9 +120,9 @@ npm run auth
 | 只看互动 | `npm run interactions:scan -- --display-only` |
 | 扫描互动入库 | `npm run interactions:scan -- --days 7` |
 | 扫描最近几小时 | `npm run interactions:scan -- --hours 6` |
-| 评论回复 | `npm run comments:execute -- --limit 50` |
+| 评论回复 | `npm run comments:execute` |
 | 准备回访任务 | `npm run interactions:scan -- --days 7 --prepare-visits` |
-| 执行回访 | `npm run visit:run -- --execute --limit 50` |
+| 执行回访 | `npm run visit:run -- --execute` |
 | 启动控制台 | `npm run server` |
 | 运行测试 | `npm test` |
 
@@ -162,8 +162,8 @@ http://localhost:3000
 
 ```bash
 npm run interactions:scan -- --days 7 --headless
-npm run comments:execute -- --limit 20 --headless
-npm run visit:run -- --execute --limit 20 --headless
+npm run comments:execute -- --headless
+npm run visit:run -- --execute --headless
 ```
 
 ## Agent 配置
@@ -188,18 +188,18 @@ npm run visit:run -- --execute --limit 20 --headless
 示例：
 
 ```bash
-npm run comments:execute -- --limit 50
+npm run comments:execute
 ```
 
 ```bash
-AGENT_PROVIDER=openclaw npm run comments:execute -- --limit 50
+AGENT_PROVIDER=openclaw npm run comments:execute
 ```
 
 Windows PowerShell：
 
 ```powershell
 $env:AGENT_PROVIDER="openclaw"
-npm run comments:execute -- --limit 50
+npm run comments:execute
 ```
 
 ```powershell
@@ -207,7 +207,7 @@ $env:AGENT_TRANSPORT="api"
 $env:HERMES_API_BASE_URL="http://127.0.0.1:8642/v1"
 $env:HERMES_API_KEY="和 Hermes 本地 API_SERVER_KEY 相同"
 $env:HERMES_API_MODEL="hermes-agent"
-npm run comments:execute -- --limit 50
+npm run comments:execute
 ```
 
 ```powershell
@@ -216,7 +216,7 @@ $env:DIRECT_API_PROVIDER="openrouter"
 $env:DIRECT_API_BASE_URL="https://openrouter.ai/api/v1"
 $env:DIRECT_API_KEY="<模型供应商 API key>"
 $env:DIRECT_API_MODEL="<模型名>"
-npm run comments:execute -- --limit 20 --agent-only
+npm run comments:execute -- --agent-only
 ```
 
 更多配置细节保留在旧文档和 Skill 内：

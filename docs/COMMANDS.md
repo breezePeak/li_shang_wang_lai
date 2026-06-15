@@ -25,14 +25,14 @@
 
 ```bash
 npm run interactions:scan -- --type comment --days 7 --prepare-replies
-npm run comments:execute -- --limit 50
+npm run comments:execute
 ```
 
 回访（DB 任务 + 进程内 Hermes/OpenClaw 生成 + CLI 执行）：
 
 ```bash
 npm run interactions:scan -- --days 7 --prepare-visits
-npm run visit:run -- --execute --limit 50
+npm run visit:run -- --execute
 ```
 
 评论回复结束后只有在用户明确要求回访时，才进入回访流程。回评和回访都不读写中间 JSON 文件。
@@ -68,7 +68,7 @@ Remove-Item Env:\AGENT_TRANSPORT -ErrorAction SilentlyContinue
 Remove-Item Env:\HERMES_API_KEY -ErrorAction SilentlyContinue
 Remove-Item Env:\HERMES_API_BASE_URL -ErrorAction SilentlyContinue
 
-npm run comments:execute -- --limit 5 --agent-only
+npm run comments:execute -- --agent-only
 ```
 
 可选加速模式之一是 Hermes API Server。它不是安装必需项，不会自动启动，也不会因为本机 Hermes `.env` 里存在 `API_SERVER_KEY` 就自动切换。只有显式设置 `AGENT_TRANSPORT=api` 时才启用。
@@ -100,7 +100,7 @@ $env:HERMES_API_BASE_URL="http://127.0.0.1:8642/v1"
 $env:HERMES_API_KEY="li-shang-wang-lai-local-dev"
 $env:HERMES_API_MODEL="hermes-agent"
 
-npm run comments:execute -- --limit 5 --agent-only
+npm run comments:execute -- --agent-only
 npm run visit:run -- --execute
 ```
 
@@ -118,7 +118,7 @@ $env:AGENT_TRANSPORT="direct-api"
 $env:DIRECT_API_PROVIDER="openrouter"
 $env:DIRECT_API_FALLBACK="none"
 
-npm run comments:execute -- --limit 5 --agent-only
+npm run comments:execute -- --agent-only
 ```
 
 如果自动推断不出来，再显式补全：
@@ -131,7 +131,7 @@ $env:DIRECT_API_KEY="<模型供应商 API key>"
 $env:DIRECT_API_MODEL="<模型名>"
 $env:DIRECT_API_FALLBACK="none"
 
-npm run comments:execute -- --limit 5 --agent-only
+npm run comments:execute -- --agent-only
 ```
 
 如果 `%LOCALAPPDATA%\hermes\.env` 里已有：
@@ -166,7 +166,7 @@ $env:DIRECT_API_KEY="bad"
 $env:DIRECT_API_MODEL="bad"
 $env:DIRECT_API_TIMEOUT_MS="2000"
 
-npm run comments:execute -- --limit 5 --agent-only
+npm run comments:execute -- --agent-only
 ```
 
 预期：
@@ -300,8 +300,8 @@ npm run actions:pending -- --type comment --json
 ## 5. comments:execute
 
 ```bash
-npm run comments:execute -- --limit 50
-npm run comments:execute -- --limit 50 --agent-only
+npm run comments:execute
+npm run comments:execute -- --agent-only
 ```
 
 源文件：`src/cli/execute-comment-replies.mjs`
@@ -314,7 +314,7 @@ reply_text 为空的评论会打印日志跳过。已经 succeeded / sent_unveri
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--limit` / `--max-count` | 必填 | 最大处理评论数 |
+| `--limit` / `--max-count` | `null` | 最大处理评论数；不传默认处理全部 pending |
 | `--agent-only` | `false` | 只生成并写回 `reply_text`，不打开浏览器执行 |
 | `--json` | `false` | JSON 输出 |
 
@@ -365,8 +365,8 @@ npm run return-visit:comment -- --task-id <taskId> --comment "<评论内容>" --
 ## 7. return-visit:execute
 
 ```bash
-npm run return-visit:execute -- --execute --limit 50
-npm run return-visit:execute -- --dry-run --limit 50
+npm run return-visit:execute -- --execute
+npm run return-visit:execute -- --dry-run
 ```
 
 源文件：`src/cli/execute-return-visit.mjs`
@@ -383,7 +383,7 @@ npm run return-visit:execute -- --dry-run --limit 50
 |---|---|---|
 | `--execute` | `false` | 真实点赞并评论 |
 | `--dry-run` | `true` | 只预演，不真实点赞或评论 |
-| `--limit` / `--max-count` | `null` | 最多处理多少条可执行回访任务 |
+| `--limit` / `--max-count` | `null` | 最多处理多少条可执行回访任务；不传默认处理全部 |
 | `--watch-policy` | 配置 `returnVisit.watchPolicy` 或 `seconds` | 看视频策略 |
 | `--watch-seconds` | 配置 `returnVisit.watchSeconds` 或 `5-8` | 看视频秒数 |
 | `--keep-open` | `false` | 复用并保留浏览器 |

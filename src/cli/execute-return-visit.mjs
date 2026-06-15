@@ -130,7 +130,7 @@ async function main() {
     printJsonError(
       'return-visit:execute',
       RESULT_CODES.INVALID_ARGUMENTS,
-      'return-visit:execute 不再支持 --items-file；请先执行 interactions:scan --prepare-visits 入库，然后直接运行 visit:run/return-visit:execute --limit M',
+      'return-visit:execute 不再支持 --items-file；请先执行 interactions:scan --prepare-visits 入库，然后直接运行 visit:run/return-visit:execute，--limit 可选，不传默认处理全部可执行任务',
       { recoverable: false }
     );
     return;
