@@ -192,6 +192,52 @@ describe('return-visit executor like/comment regressions', () => {
     });
   });
 
+  it('prefers non-top unliked work before pinned unliked work within the first N candidates', async () => {
+    collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
+      ok: true,
+      candidates: [
+        { workId: '111', workUrl: 'https://www.douyin.com/video/111', userDigged: 0, isTop: 1 },
+        { workId: '222', workUrl: 'https://www.douyin.com/video/222', userDigged: 0, isTop: 0 },
+      ],
+    });
+    collectCurrentOpenedWorkMock.mockResolvedValue({
+      ok: true,
+      sufficient: true,
+      work: {
+        workId: '222',
+        workTitle: '第二条作品',
+        workText: '第二条作品正文',
+        contentSummary: '第二条作品正文',
+        visibleFingerprint: '第二条作品|第二条作品正文',
+      },
+    });
+    const page = {
+      url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo?modal_id=222'),
+      evaluate: vi.fn().mockResolvedValue({ hasVideoElement: false }),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await executeReturnVisitTask(page, {
+      taskId: 'pick-nontop-first',
+      userProfileUrl: 'https://www.douyin.com/user/demo',
+      targetWork: { workId: '', workUrl: '' },
+      generatedComment: '测试评论',
+      likeStatus: 'pending',
+      commentStatus: 'generated',
+    }, { execute: true, maxWorksToCheck: 2 });
+
+    expect(openProfileWorkByAwemeIdMock).toHaveBeenCalledTimes(1);
+    expect(openProfileWorkByAwemeIdMock).toHaveBeenCalledWith(
+      page,
+      'https://www.douyin.com/user/demo',
+      '222',
+      expect.objectContaining({ reuseCurrentProfile: true })
+    );
+    expect(result.ok).toBe(true);
+    expect(result.selectionMode).toBe('normal_unliked');
+    expect(result.resolvedWork.workId).toBe('222');
+  });
+
   it('uses update-request fallback when all checked works are already liked', async () => {
     collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
       ok: true,
@@ -278,7 +324,7 @@ describe('return-visit executor like/comment regressions', () => {
       '222',
       expect.objectContaining({ reuseCurrentProfile: true })
     );
-    expect(result.checkedWorks[1]).toMatchObject({
+    expect(result.checkedWorks.find(item => item.workId === '222')).toMatchObject({
       workId: '222',
       action: 'update_request_comment',
       reason: 'all_candidates_already_liked',

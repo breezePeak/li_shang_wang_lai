@@ -614,6 +614,19 @@ function pickFallbackUpdateRequestCandidate(candidates = []) {
   return firstNonTop || candidates[0] || null;
 }
 
+function prioritizeReturnVisitCandidates(candidates = []) {
+  const nonTop = [];
+  const top = [];
+  for (const candidate of candidates) {
+    if (Number(candidate?.isTop) === 1) {
+      top.push(candidate);
+    } else {
+      nonTop.push(candidate);
+    }
+  }
+  return nonTop.concat(top);
+}
+
 export function findPostedUpdateRequestCommentByWork(workId, commentText = FIXED_UPDATE_REQUEST_COMMENT) {
   const normalizedWorkId = String(workId || '').trim();
   const normalizedComment = String(commentText || '').trim();
@@ -1026,7 +1039,9 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   const checkedWorks = [];
   let missingApiLikeStateCount = 0;
 
-  for (const candidate of candidates) {
+  const prioritizedCandidates = prioritizeReturnVisitCandidates(candidates);
+
+  for (const candidate of prioritizedCandidates) {
     if (candidate.userDigged === 1) {
       checkedWorks.push(createCheckedWorkEntry(candidate, {
         likeState: 'already_liked',
@@ -1163,7 +1178,6 @@ export async function executeReturnVisitTask(page, task, options = {}) {
 
   if (areAllCheckedWorksAlreadyLiked(checkedWorks, candidates.length) && allLikedFallbackEnabled) {
     const fallbackCandidate = pickFallbackUpdateRequestCandidate(candidates);
-    const fallbackIndex = candidates.findIndex(candidate => candidate?.workId === fallbackCandidate?.workId);
     const opened = await openCandidateWork(fallbackCandidate);
     if (!opened.ok) {
       return {
@@ -1180,14 +1194,17 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     const selectionMode = 'all_liked_update_request';
     const presentation = await detectWorkPresentationKind(page, resolvedWork);
     const fallbackComment = getFixedUpdateRequestComment();
-    const fallbackCheckedWorks = checkedWorks.slice();
-    if (fallbackIndex >= 0 && fallbackCheckedWorks[fallbackIndex]) {
-      fallbackCheckedWorks[fallbackIndex] = {
-        ...fallbackCheckedWorks[fallbackIndex],
+    const fallbackWorkId = String(fallbackCandidate?.workId || fallbackCandidate?.awemeId || '').trim();
+    const fallbackCheckedWorks = checkedWorks.map(item => {
+      if (String(item?.workId || '').trim() !== fallbackWorkId) {
+        return item;
+      }
+      return {
+        ...item,
         action: execute ? 'update_request_comment' : 'plan_update_request_comment',
         reason: 'all_candidates_already_liked',
       };
-    }
+    });
 
     return postCommentForResolvedWork(
       resolvedWork,
