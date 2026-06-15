@@ -313,7 +313,7 @@ describe('return-visit work collector url normalization', () => {
     expect(result.method).toBe('escape');
   });
 
-  it('collectCandidateAwemesFromProfile 默认保留置顶并取主页前 5 条', async () => {
+  it('collectCandidateAwemesFromProfile 默认保留置顶并取主页前 10 条', async () => {
     const awemeList = [
       { aweme_id: 'top-1', is_top: 1, desc: '置顶1' },
       { aweme_id: 'n-2', is_top: 0, desc: '普通2' },
@@ -321,6 +321,11 @@ describe('return-visit work collector url normalization', () => {
       { aweme_id: 'n-4', is_top: 0, desc: '普通4' },
       { aweme_id: 'n-5', is_top: 0, desc: '普通5' },
       { aweme_id: 'n-6', is_top: 0, desc: '普通6' },
+      { aweme_id: 'n-7', is_top: 0, desc: '普通7' },
+      { aweme_id: 'n-8', is_top: 0, desc: '普通8' },
+      { aweme_id: 'n-9', is_top: 0, desc: '普通9' },
+      { aweme_id: 'n-10', is_top: 0, desc: '普通10' },
+      { aweme_id: 'n-11', is_top: 0, desc: '普通11' },
     ];
     const fakePage = {
       goto: async () => {},
@@ -342,8 +347,8 @@ describe('return-visit work collector url normalization', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.candidates).toHaveLength(5);
-    expect(result.candidates.map(item => item.workId)).toEqual(['top-1', 'n-2', 'n-3', 'n-4', 'n-5']);
+    expect(result.candidates).toHaveLength(10);
+    expect(result.candidates.map(item => item.workId)).toEqual(['top-1', 'n-2', 'n-3', 'n-4', 'n-5', 'n-6', 'n-7', 'n-8', 'n-9', 'n-10']);
     expect(result.candidates[0].isTop).toBe(1);
   });
 });

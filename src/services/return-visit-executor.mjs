@@ -25,7 +25,7 @@ import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
 import { DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK } from '../config/defaults.mjs';
 import { getDb } from '../db/database.mjs';
 
-const FIXED_UPDATE_REQUEST_COMMENT = '期待更新呀～';
+const FIXED_UPDATE_REQUEST_COMMENT = '蹲个更新呀～';
 
 async function saveDebugScreenshot(page, taskId, phase) {
   try {

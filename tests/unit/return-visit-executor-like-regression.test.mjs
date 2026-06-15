@@ -231,7 +231,7 @@ describe('return-visit executor like/comment regressions', () => {
 
     expect(clickLikeMock).not.toHaveBeenCalled();
     expect(agentProvider.generateComment).not.toHaveBeenCalled();
-    expect(postWorkModalCommentMock).toHaveBeenCalledWith(page, '期待更新呀～');
+    expect(postWorkModalCommentMock).toHaveBeenCalledWith(page, '蹲个更新呀～');
     expect(result.ok).toBe(true);
     expect(result.selectionMode).toBe('all_liked_update_request');
     expect(result.likeStatus).toBe('already_liked');
@@ -340,7 +340,7 @@ describe('return-visit executor like/comment regressions', () => {
           task_id: 'return_visit_old_fixed_comment',
           user_name: '老用户',
           target_work_id: '222',
-          generated_comment: '期待更新呀～',
+          generated_comment: '蹲个更新呀～',
           comment_status: 'posted',
           status: 'done',
           executed_at: '2026-06-13T10:00:00.000Z',

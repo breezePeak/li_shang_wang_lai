@@ -1,4 +1,4 @@
-export const DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK = 5;
+export const DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK = 10;
 
 // 默认配置常量 — 占位，由 config/local.json 覆盖
 export const DEFAULTS = {
@@ -61,7 +61,7 @@ export const DEFAULTS = {
     restartBrowserEveryTasks: 5,
     allLikedFallbackEnabled: true,
     allLikedFallbackComments: [
-      '期待更新呀～',
+      '蹲个更新呀～',
     ],
     maxRetryCount: 2,
     maxConsecutiveFailures: 3,
