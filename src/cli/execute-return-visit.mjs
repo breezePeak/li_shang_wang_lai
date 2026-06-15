@@ -1,5 +1,5 @@
 import { runMigrations } from '../db/migrations.mjs';
-import { createBrowserContext, replaceContextPage } from '../browser/browser-context.mjs';
+import { createBrowserSessionManager } from '../browser/session-manager.mjs';
 import { loadConfig } from '../config/user-config.mjs';
 import { DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK } from '../config/defaults.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
@@ -217,6 +217,11 @@ async function main() {
   let browser = null;
   let page = null;
   const agentProvider = createAgentProvider();
+  const browserSession = createBrowserSessionManager({
+    headless: args.headless,
+    enableReuse: args.keepOpen,
+    logger: (message) => console.error(message),
+  });
 
   function isFatalPageError(err) {
     const msg = String(err?.message || '').toLowerCase();
@@ -228,40 +233,24 @@ async function main() {
       || msg.includes('execution context was destroyed');
   }
 
-  async function recreatePage(ctx, currentPage) {
-    if (!ctx?.context) return currentPage;
-    page = await replaceContextPage(ctx.context, currentPage);
+  async function recreatePage() {
+    page = await browserSession.replacePage();
     console.error('[return-visit:execute] 已切换到新页面');
     return page;
   }
 
-  async function closeBrowserSession(currentBrowser) {
-    if (!currentBrowser) return;
-    await currentBrowser.close().catch(() => {});
-  }
-
   async function openBrowserSession() {
-    const nextCtx = await createBrowserContext({
-      headless: args.headless,
-      enableReuse: args.keepOpen,
-    });
-    const nextBrowser = nextCtx.browser;
-    const nextPage = await replaceContextPage(nextCtx.context, nextCtx.context.pages()[0] || null);
-    return { ctx: nextCtx, browser: nextBrowser, page: nextPage };
+    const session = await browserSession.open();
+    return {
+      ctx: session.ctx,
+      browser: session.browser,
+      page: session.page,
+    };
   }
 
-  async function restartBrowserSession(reason, currentCtx, currentBrowser, currentPage) {
+  async function restartBrowserSession(reason) {
     console.error(`[return-visit:execute] 重启浏览器会话 reason=${reason}`);
-    if (currentPage) {
-      try {
-        if (typeof currentPage.isClosed !== 'function' || !currentPage.isClosed()) {
-          await currentPage.close().catch(() => {});
-        }
-      } catch {}
-    }
-    await closeBrowserSession(currentBrowser);
-    const nextSession = await openBrowserSession();
-    return nextSession;
+    return browserSession.restart(reason);
   }
 
   try {
@@ -288,7 +277,7 @@ async function main() {
     for (let index = 0; index < tasks.length; index++) {
       const task = tasks[index];
       if (index > 0) {
-        page = await recreatePage(ctx, page);
+        page = await recreatePage();
       }
       if (consecutiveFailures >= maxConsecutiveFailures) {
         log(args.json, `[return-visit:execute] 连续失败 ${consecutiveFailures} 个任务，暂停本轮执行`);
@@ -331,7 +320,7 @@ async function main() {
         };
         if (isFatalPageError(err)) {
           try {
-            const nextSession = await restartBrowserSession('fatal_page_error', ctx, browser, page);
+            const nextSession = await restartBrowserSession('fatal_page_error');
             ctx = nextSession.ctx;
             browser = nextSession.browser;
             page = nextSession.page;
@@ -452,9 +441,6 @@ async function main() {
       if (shouldRestartBrowser) {
         const nextSession = await restartBrowserSession(
           `periodic_after_${processedSinceBrowserRestart}_tasks`,
-          ctx,
-          browser,
-          page,
         );
         ctx = nextSession.ctx;
         browser = nextSession.browser;
@@ -480,7 +466,7 @@ async function main() {
     log(args.json, `[return-visit:execute] summary done=${done} skipped=${skipped} failed=${failed}`);
 
     if (browser && !args.keepOpen) {
-      await closeBrowserSession(browser);
+      await browserSession.close();
     }
     if (args.json) {
       printJsonResult('return-visit:execute', { tasks: taskResults }, summary);
