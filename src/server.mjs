@@ -4,6 +4,12 @@ import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { getDb } from './db/database.mjs';
 import { isLockedReplyStatus } from './db/work-comment-repository.mjs';
+import {
+  buildNormalizedStatusDistribution,
+  normalizeInteractionEventStatus,
+  normalizeReplyStatus,
+  normalizeVisitTaskStatus,
+} from './domain/status-model.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -163,6 +169,10 @@ app.get('/api/stats', (req, res) => {
     for (const r of replyStatusRows) {
       replyStatusDistribution[r.reply_status] = r.count;
     }
+    const normalizedReplyStatusDistribution = buildNormalizedStatusDistribution(replyStatusRows, {
+      statusKey: 'reply_status',
+      normalize: normalizeReplyStatus,
+    });
 
     // 已完成回访任务数
     const completedTasks = db.prepare(`
@@ -203,6 +213,9 @@ app.get('/api/stats', (req, res) => {
     for (const r of statusRows) {
       statusDistribution[r.status] = r.count;
     }
+    const normalizedVisitStatusDistribution = buildNormalizedStatusDistribution(statusRows, {
+      normalize: normalizeVisitTaskStatus,
+    });
 
     const eventStatusRows = db.prepare(`
       SELECT event_type, status, COUNT(*) as count
@@ -210,9 +223,17 @@ app.get('/api/stats', (req, res) => {
       GROUP BY event_type, status
     `).all();
     const eventStatusDistribution = {};
+    const normalizedEventStatusDistribution = {};
     for (const r of eventStatusRows) {
       if (!eventStatusDistribution[r.event_type]) eventStatusDistribution[r.event_type] = {};
       eventStatusDistribution[r.event_type][r.status] = r.count;
+      if (!normalizedEventStatusDistribution[r.event_type]) {
+        normalizedEventStatusDistribution[r.event_type] = buildNormalizedStatusDistribution([], {
+          normalize: normalizeInteractionEventStatus,
+        });
+      }
+      const normalized = normalizeInteractionEventStatus(r.status);
+      normalizedEventStatusDistribution[r.event_type][normalized] += r.count;
     }
 
     res.json({
@@ -243,8 +264,11 @@ app.get('/api/stats', (req, res) => {
           (statusDistribution.skipped_private || 0) +
           (statusDistribution.skipped_no_suitable_work || 0),
         statusDistribution,
+        normalizedVisitStatusDistribution,
         eventStatusDistribution,
-        replyStatusDistribution
+        normalizedEventStatusDistribution,
+        replyStatusDistribution,
+        normalizedReplyStatusDistribution
       }
     });
   } catch (err) {
