@@ -367,6 +367,59 @@ describe('comments:execute refactored logic', () => {
     verifyDb.close();
   });
 
+  it('generateMissingReplies 会重生成同一好友跨作品的重复回复，避免不同作品拿到同一句', async () => {
+    const db = new Database(testDb);
+    db.prepare(`
+      INSERT INTO works (work_id, modal_id, work_url, work_title, work_desc, author_name, author_profile_url, author_profile_key, first_seen_at, last_seen_at)
+      VALUES ('w-dup-1', 'w-dup-1', 'https://www.douyin.com/video/w-dup-1', '作品一', '第一条作品在聊 AI 工具', '作者A', 'https://www.douyin.com/user/author-a', 'author-a', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `).run();
+    db.prepare(`
+      INSERT INTO works (work_id, modal_id, work_url, work_title, work_desc, author_name, author_profile_url, author_profile_key, first_seen_at, last_seen_at)
+      VALUES ('w-dup-2', 'w-dup-2', 'https://www.douyin.com/video/w-dup-2', '作品二', '第二条作品在聊 自动化流程', '作者A', 'https://www.douyin.com/user/author-a', 'author-a', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `).run();
+    db.prepare(`
+      INSERT INTO work_comments (
+        id, work_id, modal_id, work_url, actor_name, actor_profile_url, actor_profile_key,
+        comment_text, event_time_text, comment_key, reply_text, reply_status
+      ) VALUES
+      (201, 'w-dup-1', 'w-dup-1', 'https://www.douyin.com/video/w-dup-1', '同一个好友', 'https://www.douyin.com/user/friend-a', 'friend-a', '这条挺有意思', '1小时前', 'dup-key-1', '', 'pending'),
+      (202, 'w-dup-2', 'w-dup-2', 'https://www.douyin.com/video/w-dup-2', '同一个好友', 'https://www.douyin.com/user/friend-a', 'friend-a', '这条挺有意思', '2小时前', 'dup-key-2', '', 'pending')
+    `).run();
+    db.close();
+
+    const items = buildWorkCommentItemsFromDbRows(
+      listPendingCommentsGroupedByHomepageAndWork({ limit: 20 }).filter(row => row.id === 201 || row.id === 202)
+    );
+    const provider = {
+      generateReplies: vi.fn(async (contexts) => contexts.map(context => ({
+        taskId: context.taskId,
+        reply: 'Hermes代看后觉得这个点挺有意思，后面我再展开聊聊',
+      }))),
+      generateReply: vi.fn(async (context) => {
+        expect(context.requirements.avoidReplyText).toContain('这个点挺有意思');
+        return `Hermes代看后觉得${context.work.title}这条内容也挺有讨论空间，我顺着回一下`;
+      }),
+    };
+
+    const results = await generateMissingReplies(items, { agentProvider: provider });
+
+    expect(provider.generateReplies).toHaveBeenCalledTimes(1);
+    expect(provider.generateReply).toHaveBeenCalledTimes(1);
+    expect(results.filter(item => item.ok)).toHaveLength(2);
+
+    const verifyDb = new Database(testDb);
+    const first = verifyDb.prepare('SELECT reply_text FROM work_comments WHERE id = 201').get();
+    const second = verifyDb.prepare('SELECT reply_text FROM work_comments WHERE id = 202').get();
+    expect(first.reply_text).not.toBe(second.reply_text);
+    expect(
+      first.reply_text.includes('作品一')
+      || first.reply_text.includes('作品二')
+      || second.reply_text.includes('作品一')
+      || second.reply_text.includes('作品二')
+    ).toBe(true);
+    verifyDb.close();
+  });
+
   it('parseArgs 支持 --keep-open，避免回评执行结束立刻关闭浏览器', () => {
     const args = parseArgs(['--limit', '2', '--keep-open']);
     expect(args.keepOpen).toBe(true);

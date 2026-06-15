@@ -89,6 +89,7 @@ export function buildWorkCommentItemsFromDbRows(rows = []) {
     work_title: row.joined_work_title || '',
     work_desc: row.joined_work_desc || '',
     work_type: row.joined_work_type || '',
+    work_published_at: row.joined_published_at || '',
     author_name: row.joined_author_name || '',
     actorName: row.actor_name || '',
     actorProfileUrl: row.actor_profile_url || '',
@@ -103,13 +104,17 @@ export function buildWorkCommentItemsFromDbRows(rows = []) {
 export function buildReplyContext(item = {}) {
   const maxLength = getReplyMaxLength();
   const minLength = getReplyMinLength();
+  const workId = item.workId || item.modalId || '';
+  const workUrl = item.workUrl || item.awemeUrl || '';
   return {
     taskId: `work_comment_${item.commentId}`,
     work: {
-      workId: item.workId || item.modalId || '',
+      workId,
+      url: workUrl,
       title: item.work_title || item.workTitle || '',
       desc: item.work_desc || item.workText || '',
       authorNickname: item.author_name || '',
+      publishedAt: item.work_published_at || '',
     },
     comment: {
       commentId: item.commentId || '',
@@ -121,6 +126,9 @@ export function buildReplyContext(item = {}) {
       minLength,
       maxLength,
       tone: '自然、简短、像真人',
+      uniquenessPolicy: '同一好友在不同作品下不要复用同一句回复',
+      actorWorkKey: `${item.actorName || ''}::${workId || workUrl || item.commentId || ''}`,
+      avoidReplyText: item.avoidReplyText || '',
     },
   };
 }
@@ -139,6 +147,84 @@ export function isReplyTextInvalid(replyText, { minLength = getReplyMinLength(),
 }
 
 export const isReplyTextTooShort = isReplyTextInvalid;
+
+function normalizeReplyComparisonText(text = '') {
+  return String(text || '')
+    .replace(/\s+/g, '')
+    .replace(/[，。！？、,.!?\-~～"'`]/g, '')
+    .trim();
+}
+
+function buildSameActorReplyConflictGroups(batchDecisions = [], byTaskId = new Map()) {
+  const groups = new Map();
+  for (const decision of batchDecisions) {
+    const item = decision.item || {};
+    const actorName = String(item.actorName || '').trim();
+    const workKey = String(item.workKey || item.workId || item.modalId || item.workUrl || '').trim();
+    const reply = String(byTaskId.get(decision.taskId) || '').trim();
+    const normalizedReply = normalizeReplyComparisonText(reply);
+    if (!actorName || !workKey || !normalizedReply) continue;
+    const groupKey = `${actorName}::${normalizedReply}`;
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey).push({ decision, actorName, workKey, reply });
+  }
+
+  return [...groups.values()].filter(group => {
+    if (group.length < 2) return false;
+    return new Set(group.map(entry => entry.workKey)).size > 1;
+  });
+}
+
+function buildDistinctReplyFallback(item = {}, originalReply = '') {
+  const topic = String(item.work_title || item.work_desc || item.commentText || '')
+    .replace(/\s+/g, '')
+    .replace(/[，。！？、,.!?\-~～"'`]/g, '')
+    .slice(0, 12);
+  const reply = topic
+    ? `你提到的这点和${topic}这条内容挺贴，我也继续顺着聊聊。`
+    : '你提到的这点我记住了，这条内容里也刚好能接上聊聊。';
+  const normalizedFallback = normalizeReplyComparisonText(reply);
+  if (!reply || normalizedFallback === normalizeReplyComparisonText(originalReply) || isReplyTextInvalid(reply)) {
+    throw new Error(`同好友跨作品回复去重失败 commentId=${item.commentId}`);
+  }
+  return reply;
+}
+
+async function resolveSameActorReplyConflicts(batchDecisions = [], byTaskId = new Map(), agentProvider) {
+  const conflictGroups = buildSameActorReplyConflictGroups(batchDecisions, byTaskId);
+  if (conflictGroups.length === 0) return;
+  if (typeof agentProvider?.generateReply !== 'function') {
+    throw new Error('agentProvider.generateReply 不存在，无法对同好友跨作品重复回复做单条重生成');
+  }
+
+  for (const group of conflictGroups) {
+    const [, ...conflictedEntries] = group;
+    for (const entry of conflictedEntries) {
+      const { decision, reply: oldReply } = entry;
+      const context = buildReplyContext({
+        ...(decision.item || {}),
+        avoidReplyText: oldReply,
+      });
+
+      let regenerated = '';
+      for (let attempt = 0; attempt < 2; attempt++) {
+        regenerated = String(await agentProvider.generateReply(context) || '').trim();
+        if (!regenerated) continue;
+        if (isReplyTextInvalid(regenerated, context.requirements)) continue;
+        if (normalizeReplyComparisonText(regenerated) === normalizeReplyComparisonText(oldReply)) continue;
+        break;
+      }
+
+      if (!regenerated
+        || isReplyTextInvalid(regenerated, context.requirements)
+        || normalizeReplyComparisonText(regenerated) === normalizeReplyComparisonText(oldReply)) {
+        regenerated = buildDistinctReplyFallback(decision.item, oldReply);
+      }
+
+      byTaskId.set(decision.taskId, regenerated);
+    }
+  }
+}
 
 export async function generateMissingReplies(items = [], { agentProvider = new LocalAgentProvider(), batchSize = 8 } = {}) {
   const decisions = [];
@@ -209,6 +295,8 @@ export async function generateMissingReplies(items = [], { agentProvider = new L
           throw new Error(`Agent 返回回复不符合发送要求 taskId=${taskId}`);
         }
       }
+
+      await resolveSameActorReplyConflicts(batchDecisions, byTaskId, agentProvider);
 
       for (const decision of batchDecisions) {
         const reply = byTaskId.get(decision.taskId);

@@ -368,9 +368,11 @@ export function buildDirectReplyMessages(context, options = {}) {
     taskId: context?.taskId || '',
     work: {
       workId: context?.work?.workId || '',
+      url: context?.work?.url || '',
       title: context?.work?.title || '',
       desc: context?.work?.desc || '',
       authorNickname: context?.work?.authorNickname || '',
+      publishedAt: context?.work?.publishedAt || '',
     },
     comment: {
       commentId: context?.comment?.commentId || '',
@@ -382,6 +384,8 @@ export function buildDirectReplyMessages(context, options = {}) {
       minLength,
       maxLength,
       tone: context?.requirements?.tone || '自然、简短、像真人',
+      uniquenessPolicy: context?.requirements?.uniquenessPolicy || '',
+      avoidReplyText: context?.requirements?.avoidReplyText || '',
     },
   };
 
@@ -407,9 +411,11 @@ export function buildDirectReplyBatchMessages(contexts, options = {}) {
     taskId: context?.taskId || '',
     work: {
       workId: context?.work?.workId || '',
+      url: context?.work?.url || '',
       title: context?.work?.title || '',
       desc: context?.work?.desc || '',
       authorNickname: context?.work?.authorNickname || '',
+      publishedAt: context?.work?.publishedAt || '',
     },
     comment: {
       commentId: context?.comment?.commentId || '',
@@ -421,6 +427,8 @@ export function buildDirectReplyBatchMessages(contexts, options = {}) {
       minLength: Number(context?.requirements?.minLength || options.minLength || getReplyMinLength()),
       maxLength: Number(context?.requirements?.maxLength || options.maxLength || getReplyMaxLength()),
       tone: context?.requirements?.tone || '自然、简短、像真人',
+      uniquenessPolicy: context?.requirements?.uniquenessPolicy || '',
+      avoidReplyText: context?.requirements?.avoidReplyText || '',
     },
   }));
 

@@ -120,9 +120,11 @@ export function buildReplyPrompt(context = {}) {
       taskId: context.taskId || '',
       work: {
         workId: work.workId || '',
+        url: work.url || '',
         title: work.title || '',
         desc: work.desc || '',
         authorNickname: work.authorNickname || '',
+        publishedAt: work.publishedAt || '',
       },
       comment: {
         commentId: comment.commentId || '',
@@ -134,6 +136,8 @@ export function buildReplyPrompt(context = {}) {
         minLength,
         maxLength,
         tone: context?.requirements?.tone || '自然、简短、像真人',
+        uniquenessPolicy: context?.requirements?.uniquenessPolicy || '',
+        avoidReplyText: context?.requirements?.avoidReplyText || '',
       },
     }, null, 2),
   ].filter(Boolean).join('\n');
@@ -152,9 +156,11 @@ export function buildReplyBatchPrompt(contexts = []) {
       taskId: context.taskId || '',
       work: {
         workId: work.workId || '',
+        url: work.url || '',
         title: work.title || '',
         desc: work.desc || '',
         authorNickname: work.authorNickname || '',
+        publishedAt: work.publishedAt || '',
       },
       comment: {
         commentId: comment.commentId || '',
@@ -166,6 +172,8 @@ export function buildReplyBatchPrompt(contexts = []) {
         minLength,
         maxLength,
         tone: context?.requirements?.tone || '自然、简短、像真人',
+        uniquenessPolicy: context?.requirements?.uniquenessPolicy || '',
+        avoidReplyText: context?.requirements?.avoidReplyText || '',
       },
     };
   });
@@ -177,6 +185,7 @@ export function buildReplyBatchPrompt(contexts = []) {
     '输出格式要求：只能返回 JSON，格式为：{"replies":[{"taskId":"work_comment_1","reply":"回复内容"}]}。',
     'replies 数量必须与输入待回评列表一致；taskId 必须原样返回；reply 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
     '每条回复都要结合对应评论独立生成，避免机械重复；不要合并多条评论，不要漏掉任何 taskId。',
+    '如果同一个 actorName 出现在不同作品下，回复也必须跟随各自作品上下文区分，不能给出完全一样的一句话。',
     '',
     '待回评列表：',
     JSON.stringify(normalized, null, 2),
