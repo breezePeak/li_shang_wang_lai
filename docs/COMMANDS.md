@@ -259,7 +259,8 @@ npm run interactions:scan -- --days 7 --prepare-visits
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `--type` | `all` | `all` / `comment` / `like` / `reply` / `follow` |
-| `--days` | 必填（非 display-only） | 限定最近 N 天通知，传 `0` 取消限制 |
+| `--days` | 与 `--hours` 二选一（非 display-only 必填其一） | 按通知 `create_time` 限定最近 N 天，传 `0` 取消限制 |
+| `--hours` | 与 `--days` 二选一（优先级更高） | 按通知 `create_time` 限定最近 N 小时，传 `0` 取消限制 |
 | `--display-only` | `false` | 只采集和展示互动数据，不查询待回评 / 准备待回访任务 |
 | `--prepare-replies` | 默认准备 | 查询待回评 DB 摘要，不生成文件 |
 | `--prepare-visits` | 默认准备 | 创建/更新待回访 DB 任务，不生成文件 |
@@ -273,6 +274,12 @@ npm run interactions:scan -- --days 7 --prepare-visits
 | `--write-run-files` | `false` | 写入运行摘要文件 |
 | `--pause-after-open` | `0` | 打开通知面板后停顿毫秒数 |
 | `--debug-notification-dom` | `false` | 保存通知 DOM 调试信息 |
+
+时间窗口说明：
+
+- `interactions:scan` 的 `--days` / `--hours` 只基于通知接口返回的 `create_time` 判断是否超窗。
+- 缺少 `create_time` 的通知不会再回退到文字时间做超窗判断。
+- API 扫描路径里的“连续过期即停止”只统计 `comment` / `like`，不再把 `reply` 算进去。
 
 ## 4. actions:pending
 

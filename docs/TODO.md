@@ -82,8 +82,9 @@
 │  ├─ 本次扫描内重复 (processedNoticeIds)         → skip           │
 │  ├─ --type 过滤 (comment/like 不匹配)           → skip           │
 │  ├─ 不再按最大条数提前截断                      → 继续扫描        │
-│  ├─ --days N 天数窗口 (事件 create_time 比较)                     │
-│  │  ├─ 超过 N 天 → 累计连续过期计数                               │
+│  ├─ --days / --hours 时间窗口（仅比较通知 create_time）           │
+│  │  ├─ 仅对 comment / like 生效                                   │
+│  │  ├─ 超过窗口 → 累计连续过期计数                                 │
 │  │  │  └─ 连续 ≥ 3 条 → stop='old-relevant' → break             │
 │  │  └─ 在窗口内 → 重置连续计数为 0                                 │
 │  │                                                                 │
