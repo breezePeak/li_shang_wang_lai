@@ -70,6 +70,9 @@ describe('agent comment server helpers', () => {
     expect(prompt).toContain('不要用"主人"称呼评论区里的人');
     expect(prompt).toContain('机械话术');
     expect(prompt).toContain('泛化代回表达');
+    expect(prompt).toContain('静默吞评');
+    expect(prompt).toContain('客服腔');
+    expect(prompt).toContain('不要像运营号统一回评');
     expect(prompt).not.toContain('你是抖音创作者互动助手');
     expect(prompt).not.toContain('必须自然出现“小猿”');
   });
@@ -104,6 +107,9 @@ describe('agent comment server helpers', () => {
     expect(prompt).toContain('不要用"主人"称呼评论区里的人');
     expect(prompt).toContain('机械话术');
     expect(prompt).toContain('泛化代回表达');
+    expect(prompt).toContain('静默吞评');
+    expect(prompt).toContain('客服腔');
+    expect(prompt).toContain('不要像运营号统一回评');
     expect(prompt).not.toContain('你是抖音创作者互动助手');
     expect(prompt).not.toContain('必须在该条 reply 里自然出现“小猿”');
     expect(prompt).toContain('work_comment_1');

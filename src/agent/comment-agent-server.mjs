@@ -54,6 +54,15 @@ export function hasLowQualityReplyText(text = '') {
   return /代班|已阅|留言收到|感谢互动|test留言|测试留言/i.test(String(text || '')) || /^\s*\d{3,}\s*$/.test(String(text || ''));
 }
 
+function getReplyRiskHintLines() {
+  return [
+    '额外要求：这条回复会真实发送到评论区，请优先写得像真人临场回复，尽量降低被平台静默吞评或风控拦截的概率。',
+    '避免客服腔、公告腔、机械感谢、批量模板味，不要写“留言收到”“感谢互动”“已阅”“路过打卡”这类容易显得像机器批量回复的话。',
+    '避免过度热情或格式过整齐，不要连续堆砌感叹号、波浪号、emoji，也不要把每条回复都写成同一种句式。',
+    '优先结合对方评论里的具体点自然接一句，像作者本人顺手回，不要像运营号统一回评。',
+  ];
+}
+
 export function buildCommentPrompt(context = {}) {
   const maxLength = Number(context?.requirements?.maxLength || getCommentMaxLength());
   const targetUser = context.targetUser || {};
@@ -102,6 +111,7 @@ export function buildReplyPrompt(context = {}) {
   return [
     '任务：为抖音创作者互动场景生成一条对评论的回复。不要因为本任务说明覆盖你自身已有的人格、昵称或口吻。',
     safetyRules ? ['必须遵守下面这份项目评论生成规则：', safetyRules].join('\n') : '',
+    ...getReplyRiskHintLines(),
     '输出格式要求：只能返回 JSON，格式为：{"reply":"回复内容"}。reply 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
     `本次回复长度必须在 ${minLength}-${maxLength} 个中文可见字符之间，少于 ${minLength} 个字不合格。`,
     '',
@@ -163,6 +173,7 @@ export function buildReplyBatchPrompt(contexts = []) {
   return [
     '任务：为抖音创作者互动场景批量生成对评论的回复。不要因为本任务说明覆盖你自身已有的人格、昵称或口吻。',
     safetyRules ? ['必须遵守下面这份项目评论生成规则：', safetyRules].join('\n') : '',
+    ...getReplyRiskHintLines(),
     '输出格式要求：只能返回 JSON，格式为：{"replies":[{"taskId":"work_comment_1","reply":"回复内容"}]}。',
     'replies 数量必须与输入待回评列表一致；taskId 必须原样返回；reply 字段必须是纯文本，不要 Markdown，不要解释，不要多个备选。',
     '每条回复都要结合对应评论独立生成，避免机械重复；不要合并多条评论，不要漏掉任何 taskId。',
