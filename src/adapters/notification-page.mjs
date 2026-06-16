@@ -1,6 +1,6 @@
 /**
  * Notification panel adapter — hover bell icon, extract notification items
- * Panel appears on mouse hover over svg.LtuRRess on /user/self
+ * Panel appears on mouse hover over the notification bell on /user/self
  *
  * Key principles:
  * - Mouse stays inside panel to keep it open
@@ -17,6 +17,22 @@ const SELF_URL = 'https://www.douyin.com/user/self';
 const REQUEST_TRACKER = Symbol.for('lishangwanglai.notificationRequestTracker');
 const NETWORK_WAIT_TIMEOUT_MS = 60000;
 const NETWORK_IDLE_MS = 1200;
+const NOTIFICATION_BELL_SELECTORS = [
+  '[data-e2e="something-button"]:has-text("通知")',
+  'li:has-text("通知") [data-e2e="something-button"]',
+  'text=/^通知$/',
+  '[data-e2e*="message" i] svg',
+  '[data-e2e*="notify" i] svg',
+  '[data-e2e*="notification" i] svg',
+  '[aria-label*="通知"] svg',
+  '[title*="通知"] svg',
+  '[data-e2e*="message" i]',
+  '[data-e2e*="notify" i]',
+  '[data-e2e*="notification" i]',
+  '[aria-label*="通知"]',
+  '[title*="通知"]',
+  'svg.LtuRRess',
+];
 
 function formatTimeoutSeconds(timeoutMs) {
   return Math.round(timeoutMs / 1000);
@@ -115,10 +131,36 @@ async function waitForPageSignalOrNetworkState(page, {
 
 async function hasNotificationBell(page) {
   return await page.evaluate(() => {
-    return !!document.querySelector('svg.LtuRRess') ||
-      !!document.querySelector('[data-e2e*="notify"]') ||
-      !!document.querySelector('[data-e2e*="message"]');
+    const selectors = [
+      '[data-e2e*="message" i]',
+      '[data-e2e*="notify" i]',
+      '[data-e2e*="notification" i]',
+      '[aria-label*="通知"]',
+      '[title*="通知"]',
+      'svg.LtuRRess',
+    ];
+    if (selectors.some(selector => document.querySelector(selector))) return true;
+
+    for (const el of document.querySelectorAll('button, a, div, span')) {
+      const text = (el.textContent || '').trim();
+      if (!text || !text.includes('通知')) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width >= 16 && rect.height >= 16 && rect.y <= 160) return true;
+    }
+    return false;
   }).catch(() => false);
+}
+
+export async function findNotificationBell(page) {
+  for (const selector of NOTIFICATION_BELL_SELECTORS) {
+    try {
+      const locator = page.locator(selector).first();
+      if (await locator.count()) {
+        return { locator, selector };
+      }
+    } catch {}
+  }
+  return null;
 }
 
 async function hasNotificationPanel(page) {
@@ -192,23 +234,23 @@ export async function openNotificationPanel(page) {
     let attempt = 0;
     while (Date.now() < deadline) {
       attempt++;
-      const bell = page.locator('svg.LtuRRess').first();
       try {
-        if (await bell.count()) {
-          await bell.hover({ timeout: 1500 });
+        const bell = await findNotificationBell(page);
+        if (bell) {
+          await bell.locator.hover({ timeout: 1500 });
           if (await waitForPanelContent(page, { maxWait: 1500 })) {
-            console.error(`[notify-page] ✅ hover 铃铛触发了通知面板 (attempt=${attempt})`);
+            console.error(`[notify-page] ✅ hover 铃铛触发了通知面板 selector=${bell.selector} (attempt=${attempt})`);
             return true;
           }
         }
       } catch {}
 
       try {
-        const bellBtn = page.locator('div[data-e2e]:has(svg.LtuRRess)').first();
-        if (await bellBtn.count()) {
-          await bellBtn.click({ timeout: 1500 });
+        const bell = await findNotificationBell(page);
+        if (bell) {
+          await bell.locator.click({ timeout: 1500 });
           if (await waitForPanelContent(page, { maxWait: 1500 })) {
-            console.error(`[notify-page] ✅ click data-e2e 容器触发了通知面板 (attempt=${attempt})`);
+            console.error(`[notify-page] ✅ click 铃铛触发了通知面板 selector=${bell.selector} (attempt=${attempt})`);
             return true;
           }
         }

@@ -9,6 +9,7 @@ import {
   captureFullScreenshot,
   captureDomFragment,
 } from '../browser/page-diagnostics.mjs';
+import { findNotificationBell } from '../adapters/notification-page.mjs';
 import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
 
 import path from 'path';
@@ -59,13 +60,12 @@ async function main() {
 
     let panelOpened = false;
 
-    // Primary: Hover over the bell SVG parent (class LtuRRess) — dropdown stays open
-    const bell = page.locator('svg.LtuRRess').first();
     try {
-      await bell.waitFor({ state: 'attached', timeout: 10000 });
-      const box = await bell.boundingBox();
+      const bell = await findNotificationBell(page);
+      if (!bell) throw new Error('bell-not-found');
+      const box = await bell.locator.boundingBox();
       if (box) {
-        console.log(`[notify] 找到铃铛 SVG, hover (${box.x.toFixed(0)}, ${box.y.toFixed(0)})...`);
+        console.log(`[notify] 找到铃铛 selector=${bell.selector}, hover (${box.x.toFixed(0)}, ${box.y.toFixed(0)})...`);
         // Mouse move to keep dropdown open (no click needed for hover menus)
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.waitForTimeout(1000);
@@ -83,8 +83,7 @@ async function main() {
       } else {
         // Try clicking instead of hover
         console.log('[notify] hover 无效，尝试 click...');
-        const parent = bell.locator('..');
-        await parent.first().click({ timeout: 5000 });
+        await bell.locator.click({ timeout: 5000 });
         await page.waitForTimeout(1000);
       }
     } catch {
