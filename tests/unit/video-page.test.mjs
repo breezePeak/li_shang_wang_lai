@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { chromium } from 'playwright';
-import { clickLike, confirmLikeSucceeded, postVideoComment, checkLikeState, navigateToVideo, clickVideoCommentButtonByDom, clickVideoCommentSendControl } from '../../src/adapters/video-page.mjs';
+import { clickLike, confirmLikeSucceeded, postVideoComment, checkLikeState, navigateToVideo, clickVideoCommentButtonByDom, clickVideoCommentSendControl, ensureCommentPanelOpen } from '../../src/adapters/video-page.mjs';
 
 function createMockLocator(selector, matchedSelectors = []) {
   const isMatch = matchedSelectors.some(sel => {
@@ -262,5 +262,46 @@ describe('video-page adapters mock testing', () => {
     } finally {
       await browser.close();
     }
+  });
+
+  it('ensureCommentPanelOpen 使用对象内 locator 调用，不会因包装对象抛错', async () => {
+    let panelOpen = false;
+    const targetLocator = {
+      count: vi.fn(async () => 1),
+      isVisible: vi.fn(async () => true),
+      click: vi.fn(async () => { panelOpen = true; }),
+      first() { return this; },
+      elementHandle: vi.fn(async () => null),
+    };
+
+    const missLocator = {
+      count: vi.fn(async () => 0),
+      isVisible: vi.fn(async () => false),
+      click: vi.fn(async () => {}),
+      first() { return this; },
+      elementHandle: vi.fn(async () => null),
+    };
+
+    const page = {
+      locator: vi.fn((selector) => {
+        if (selector === '[data-e2e="feed-comment-icon"]') return targetLocator;
+        return missLocator;
+      }),
+      evaluate: vi.fn(async (fn) => {
+        const code = String(fn);
+        if (code.includes('const selectors = [')) {
+          return panelOpen;
+        }
+        if (code.includes("const nodes = Array.from(document.querySelectorAll('button")) {
+          return { clicked: false };
+        }
+        return false;
+      }),
+      waitForTimeout: vi.fn(async () => {}),
+    };
+
+    const result = await ensureCommentPanelOpen(page);
+    expect(result).toBe(true);
+    expect(targetLocator.click).toHaveBeenCalled();
   });
 });

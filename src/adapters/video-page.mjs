@@ -1445,18 +1445,19 @@ export async function ensureCommentPanelOpen(page) {
       console.error(`[video-page] 打开评论区 attempt=${attempt} start`);
       for (const btn of commentBtns) {
         console.error(`[video-page] 检查评论按钮 attempt=${attempt} selector=${btn.label}`);
-        if (await btn.count() > 0 && await btn.first().isVisible()) {
+        const locator = btn.locator;
+        if (await locator.count() > 0 && await locator.first().isVisible()) {
           let clicked = false;
           try {
-            await btn.first().click({ timeout: 3000 });
+            await locator.first().click({ timeout: 3000 });
             clicked = true;
           } catch {
             try {
-              await btn.first().click({ force: true, timeout: 3000 });
+              await locator.first().click({ force: true, timeout: 3000 });
               clicked = true;
             } catch {
               try {
-                const handle = await btn.first().elementHandle();
+                const handle = await locator.first().elementHandle();
                 if (handle) {
                   await handle.evaluate((el) => el.click());
                   clicked = true;
