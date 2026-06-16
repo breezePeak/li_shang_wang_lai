@@ -161,6 +161,86 @@ describe('clickReplySendControl', () => {
       await browser.close();
     }
   });
+
+  it('发送文案是普通 div 时也能点到发送控件', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+      await page.setContent(`
+        <html>
+          <body>
+            <div class="comment-input-container">
+              <div class="commentInput-left-ct">
+                <div contenteditable="true">测试评论</div>
+              </div>
+              <div class="commentInput-right-ct">
+                <div class="send-shell" id="send-shell">
+                  <div class="Lb5hig9Q">发送</div>
+                </div>
+              </div>
+            </div>
+            <script>
+              window.clicked = [];
+              document.getElementById('send-shell').addEventListener('click', () => window.clicked.push('send'));
+            </script>
+          </body>
+        </html>
+      `);
+
+      const result = await clickReplySendControl(page);
+      const clicked = await page.evaluate(() => window.clicked.slice());
+
+      expect(result.ok).toBe(true);
+      expect(clicked).toContain('send');
+    } finally {
+      await browser.close();
+    }
+  });
+
+  it('发送是纯图标按钮时跳过上传并点击安全兄弟节点', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+      await page.setContent(`
+        <html>
+          <body>
+            <div class="comment-input-container">
+              <div class="commentInput-left-ct">
+                <div contenteditable="true">测试评论</div>
+              </div>
+              <div class="commentInput-right-ct">
+                <div class="EiXTAP_w" id="upload-shell">
+                  <input type="file" style="display:none" />
+                  <span aria-label="上传图片">
+                    <svg width="20" height="20"></svg>
+                  </span>
+                </div>
+                <div class="send-shell" id="send-shell">
+                  <span class="send-icon">
+                    <svg width="20" height="20"></svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <script>
+              window.clicked = [];
+              document.getElementById('upload-shell').addEventListener('click', () => window.clicked.push('upload'));
+              document.getElementById('send-shell').addEventListener('click', () => window.clicked.push('send'));
+            </script>
+          </body>
+        </html>
+      `);
+
+      const result = await clickReplySendControl(page);
+      const clicked = await page.evaluate(() => window.clicked.slice());
+
+      expect(result.ok).toBe(true);
+      expect(clicked).toContain('send');
+      expect(clicked).not.toContain('upload');
+    } finally {
+      await browser.close();
+    }
+  });
 });
 
 describe('replyText 前缀匹配逻辑', () => {

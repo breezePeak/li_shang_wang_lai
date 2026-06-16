@@ -311,11 +311,16 @@ export async function clickReplySendControl(page) {
       return /上传|投稿|选择文件|图片|相册|附件|表情/.test(`${text} ${attrs}`);
     }
 
+    function containsFileInput(el) {
+      return !!el?.querySelector?.('input[type="file"]');
+    }
+
     function pickPreferredClickTarget(el) {
       const chain = [el, el?.closest?.('button,[role="button"]'), el?.parentElement, el?.parentElement?.closest?.('button,[role="button"]')];
       for (const candidate of chain) {
         if (!candidate || !visible(candidate)) continue;
         if (hasBlockedSemantics(candidate)) continue;
+        if (containsFileInput(candidate)) continue;
         const text = textOf(candidate);
         const attrs = [
           candidate.getAttribute?.('class') || '',
@@ -326,6 +331,17 @@ export async function clickReplySendControl(page) {
         const isSendText = text === '发送' || text === '发布';
         const isSendAttr = /send|submit|publish|comment-submit|FbVIhLlK/.test(attrs);
         if (isSendText || isSendAttr) return candidate;
+      }
+      return null;
+    }
+
+    function pickSafeFallbackTarget(el) {
+      const chain = [el, el?.closest?.('button,[role="button"]'), el?.parentElement, el?.parentElement?.closest?.('button,[role="button"]')];
+      for (const candidate of chain) {
+        if (!candidate || !visible(candidate)) continue;
+        if (hasBlockedSemantics(candidate)) continue;
+        if (containsFileInput(candidate)) continue;
+        return candidate;
       }
       return null;
     }
@@ -376,6 +392,32 @@ export async function clickReplySendControl(page) {
         clickAllWays(target);
         return { ok: true, method: 'send_control_click', selector: selector.css, targetText: textOf(target).slice(0, 20) };
       }
+    }
+
+    const textMatches = Array.from(sendArea.querySelectorAll('div, span, button, [role="button"]'))
+      .filter(visible)
+      .filter(el => !hasBlockedSemantics(el))
+      .filter(el => !containsFileInput(el))
+      .filter(el => {
+        const text = textOf(el);
+        return text === '发送' || text === '发布' || text.includes('发送') || text.includes('发布');
+      });
+    for (const el of textMatches) {
+      const target = pickPreferredClickTarget(el) || pickSafeFallbackTarget(el);
+      if (!target) continue;
+      clickAllWays(target);
+      return { ok: true, method: 'send_text_fallback_click', selector: 'text-descendant', targetText: textOf(target).slice(0, 20) };
+    }
+
+    const directChildren = Array.from(sendArea.children)
+      .filter(visible)
+      .filter(el => !hasBlockedSemantics(el))
+      .filter(el => !containsFileInput(el));
+    for (const el of directChildren) {
+      const target = pickSafeFallbackTarget(el);
+      if (!target) continue;
+      clickAllWays(target);
+      return { ok: true, method: 'send_area_safe_sibling_click', selector: 'send-area-child', targetText: textOf(target).slice(0, 20) };
     }
 
     return { ok: false, reason: 'strict_send_control_not_found' };
