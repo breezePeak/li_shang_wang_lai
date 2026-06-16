@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { clickLike, confirmLikeSucceeded, postVideoComment, checkLikeState, navigateToVideo } from '../../src/adapters/video-page.mjs';
+import { chromium } from 'playwright';
+import { clickLike, confirmLikeSucceeded, postVideoComment, checkLikeState, navigateToVideo, clickVideoCommentButtonByDom, clickVideoCommentSendControl } from '../../src/adapters/video-page.mjs';
 
 function createMockLocator(selector, matchedSelectors = []) {
   const isMatch = matchedSelectors.some(sel => {
@@ -192,5 +193,74 @@ describe('video-page adapters mock testing', () => {
     const res = await navigateToVideo(mockPage, 'https://www.douyin.com/jingxuan?modal_id=7636032429409601465');
     expect(res.ok).toBe(true);
     expect(res.data.isModalPage).toBe(true);
+  });
+
+  it('clickVideoCommentButtonByDom 能点击右侧 action bar 第二项评论入口', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      await page.setContent(`
+        <html>
+          <body>
+            <div class="t5VMknM2">
+              <div class="MinpposV">
+                <div class="AOWKbsTg" id="like-btn"><span>63</span></div>
+                <div class="AOWKbsTg" id="comment-btn"><span>24</span></div>
+                <div class="AOWKbsTg" id="share-btn"><span>3</span></div>
+              </div>
+            </div>
+            <script>
+              window.clicked = [];
+              document.getElementById('comment-btn').addEventListener('click', () => window.clicked.push('comment'));
+            </script>
+          </body>
+        </html>
+      `);
+
+      const result = await clickVideoCommentButtonByDom(page);
+      const clicked = await page.evaluate(() => window.clicked.slice());
+
+      expect(result.ok).toBe(true);
+      expect(result.method).toBe('douyin_actionbar_comment_index');
+      expect(clicked).toContain('comment');
+    } finally {
+      await browser.close();
+    }
+  });
+
+  it('clickVideoCommentSendControl 能点击评论框右侧红色发送控件', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      await page.setContent(`
+        <html>
+          <body>
+            <div class="comment-input-container" style="position:fixed;right:16px;bottom:16px;width:320px;height:72px;">
+              <div class="left-actions">
+                <span aria-label="上传图片">图</span>
+              </div>
+              <div contenteditable="true" id="editor">测试评论</div>
+              <button id="send-btn" type="button" style="position:absolute;right:12px;bottom:12px;color:rgb(255,255,255);background:rgb(255,46,85);width:28px;height:28px;border-radius:50%;">
+                <svg width="16" height="16" fill="rgb(255,255,255)"></svg>
+              </button>
+            </div>
+            <script>
+              window.clicked = [];
+              document.getElementById('editor').focus();
+              document.getElementById('send-btn').addEventListener('click', () => window.clicked.push('send'));
+            </script>
+          </body>
+        </html>
+      `);
+
+      const result = await clickVideoCommentSendControl(page);
+      const clicked = await page.evaluate(() => window.clicked.slice());
+
+      expect(result.ok).toBe(true);
+      expect(result.method).toBe('video_send_control_click');
+      expect(clicked).toContain('send');
+    } finally {
+      await browser.close();
+    }
   });
 });

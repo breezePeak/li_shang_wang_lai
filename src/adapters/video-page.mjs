@@ -116,6 +116,147 @@ async function captureVideoCommentDebug(page, phase, extra = {}) {
   }
 }
 
+export async function clickVideoCommentButtonByDom(page) {
+  return await page.evaluate(() => {
+    function visible(el) {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    }
+
+    function clickAllWays(target) {
+      target.click?.();
+      target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }
+
+    const actionItems = Array.from(document.querySelectorAll('.t5VMknM2 .MinpposV > .AOWKbsTg'))
+      .filter(visible);
+    if (actionItems.length >= 2) {
+      const target = actionItems[1];
+      const rect = target.getBoundingClientRect();
+      clickAllWays(target);
+      return {
+        ok: true,
+        method: 'douyin_actionbar_comment_index',
+        text: (target.innerText || target.textContent || '').trim().slice(0, 40),
+        x: Math.round(rect.x + rect.width / 2),
+        y: Math.round(rect.y + rect.height / 2),
+      };
+    }
+
+    const nodes = Array.from(document.querySelectorAll('button, [role="button"], div, span, a'))
+      .filter(visible)
+      .map(el => ({ el, text: (el.innerText || el.textContent || '').trim(), rect: el.getBoundingClientRect() }))
+      .filter(item => item.rect.left >= window.innerWidth * 0.62)
+      .filter(item => item.rect.top >= 80 && item.rect.bottom <= window.innerHeight - 60)
+      .filter(item => item.text === '评论' || /^(评论)?\d+$/.test(item.text.replace(/\s+/g, '')));
+
+    nodes.sort((a, b) => {
+      const aScore = (a.text.includes('评论') ? 10 : 0) + a.rect.width * a.rect.height;
+      const bScore = (b.text.includes('评论') ? 10 : 0) + b.rect.width * b.rect.height;
+      return bScore - aScore;
+    });
+
+    const target = nodes[0]?.el || null;
+    if (!target) return { ok: false, reason: 'comment_button_not_found_by_dom' };
+
+    const rect = target.getBoundingClientRect();
+    clickAllWays(target);
+    return {
+      ok: true,
+      method: 'right_sidebar_comment_fallback',
+      text: (target.innerText || target.textContent || '').trim().slice(0, 40),
+      x: Math.round(rect.x + rect.width / 2),
+      y: Math.round(rect.y + rect.height / 2),
+    };
+  }).catch(err => ({ ok: false, reason: `comment_button_dom_exception:${err.message}` }));
+}
+
+export async function clickVideoCommentSendControl(page) {
+  return await page.evaluate(() => {
+    function visible(el) {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    }
+
+    function clickAllWays(target) {
+      target.click?.();
+      target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }
+
+    function textOf(el) {
+      return (el?.innerText || el?.textContent || '').trim();
+    }
+
+    function isRedLike(value) {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (!normalized) return false;
+      const match = normalized.match(/rgb[a]?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+      if (!match) return false;
+      const r = Number(match[1]);
+      const g = Number(match[2]);
+      const b = Number(match[3]);
+      return r >= 220 && g <= 120 && b <= 140;
+    }
+
+    function hasBlockedSemantics(el) {
+      const raw = `${textOf(el)} ${el?.getAttribute?.('aria-label') || ''} ${el?.getAttribute?.('title') || ''} ${el?.getAttribute?.('class') || ''}`;
+      return /上传|投稿|选择文件|图片|相册|附件|表情|@/.test(raw);
+    }
+
+    const editor = document.activeElement?.matches?.('[contenteditable="true"], textarea, input[type="text"]')
+      ? document.activeElement
+      : document.querySelector('[contenteditable="true"][data-placeholder*="评"], [contenteditable="true"][placeholder*="评"], textarea[placeholder*="评"], [class*="comment"] [contenteditable="true"], [class*="comment"] textarea');
+    const composer = editor?.closest?.('.comment-input-container, [class*="comment-input-container"], [class*="commentInput"], [class*="input-container"]')
+      || editor?.parentElement?.parentElement
+      || null;
+    if (!visible(composer)) return { ok: false, reason: 'composer_not_found' };
+
+    const composerRect = composer.getBoundingClientRect();
+    const candidates = Array.from(composer.querySelectorAll('button, [role="button"], div, span, svg, img'))
+      .filter(visible)
+      .filter(el => !hasBlockedSemantics(el))
+      .map(el => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        const text = textOf(el);
+        const svg = el.tagName.toLowerCase() === 'svg' ? el : el.querySelector?.('svg');
+        const path = svg?.querySelector?.('path');
+        let score = 0;
+        if (text === '发送' || text === '发布' || text.includes('发送') || text.includes('发布')) score += 50;
+        if (rect.left >= composerRect.left + composerRect.width * 0.65) score += 30;
+        if (rect.width <= 56 && rect.height <= 56) score += 10;
+        if (isRedLike(style.color) || isRedLike(style.backgroundColor)) score += 25;
+        if (isRedLike(svg?.getAttribute?.('fill')) || isRedLike(path?.getAttribute?.('fill'))) score += 25;
+        if (text === '' && (el.tagName.toLowerCase() === 'svg' || el.querySelector?.('svg'))) score += 10;
+        return { el, rect, text, score };
+      })
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    const target = candidates[0]?.el || null;
+    if (!target) return { ok: false, reason: 'video_send_control_not_found' };
+    const rect = target.getBoundingClientRect();
+    clickAllWays(target);
+    return {
+      ok: true,
+      method: 'video_send_control_click',
+      text: textOf(target).slice(0, 20),
+      x: Math.round(rect.x + rect.width / 2),
+      y: Math.round(rect.y + rect.height / 2),
+    };
+  }).catch(err => ({ ok: false, reason: `video_send_dom_exception:${err.message}` }));
+}
+
 /**
  * Pure function: determine like state from a single candidate's diagnostic info.
  * Returns { liked: true|false|null, confidence, signal } or null if can't determine.
@@ -1365,6 +1506,18 @@ export async function ensureCommentPanelOpen(page) {
           console.error(`[video-page] 评论面板仍未打开 selector=${btn.label} (attempt=${attempt})`);
         }
       }
+
+      const domClick = await clickVideoCommentButtonByDom(page);
+      if (domClick?.ok) {
+        console.error(`[video-page] 已通过 DOM 兜底点击评论按钮 method=${domClick.method} text="${domClick.text || ''}" (attempt=${attempt})`);
+        await page.waitForTimeout(800);
+        const deadline = Date.now() + (attempt < 3 ? 2500 : 5000);
+        while (Date.now() < deadline) {
+          if (await isOpen()) return true;
+          await page.waitForTimeout(500);
+        }
+        console.error(`[video-page] DOM 兜底点击后评论面板仍未打开 method=${domClick.method} (attempt=${attempt})`);
+      }
       await page.waitForTimeout(700 * attempt);
     }
   } catch (err) {
@@ -1622,6 +1775,14 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
         clickedSend = true;
         console.error(`[video-page] 已通过按钮发送评论 (${sel})`);
         break;
+      }
+    }
+
+    if (!clickedSend) {
+      const domSend = await clickVideoCommentSendControl(page);
+      if (domSend?.ok) {
+        clickedSend = true;
+        console.error(`[video-page] 已通过 DOM 发送控件发送评论 (${domSend.method})`);
       }
     }
 
