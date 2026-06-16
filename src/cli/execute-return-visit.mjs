@@ -191,9 +191,11 @@ async function main() {
     if (issue) {
       if (issue === 'no_work_target') {
         log(args.json, `[return-visit:execute] task ${task.taskId} skipped due to empty work target`);
-        updateReturnVisitTask(task.taskId, {
+        markReturnVisitFailure(task, {
           status: RETURN_VISIT_STATUS.FAILED_COLLECT,
-          lastError: 'no_work_target'
+          error: 'no_work_target',
+          likeStatus: task.likeStatus,
+          commentStatus: task.commentStatus,
         });
         taskResults.push({ taskId: task.taskId, status: RETURN_VISIT_STATUS.FAILED_COLLECT, reason: 'no_work_target' });
         failed++;

@@ -201,7 +201,8 @@ export function runMigrations(dbPath = DB_PATH) {
       raw_comment_json TEXT,
       first_seen_at TEXT NOT NULL,
       last_seen_at TEXT NOT NULL,
-      replied_at TEXT
+      replied_at TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_work_comments_unique
@@ -448,7 +449,8 @@ export function runMigrations(dbPath = DB_PATH) {
         raw_comment_json TEXT,
         first_seen_at TEXT NOT NULL,
         last_seen_at TEXT NOT NULL,
-        replied_at TEXT
+        replied_at TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0
       )
     `);
 
@@ -456,10 +458,10 @@ export function runMigrations(dbPath = DB_PATH) {
       INSERT INTO work_comments_new
         (id, work_id, work_url, modal_id, actor_name, actor_profile_url, actor_profile_key,
           comment_text, event_time_text, comment_key, source_event_id, source_notification_key,
-          reply_status, reply_text, reply_reason, raw_comment_json, first_seen_at, last_seen_at, replied_at)
+          reply_status, reply_text, reply_reason, raw_comment_json, first_seen_at, last_seen_at, replied_at, retry_count)
         SELECT id, work_id, work_url, modal_id, actor_name, actor_profile_url, actor_profile_key,
           comment_text, event_time_text, comment_key, source_event_id, source_notification_key,
-          reply_status, reply_text, reply_reason, raw_comment_json, first_seen_at, last_seen_at, replied_at
+          reply_status, reply_text, reply_reason, raw_comment_json, first_seen_at, last_seen_at, replied_at, 0
         FROM work_comments ORDER BY id
     `);
 
@@ -469,6 +471,16 @@ export function runMigrations(dbPath = DB_PATH) {
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_work_comments_unique ON work_comments(work_id, comment_key) WHERE work_id IS NOT NULL AND work_id != ''`);
 
     console.error('[db:init] work_comments 表已重建（reply_status 约束已更新）');
+  }
+
+  const checkRetryCount = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='work_comments'"
+  ).get();
+  const workCommentsSql = checkRetryCount ? (checkRetryCount.sql || '') : '';
+  if (workCommentsSql && !workCommentsSql.includes('retry_count')) {
+    console.error('[db:init] 旧版 work_comments 缺少 retry_count 列，迁移中...');
+    db.exec("ALTER TABLE work_comments ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0");
+    console.error('[db:init] retry_count 列已添加');
   }
 
   // Migrate: backfill relation=friend for events where rawText shows 在线 after username

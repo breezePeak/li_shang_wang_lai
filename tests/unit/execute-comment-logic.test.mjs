@@ -19,6 +19,7 @@ import {
   validateWorkCommentItem,
 } from '../../src/cli/execute-comment-replies.mjs';
 import { listPendingCommentsGroupedByHomepageAndWork } from '../../src/db/work-comment-repository.mjs';
+import { markCommentRetryFailure } from '../../src/db/work-comment-repository.mjs';
 
 // ============================================================
 // Test helpers — run CLI and capture stdout
@@ -60,7 +61,8 @@ function setup() {
       raw_comment_json TEXT,
       first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      replied_at TEXT
+      replied_at TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS interaction_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -364,6 +366,8 @@ describe('comments:execute refactored logic', () => {
     });
     expect(verifyDb.prepare('SELECT reply_reason FROM work_comments WHERE id = 1').get().reply_reason).toContain('agent_generate_failed:Agent 返回回复数量不匹配');
     expect(verifyDb.prepare('SELECT reply_reason FROM work_comments WHERE id = 2').get().reply_reason).toContain('agent_generate_failed:Agent 返回回复数量不匹配');
+    expect(verifyDb.prepare('SELECT retry_count FROM work_comments WHERE id = 1').get().retry_count).toBe(1);
+    expect(verifyDb.prepare('SELECT retry_count FROM work_comments WHERE id = 2').get().retry_count).toBe(1);
     verifyDb.close();
   });
 
@@ -914,6 +918,99 @@ describe('comments:execute single-pass per work', () => {
     expect(results).toHaveLength(1);
     expect(results[0].error).toContain('single_pass_not_found');
     expect(saveRetryable).toHaveBeenCalledWith(expect.objectContaining({ commentId: 1 }), 'single_pass_not_found');
+  });
+
+  it('同一条回评第 3 次执行失败后直接转 blocked 异常，交给人工处理', async () => {
+    const db = new Database(testDb);
+    db.prepare(`
+      UPDATE work_comments
+      SET actor_name = '重试用户',
+          comment_text = '一直找不到',
+          event_time_text = '2小时前',
+          reply_text = 'Hermes代看后觉得这是用于验证的合格回复内容',
+          reply_status = 'pending',
+          reply_reason = NULL,
+          retry_count = 2
+      WHERE id = 1
+    `).run();
+    db.close();
+    resetDb();
+    getDb(testDb);
+    const retryResult = markCommentRetryFailure(1, 'single_pass_not_found');
+    expect(retryResult.finalStatus).toBe('blocked');
+    expect(retryResult.retryCount).toBe(3);
+
+    const verifyDb = new Database(testDb);
+    expect(verifyDb.prepare('SELECT reply_status, retry_count, reply_reason FROM work_comments WHERE id = 1').get()).toMatchObject({
+      reply_status: 'blocked',
+      retry_count: 3,
+    });
+    expect(verifyDb.prepare('SELECT reply_reason FROM work_comments WHERE id = 1').get().reply_reason).toContain('single_pass_not_found');
+    verifyDb.close();
+  });
+
+  it('回评向下翻 20 次还没找到评论时放弃本轮，并累计一次失败', async () => {
+    const page = createFakePage();
+    const saveRetryable = vi.fn();
+    let scrollCount = 0;
+
+    const results = await executeSinglePassForWorkGroup(page, [
+      { commentId: 1, replyText: 'r1', actorName: 'u1', commentText: 'missing', eventTimeText: '2小时前' },
+    ], { getByCid: () => null, getStats: () => ({ hasMore: 1 }) }, {
+      collectCandidates: vi.fn(async () => ({ ok: true, candidates: [] })),
+      scrollOnce: vi.fn(async () => {
+        scrollCount++;
+        return { ok: true };
+      }),
+      openMatchedReplyBox: vi.fn(),
+      fillReply: vi.fn(),
+      clickSend: vi.fn(),
+      verifyReply: vi.fn(),
+      saveSucceeded: vi.fn(),
+      saveRetryable,
+      saveSentUnverified: vi.fn(),
+      onResult: vi.fn(),
+    });
+
+    expect(scrollCount).toBe(20);
+    expect(results).toHaveLength(1);
+    expect(results[0].error).toContain('scroll_limit_20');
+    expect(saveRetryable).toHaveBeenCalledWith(expect.objectContaining({ commentId: 1 }), 'single_pass_not_found:scroll_limit_20');
+  });
+
+  it('当可见评论时间越翻越旧并超过目标时间时，会开始回滚向上找', async () => {
+    const page = createFakePage();
+    let collectRound = 0;
+    const directions = [];
+
+    const results = await executeSinglePassForWorkGroup(page, [
+      { commentId: 1, replyText: 'r1', actorName: 'u1', commentText: '目标评论', eventTimeText: '2小时前' },
+    ], { getByCid: () => null, getStats: () => ({ hasMore: 1 }) }, {
+      collectCandidates: vi.fn(async () => {
+        collectRound++;
+        if (collectRound === 1) {
+          return { ok: true, candidates: [{ domIndex: 0, cid: '', actorName: 'u2', commentText: '别的评论', timeText: '3小时前', hasReplyButton: true }] };
+        }
+        if (collectRound === 2) {
+          return { ok: true, candidates: [{ domIndex: 0, cid: '', actorName: 'u3', commentText: '更旧评论', timeText: '6小时前', hasReplyButton: true }] };
+        }
+        return { ok: true, candidates: [{ domIndex: 0, cid: '', actorName: 'u1', commentText: '目标评论', timeText: '2小时前', hasReplyButton: true }] };
+      }),
+      scrollOnce: vi.fn(async (_page, options = {}) => {
+        directions.push(options.direction || 'down');
+        return { ok: true, atStart: false };
+      }),
+      openMatchedReplyBox: vi.fn(async () => ({ ok: true })),
+      fillReply: vi.fn(async () => ({ ok: true })),
+      clickSend: vi.fn(async () => ({ ok: true })),
+      verifyReply: vi.fn(async () => ({ ok: true })),
+      saveSucceeded: vi.fn(),
+      saveSentUnverified: vi.fn(),
+      onResult: vi.fn(),
+    });
+
+    expect(directions).toEqual(['down', 'up']);
+    expect(results.some(item => item.status === 'succeeded')).toBe(true);
   });
 
   it('回复框打不开属于可重试失败，保留 pending 状态而不是 blocked', async () => {

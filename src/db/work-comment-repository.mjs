@@ -2,6 +2,7 @@ import { getDb } from './database.mjs';
 import { resolveTimeWindowSinceIso } from '../utils/time-window.mjs';
 
 export const LOCKED_REPLY_STATUSES = new Set(['skipped', 'succeeded', 'manually_replied']);
+export const WORK_COMMENT_MAX_RETRY_COUNT = 3;
 
 export function isLockedReplyStatus(status) {
   return LOCKED_REPLY_STATUSES.has(String(status || '').trim());
@@ -30,7 +31,7 @@ export function upsertWorkComment(comment) {
       }
       const updates = [];
       const params = [];
-      const shouldReopen = !['pending', 'prepared', 'skipped'].includes(existing.reply_status);
+      const shouldReopen = !['pending', 'prepared', 'skipped', 'blocked', 'sent_unverified'].includes(existing.reply_status);
       if (shouldReopen) {
         updates.push("reply_status = 'pending'");
         updates.push('reply_reason = NULL');
@@ -144,7 +145,7 @@ export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
 export function saveReplyText(commentId, replyText) {
   const db = getDb();
   db.prepare(
-    "UPDATE work_comments SET reply_text = ?, reply_reason = NULL, last_seen_at = ? WHERE id = ?"
+    "UPDATE work_comments SET reply_text = ?, reply_reason = NULL, last_seen_at = ?, retry_count = 0 WHERE id = ?"
   ).run(replyText, new Date().toISOString(), commentId);
 }
 
@@ -160,7 +161,7 @@ export function markCommentReplied(commentId) {
   if (!row) return false;
 
   db.prepare(
-    "UPDATE work_comments SET reply_status = 'succeeded', reply_reason = NULL, replied_at = ?, last_seen_at = ? WHERE id = ?"
+    "UPDATE work_comments SET reply_status = 'succeeded', reply_reason = NULL, replied_at = ?, last_seen_at = ?, retry_count = 0 WHERE id = ?"
   ).run(now, now, commentId);
 
   if (row.source_event_id) {
@@ -174,7 +175,7 @@ export function markCommentReplied(commentId) {
 export function markCommentSentUnverified(commentId, reason) {
   const db = getDb();
   db.prepare(
-    "UPDATE work_comments SET reply_status = 'sent_unverified', reply_reason = ?, last_seen_at = ? WHERE id = ?"
+    "UPDATE work_comments SET reply_status = 'sent_unverified', reply_reason = ?, last_seen_at = ?, retry_count = retry_count + 1 WHERE id = ?"
   ).run(reason || null, new Date().toISOString(), commentId);
 }
 
@@ -185,6 +186,24 @@ export function markCommentBlocked(commentId, reason) {
   ).run(reason || null, new Date().toISOString(), commentId);
 }
 
+export function markCommentRetryFailure(commentId, reason, { maxRetryCount = WORK_COMMENT_MAX_RETRY_COUNT } = {}) {
+  const db = getDb();
+  const row = db.prepare('SELECT retry_count, reply_status FROM work_comments WHERE id = ?').get(commentId);
+  if (!row) return { ok: false, retryCount: 0, finalStatus: null };
+
+  const nextRetryCount = Number(row.retry_count || 0) + 1;
+  const now = new Date().toISOString();
+  const finalStatus = nextRetryCount >= Number(maxRetryCount || WORK_COMMENT_MAX_RETRY_COUNT)
+    ? 'blocked'
+    : 'pending';
+
+  db.prepare(
+    'UPDATE work_comments SET reply_status = ?, reply_reason = ?, retry_count = ?, last_seen_at = ? WHERE id = ?'
+  ).run(finalStatus, reason || null, nextRetryCount, now, commentId);
+
+  return { ok: true, retryCount: nextRetryCount, finalStatus };
+}
+
 export function markCommentManuallyReplied(commentId, reason = null) {
   const db = getDb();
   const now = new Date().toISOString();
@@ -192,7 +211,7 @@ export function markCommentManuallyReplied(commentId, reason = null) {
   if (!row) return false;
 
   db.prepare(
-    "UPDATE work_comments SET reply_status = 'manually_replied', reply_reason = ?, replied_at = ?, last_seen_at = ? WHERE id = ?"
+    "UPDATE work_comments SET reply_status = 'manually_replied', reply_reason = ?, replied_at = ?, last_seen_at = ?, retry_count = 0 WHERE id = ?"
   ).run(reason || 'author already replied', now, now, commentId);
 
   if (row.source_event_id) {
@@ -243,7 +262,7 @@ export function updateCommentReplyState(commentId, { replyStatus = null, replyTe
 export function markCommentSkipped(commentId, reason) {
   const db = getDb();
   db.prepare(
-    "UPDATE work_comments SET reply_status = 'skipped', reply_reason = ?, last_seen_at = ? WHERE id = ?"
+    "UPDATE work_comments SET reply_status = 'skipped', reply_reason = ?, last_seen_at = ?, retry_count = 0 WHERE id = ?"
   ).run(reason || null, new Date().toISOString(), commentId);
 }
 

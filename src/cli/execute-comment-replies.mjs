@@ -12,7 +12,7 @@
 //   命令默认真实执行回复，不再需要 --execute。
 
 import { runMigrations } from '../db/migrations.mjs';
-import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentPending, markCommentSentUnverified, markCommentSkipped, markCommentManuallyReplied, findCommentByWorkActorAndText, listPendingCommentsGroupedByHomepageAndWork } from '../db/work-comment-repository.mjs';
+import { getWorkComment, saveReplyText, markCommentReplied, markCommentBlocked, markCommentPending, markCommentSentUnverified, markCommentSkipped, markCommentManuallyReplied, markCommentRetryFailure, findCommentByWorkActorAndText, listPendingCommentsGroupedByHomepageAndWork, WORK_COMMENT_MAX_RETRY_COUNT } from '../db/work-comment-repository.mjs';
 import { findWorkByIdentity } from '../db/work-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
@@ -29,6 +29,7 @@ import {
   expandVisibleWorkCommentReplies,
   fillWorkReplyText,
   openReplyBoxForMatchedWorkComment,
+  parseDouyinTimeText,
   pickWorkCommentCandidate,
   scrollCommentAreaOnce,
   waitForWorkCommentArea,
@@ -253,7 +254,7 @@ export async function generateMissingReplies(items = [], { agentProvider = new L
   if (typeof agentProvider.generateReplies !== 'function') {
     const message = 'agentProvider.generateReplies 不存在，无法一次性生成待回评列表';
     for (const decision of decisions.filter(item => item.type === 'generate')) {
-      markCommentPending(decision.commentId, `agent_generate_failed:${message}`);
+      saveRetryablePending({ commentId: decision.commentId }, `agent_generate_failed:${message}`);
       decision.result = { commentId: decision.commentId, ok: false, error: message };
     }
     return decisions.map(decision => decision.result);
@@ -309,7 +310,7 @@ export async function generateMissingReplies(items = [], { agentProvider = new L
     } catch (err) {
       const message = err?.message || String(err);
       for (const decision of batchDecisions) {
-        markCommentPending(decision.commentId, `agent_generate_failed:${message}`);
+        saveRetryablePending({ commentId: decision.commentId }, `agent_generate_failed:${message}`);
         console.error(`[agent] commentId=${decision.commentId} failed reason=${message}`);
         decision.result = { commentId: decision.commentId, ok: false, error: message };
       }
@@ -320,7 +321,10 @@ export async function generateMissingReplies(items = [], { agentProvider = new L
 }
 
 function saveRetryablePending(item, reason) {
-  markCommentPending(item.commentId, reason);
+  const failed = markCommentRetryFailure(item.commentId, reason, {
+    maxRetryCount: WORK_COMMENT_MAX_RETRY_COUNT,
+  });
+  return failed?.finalStatus || 'pending';
 }
 
 export function groupExecutableItemsByWork(items) {
@@ -651,6 +655,80 @@ function getCandidateSignature(candidates = []) {
     .join('|');
 }
 
+function toComparableTimestamp(text) {
+  if (!text) return null;
+  const iso = parseDouyinTimeText(text);
+  const ms = Date.parse(iso || '');
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function summarizeViewportTimeRange(visibleCandidates = []) {
+  const timestamps = (visibleCandidates || [])
+    .map(candidate => toComparableTimestamp(candidate?.timeText || ''))
+    .filter(ms => Number.isFinite(ms));
+  if (timestamps.length === 0) return null;
+  return {
+    newestMs: Math.max(...timestamps),
+    oldestMs: Math.min(...timestamps),
+  };
+}
+
+function shouldStartRollbackByTime(pendingItems = [], visibleCandidates = [], lastViewportTimeRange = null) {
+  const currentRange = summarizeViewportTimeRange(visibleCandidates);
+  if (!currentRange || !lastViewportTimeRange) {
+    return { shouldRollback: false, currentRange };
+  }
+
+  const pendingTimes = (pendingItems || [])
+    .map(item => toComparableTimestamp(item?.eventTimeText || ''))
+    .filter(ms => Number.isFinite(ms));
+  if (pendingTimes.length === 0) {
+    return { shouldRollback: false, currentRange };
+  }
+
+  const overshot = pendingTimes.some(targetMs => currentRange.newestMs < targetMs);
+  const movingOlder =
+    currentRange.newestMs < lastViewportTimeRange.newestMs &&
+    currentRange.oldestMs < lastViewportTimeRange.oldestMs;
+
+  return {
+    shouldRollback: overshot && movingOlder,
+    currentRange,
+  };
+}
+
+async function scrollCommentViewport(page, { direction = 'down' } = {}) {
+  if (direction !== 'up') {
+    return scrollCommentAreaOnce(page);
+  }
+
+  const result = await page.evaluate((selectors) => {
+    for (const selector of selectors) {
+      for (const el of document.querySelectorAll(selector)) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        const canScroll = el.scrollHeight > el.clientHeight + 20;
+        if (!canScroll) continue;
+        const before = el.scrollTop;
+        const delta = Math.max(400, Math.round(el.clientHeight * 0.8));
+        el.scrollTop = Math.max(0, before - delta);
+        return {
+          ok: true,
+          scrolled: el.scrollTop !== before,
+          atStart: el.scrollTop <= 5,
+          before,
+          after: el.scrollTop,
+          direction: 'up',
+        };
+      }
+    }
+    return { ok: false, reason: 'comment_container_not_found', direction: 'up' };
+  }, WORK_COMMENT_CONTAINER_SELECTORS).catch(() => ({ ok: false, reason: 'comment_container_not_found', direction: 'up' }));
+
+  await page.waitForTimeout?.(600).catch(() => {});
+  return result;
+}
+
 async function captureSinglePassDebugSnapshot(page, {
   currentWork = {},
   viewportRound = 0,
@@ -750,6 +828,7 @@ async function captureSinglePassDebugSnapshot(page, {
 
 export async function executeSinglePassForWorkGroup(page, group, commentListCollector, {
   maxNoProgressRounds = 3,
+  maxScrollRounds = 20,
   days = 0,
   collectCandidates = collectVisibleWorkCommentCandidates,
   expandReplies = expandVisibleWorkCommentReplies,
@@ -757,7 +836,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
   fillReply = fillWorkReplyText,
   clickSend = clickSendWorkReply,
   verifyReply = verifyWorkReplyVisible,
-  scrollOnce = scrollCommentAreaOnce,
+  scrollOnce = scrollCommentViewport,
   saveSucceeded = (item) => {
     markCommentReplied(item.commentId);
     saveReplyText(item.commentId, item.replyText);
@@ -785,6 +864,9 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
   let lastSignature = '';
   let succeededCount = 0;
   let blockedCount = 0;
+  let lastViewportTimeRange = null;
+  let scrollRounds = 0;
+  let rollbackRounds = 0;
 
   console.log(`[comments:execute] single-pass start work=${currentWork.workId || currentWork.modalId || currentWork.workUrl} pending=${pendingMap.size}`);
 
@@ -844,10 +926,10 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       });
       if (!opened.ok) {
         const reason = opened.message || opened.code || 'reply_box_not_opened';
-        saveRetryable(nextAction.item, `reply_box_not_opened:${reason}`);
+        const finalStatus = saveRetryable(nextAction.item, `reply_box_not_opened:${reason}`) || 'pending';
         pendingMap.delete(nextAction.item.commentId);
         progressedInViewport = true;
-        const result = { ...nextAction.item, ok: false, status: 'pending', error: reason };
+        const result = { ...nextAction.item, ok: false, status: finalStatus, error: reason };
         localResults.push(result);
         onResult(result);
         console.log(`[comments:execute] pending_retry commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
@@ -857,10 +939,10 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       const filled = await fillReply(page, nextAction.item.replyText);
       if (!filled.ok) {
         const reason = filled.message || filled.code || 'fill_failed';
-        saveRetryable(nextAction.item, `fill_failed:${reason}`);
+        const finalStatus = saveRetryable(nextAction.item, `fill_failed:${reason}`) || 'pending';
         pendingMap.delete(nextAction.item.commentId);
         progressedInViewport = true;
-        const result = { ...nextAction.item, ok: false, status: 'pending', error: reason };
+        const result = { ...nextAction.item, ok: false, status: finalStatus, error: reason };
         localResults.push(result);
         onResult(result);
         console.log(`[comments:execute] pending_retry commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
@@ -873,10 +955,10 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
         const sent = await clickSend(page);
         if (!sent.ok) {
           const reason = sent.message || sent.code || 'send_failed';
-          saveRetryable(nextAction.item, `send_failed:${reason}`);
+          const finalStatus = saveRetryable(nextAction.item, `send_failed:${reason}`) || 'pending';
           pendingMap.delete(nextAction.item.commentId);
           progressedInViewport = true;
-          const result = { ...nextAction.item, ok: false, status: 'pending', error: reason };
+          const result = { ...nextAction.item, ok: false, status: finalStatus, error: reason };
           localResults.push(result);
           onResult(result);
           console.log(`[comments:execute] pending_retry commentId=${nextAction.item.commentId} reason=${reason} pending=${pendingMap.size}`);
@@ -941,6 +1023,14 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       });
     }
 
+    const pendingItems = [...pendingMap.values()];
+    const rollbackDecision = shouldStartRollbackByTime(
+      pendingItems,
+      visibleCandidates,
+      lastViewportTimeRange,
+    );
+    lastViewportTimeRange = rollbackDecision.currentRange || lastViewportTimeRange;
+
     const stats = commentListCollector?.getStats?.() || {};
     if (Number(stats.hasMore) === 0 && viewportRound > 2) {
       break;
@@ -958,23 +1048,40 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       noProgressRounds = Math.max(noProgressRounds, 3);
     }
 
-    if (noProgressRounds > maxNoProgressRounds) {
+    if (noProgressRounds > maxNoProgressRounds && Number(stats.hasMore) === 0) {
       break;
     }
 
-    const scrollResult = await scrollOnce(page);
+    if (scrollRounds >= maxScrollRounds) {
+      break;
+    }
+
+    const scrollDirection = rollbackDecision.shouldRollback ? 'up' : 'down';
+    const scrollResult = await scrollOnce(page, { direction: scrollDirection });
     if (!scrollResult.ok) {
       break;
     }
+    if (scrollDirection === 'up') {
+      rollbackRounds++;
+      console.log(`[comments:execute] rollback round=${rollbackRounds} pending=${pendingMap.size}`);
+      if (scrollResult.atStart && rollbackRounds >= 2) {
+        break;
+      }
+    } else {
+      rollbackRounds = 0;
+    }
 
+    scrollRounds++;
     viewportRound++;
-    console.log(`[comments:execute] scroll round=${viewportRound} pending=${pendingMap.size}`);
+    console.log(`[comments:execute] scroll round=${viewportRound} direction=${scrollDirection} pending=${pendingMap.size}`);
   }
 
   for (const leftover of pendingMap.values()) {
-    const reason = 'single_pass_not_found';
-    saveRetryable(leftover, reason);
-    const result = { ...leftover, ok: false, status: 'pending', error: reason };
+    const reason = scrollRounds >= maxScrollRounds
+      ? `single_pass_not_found:scroll_limit_${maxScrollRounds}`
+      : 'single_pass_not_found';
+    const finalStatus = saveRetryable(leftover, reason) || 'pending';
+    const result = { ...leftover, ok: false, status: finalStatus, error: reason };
     localResults.push(result);
     onResult(result);
   }
@@ -1106,8 +1213,8 @@ async function executeWorkCommentItems(items, args) {
             console.log(`[comments:execute] open_profile_failed reason=${openResult.reason || openResult.message || openResult.code || 'work_open_failed'}`);
             for (const validated of group) {
               const reason = openResult.reason || openResult.message || openResult.code || 'work_open_failed';
-              if (!diagnosePosition) markCommentPending(validated.commentId, `work_open_failed:${reason}`);
-              results.push({ ...validated, ok: false, status: 'pending', error: reason });
+              const finalStatus = diagnosePosition ? 'pending' : saveRetryablePending(validated, `work_open_failed:${reason}`);
+              results.push({ ...validated, ok: false, status: finalStatus, error: reason });
             }
             continue;
           }
@@ -1118,8 +1225,8 @@ async function executeWorkCommentItems(items, args) {
           if (!modalReady.ok) {
             for (const validated of group) {
               const reason = modalReady.message || modalReady.code || 'work_modal_not_ready';
-              if (!diagnosePosition) markCommentPending(validated.commentId, `work_modal_not_ready:${reason}`);
-              results.push({ ...validated, ok: false, status: 'pending', error: reason });
+              const finalStatus = diagnosePosition ? 'pending' : saveRetryablePending(validated, `work_modal_not_ready:${reason}`);
+              results.push({ ...validated, ok: false, status: finalStatus, error: reason });
             }
             continue;
           }
@@ -1128,8 +1235,8 @@ async function executeWorkCommentItems(items, args) {
           if (!commentAreaReady.ok) {
             for (const validated of group) {
               const reason = commentAreaReady.message || commentAreaReady.code || 'comment_area_not_ready';
-              if (!diagnosePosition) markCommentPending(validated.commentId, `comment_area_not_ready:${reason}`);
-              results.push({ ...validated, ok: false, status: 'pending', error: reason });
+              const finalStatus = diagnosePosition ? 'pending' : saveRetryablePending(validated, `comment_area_not_ready:${reason}`);
+              results.push({ ...validated, ok: false, status: finalStatus, error: reason });
             }
             continue;
           }
@@ -1174,8 +1281,8 @@ async function executeWorkCommentItems(items, args) {
       } catch (err) {
         run.hadBlocked = true;
         for (const validated of group) {
-          if (!diagnosePosition) markCommentPending(validated.commentId, `group_execute_failed:${err.message}`);
-          results.push({ ...validated, ok: false, status: 'pending', error: err.message });
+          const finalStatus = diagnosePosition ? 'pending' : saveRetryablePending(validated, `group_execute_failed:${err.message}`);
+          results.push({ ...validated, ok: false, status: finalStatus, error: err.message });
         }
         await captureGroupEvidence(err, currentWork);
 
