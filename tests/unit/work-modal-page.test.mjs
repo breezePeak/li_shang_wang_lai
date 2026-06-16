@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { chromium } from 'playwright';
 import {
   buildWorkReplyTarget,
+  clickReplySendControl,
   extractWorkModalContext,
   extractModalIdFromUrl,
   fillWorkReplyText,
@@ -118,6 +119,44 @@ describe('extractWorkModalContext', () => {
       expect(result.data.workText).toContain('Think Max');
       expect(result.data.workText).not.toContain('龙虾');
       expect(result.data.workText).not.toContain('无限team');
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
+describe('clickReplySendControl', () => {
+  it('回访发送时不会误点上传入口', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+      await page.setContent(`
+        <html>
+          <body>
+            <div class="comment-input-container">
+              <div class="commentInput-left-ct">
+                <div contenteditable="true">测试评论</div>
+              </div>
+              <div class="commentInput-right-ct">
+                <button id="upload-btn" type="button" aria-label="上传图片">上传</button>
+                <button id="send-btn" type="button"><span class="FbVIhLlK">发送</span></button>
+              </div>
+            </div>
+            <script>
+              window.clicked = [];
+              document.getElementById('upload-btn').addEventListener('click', () => window.clicked.push('upload'));
+              document.getElementById('send-btn').addEventListener('click', () => window.clicked.push('send'));
+            </script>
+          </body>
+        </html>
+      `);
+
+      const result = await clickReplySendControl(page);
+      const clicked = await page.evaluate(() => window.clicked.slice());
+
+      expect(result.ok).toBe(true);
+      expect(clicked).toContain('send');
+      expect(clicked).not.toContain('upload');
     } finally {
       await browser.close();
     }

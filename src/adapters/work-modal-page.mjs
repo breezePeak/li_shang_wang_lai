@@ -280,7 +280,7 @@ async function typeIntoReplyDraftEditor(page, replyText) {
   return typed;
 }
 
-async function clickReplySendControl(page) {
+export async function clickReplySendControl(page) {
   return await page.evaluate(() => {
     function visible(el) {
       const rect = el.getBoundingClientRect();
@@ -294,6 +294,40 @@ async function clickReplySendControl(page) {
       target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
       target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
       target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }
+
+    function textOf(el) {
+      return (el?.innerText || el?.textContent || '').trim();
+    }
+
+    function hasBlockedSemantics(el) {
+      const text = textOf(el);
+      const attrs = [
+        el?.getAttribute?.('class') || '',
+        el?.getAttribute?.('aria-label') || '',
+        el?.getAttribute?.('title') || '',
+        el?.getAttribute?.('data-e2e') || '',
+      ].join(' ');
+      return /上传|投稿|选择文件|图片|相册|附件|表情/.test(`${text} ${attrs}`);
+    }
+
+    function pickPreferredClickTarget(el) {
+      const chain = [el, el?.closest?.('button,[role="button"]'), el?.parentElement, el?.parentElement?.closest?.('button,[role="button"]')];
+      for (const candidate of chain) {
+        if (!candidate || !visible(candidate)) continue;
+        if (hasBlockedSemantics(candidate)) continue;
+        const text = textOf(candidate);
+        const attrs = [
+          candidate.getAttribute?.('class') || '',
+          candidate.getAttribute?.('aria-label') || '',
+          candidate.getAttribute?.('title') || '',
+          candidate.getAttribute?.('data-e2e') || '',
+        ].join(' ');
+        const isSendText = text === '发送' || text === '发布';
+        const isSendAttr = /send|submit|publish|comment-submit|FbVIhLlK/.test(attrs);
+        if (isSendText || isSendAttr) return candidate;
+      }
+      return null;
     }
 
     const containerSelectors = [
@@ -315,33 +349,26 @@ async function clickReplySendControl(page) {
 
     const iconTargets = [
       '.FbVIhLlK',
+      '[data-e2e="comment-submit"]',
+      'button:has-text("发送")',
+      'button:has-text("发布")',
+      '[role="button"]:has-text("发送")',
+      '[role="button"]:has-text("发布")',
+      '[class*="send"]',
+      '[class*="submit"]',
+      '[class*="publish"]',
       'svg',
       'img',
       '[class*="icon"]',
-      '[class*="send"]',
-      'span',
-      'div',
-      'button',
-      '[role="button"]',
     ];
     for (const selector of iconTargets) {
       const matches = Array.from(sendArea.querySelectorAll(selector)).filter(visible);
       for (const el of matches) {
-        if (el.tagName === 'SPAN' || el.tagName === 'DIV') {
-          const text = (el.innerText || '').trim();
-          if (text && text.length > 6) continue;
-        }
-        const target = el.closest('button,[role="button"]') || el;
-        if (!visible(target)) continue;
+        const target = pickPreferredClickTarget(el);
+        if (!target) continue;
         clickAllWays(target);
-        return { ok: true, method: 'send_control_click', selector };
+        return { ok: true, method: 'send_control_click', selector, targetText: textOf(target).slice(0, 20) };
       }
-    }
-
-    const directChildren = Array.from(sendArea.children).filter(visible);
-    for (const child of directChildren) {
-      clickAllWays(child);
-      return { ok: true, method: 'send_area_direct_child', tag: child.tagName.toLowerCase() };
     }
 
     return { ok: false, reason: 'strict_send_control_not_found' };
