@@ -1,5 +1,8 @@
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
 import { createCommentSubmitApiWatcher } from './comment-submit-api-listener.mjs';
+import path from 'path';
+import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
+import { writeFileSync } from 'fs';
 
 export const DOUYIN_PLAYER_ACTION_SELECTORS = Object.freeze({
   like: '[data-e2e="video-player-digg"]',
@@ -15,6 +18,103 @@ export const DOUYIN_PLAYER_ACTION_STATES = Object.freeze({
   notLiked: 'video-player-no-digged',
   notCollected: 'video-player-no-collect',
 });
+
+async function captureVideoCommentDebug(page, phase, extra = {}) {
+  try {
+    const dir = path.resolve('data', 'debug', 'comment-box');
+    ensureDir(dir);
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const base = path.join(dir, `${ts}-${phase}`);
+
+    const data = await page.evaluate((payload) => {
+      function summarize(el) {
+        if (!el) return null;
+        const rect = el.getBoundingClientRect();
+        return {
+          tag: el.tagName.toLowerCase(),
+          text: (el.innerText || el.textContent || '').trim().slice(0, 120),
+          className: (typeof el.className === 'string' ? el.className : '').slice(0, 200),
+          id: el.id || '',
+          role: el.getAttribute('role') || '',
+          placeholder: el.getAttribute('placeholder') || el.getAttribute('data-placeholder') || '',
+          ariaLabel: el.getAttribute('aria-label') || '',
+          title: el.getAttribute('title') || '',
+          dataE2e: el.getAttribute('data-e2e') || '',
+          rect: {
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+          },
+        };
+      }
+
+      function visible(el) {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        const style = window.getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+      }
+
+      const commentSelectors = [
+        '[data-e2e="feed-comment-icon"]',
+        '[data-e2e="video-comment"]',
+        '[data-e2e="comment-icon"]',
+        '[aria-label*="评论"]',
+        '[title*="评论"]',
+      ];
+      const commentButtons = [];
+      for (const selector of commentSelectors) {
+        for (const el of document.querySelectorAll(selector)) {
+          if (!visible(el)) continue;
+          commentButtons.push({ selector, ...summarize(el) });
+        }
+      }
+
+      const visibleInputs = Array.from(document.querySelectorAll('input, textarea, [contenteditable="true"]'))
+        .filter(visible)
+        .slice(0, 12)
+        .map(summarize);
+
+      const topTextNodes = Array.from(document.querySelectorAll('button, [role="tab"], [role="button"], div, span, a'))
+        .filter(visible)
+        .map(el => ({ el, text: (el.innerText || el.textContent || '').trim() }))
+        .filter(item => item.text === '评论' || item.text === '问AI' || item.text === '搜索')
+        .slice(0, 20)
+        .map(item => summarize(item.el));
+
+      const activeElement = summarize(document.activeElement);
+      return {
+        phase: payload.phase,
+        extra: payload.extra || {},
+        url: location.href,
+        title: document.title,
+        activeElement,
+        commentButtons,
+        visibleInputs,
+        topTextNodes,
+        commentContainerCount: document.querySelectorAll('[class*="comment"], [id*="comment"]').length,
+        aiTextVisible: (document.body?.innerText || '').includes('问AI'),
+        bodyTextPreview: (document.body?.innerText || '').slice(0, 2000),
+      };
+    }, { phase, extra });
+
+    writeJSON(`${base}.json`, data);
+    try {
+      const html = await page.content();
+      writeFileSync(`${base}.html`, html, 'utf8');
+    } catch {}
+    try {
+      await page.screenshot({ path: `${base}.png`, fullPage: false });
+    } catch {}
+    console.error(`[video-page] 评论区诊断已保存: ${base}.json / ${base}.html`);
+    return `${base}.json`;
+  } catch (err) {
+    console.error(`[video-page] 评论区诊断保存失败: ${err.message}`);
+    return null;
+  }
+}
 
 /**
  * Pure function: determine like state from a single candidate's diagnostic info.
@@ -1191,17 +1291,19 @@ export async function ensureCommentPanelOpen(page) {
     if (await isOpen()) return true;
 
     const commentBtns = [
-      page.locator('.hOcDRkbZ.WcVcXqQb [data-e2e="feed-comment-icon"]'),
-      page.locator('[data-e2e="feed-comment-icon"]'),
-      page.locator('.swmK_9e_.PWegAy8W.LDWpmlY0'),
-      page.locator('[data-e2e="video-comment"]'),
-      page.locator('[data-e2e="comment-icon"]'),
-      page.locator('[aria-label*="评论"]'),
-      page.locator('[title*="评论"]'),
+      { label: 'actionbar-feed-comment', locator: page.locator('.hOcDRkbZ.WcVcXqQb [data-e2e="feed-comment-icon"]') },
+      { label: 'feed-comment-icon', locator: page.locator('[data-e2e="feed-comment-icon"]') },
+      { label: 'legacy-comment-icon', locator: page.locator('.swmK_9e_.PWegAy8W.LDWpmlY0') },
+      { label: 'video-comment', locator: page.locator('[data-e2e="video-comment"]') },
+      { label: 'comment-icon', locator: page.locator('[data-e2e="comment-icon"]') },
+      { label: 'aria-comment', locator: page.locator('[aria-label*="评论"]') },
+      { label: 'title-comment', locator: page.locator('[title*="评论"]') },
     ];
 
     for (let attempt = 1; attempt <= 4; attempt++) {
+      console.error(`[video-page] 打开评论区 attempt=${attempt} start`);
       for (const btn of commentBtns) {
+        console.error(`[video-page] 检查评论按钮 attempt=${attempt} selector=${btn.label}`);
         if (await btn.count() > 0 && await btn.first().isVisible()) {
           let clicked = false;
           try {
@@ -1224,7 +1326,7 @@ export async function ensureCommentPanelOpen(page) {
 
           if (!clicked) continue;
 
-          console.error(`[video-page] 已点击评论按钮，尝试打开评论面板 (attempt=${attempt})`);
+          console.error(`[video-page] 已点击评论按钮 selector=${btn.label}，尝试打开评论面板 (attempt=${attempt})`);
 
           // 新版抖音点击评论图标默认打开"问问AI"，需要再点"评论"tab切换到真实评论区
           await page.waitForTimeout(800);
@@ -1260,6 +1362,7 @@ export async function ensureCommentPanelOpen(page) {
             if (await isOpen()) return true;
             await page.waitForTimeout(500);
           }
+          console.error(`[video-page] 评论面板仍未打开 selector=${btn.label} (attempt=${attempt})`);
         }
       }
       await page.waitForTimeout(700 * attempt);
@@ -1486,11 +1589,12 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
       });
 
       console.error('[video-page] 评论框未找到！当前页面 DOM Debug 诊断信息:', JSON.stringify(debugInfo));
+      const debugPath = await captureVideoCommentDebug(page, 'comment-input-not-found', { clickCommentPanelSuccess, debugInfo });
 
       return blocking(
         RESULT_CODES.COMMENT_INPUT_NOT_FOUND,
         '找不到视频评论区输入框',
-        { data: { clickCommentPanelSuccess, debugInfo } }
+        { data: { clickCommentPanelSuccess, debugInfo, debugPath } }
       );
     }
 
