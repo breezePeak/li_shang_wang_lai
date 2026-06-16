@@ -330,6 +330,13 @@ export async function clickReplySendControl(page) {
       return null;
     }
 
+    function matchesSelectorWithOptionalText(el, selector) {
+      if (!el || !el.matches?.(selector.css)) return false;
+      if (!selector.texts?.length) return true;
+      const text = textOf(el);
+      return selector.texts.some(expected => text === expected || text.includes(expected));
+    }
+
     const containerSelectors = [
       '.comment-input-container',
       '[class*="comment-input-container"]',
@@ -348,26 +355,26 @@ export async function clickReplySendControl(page) {
     if (!visible(sendArea)) return { ok: false, reason: 'comment_send_area_not_found' };
 
     const iconTargets = [
-      '.FbVIhLlK',
-      '[data-e2e="comment-submit"]',
-      'button:has-text("发送")',
-      'button:has-text("发布")',
-      '[role="button"]:has-text("发送")',
-      '[role="button"]:has-text("发布")',
-      '[class*="send"]',
-      '[class*="submit"]',
-      '[class*="publish"]',
-      'svg',
-      'img',
-      '[class*="icon"]',
+      { css: '.FbVIhLlK' },
+      { css: '[data-e2e="comment-submit"]' },
+      { css: 'button', texts: ['发送', '发布'] },
+      { css: '[role="button"]', texts: ['发送', '发布'] },
+      { css: '[class*="send"]' },
+      { css: '[class*="submit"]' },
+      { css: '[class*="publish"]' },
+      { css: 'svg' },
+      { css: 'img' },
+      { css: '[class*="icon"]' },
     ];
     for (const selector of iconTargets) {
-      const matches = Array.from(sendArea.querySelectorAll(selector)).filter(visible);
+      const matches = Array.from(sendArea.querySelectorAll(selector.css))
+        .filter(visible)
+        .filter(el => matchesSelectorWithOptionalText(el, selector));
       for (const el of matches) {
         const target = pickPreferredClickTarget(el);
         if (!target) continue;
         clickAllWays(target);
-        return { ok: true, method: 'send_control_click', selector, targetText: textOf(target).slice(0, 20) };
+        return { ok: true, method: 'send_control_click', selector: selector.css, targetText: textOf(target).slice(0, 20) };
       }
     }
 
