@@ -2701,21 +2701,35 @@ export async function postWorkModalComment(page, commentText) {
 
     while (Date.now() - startedAt < 5000) {
       const state = await page.evaluate(({ replyNeedle, replyPrefix }) => {
+        function isVisible(el) {
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          if (rect.width < 20 || rect.height < 18) return false;
+          const style = window.getComputedStyle(el);
+          return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+        }
+
         const commentArea = document.querySelector('.comment-mainContent');
         const commentTextVisible = (commentArea?.innerText || '').trim();
         const visible = commentTextVisible.includes(replyNeedle)
           || (replyPrefix.length >= 5 && commentTextVisible.includes(replyPrefix));
 
         const container = document.querySelector('.comment-input-container') || document.querySelector('.comment-input-inner-container');
-        const editorEl = document.querySelector('[data-return-visit-editor="true"]')
-          || container?.querySelector('[contenteditable="true"], textarea, input[type="text"]');
+        const taggedEditor = document.querySelector('[data-return-visit-editor="true"]');
+        const fallbackEditor = container?.querySelector('[contenteditable="true"], textarea, input[type="text"]');
+        const editorEl = isVisible(taggedEditor) ? taggedEditor : (isVisible(fallbackEditor) ? fallbackEditor : null);
         const editorText = (typeof editorEl?.value === 'string' ? editorEl.value : (editorEl?.innerText || editorEl?.textContent || '')).trim();
-        const containerText = (container?.innerText || '').trim();
-        const inputCleared = !editorText.includes(replyPrefix) && !containerText.includes(replyPrefix);
+        const containerText = isVisible(container) ? (container?.innerText || '').trim() : '';
+        const placeholderVisible = /留下你的精彩评论吧|发一条友好的弹幕吧|说点什么/.test(containerText);
+        const inputCleared = (!editorText || !editorText.includes(replyPrefix)) && !containerText.includes(replyPrefix);
+        const acceptedByReset = inputCleared && (placeholderVisible || !isVisible(editorEl));
 
         return {
           visible,
-          inputCleared,
+          inputCleared: inputCleared || acceptedByReset,
+          acceptedByReset,
+          placeholderVisible,
+          editorVisible: isVisible(editorEl),
           commentPreview: commentTextVisible.slice(0, 200),
         };
       }, { replyNeedle, replyPrefix }).catch(() => ({ visible: false, inputCleared: false }));
@@ -2727,7 +2741,7 @@ export async function postWorkModalComment(page, commentText) {
       }
 
       if (state.inputCleared) {
-        console.error('[work-modal] 顶层评论未立即可见，但输入框已清空，按页面已接受发送处理');
+        console.error(`[work-modal] 顶层评论未立即可见，但输入框已重置 acceptedByReset=${Boolean(state.acceptedByReset)} placeholderVisible=${Boolean(state.placeholderVisible)}`);
         return success({ ...sent.data, verified: true, unconfirmed: false, method: 'editor_cleared_after_send' });
       }
 
