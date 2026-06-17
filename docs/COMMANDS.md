@@ -248,6 +248,7 @@ npm run db:init
 npm run interactions:scan -- --display-only
 npm run interactions:scan -- --type comment --days 7 --prepare-replies
 npm run interactions:scan -- --days 7 --prepare-visits
+npm run interactions:scan -- --days 7 --debug
 ```
 
 源文件：`src/cli/scan-interactions.mjs`
@@ -266,7 +267,7 @@ npm run interactions:scan -- --days 7 --prepare-visits
 | `--prepare-visits` | 默认准备 | 创建/更新待回访 DB 任务，不生成文件 |
 | `--collect-types` | `like,comment,reply,follow` | 准备待回访任务时保留的来源类型 |
 | `--json` | `false` | JSON 输出 |
-| `--debug` | `true` | 调试日志 |
+| `--debug` | `false` | 开启步骤级调试取证，记录执行日志、DOM 和截图到 `data/runs/<runId>/debug/` |
 | `--keep-open` | `false` | 结束后保持浏览器打开 |
 | `--keep-open-on-error` | `true` | 出错时保持浏览器打开 |
 | `--pause-on-error` | `true` | 出错时暂停等待人工处理 |
@@ -302,6 +303,7 @@ npm run actions:pending -- --type comment --json
 ```bash
 npm run comments:execute
 npm run comments:execute -- --agent-only
+npm run comments:execute -- --debug
 ```
 
 源文件：`src/cli/execute-comment-replies.mjs`
@@ -317,6 +319,7 @@ reply_text 为空的评论会打印日志跳过。已经 succeeded / sent_unveri
 | `--limit` / `--max-count` | `null` | 最大处理评论数；不传默认处理全部 pending |
 | `--agent-only` | `false` | 只生成并写回 `reply_text`，不打开浏览器执行 |
 | `--json` | `false` | JSON 输出 |
+| `--debug` | `false` | 开启步骤级调试取证，记录执行日志、DOM 和截图到 `data/runs/<runId>/debug/` |
 
 安全规则：
 
@@ -367,6 +370,7 @@ npm run return-visit:comment -- --task-id <taskId> --comment "<评论内容>" --
 ```bash
 npm run return-visit:execute -- --execute
 npm run return-visit:execute -- --dry-run
+npm run visit:run -- --execute --debug
 ```
 
 源文件：`src/cli/execute-return-visit.mjs`
@@ -389,6 +393,7 @@ npm run return-visit:execute -- --dry-run
 | `--keep-open` | `false` | 复用并保留浏览器 |
 | `--headless` | `false` | 无头运行 |
 | `--json` | `false` | JSON 输出 |
+| `--debug` | `false` | 开启步骤级调试取证，记录执行日志、DOM 和截图到 `data/runs/<runId>/debug/` |
 
 安全规则：
 
@@ -397,6 +402,14 @@ npm run return-visit:execute -- --dry-run
 - 已点赞时跳过点赞，不重复点击。
 - 评论发送后会确认结果；未确认会阻断并记录失败。
 - 连续失败达到配置上限时暂停本轮执行。
+
+调试输出说明：
+
+- 开启 `--debug` 后，扫描、回评、回访三条主链路都会在 `data/runs/<runId>/debug/` 下保存调试资料。
+- `logs/execution.log` 保存完整执行日志。
+- `steps/<序号>_<步骤名>/dom.html` 保存当前页面 DOM 快照。
+- `steps/<序号>_<步骤名>/screenshot.png` 保存当前页面截图。
+- `steps/<序号>_<步骤名>/step.json` 保存步骤时间、URL 和动作参数摘要。
 
 ## 8. comments:classify
 
