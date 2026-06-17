@@ -1872,6 +1872,15 @@ export async function collectVisibleWorkCommentCandidates(page) {
       return null;
     }
 
+    function hasCandidateAncestor(node, candidates) {
+      let current = node?.parentElement || null;
+      while (current && current !== document.body) {
+        if (candidates.has(current)) return true;
+        current = current.parentElement;
+      }
+      return false;
+    }
+
     function isTimeLine(line) {
       return TIME_PATTERNS.some(pattern => pattern.test(line));
     }
@@ -1988,17 +1997,24 @@ export async function collectVisibleWorkCommentCandidates(page) {
     const commentArea = findContainer();
     if (!commentArea) return { ok: false, reason: 'comment_area_not_found', candidates: [] };
 
-    const itemList = [];
-    const seen = new Set();
+    const rawItemSet = new Set();
     for (const selector of itemSelectors) {
       for (const item of commentArea.querySelectorAll(selector)) {
-        if (!visible(item) || seen.has(item)) continue;
-        seen.add(item);
-        itemList.push(item);
+        if (!visible(item)) continue;
+        rawItemSet.add(item);
       }
     }
 
+    const itemList = Array.from(rawItemSet)
+      .filter(item => !hasCandidateAncestor(item, rawItemSet))
+      .sort((left, right) => {
+        const leftRect = left.getBoundingClientRect();
+        const rightRect = right.getBoundingClientRect();
+        return leftRect.top - rightRect.top;
+      });
+
     if (itemList.length === 0) {
+      const seen = new Set();
       for (const replyButton of commentArea.querySelectorAll('button, [role="button"], span, div')) {
         const text = (replyButton.innerText || replyButton.textContent || '').trim();
         if (text !== '回复' && !text.startsWith('回复')) continue;

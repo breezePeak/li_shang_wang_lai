@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 import {
   buildWorkReplyTarget,
   clickReplySendControl,
+  collectVisibleWorkCommentCandidates,
   extractWorkModalContext,
   extractModalIdFromUrl,
   fillWorkReplyText,
@@ -694,6 +695,42 @@ describe('作品评论区回复定位', () => {
       expect(typeof result.jitter).toBe('number');
     } finally {
       randomSpy.mockRestore();
+    }
+  });
+
+  it('collectVisibleWorkCommentCandidates 只保留真正的评论卡片，不混入子节点碎片', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      await page.setContent(`
+        <html>
+          <body>
+            <div class="comment-mainContent" style="width:640px;height:600px;overflow:auto;">
+              <div class="IJfG7ymB comment-item-root" data-e2e="comment-item" data-cid="7652020766397989675" style="display:block;width:600px;height:120px;">
+                <div class="ghXU6qWa comment-item-info-wrap">
+                  <div class="Sw1iq0tk">小左超爱玩</div>
+                  <div class="comment-item-tag">互相关注</div>
+                </div>
+                <div class="Pmn4RZdg comment-content">[赞][赞][赞]</div>
+                <div class="WQp8eISZ">12小时前·贵州</div>
+                <div class="ormFoAZF"><span>0</span><button type="button">回复</button></div>
+              </div>
+            </div>
+          </body>
+        </html>
+      `);
+
+      const result = await collectVisibleWorkCommentCandidates(page);
+
+      expect(result.ok).toBe(true);
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates[0].cid).toBe('7652020766397989675');
+      expect(result.candidates[0].actorName).toBe('小左超爱玩');
+      expect(result.candidates[0].commentText).toBe('[赞][赞][赞]');
+      expect(result.candidates[0].hasReplyButton).toBe(true);
+      expect(result.candidates[0].containerText).not.toContain('评论项碎片');
+    } finally {
+      await browser.close();
     }
   });
 });
