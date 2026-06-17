@@ -23,14 +23,11 @@ export function resolveHermesEnvPaths(env = process.env) {
   const paths = [];
   const localAppData = String(env?.LOCALAPPDATA || '').trim();
   const userProfile = String(env?.USERPROFILE || '').trim();
-  const home = String(env?.HOME || homedir() || '').trim();
+  const home = String(env?.HOME || (env === process.env ? homedir() : '') || '').trim();
 
-  if (process.platform === 'win32') {
-    if (localAppData) paths.push(join(localAppData, 'hermes', '.env'));
-    if (userProfile) paths.push(join(userProfile, '.hermes', '.env'));
-  } else if (home) {
-    paths.push(join(home, '.hermes', '.env'));
-  }
+  if (localAppData) paths.push(join(localAppData, 'hermes', '.env'));
+  if (userProfile) paths.push(join(userProfile, '.hermes', '.env'));
+  if (home) paths.push(join(home, '.hermes', '.env'));
 
   return [...new Set(paths.map(filePath => resolve(filePath)))];
 }

@@ -335,6 +335,90 @@ describe('waitForWorkModal', () => {
       await browser.close();
     }
   });
+
+  it('新版沉浸式右侧栏 feed-comment-icon 能展开评论区', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      await page.setContent(`
+        <html>
+          <body>
+            <div class="modal-video-container" data-e2e="modal-video-container" style="position:relative;width:1280px;height:760px;">
+              <div class="wnIG9XCL" style="position:absolute;right:24px;top:260px;width:72px;">
+                <div class="i1KE4QVe DxGjfOQy">
+                  <div><div data-e2e="video-player-digg" style="width:48px;height:68px;">11</div></div>
+                  <div>
+                    <div class="R9AI5rZZ ssK6OOdg qLds7yJl" data-e2e="feed-comment-icon" id="comment-btn" style="width:48px;height:74px;">
+                      <div class="sc8WB9tl"></div>
+                      <div class="c6LWyzWk KTSutgCr">抢首评</div>
+                    </div>
+                  </div>
+                  <div><div data-e2e="video-player-collect" style="width:48px;height:68px;">收藏</div></div>
+                </div>
+              </div>
+            </div>
+            <script>
+              document.getElementById('comment-btn').addEventListener('click', () => {
+                const area = document.createElement('div');
+                area.className = 'comment-mainContent';
+                area.textContent = '评论区已展开';
+                area.style.cssText = 'position:absolute;right:120px;top:120px;width:420px;height:360px;background:#fff;';
+                document.body.appendChild(area);
+              });
+            </script>
+          </body>
+        </html>
+      `);
+
+      const result = await waitForWorkModal(page, { timeoutMs: 1500, closeAutoPlay: false, openCommentArea: true });
+      expect(result.ok).toBe(true);
+      const commentAreaVisible = await page.locator('.comment-mainContent').first().isVisible();
+      expect(commentAreaVisible).toBe(true);
+    } finally {
+      await browser.close();
+    }
+  });
+
+  it('评论入口只有抢首评文案时也能展开评论区', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      await page.setContent(`
+        <html>
+          <body>
+            <div class="modal-video-container" data-e2e="modal-video-container" style="position:relative;width:1280px;height:760px;">
+              <div class="wnIG9XCL" style="position:absolute;right:24px;top:260px;width:72px;">
+                <div class="i1KE4QVe DxGjfOQy">
+                  <div tabindex="0"><div style="width:48px;height:68px;">11</div></div>
+                  <div tabindex="0" id="comment-shell" style="width:48px;height:74px;">
+                    <div class="icon"></div>
+                    <div>抢首评</div>
+                  </div>
+                  <div tabindex="0"><div style="width:48px;height:68px;">分享</div></div>
+                </div>
+              </div>
+            </div>
+            <script>
+              document.getElementById('comment-shell').addEventListener('click', () => {
+                const area = document.createElement('div');
+                area.className = 'comment-mainContent';
+                area.textContent = '评论区已展开';
+                area.style.cssText = 'position:absolute;right:120px;top:120px;width:420px;height:360px;background:#fff;';
+                document.body.appendChild(area);
+              });
+            </script>
+          </body>
+        </html>
+      `);
+
+      const result = await waitForWorkModal(page, { timeoutMs: 1500, closeAutoPlay: false, openCommentArea: true });
+      expect(result.ok).toBe(true);
+      const commentAreaVisible = await page.locator('.comment-mainContent').first().isVisible();
+      expect(commentAreaVisible).toBe(true);
+    } finally {
+      await browser.close();
+    }
+  });
 });
 
 describe('replyText 前缀匹配逻辑', () => {

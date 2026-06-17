@@ -254,7 +254,7 @@ export function resolveSoulPaths(options = {}, env = process.env) {
   const cwd = String(options.cwd || env.PWD || process.cwd() || '').trim();
   const localAppData = String(env.LOCALAPPDATA || '').trim();
   const userProfile = String(env.USERPROFILE || '').trim();
-  const home = String(env.HOME || homedir() || '').trim();
+  const home = String(env.HOME || (env === process.env ? homedir() : '') || '').trim();
   const paths = [];
 
   if (options.soulPath) paths.push(String(options.soulPath));

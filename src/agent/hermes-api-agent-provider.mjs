@@ -41,7 +41,9 @@ export class HermesApiAgentProvider {
   constructor(options = {}) {
     this.options = options;
     this.baseUrl = normalizeBaseUrl(options.baseUrl || process.env.HERMES_API_BASE_URL);
-    this.apiKey = options.apiKey || process.env.HERMES_API_KEY || readHermesEnvKey() || '';
+    this.apiKey = Object.prototype.hasOwnProperty.call(options, 'apiKey')
+      ? String(options.apiKey || '')
+      : (process.env.HERMES_API_KEY || readHermesEnvKey() || '');
     this.model = options.model || process.env.HERMES_API_MODEL || 'hermes-agent';
     this.timeoutMs = resolveTimeoutMs(options);
     this.fetchImpl = options.fetchImpl || fetch;

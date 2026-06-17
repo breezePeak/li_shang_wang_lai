@@ -1098,6 +1098,8 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           const selectors = [
             '.t5VMknM2 .MinpposV',
             '.hOcDRkbZ.WcVcXqQb',
+            '.wnIG9XCL',
+            '.i1KE4QVe',
             '[class*="action-bar"]',
             '[class*="ActionBar"]',
           ];
@@ -1127,6 +1129,81 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
             return a.distanceToViewportCenter - b.distanceToViewportCenter;
           });
           return scored[0]?.el || null;
+        }
+
+        function summarizeChildren(el) {
+          const children = [];
+          el.querySelectorAll('*').forEach(child => {
+            children.push({
+              tag: child.tagName.toLowerCase(),
+              cls: (typeof child.className === 'string' ? child.className : '').slice(0, 60),
+              text: (child.innerText || '').trim().slice(0, 30),
+            });
+          });
+          return children;
+        }
+
+        function buildFoundResult(target, selector, searchScopeSelector, diagAll) {
+          target.scrollIntoView({ block: 'center', behavior: 'instant' });
+          const rect = target.getBoundingClientRect();
+          target.setAttribute('data-return-visit-comment-button', 'true');
+          const children = summarizeChildren(target);
+          clickAllWays(target);
+          return {
+            found: true,
+            domClicked: true,
+            selector,
+            tag: target.tagName,
+            className: typeof target.className === 'string' ? target.className.slice(0, 120) : '',
+            x: Math.round(rect.left + rect.width / 2),
+            y: Math.round(rect.top + rect.height / 2),
+            rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+            searchScopeSelector,
+            diagActionBarElements: diagAll.slice(0, 10),
+            diagChildren: children.slice(0, 8),
+          };
+        }
+
+        function pickClickableAncestor(el) {
+          let current = el;
+          for (let depth = 0; current && depth < 4; depth++) {
+            if (!visible(current)) break;
+            if (
+              current.matches?.('[data-e2e], button, [role="button"], a, [tabindex]') ||
+              current.onclick ||
+              current.getAttribute?.('data-click-from')
+            ) {
+              return current;
+            }
+            current = current.parentElement;
+          }
+          return el;
+        }
+
+        function scoreTextCommentCandidate(el, scopeRoot) {
+          if (!visible(el)) return null;
+          const textRect = el.getBoundingClientRect();
+          if (textRect.left < window.innerWidth * 0.45) return null;
+          const rawText = (el.textContent || '').replace(/\s+/g, '').trim();
+          if (!rawText) return null;
+          if (!(rawText === '抢首评' || rawText === '评论' || /^评论\d*$/.test(rawText))) return null;
+          if (el.closest?.('.comment-mainContent, .comment-input-container, .comment-input-inner-container')) return null;
+          if (el.closest?.('[data-e2e="video-player-share"], [data-e2e="video-player-collect"], [data-e2e="video-player-digg"], [data-e2e="feed-follow-icon"]')) return null;
+
+          const target = pickClickableAncestor(el);
+          if (!visible(target)) return null;
+          const rect = target.getBoundingClientRect();
+          if (rect.width < 18 || rect.height < 18) return null;
+          const rightSideBonus = textRect.left > window.innerWidth * 0.55 ? 0 : 4;
+          const inActionBarBonus = scopeRoot && scopeRoot !== document && scopeRoot.contains(target) ? 0 : 1;
+          const exactBonus = rawText === '抢首评' || rawText === '评论' ? 0 : 1;
+          const sizePenalty = Math.max(0, (rect.width * rect.height - 12000) / 12000);
+          return {
+            target,
+            text: rawText,
+            rect,
+            score: rightSideBonus + inActionBarBonus + exactBonus + sizePenalty + Math.abs((textRect.top + textRect.height / 2) - window.innerHeight * 0.55) / window.innerHeight,
+          };
         }
 
         document.querySelectorAll('[data-return-visit-comment-button="true"]')
@@ -1161,35 +1238,38 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
         for (const selector of directSelectors) {
           const commentContainer = searchScope.querySelector(selector);
           if (commentContainer && visible(commentContainer)) {
-            commentContainer.scrollIntoView({ block: 'center', behavior: 'instant' });
-            const rect = commentContainer.getBoundingClientRect();
-            commentContainer.setAttribute('data-return-visit-comment-button', 'true');
-
-            const children = [];
-            commentContainer.querySelectorAll('*').forEach(child => {
-              children.push({
-                tag: child.tagName.toLowerCase(),
-                cls: (typeof child.className === 'string' ? child.className : '').slice(0, 60),
-                text: (child.innerText || '').trim().slice(0, 30),
-              });
-            });
-
-            clickAllWays(commentContainer);
-
-            return {
-              found: true,
-              domClicked: true,
+            return buildFoundResult(
+              commentContainer,
               selector,
-              tag: commentContainer.tagName,
-              className: typeof commentContainer.className === 'string' ? commentContainer.className.slice(0, 120) : '',
-              x: Math.round(rect.left + rect.width / 2),
-              y: Math.round(rect.top + rect.height / 2),
-              rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
-              searchScopeSelector: actionBar ? 'action-bar' : 'document',
-              diagActionBarElements: diagAll.slice(0, 10),
-              diagChildren: children.slice(0, 8),
-            };
+              actionBar ? 'action-bar' : 'document',
+              diagAll,
+            );
           }
+        }
+
+        const textSearchScope = actionBar ||
+          document.querySelector('.wnIG9XCL, .i1KE4QVe, .Qs31a2ah, .positionBox') ||
+          null;
+        const textCandidates = [];
+        if (textSearchScope) {
+          const nodes = Array.from(textSearchScope.querySelectorAll('button, [role="button"], [tabindex], div, span, a'));
+          for (const el of nodes) {
+            const rect = el.getBoundingClientRect();
+            if (rect.right <= 0 || rect.bottom <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) continue;
+            if (rect.left < window.innerWidth * 0.45) continue;
+            const scored = scoreTextCommentCandidate(el, textSearchScope);
+            if (scored) textCandidates.push(scored);
+            if (textCandidates.length >= 20) break;
+          }
+          textCandidates.sort((a, b) => a.score - b.score);
+        }
+        if (textCandidates.length > 0) {
+          return buildFoundResult(
+            textCandidates[0].target,
+            `text:${textCandidates[0].text}`,
+            actionBar ? 'action-bar-text' : 'right-rail-text',
+            diagAll,
+          );
         }
 
         const actionItems = actionBar
