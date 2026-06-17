@@ -42,6 +42,7 @@ import { closeCurrentWorkModalToProfile, openProfileWorkByAwemeIdFromPostApi } f
 import { writeFileSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
 import { pathToFileURL } from 'url';
+import { createRunDebugRecorder } from '../browser/run-debug-recorder.mjs';
 import { LocalAgentProvider } from '../agent/local-agent-provider.mjs';
 import { createAgentProvider } from '../agent/agent-provider-factory.mjs';
 import { normalizeNoticeApiItem } from '../domain/notice-api-normalization.mjs';
@@ -56,6 +57,7 @@ export function parseArgs(argv) {
     headless: undefined,
     limit: null,
     agentOnly: false,
+    debug: false,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -67,6 +69,7 @@ export function parseArgs(argv) {
     if (argv[i] === '--diagnose-position') args.diagnosePosition = true;
     if (argv[i] === '--keep-open') args.keepOpen = true;
     if (argv[i] === '--headless') args.headless = true;
+    if (argv[i] === '--debug') args.debug = true;
     if ((argv[i] === '--limit' || argv[i] === '--max-count') && argv[i + 1]) args.limit = Number(argv[++i] || 0) || null;
     if (argv[i] === '--agent-only') args.agentOnly = true;
   }
@@ -1103,19 +1106,8 @@ function isTimeBeyondDays(timeText, days) {
   return false;
 }
 
-async function executeWorkCommentItems(items, args) {
+async function executeWorkCommentItems(items, args, run, recorder) {
   const diagnosePosition = Boolean(args.diagnosePosition);
-  const run = createRunContext('comment-execute-json', {
-    debug: true,
-    dryRun: false,
-    execute: !diagnosePosition,
-    json: args.json,
-    keepOpen: Boolean(args.keepOpen) && !args.json,
-    keepOpenOnError: !args.json && !diagnosePosition,
-    pauseOnError: !args.json && !diagnosePosition,
-    writeRunFiles: false,
-  });
-
   let browser = null;
   let ctx = null;
   let page = null;
@@ -1132,6 +1124,7 @@ async function executeWorkCommentItems(items, args) {
     if (ctx && ctx.context) {
       try {
         page = await replaceContextPage(ctx.context, page);
+        recorder?.instrumentPage(page, { label: 'comments.execute.page' });
         console.error('[comments:execute] 已重建页面');
         return true;
       } catch {
@@ -1168,6 +1161,7 @@ async function executeWorkCommentItems(items, args) {
     ctx = await createBrowserContext({ headless: args.headless, enableReuse: Boolean(args.keepOpen) && !args.json });
     browser = ctx.browser;
     page = await replaceContextPage(ctx.context, ctx.context.pages()[0] || null);
+    recorder?.instrumentPage(page, { label: 'comments.execute.page' });
 
     const workGroups = groupExecutableItemsByWork(executable);
     let activeHomepageUrl = '';
@@ -1175,8 +1169,15 @@ async function executeWorkCommentItems(items, args) {
       groupIndex++;
       const currentWork = group[0];
       try {
+        await recorder?.capture(page, 'comments.work_group.start', {
+          groupIndex,
+          groupSize: group.length,
+          workId: currentWork?.workId || '',
+          modalId: currentWork?.modalId || '',
+        });
         if (groupIndex > 0) {
           page = await replaceContextPage(ctx.context, page);
+          recorder?.instrumentPage(page, { label: 'comments.execute.page' });
           activeHomepageUrl = '';
           console.error(`[comments:execute] 切换到新页面执行作品组 group_index=${groupIndex + 1}/${workGroups.length}`);
         }
@@ -1264,6 +1265,11 @@ async function executeWorkCommentItems(items, args) {
           if (groupResults.some(result => !result.ok && result.status === 'blocked')) {
             run.hadBlocked = true;
           }
+          await recorder?.capture(page, 'comments.work_group.finish', {
+            groupIndex,
+            groupSize: group.length,
+            hadBlocked: groupResults.some(result => !result.ok && result.status === 'blocked'),
+          });
 
           const nextGroup = workGroups[workGroups.indexOf(group) + 1] || null;
           const shouldReturnToProfile = Boolean(nextGroup && (nextGroup[0]?.authorProfileUrl || nextGroup[0]?.homepageUrl) === targetHomepageUrl);
@@ -1297,7 +1303,6 @@ async function executeWorkCommentItems(items, args) {
       }
     }
   } finally {
-    saveRunSummary(run);
     const shouldClose = resolveBrowserClose(run);
     if (browser && shouldClose) await browser.close();
     else if (browser && typeof browser.disconnect === 'function') await browser.disconnect();
@@ -1316,76 +1321,103 @@ function isSkippedResult(result) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-
-  if (args.unsupportedItemsFile) {
-    printJsonError(
-      'comments:execute',
-      RESULT_CODES.INVALID_ARGUMENTS,
-      'comments:execute 不再支持 --items-file；请直接从数据库执行，--limit 可选，不传默认处理全部 pending',
-      { recoverable: false }
-    );
-    return;
-  }
-
-  let loaded = { items: [] };
-  let agentResults = [];
-
-  runMigrations();
-  const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: args.limit });
-  loaded = { items: buildWorkCommentItemsFromDbRows(rows) };
-  console.log(`[comments:execute] loaded pending comments from db: ${loaded.items.length}`);
-
-  const agentProvider = createAgentProvider();
-  try {
-    agentResults = await generateMissingReplies(loaded.items, {
-      agentProvider,
-      batchSize: Number(process.env.REPLY_BATCH_SIZE || 8),
-    });
-  } finally {
-    await agentProvider.close?.();
-  }
-
-  if (args.agentOnly) {
-    const generated = agentResults.filter(r => r.ok && r.reply).length;
-    const failedAgent = agentResults.filter(r => !r.ok).length;
-    if (args.json) {
-      printJsonResult('comments:execute', { agentResults }, { generated, failed: failedAgent, mode: 'agent_only' });
-    } else {
-      console.log(`[comments:execute] agent-only generated=${generated} failed=${failedAgent}`);
-    }
-    return;
-  }
-
-  const results = await executeWorkCommentItems(loaded.items, args);
-  console.log(args.diagnosePosition
-    ? `[comments:execute] diagnose-position 模式：不更新 DB，未发送回复`
-    : `[comments:execute] DB 模式：不生成/读取/写回中间 JSON`);
-
-  const succeeded = results.filter(item => item.ok && item.status === 'succeeded').length;
-  const skipped = results.filter(isSkippedResult).length;
-  const failed = results.length - succeeded - skipped;
-
-  const skipReasons = {};
-  results.filter(isSkippedResult).forEach(r => {
-    const reason = r.status === 'skipped_empty_reply' ? 'empty' : (r.error || r.status);
-    skipReasons[reason] = (skipReasons[reason] || 0) + 1;
+  const run = createRunContext('comments:execute', {
+    debug: args.debug,
+    dryRun: false,
+    execute: !args.diagnosePosition,
+    json: args.json,
+    keepOpen: Boolean(args.keepOpen) && !args.json,
+    keepOpenOnError: !args.json && !args.diagnosePosition,
+    pauseOnError: !args.json && !args.diagnosePosition,
+    writeRunFiles: args.debug,
+    headless: args.headless,
+    maxItems: args.limit || 0,
   });
-  const skippedLog = skipped > 0 ? `，跳过 ${skipped} 条（${Object.entries(skipReasons).map(([k, v]) => `${k}×${v}`).join(', ')}）` : '';
+  const recorder = createRunDebugRecorder(run, { command: 'comments:execute' });
+  recorder.startConsoleCapture();
 
-  if (args.json) {
-    printJsonResult('comments:execute', { agentResults, results }, { succeeded, failed, skipped, mode: args.diagnosePosition ? 'diagnose_position' : 'db_agent_execute' });
-  } else {
-    console.log(`[comments:execute] mode=${args.diagnosePosition ? 'diagnose_position' : 'db_agent_execute'} 成功 ${succeeded} 条，失败 ${failed} 条${skippedLog}`);
-    for (const item of results) {
-      const tag = item.status === 'skipped_empty_reply' ? ' [empty-reply]'
-        : item.status === 'skipped' ? ' [skipped]'
-        : item.status === 'manually_replied' ? ' [manually-replied]'
-        : (!item.ok && item.status === 'succeeded') ? ' [already-done]'
-        : (!item.ok && item.status === 'sent_unverified') ? ' [already-sent]'
-        : '';
-      const lineStatus = item.ok ? item.status : (item.status === 'skipped' ? `skipped ${item.error}` : `failed ${item.error}`);
-      console.log(`  [comment#${item.commentId || '-'}] ${lineStatus}${tag}`);
+  try {
+    if (args.unsupportedItemsFile) {
+      printJsonError(
+        'comments:execute',
+        RESULT_CODES.INVALID_ARGUMENTS,
+        'comments:execute 不再支持 --items-file；请直接从数据库执行，--limit 可选，不传默认处理全部 pending',
+        { recoverable: false }
+      );
+      return;
     }
+
+    let loaded = { items: [] };
+    let agentResults = [];
+
+    runMigrations();
+    const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: args.limit });
+    loaded = { items: buildWorkCommentItemsFromDbRows(rows) };
+    run.scanned = loaded.items.length;
+    console.log(`[comments:execute] loaded pending comments from db: ${loaded.items.length}`);
+
+    const agentProvider = createAgentProvider();
+    try {
+      agentResults = await generateMissingReplies(loaded.items, {
+        agentProvider,
+        batchSize: Number(process.env.REPLY_BATCH_SIZE || 8),
+      });
+    } finally {
+      await agentProvider.close?.();
+    }
+
+    if (args.agentOnly) {
+      const generated = agentResults.filter(r => r.ok && r.reply).length;
+      const failedAgent = agentResults.filter(r => !r.ok).length;
+      run.processed = loaded.items.length;
+      run.succeeded = generated;
+      run.failed = failedAgent;
+      if (args.json) {
+        printJsonResult('comments:execute', { agentResults }, { generated, failed: failedAgent, mode: 'agent_only' });
+      } else {
+        console.log(`[comments:execute] agent-only generated=${generated} failed=${failedAgent}`);
+      }
+      return;
+    }
+
+    const results = await executeWorkCommentItems(loaded.items, args, run, recorder);
+    console.log(args.diagnosePosition
+      ? `[comments:execute] diagnose-position 模式：不更新 DB，未发送回复`
+      : `[comments:execute] DB 模式：不生成/读取/写回中间 JSON`);
+
+    const succeeded = results.filter(item => item.ok && item.status === 'succeeded').length;
+    const skipped = results.filter(isSkippedResult).length;
+    const failed = results.length - succeeded - skipped;
+    run.processed = results.length;
+    run.succeeded = succeeded;
+    run.failed = failed;
+    run.skipped = skipped;
+
+    const skipReasons = {};
+    results.filter(isSkippedResult).forEach(r => {
+      const reason = r.status === 'skipped_empty_reply' ? 'empty' : (r.error || r.status);
+      skipReasons[reason] = (skipReasons[reason] || 0) + 1;
+    });
+    const skippedLog = skipped > 0 ? `，跳过 ${skipped} 条（${Object.entries(skipReasons).map(([k, v]) => `${k}×${v}`).join(', ')}）` : '';
+
+    if (args.json) {
+      printJsonResult('comments:execute', { agentResults, results }, { succeeded, failed, skipped, mode: args.diagnosePosition ? 'diagnose_position' : 'db_agent_execute' });
+    } else {
+      console.log(`[comments:execute] mode=${args.diagnosePosition ? 'diagnose_position' : 'db_agent_execute'} 成功 ${succeeded} 条，失败 ${failed} 条${skippedLog}`);
+      for (const item of results) {
+        const tag = item.status === 'skipped_empty_reply' ? ' [empty-reply]'
+          : item.status === 'skipped' ? ' [skipped]'
+          : item.status === 'manually_replied' ? ' [manually-replied]'
+          : (!item.ok && item.status === 'succeeded') ? ' [already-done]'
+          : (!item.ok && item.status === 'sent_unverified') ? ' [already-sent]'
+          : '';
+        const lineStatus = item.ok ? item.status : (item.status === 'skipped' ? `skipped ${item.error}` : `failed ${item.error}`);
+        console.log(`  [comment#${item.commentId || '-'}] ${lineStatus}${tag}`);
+      }
+    }
+  } finally {
+    saveRunSummary(run);
+    recorder.stopConsoleCapture();
   }
 }
 

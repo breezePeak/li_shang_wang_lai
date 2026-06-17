@@ -1,5 +1,7 @@
 import { runMigrations } from '../db/migrations.mjs';
 import { createBrowserSessionManager } from '../browser/session-manager.mjs';
+import { createRunContext, saveRunSummary } from '../browser/run-context.mjs';
+import { createRunDebugRecorder } from '../browser/run-debug-recorder.mjs';
 import { loadConfig } from '../config/user-config.mjs';
 import { DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK } from '../config/defaults.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
@@ -29,6 +31,7 @@ function parseArgs(argv) {
     maxWorksToCheck: null,
     limit: null,
     unsupportedItemsFile: false,
+    debug: false,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -38,6 +41,7 @@ function parseArgs(argv) {
     else if (arg === '--headless') args.headless = true;
     else if (arg === '--dry-run') { args.dryRun = true; args.execute = false; }
     else if (arg === '--execute') { args.execute = true; args.dryRun = false; }
+    else if (arg === '--debug') args.debug = true;
     else if (arg === '--watch-policy' && i + 1 < argv.length) args.watchPolicy = argv[++i];
     else if (arg === '--watch-seconds' && i + 1 < argv.length) args.watchSeconds = argv[++i];
     else if (arg === '--max-works-to-check' && i + 1 < argv.length) args.maxWorksToCheck = argv[++i];
@@ -137,6 +141,20 @@ async function main() {
   }
   const config = loadConfig();
   const returnVisitConfig = config.returnVisit || {};
+  const run = createRunContext('return-visit:execute', {
+    debug: args.debug,
+    dryRun: !args.execute,
+    execute: args.execute,
+    json: args.json,
+    keepOpen: Boolean(args.keepOpen) && !args.json,
+    keepOpenOnError: !args.json,
+    pauseOnError: false,
+    writeRunFiles: args.debug,
+    headless: args.headless,
+    maxItems: args.limit || 0,
+  });
+  const recorder = createRunDebugRecorder(run, { command: 'return-visit:execute' });
+  recorder.startConsoleCapture();
 
   const executeMode = args.execute;
   const maxRetryCount = Number(returnVisitConfig.maxRetryCount ?? 2);
@@ -210,9 +228,12 @@ async function main() {
 
   log(args.json, `[return-visit:execute] loaded executable tasks: ${tasks.length}`);
   if (tasks.length === 0) {
+    run.scanned = allTasks.length;
     if (args.json) {
       printJsonResult('return-visit:execute', { tasks: taskResults }, { loaded: allTasks.length, done, skipped, failed });
     }
+    saveRunSummary(run);
+    recorder.stopConsoleCapture();
     return;
   }
 
@@ -237,6 +258,7 @@ async function main() {
 
   async function recreatePage() {
     page = await browserSession.replacePage();
+    recorder.instrumentPage(page, { label: 'return.visit.page' });
     console.error('[return-visit:execute] 已切换到新页面');
     return page;
   }
@@ -252,7 +274,9 @@ async function main() {
 
   async function restartBrowserSession(reason) {
     console.error(`[return-visit:execute] 重启浏览器会话 reason=${reason}`);
-    return browserSession.restart(reason);
+    const session = await browserSession.restart(reason);
+    recorder.instrumentPage(session.page, { label: 'return.visit.page' });
+    return session;
   }
 
   try {
@@ -262,6 +286,7 @@ async function main() {
       ctx = session.ctx;
       browser = session.browser;
       page = session.page;
+      recorder.instrumentPage(page, { label: 'return.visit.page' });
     } catch (err) {
       const msg = `浏览器启动失败: ${err.message}`;
       if (args.json) {
@@ -278,6 +303,12 @@ async function main() {
 
     for (let index = 0; index < tasks.length; index++) {
       const task = tasks[index];
+      await recorder.capture(page, 'return_visit.task.start', {
+        index,
+        taskId: task.taskId,
+        taskStatus: task.status,
+        workId: task?.targetWork?.workId || '',
+      });
       if (index > 0) {
         page = await recreatePage();
       }
@@ -424,6 +455,12 @@ async function main() {
         consecutiveFailures++;
         log(args.json, `[return-visit:execute] failed: ${result.error || result.status || 'unknown'}`);
       }
+      await recorder.capture(page, 'return_visit.task.finish', {
+        index,
+        taskId: task.taskId,
+        resultStatus: result.status || 'unknown',
+        ok: result.ok,
+      });
 
       processedSinceRest++;
       processedSinceBrowserRestart++;
@@ -465,6 +502,12 @@ async function main() {
       failed,
       mode: executeMode ? 'execute' : 'dry-run',
     };
+    run.scanned = tasks.length;
+    run.planned = tasks.length;
+    run.processed = done + skipped + failed;
+    run.succeeded = done;
+    run.skipped = skipped;
+    run.failed = failed;
     log(args.json, `[return-visit:execute] summary done=${done} skipped=${skipped} failed=${failed}`);
 
     if (browser && !args.keepOpen) {
@@ -474,6 +517,8 @@ async function main() {
       printJsonResult('return-visit:execute', { tasks: taskResults }, summary);
     }
   } finally {
+    saveRunSummary(run);
+    recorder.stopConsoleCapture();
     await agentProvider.close?.();
   }
 }

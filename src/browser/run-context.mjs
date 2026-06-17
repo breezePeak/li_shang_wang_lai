@@ -2,7 +2,7 @@ import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
 import path from 'path';
 
 const DEFAULT_OPTIONS = {
-  debug: true,
+  debug: false,
   dryRun: true,
   execute: false,
   json: false,

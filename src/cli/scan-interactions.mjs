@@ -14,6 +14,7 @@ import { upsertWorkComment, listPendingCommentsGroupedByHomepageAndWork, listRep
 import logger from '../utils/logger.mjs';
 import { runMigrations } from '../db/migrations.mjs';
 import { parseCommonArgs, createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
+import { createRunDebugRecorder } from '../browser/run-debug-recorder.mjs';
 import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { promptRecoveryAction } from '../browser/interactive-control.mjs';
 import { RESULT_CODES, success, blocking } from '../domain/result-codes.mjs';
@@ -1909,6 +1910,8 @@ async function main() {
   runMigrations();
 
   const run = createRunContext('scan-interactions', options);
+  const recorder = createRunDebugRecorder(run, { command: 'interactions:scan' });
+  recorder.startConsoleCapture();
 
   let browser = null;
   let page = null;
@@ -1919,6 +1922,8 @@ async function main() {
     browser = ctx.browser;
     const pages = ctx.context.pages();
     page = pages.length > 0 ? pages[0] : await ctx.context.newPage();
+    recorder.instrumentPage(page, { label: 'scan.page' });
+    await recorder.capture(page, 'scan.notification.start', { type, plan: scanPlan });
 
     // --- Notification scanning phase (ONLY interaction entry point) ---
     // All new interaction collection flows through the notification center.
@@ -1933,6 +1938,7 @@ async function main() {
       return;
     }
     if (notifResult.action === 'quit-close' || notifResult.action === 'quit-keep-open') return;
+    await recorder.capture(page, 'scan.notification.finish', { ok: notifResult.ok, action: notifResult.action || 'continue' });
 
     console.error('');
     console.error('[scan] ====== 扫描完成 ======');
@@ -1994,6 +2000,7 @@ async function main() {
     process.exitCode = 1;
   } finally {
     saveRunSummary(run);
+    recorder.stopConsoleCapture();
 
     const shouldClose = resolveBrowserClose(run);
 
