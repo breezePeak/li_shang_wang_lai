@@ -142,7 +142,22 @@ async function typeIntoReplyDraftEditor(page, replyText) {
       document.querySelectorAll('[data-return-visit-editor="true"]').forEach(el => el.removeAttribute('data-return-visit-editor'));
       document.querySelectorAll('[data-return-visit-comment-host="true"]').forEach(el => el.removeAttribute('data-return-visit-comment-host'));
 
-      const commentInputContainer = document.querySelector('.comment-input-container');
+      const containerSelectors = [
+        '.comment-input-container',
+        '[class*="comment-input-container"]',
+        '[class*="commentInputContainer"]',
+        '.comment-input-inner-container',
+        '[class*="comment-input-inner-container"]',
+      ];
+      let commentInputContainer = null;
+      for (const selector of containerSelectors) {
+        const matches = Array.from(document.querySelectorAll(selector)).filter(visible);
+        if (matches.length > 0) {
+          matches.sort((a, b) => b.getBoundingClientRect().width * b.getBoundingClientRect().height - a.getBoundingClientRect().width * a.getBoundingClientRect().height);
+          commentInputContainer = matches[0];
+          break;
+        }
+      }
       if (!visible(commentInputContainer)) return { ok: false, reason: 'comment_input_container_not_found' };
 
       commentInputContainer.setAttribute('data-return-visit-comment-host', 'true');
@@ -235,7 +250,10 @@ async function typeIntoReplyDraftEditor(page, replyText) {
   await page.waitForTimeout(300).catch(() => {});
 
   let typed = await page.evaluate(({ text, method }) => {
-    const container = document.querySelector('.comment-input-container');
+    const container = document.querySelector('[data-return-visit-comment-host="true"]')
+      || document.querySelector('.comment-input-container')
+      || document.querySelector('[class*="comment-input-container"]')
+      || document.querySelector('.comment-input-inner-container');
     const editorEl = document.querySelector('[data-return-visit-editor="true"]')
       || container?.querySelector('.public-DraftEditor-content[contenteditable="true"]')
       || container?.querySelector('[contenteditable="true"]');
@@ -262,7 +280,10 @@ async function typeIntoReplyDraftEditor(page, replyText) {
     await page.keyboard.insertText(replyText);
     await page.waitForTimeout(300).catch(() => {});
     typed = await page.evaluate((text) => {
-      const container = document.querySelector('.comment-input-container');
+      const container = document.querySelector('[data-return-visit-comment-host="true"]')
+        || document.querySelector('.comment-input-container')
+        || document.querySelector('[class*="comment-input-container"]')
+        || document.querySelector('.comment-input-inner-container');
       const editorEl = document.querySelector('[data-return-visit-editor="true"]')
         || container?.querySelector('.public-DraftEditor-content[contenteditable="true"]')
         || container?.querySelector('[contenteditable="true"]');
@@ -300,6 +321,17 @@ export async function clickReplySendControl(page) {
       return (el?.innerText || el?.textContent || '').trim();
     }
 
+    function isRedLike(value) {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (!normalized) return false;
+      const match = normalized.match(/rgb[a]?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+      if (!match) return false;
+      const r = Number(match[1]);
+      const g = Number(match[2]);
+      const b = Number(match[3]);
+      return r >= 220 && g <= 120 && b <= 140;
+    }
+
     function hasBlockedSemantics(el) {
       const text = textOf(el);
       const attrs = [
@@ -313,6 +345,25 @@ export async function clickReplySendControl(page) {
 
     function containsFileInput(el) {
       return !!el?.querySelector?.('input[type="file"]');
+    }
+
+    function scoreSendCandidate(el, composerRect) {
+      if (!el || !visible(el) || hasBlockedSemantics(el) || containsFileInput(el)) return null;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      const text = textOf(el);
+      const svg = el.tagName.toLowerCase() === 'svg' ? el : el.querySelector?.('svg');
+      const path = svg?.querySelector?.('path');
+
+      let score = 0;
+      if (text === '发送' || text === '发布' || text.includes('发送') || text.includes('发布')) score += 50;
+      if (rect.left >= composerRect.left + composerRect.width * 0.6) score += 30;
+      if (rect.top >= composerRect.top - 12 && rect.bottom <= composerRect.bottom + 20) score += 15;
+      if (rect.width <= 64 && rect.height <= 64) score += 10;
+      if (isRedLike(style.color) || isRedLike(style.backgroundColor)) score += 25;
+      if (isRedLike(svg?.getAttribute?.('fill')) || isRedLike(path?.getAttribute?.('fill'))) score += 25;
+      if (!text && (el.tagName.toLowerCase() === 'svg' || el.querySelector?.('svg'))) score += 10;
+      return score > 0 ? { el, rect, text, score } : null;
     }
 
     function pickPreferredClickTarget(el) {
@@ -357,18 +408,28 @@ export async function clickReplySendControl(page) {
       '.comment-input-container',
       '[class*="comment-input-container"]',
       '[class*="commentInputContainer"]',
+      '.comment-input-inner-container',
+      '[class*="comment-input-inner-container"]',
+      '[class*="commentInput-right"]',
     ];
     let container = null;
     for (const sel of containerSelectors) {
-      const el = document.querySelector(sel);
-      if (visible(el)) { container = el; break; }
+      const elements = Array.from(document.querySelectorAll(sel)).filter(visible);
+      if (elements.length > 0) {
+        elements.sort((a, b) => b.getBoundingClientRect().width * b.getBoundingClientRect().height - a.getBoundingClientRect().width * a.getBoundingClientRect().height);
+        container = elements[0];
+        break;
+      }
     }
     if (!container) return { ok: false, reason: 'comment_input_container_not_found' };
 
     const sendArea = container.querySelector('.commentInput-right-ct')
       || container.querySelector('[class*="commentInput-right"]')
-      || container.querySelector('[class*="right-ct"]');
+      || container.querySelector('[class*="right-ct"]')
+      || container;
     if (!visible(sendArea)) return { ok: false, reason: 'comment_send_area_not_found' };
+
+    const composerRect = container.getBoundingClientRect();
 
     const iconTargets = [
       { css: '.FbVIhLlK' },
@@ -392,6 +453,22 @@ export async function clickReplySendControl(page) {
         clickAllWays(target);
         return { ok: true, method: 'send_control_click', selector: selector.css, targetText: textOf(target).slice(0, 20) };
       }
+    }
+
+    const scoredCandidates = Array.from(sendArea.querySelectorAll('button, [role="button"], div, span, svg, img'))
+      .map(el => scoreSendCandidate(el, composerRect))
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score);
+    for (const candidate of scoredCandidates) {
+      const target = pickPreferredClickTarget(candidate.el) || pickSafeFallbackTarget(candidate.el);
+      if (!target) continue;
+      clickAllWays(target);
+      return {
+        ok: true,
+        method: 'send_control_scored_click',
+        selector: target.tagName?.toLowerCase?.() || 'unknown',
+        targetText: textOf(target).slice(0, 20),
+      };
     }
 
     const textMatches = Array.from(sendArea.querySelectorAll('div, span, button, [role="button"]'))
@@ -991,8 +1068,21 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           return rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
         }
 
+        function clickAllWays(target) {
+          target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+          target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+          target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+          target.click?.();
+        }
+
         function pickActionBar() {
-          const candidates = Array.from(document.querySelectorAll('.hOcDRkbZ.WcVcXqQb'));
+          const selectors = [
+            '.t5VMknM2 .MinpposV',
+            '.hOcDRkbZ.WcVcXqQb',
+            '[class*="action-bar"]',
+            '[class*="ActionBar"]',
+          ];
+          const candidates = selectors.flatMap(selector => Array.from(document.querySelectorAll(selector)));
           if (candidates.length === 0) return null;
 
           const viewportCenterY = window.innerHeight / 2;
@@ -1042,46 +1132,75 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           });
         }
 
-        const commentContainer = searchScope.querySelector('[data-e2e="feed-comment-icon"]');
-        if (commentContainer && visible(commentContainer)) {
-          commentContainer.scrollIntoView({ block: 'center', behavior: 'instant' });
-          const rect = commentContainer.getBoundingClientRect();
-          commentContainer.setAttribute('data-return-visit-comment-button', 'true');
+        const directSelectors = [
+          '[data-e2e="feed-comment-icon"]',
+          '[data-e2e="video-comment"]',
+          '[data-e2e="comment-icon"]',
+          '[aria-label*="评论"]',
+          '[title*="评论"]',
+        ];
+        for (const selector of directSelectors) {
+          const commentContainer = searchScope.querySelector(selector);
+          if (commentContainer && visible(commentContainer)) {
+            commentContainer.scrollIntoView({ block: 'center', behavior: 'instant' });
+            const rect = commentContainer.getBoundingClientRect();
+            commentContainer.setAttribute('data-return-visit-comment-button', 'true');
 
-          // 诊断：该元素下方的子元素
-          const children = [];
-          commentContainer.querySelectorAll('*').forEach(child => {
-            children.push({
-              tag: child.tagName.toLowerCase(),
-              cls: (typeof child.className === 'string' ? child.className : '').slice(0, 60),
-              text: (child.innerText || '').trim().slice(0, 30),
+            const children = [];
+            commentContainer.querySelectorAll('*').forEach(child => {
+              children.push({
+                tag: child.tagName.toLowerCase(),
+                cls: (typeof child.className === 'string' ? child.className : '').slice(0, 60),
+                text: (child.innerText || '').trim().slice(0, 30),
+              });
             });
-          });
 
-          commentContainer.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-          commentContainer.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-          commentContainer.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-          commentContainer.click?.();
+            clickAllWays(commentContainer);
 
+            return {
+              found: true,
+              domClicked: true,
+              selector,
+              tag: commentContainer.tagName,
+              className: typeof commentContainer.className === 'string' ? commentContainer.className.slice(0, 120) : '',
+              x: Math.round(rect.left + rect.width / 2),
+              y: Math.round(rect.top + rect.height / 2),
+              rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+              searchScopeSelector: actionBar ? 'action-bar' : 'document',
+              diagActionBarElements: diagAll.slice(0, 10),
+              diagChildren: children.slice(0, 8),
+            };
+          }
+        }
+
+        const actionItems = actionBar
+          ? Array.from(actionBar.querySelectorAll(':scope > .AOWKbsTg')).filter(visible)
+          : [];
+        if (actionItems.length >= 2) {
+          const target = actionItems[1];
+          const rect = target.getBoundingClientRect();
+          target.setAttribute('data-return-visit-comment-button', 'true');
+          clickAllWays(target);
           return {
             found: true,
             domClicked: true,
-            selector: '[data-e2e="feed-comment-icon"]',
-            tag: commentContainer.tagName,
-            className: typeof commentContainer.className === 'string' ? commentContainer.className.slice(0, 120) : '',
+            selector: '.t5VMknM2 .MinpposV > .AOWKbsTg:nth-child(2)',
+            tag: target.tagName,
+            className: typeof target.className === 'string' ? target.className.slice(0, 120) : '',
             x: Math.round(rect.left + rect.width / 2),
             y: Math.round(rect.top + rect.height / 2),
             rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
-            searchScopeSelector: actionBar ? '.hOcDRkbZ.WcVcXqQb' : 'document',
+            searchScopeSelector: 'action-bar-second-item',
             diagActionBarElements: diagAll.slice(0, 10),
-            diagChildren: children.slice(0, 8),
+            diagChildren: [],
           };
         }
+
         return {
           found: false,
-          searchScopeSelector: actionBar ? '.hOcDRkbZ.WcVcXqQb' : 'document',
+          searchScopeSelector: actionBar ? 'action-bar' : 'document',
           diagActionBarElements: diagAll.slice(0, 10),
-          diagReason: commentContainer ? 'not_visible' : 'element_not_found',
+          diagReason: actionBar ? 'not_visible' : 'element_not_found',
         };
       }).catch((err) => {
         console.error(`[click-comment] 查找评论按钮异常: ${err.message}`);
@@ -1193,7 +1312,21 @@ export async function ensureWorkModalCommentBoxReady(page) {
       return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
     }
 
-    const container = document.querySelector('.comment-input-container');
+    const selectors = [
+      '.comment-input-container',
+      '[class*="comment-input-container"]',
+      '[class*="commentInputContainer"]',
+      '.comment-input-inner-container',
+      '[class*="comment-input-inner-container"]',
+    ];
+    let container = null;
+    for (const selector of selectors) {
+      const match = Array.from(document.querySelectorAll(selector)).find(visible);
+      if (match) {
+        container = match;
+        break;
+      }
+    }
     if (!visible(container)) return { ok: false, reason: 'comment_input_container_not_found' };
     const editor = container.querySelector('.public-DraftEditor-content[contenteditable="true"], [contenteditable="true"], [role="textbox"]');
     if (visible(editor)) return { ok: true, method: 'editor_visible' };

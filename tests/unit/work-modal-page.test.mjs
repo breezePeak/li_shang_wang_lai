@@ -14,6 +14,7 @@ import {
   resolveReplyTypingOptions,
   scrollCommentAreaOnce,
   typeReplyTextWithEffect,
+  waitForWorkModal,
 } from '../../src/adapters/work-modal-page.mjs';
 import { checkWorkOwner } from '../../src/adapters/work-context-page.mjs';
 
@@ -238,6 +239,81 @@ describe('clickReplySendControl', () => {
       expect(result.ok).toBe(true);
       expect(clicked).toContain('send');
       expect(clicked).not.toContain('upload');
+    } finally {
+      await browser.close();
+    }
+  });
+
+  it('发送是红色图标按钮且没有显式发送文案时也能命中', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+      await page.setContent(`
+        <html>
+          <body>
+            <div class="comment-input-container" style="position:fixed;right:16px;bottom:16px;width:320px;height:72px;">
+              <div class="left-actions">
+                <span aria-label="上传图片">图</span>
+              </div>
+              <div contenteditable="true" id="editor">测试评论</div>
+              <button id="send-btn" type="button" style="position:absolute;right:12px;bottom:12px;color:rgb(255,255,255);background:rgb(255,46,85);width:28px;height:28px;border-radius:50%;">
+                <svg width="16" height="16" fill="rgb(255,255,255)"></svg>
+              </button>
+            </div>
+            <script>
+              window.clicked = [];
+              document.getElementById('send-btn').addEventListener('click', () => window.clicked.push('send'));
+            </script>
+          </body>
+        </html>
+      `);
+
+      const result = await clickReplySendControl(page);
+      const clicked = await page.evaluate(() => window.clicked.slice());
+
+      expect(result.ok).toBe(true);
+      expect(result.method).toBe('send_control_scored_click');
+      expect(clicked).toContain('send');
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
+describe('waitForWorkModal', () => {
+  it('主页 modal 只有 action bar 第二项可点时也能展开评论区', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      await page.setContent(`
+        <html>
+          <body>
+            <div class="modal-video-container" data-e2e="modal-video-container" style="position:relative;width:900px;height:700px;margin:0 auto;">
+              <div class="t5VMknM2" style="position:absolute;right:24px;top:120px;">
+                <div class="MinpposV">
+                  <div class="AOWKbsTg" id="like-btn"><span>63</span></div>
+                  <div class="AOWKbsTg" id="comment-btn"><span>24</span></div>
+                  <div class="AOWKbsTg" id="share-btn"><span>3</span></div>
+                </div>
+              </div>
+            </div>
+            <script>
+              document.getElementById('comment-btn').addEventListener('click', () => {
+                const area = document.createElement('div');
+                area.className = 'comment-mainContent';
+                area.textContent = '评论区已展开';
+                area.style.cssText = 'position:absolute;left:40px;top:180px;width:360px;height:280px;background:#fff;';
+                document.body.appendChild(area);
+              });
+            </script>
+          </body>
+        </html>
+      `);
+
+      const result = await waitForWorkModal(page, { timeoutMs: 1500, closeAutoPlay: false, openCommentArea: true });
+      expect(result.ok).toBe(true);
+      const commentAreaVisible = await page.locator('.comment-mainContent').first().isVisible();
+      expect(commentAreaVisible).toBe(true);
     } finally {
       await browser.close();
     }
