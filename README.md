@@ -125,7 +125,6 @@ npm run auth
 | 评论回复 | `npm run comments:execute` |
 | 准备回访任务 | `npm run interactions:scan -- --days 7 --prepare-visits` |
 | 执行回访 | `npm run visit:run -- --execute` |
-| 三条主链路调试 | 在扫描 / 回评 / 回访命令后追加 `--debug` |
 | 启动控制台 | `npm run server` |
 | 运行测试 | `npm test` |
 
@@ -168,23 +167,6 @@ npm run interactions:scan -- --days 7 --headless
 npm run comments:execute -- --headless
 npm run visit:run -- --execute --headless
 ```
-
-## 调试取证
-
-扫描、回评、回访三个主执行命令都支持 `--debug`：
-
-```bash
-npm run interactions:scan -- --days 7 --debug
-npm run comments:execute -- --debug
-npm run visit:run -- --execute --debug
-```
-
-开启后会在 `data/runs/<runId>/debug/` 下保存：
-
-- `logs/execution.log`：完整执行日志
-- `steps/<序号>_<步骤名>/dom.html`：当前页面 DOM 快照
-- `steps/<序号>_<步骤名>/screenshot.png`：当前页面截图
-- `steps/<序号>_<步骤名>/step.json`：步骤时间、URL、动作参数摘要
 
 ## Agent 配置
 
