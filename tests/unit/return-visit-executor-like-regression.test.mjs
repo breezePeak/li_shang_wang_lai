@@ -238,7 +238,7 @@ describe('return-visit executor like/comment regressions', () => {
     expect(result.resolvedWork.workId).toBe('222');
   });
 
-  it('uses update-request fallback when all checked works are already liked', async () => {
+  it('skips return visit when all checked works are already liked', async () => {
     collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
       ok: true,
       candidates: [
@@ -277,13 +277,20 @@ describe('return-visit executor like/comment regressions', () => {
 
     expect(clickLikeMock).not.toHaveBeenCalled();
     expect(agentProvider.generateComment).not.toHaveBeenCalled();
-    expect(postWorkModalCommentMock).toHaveBeenCalledWith(page, '蹲个更新呀～');
-    expect(result.ok).toBe(true);
-    expect(result.selectionMode).toBe('all_liked_update_request');
+    expect(postWorkModalCommentMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('skipped_no_suitable_work');
+    expect(result.selectionMode).toBeNull();
     expect(result.likeStatus).toBe('already_liked');
+    expect(result.error).toBe('latest_2_works_already_liked');
+    expect(result.checkedWorks).toHaveLength(2);
+    expect(result.checkedWorks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ workId: '111', action: 'skip', reason: 'all_candidates_already_liked' }),
+      expect.objectContaining({ workId: '222', action: 'skip', reason: 'all_candidates_already_liked' }),
+    ]));
   });
 
-  it('uses the first non-top candidate for update-request fallback when the first candidate is pinned', async () => {
+  it('includes pinned works in the all-liked skip decision', async () => {
     collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
       ok: true,
       candidates: [
@@ -291,19 +298,8 @@ describe('return-visit executor like/comment regressions', () => {
         { workId: '222', workUrl: 'https://www.douyin.com/video/222', userDigged: 1, isTop: 0 },
       ],
     });
-    collectCurrentOpenedWorkMock.mockResolvedValue({
-      ok: true,
-      sufficient: true,
-      work: {
-        workId: '222',
-        workTitle: '第二条作品',
-        workText: '第二条作品正文',
-        contentSummary: '第二条作品正文',
-        visibleFingerprint: '第二条作品|第二条作品正文',
-      },
-    });
     const page = {
-      url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo?modal_id=222'),
+      url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo'),
       evaluate: vi.fn().mockResolvedValue({ hasVideoElement: false }),
       waitForTimeout: vi.fn().mockResolvedValue(undefined),
     };
@@ -318,17 +314,15 @@ describe('return-visit executor like/comment regressions', () => {
       execute: true,
     });
 
-    expect(openProfileWorkByAwemeIdMock).toHaveBeenCalledWith(
-      page,
-      'https://www.douyin.com/user/demo',
-      '222',
-      expect.objectContaining({ reuseCurrentProfile: true })
-    );
-    expect(result.checkedWorks.find(item => item.workId === '222')).toMatchObject({
-      workId: '222',
-      action: 'update_request_comment',
-      reason: 'all_candidates_already_liked',
-    });
+    expect(postWorkModalCommentMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('skipped_no_suitable_work');
+    expect(result.error).toBe('latest_2_works_already_liked');
+    expect(result.checkedWorks).toHaveLength(2);
+    expect(result.checkedWorks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ workId: '111', action: 'skip', reason: 'all_candidates_already_liked' }),
+      expect.objectContaining({ workId: '222', action: 'skip', reason: 'all_candidates_already_liked' }),
+    ]));
   });
 
   it('does not process unliked works beyond the first N candidates', async () => {
@@ -367,33 +361,14 @@ describe('return-visit executor like/comment regressions', () => {
       maxWorksToCheck: 2,
     });
 
-    expect(openProfileWorkByAwemeIdMock).toHaveBeenCalledTimes(1);
-    expect(openProfileWorkByAwemeIdMock).not.toHaveBeenCalledWith(
-      page,
-      'https://www.douyin.com/user/demo',
-      '333',
-      expect.anything()
-    );
-    expect(result.selectionMode).toBe('all_liked_update_request');
-    expect(result.dryRun).toBe(true);
+    expect(openProfileWorkByAwemeIdMock).not.toHaveBeenCalled();
+    expect(result.selectionMode).toBeNull();
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('skipped_no_suitable_work');
+    expect(result.error).toBe('latest_2_works_already_liked');
   });
 
-  it('does not post duplicate fixed update-request comment when db already has one for the same work', async () => {
-    getDbMock.mockReturnValue({
-      prepare: vi.fn().mockReturnValue({
-        get: vi.fn().mockReturnValue({
-          id: 501,
-          task_id: 'return_visit_old_fixed_comment',
-          user_name: '老用户',
-          target_work_id: '222',
-          generated_comment: '蹲个更新呀～',
-          comment_status: 'posted',
-          status: 'done',
-          executed_at: '2026-06-13T10:00:00.000Z',
-          updated_at: '2026-06-13T10:00:00.000Z',
-        }),
-      }),
-    });
+  it('all-liked branch no longer depends on duplicate update-request comment checks', async () => {
     collectCandidateAwemesFromProfileMock.mockResolvedValueOnce({
       ok: true,
       candidates: [
@@ -429,10 +404,9 @@ describe('return-visit executor like/comment regressions', () => {
     });
 
     expect(postWorkModalCommentMock).not.toHaveBeenCalled();
-    expect(result.ok).toBe(true);
-    expect(result.status).toBe('done');
-    expect(result.commentStatus).toBe('posted');
-    expect(result.skipPostBecauseExistingComment).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('skipped_no_suitable_work');
+    expect(result.error).toBe('latest_2_works_already_liked');
   });
 
   it('skips the candidate when post API does not provide userDigged', async () => {

@@ -1177,42 +1177,19 @@ export async function executeReturnVisitTask(page, task, options = {}) {
   }
 
   if (areAllCheckedWorksAlreadyLiked(checkedWorks, candidates.length) && allLikedFallbackEnabled) {
-    const fallbackCandidate = pickFallbackUpdateRequestCandidate(candidates);
-    const opened = await openCandidateWork(fallbackCandidate);
-    if (!opened.ok) {
-      return {
-        ok: false,
-        status: opened.status || 'failed_collect',
-        error: opened.reason || 'open_fallback_profile_work_failed',
-        likeStatus: 'already_liked',
-        commentStatus: task.commentStatus || 'pending',
-        checkedWorks,
-      };
-    }
-
-    const resolvedWork = opened.work;
-    const selectionMode = 'all_liked_update_request';
-    const presentation = await detectWorkPresentationKind(page, resolvedWork);
-    const fallbackComment = getFixedUpdateRequestComment();
-    const fallbackWorkId = String(fallbackCandidate?.workId || fallbackCandidate?.awemeId || '').trim();
-    const fallbackCheckedWorks = checkedWorks.map(item => {
-      if (String(item?.workId || '').trim() !== fallbackWorkId) {
-        return item;
-      }
-      return {
+    return {
+      ok: false,
+      status: 'skipped_no_suitable_work',
+      error: `latest_${candidates.length}_works_already_liked`,
+      likeStatus: 'already_liked',
+      commentStatus: task.commentStatus || 'pending',
+      checkedWorks: checkedWorks.map(item => ({
         ...item,
-        action: execute ? 'update_request_comment' : 'plan_update_request_comment',
+        action: 'skip',
         reason: 'all_candidates_already_liked',
-      };
-    });
-
-    return postCommentForResolvedWork(
-      resolvedWork,
-      presentation,
-      'already_liked',
-      selectionMode,
-      fallbackComment,
-    ).then(result => ({ ...result, checkedWorks: fallbackCheckedWorks }));
+      })),
+      selectionMode: null,
+    };
   }
 
   return {
