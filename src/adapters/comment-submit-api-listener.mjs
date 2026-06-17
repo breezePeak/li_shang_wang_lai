@@ -30,8 +30,15 @@ export function createCommentSubmitApiWatcher(page, { expectedText = '' } = {}) 
   const expectedNeedles = normalizeExpectedText(expectedText);
   const state = {
     success: null,
+    requestCount: 0,
     responseCount: 0,
+    non200Count: 0,
     parseFailed: 0,
+    successWithoutCommentId: 0,
+    lastUrl: '',
+    lastStatus: 0,
+    lastMatchedBy: '',
+    lastPostDataPreview: '',
     lastSeenAt: 0,
   };
 
@@ -55,8 +62,16 @@ export function createCommentSubmitApiWatcher(page, { expectedText = '' } = {}) 
     const method = typeof request?.method === 'function' ? String(request.method() || '').toUpperCase() : '';
     if (method && method !== 'POST') return;
 
+    state.requestCount += 1;
+    state.lastSeenAt = Date.now();
+    state.lastUrl = url;
+
     const status = typeof response?.status === 'function' ? Number(response.status()) : 0;
-    if (status && status !== 200) return;
+    state.lastStatus = status || 0;
+    if (status && status !== 200) {
+      state.non200Count += 1;
+      return;
+    }
 
     let json;
     try {
@@ -68,12 +83,19 @@ export function createCommentSubmitApiWatcher(page, { expectedText = '' } = {}) 
 
     state.responseCount += 1;
     state.lastSeenAt = Date.now();
-    if (!isSuccessPayload(json)) return;
-
     const postData = getRequestPostData(request);
     const matchedBy = expectedNeedles.length > 0 && expectedNeedles.some((needle) => postData.includes(needle))
       ? 'request_payload'
       : 'request_scope';
+    state.lastMatchedBy = matchedBy;
+    state.lastPostDataPreview = postData.slice(0, 200);
+
+    if (!isSuccessPayload(json)) {
+      const statusCode = json.status_code ?? json.statusCode ?? json.code ?? json.err_no ?? json.error_code;
+      const maybeSuccess = Number(statusCode) === 0;
+      if (maybeSuccess) state.successWithoutCommentId += 1;
+      return;
+    }
 
     state.success = {
       url,
