@@ -986,15 +986,32 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
       return success({ modalVisible: true, commentAreaOpened: false });
     }
 
-    const isCommentAreaVisible = async () => await page.evaluate(() => {
-      const commentAreas = document.querySelectorAll('.comment-mainContent');
-      for (const commentArea of commentAreas) {
-        const rect = commentArea.getBoundingClientRect();
-        const inViewport = rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
-        if (rect.width > 50 && rect.height > 50 && inViewport) return true;
+    const isCommentAreaVisible = async () => await page.evaluate((selectors) => {
+      function visible(el) {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        return rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+      }
+
+      for (const selector of selectors) {
+        for (const commentArea of document.querySelectorAll(selector)) {
+          if (!visible(commentArea)) continue;
+          const rect = commentArea.getBoundingClientRect();
+          const text = (commentArea.innerText || '').trim();
+          const hasScrollableSurface = commentArea.scrollHeight > commentArea.clientHeight + 20;
+          const hasCommentItems = commentArea.querySelectorAll('[data-e2e="comment-item"], [class*="comment-item"], [class*="commentItem"]').length > 0;
+          const hasCommentSignals = /评论|回复|留下你的精彩评论吧|说点什么|发一条友好的弹幕吧/.test(text);
+          if ((rect.width > 50 && rect.height > 50 && (hasScrollableSurface || hasCommentItems || hasCommentSignals))
+            || (rect.width > 180 && rect.height > 36 && hasCommentSignals)) {
+            return true;
+          }
+        }
       }
       return false;
-    }).catch(() => false);
+    }, WORK_COMMENT_CONTAINER_SELECTORS).catch(() => false);
 
     async function clickTopCommentTab() {
       return await page.evaluate(() => {
@@ -1018,6 +1035,8 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           if (rect.top > window.innerHeight * 0.45) continue;
           if (rect.width < 20 || rect.height < 20) continue;
           if (el.closest('[data-e2e="feed-comment-icon"], [data-e2e="video-comment"], [data-e2e="comment-icon"]')) continue;
+          if (el.matches?.('.comment-mainContent, .comment-input-container, .comment-input-inner-container')) continue;
+          if (el.closest?.('.comment-mainContent, .comment-input-container, .comment-input-inner-container')) continue;
           candidates.push({
             el,
             rect,
@@ -1822,6 +1841,9 @@ export const WORK_COMMENT_CONTAINER_SELECTORS = [
   '[class*="comment-main"]',
   '[class*="comment-list"]',
   '[class*="commentList"]',
+  '[class*="comment-container"]',
+  '[class*="commentContainer"]',
+  '[data-e2e*="comment-list"]',
   '[class*="comment"]',
 ];
 
@@ -2671,7 +2693,14 @@ export async function clickSendWorkReply(page) {
       await page.waitForTimeout(2000);
       return success({ sent: true, method: clicked.method });
     }
-    return blocking(RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND, `严格发送控件未找到: ${clicked.reason}`, { recoverable: true });
+
+    console.error(`[work-modal] 严格发送控件未找到，尝试键盘兜底 reason=${clicked.reason}`);
+    await page.keyboard.press('Control+Enter').catch(() => {});
+    await page.waitForTimeout(250).catch(() => {});
+    await page.keyboard.press('Enter').catch(() => {});
+    await captureReplyBoxDebug(page, 'send-keyboard-fallback', { success: true });
+    await page.waitForTimeout(1800).catch(() => {});
+    return success({ sent: true, method: 'keyboard_enter_fallback', fallbackReason: clicked.reason });
   } catch (err) {
     return blocking(RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND, `发送回复异常: ${err.message}`, { recoverable: true });
   }
@@ -2688,7 +2717,11 @@ export async function verifyWorkReplyVisible(page, item, replyText, { timeoutMs 
   let expandRound = 0;
   while (Date.now() - startedAt < timeoutMs) {
     const found = await page.evaluate(({ commentText, replyNeedle, replyPrefix }) => {
-      const commentArea = document.querySelector('.comment-mainContent');
+      const commentArea = document.querySelector('.comment-mainContent')
+        || document.querySelector('[class*="comment-main"]')
+        || document.querySelector('[class*="comment-list"]')
+        || document.querySelector('[class*="commentContainer"]')
+        || document.querySelector('[class*="comment-container"]');
       const bodyText = (document.body?.innerText || '').trim();
       if (bodyText.includes(replyNeedle)) return { verified: true, method: 'body_full' };
       if (replyPrefix.length >= 5 && bodyText.includes(replyPrefix)) return { verified: true, method: 'body_prefix' };
@@ -2842,7 +2875,11 @@ export async function postWorkModalComment(page, commentText) {
           return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
         }
 
-        const commentArea = document.querySelector('.comment-mainContent');
+        const commentArea = document.querySelector('.comment-mainContent')
+          || document.querySelector('[class*="comment-main"]')
+          || document.querySelector('[class*="comment-list"]')
+          || document.querySelector('[class*="commentContainer"]')
+          || document.querySelector('[class*="comment-container"]');
         const commentTextVisible = (commentArea?.innerText || '').trim();
         const visible = commentTextVisible.includes(replyNeedle)
           || (replyPrefix.length >= 5 && commentTextVisible.includes(replyPrefix));

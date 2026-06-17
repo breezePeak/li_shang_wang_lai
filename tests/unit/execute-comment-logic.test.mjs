@@ -127,7 +127,7 @@ function parseStdout(result) {
 async function runCli(fileName, extraArgs = []) {
   const { spawnSync } = await import('child_process');
   const args = [resolve(__dirname, '../../src/cli', fileName), ...extraArgs];
-  const result = spawnSync('node', args, {
+  const result = spawnSync(process.execPath, args, {
     env: { ...process.env, LISHANGWANGLAI_DB_PATH: testDb },
     stdio: 'pipe',
     encoding: 'utf8',

@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 import {
   buildWorkReplyTarget,
   clickReplySendControl,
+  clickSendWorkReply,
   collectVisibleWorkCommentCandidates,
   extractWorkModalContext,
   extractModalIdFromUrl,
@@ -277,6 +278,22 @@ describe('clickReplySendControl', () => {
     } finally {
       await browser.close();
     }
+  });
+
+  it('严格发送控件缺失时回退键盘发送', async () => {
+    const page = {
+      evaluate: vi.fn(async () => ({ ok: false, reason: 'strict_send_control_not_found' })),
+      keyboard: {
+        press: vi.fn(async () => {}),
+      },
+      waitForTimeout: vi.fn(async () => {}),
+    };
+
+    const result = await clickSendWorkReply(page);
+    expect(result.ok).toBe(true);
+    expect(result.data.method).toBe('keyboard_enter_fallback');
+    expect(page.keyboard.press).toHaveBeenCalledWith('Control+Enter');
+    expect(page.keyboard.press).toHaveBeenCalledWith('Enter');
   });
 });
 
