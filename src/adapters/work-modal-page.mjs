@@ -341,11 +341,33 @@ export async function clickReplySendControl(page) {
         el?.getAttribute?.('title') || '',
         el?.getAttribute?.('data-e2e') || '',
       ].join(' ');
-      return /上传|投稿|选择文件|图片|相册|附件|表情|@|at|mention/i.test(`${text} ${attrs}`);
+      return /上传|投稿|选择文件|图片|相册|附件|表情|@|at|mention|emoji|emoticon|艾特|提醒|好友|朋友/i.test(`${text} ${attrs}`);
     }
 
     function containsFileInput(el) {
       return !!el?.querySelector?.('input[type="file"]');
+    }
+
+    function isInToolbarWithFileInput(el) {
+      if (!el) return false;
+      const toolbar = el.closest?.('.commentInput-right-ct, [class*="commentInput-right"], [class*="right-ct"]');
+      return !!(toolbar && toolbar.querySelector('input[type="file"]'));
+    }
+
+    function isSendLike(el) {
+      if (!el) return false;
+      const text = textOf(el);
+      if (text === '发送' || text === '发布' || text.includes('发送') || text.includes('发布')) return true;
+      const cls = el.getAttribute?.('class') || '';
+      if (/f5hSYimo|FbVIhLlK|Law8JZNu/i.test(cls)) return true;
+      const aria = el.getAttribute?.('aria-label') || '';
+      if (/发送|发布|submit|send/i.test(aria)) return true;
+      const style = window.getComputedStyle(el);
+      if (isRedLike(style.color) || isRedLike(style.backgroundColor)) return true;
+      const svg = el.tagName?.toLowerCase?.() === 'svg' ? el : el.querySelector?.('svg');
+      const path = svg?.querySelector?.('path');
+      if (isRedLike(svg?.getAttribute?.('fill')) || isRedLike(path?.getAttribute?.('fill'))) return true;
+      return false;
     }
 
     function scoreSendCandidate(el, composerRect) {
@@ -432,6 +454,23 @@ export async function clickReplySendControl(page) {
 
     const composerRect = container.getBoundingClientRect();
 
+    const sendLikeCandidates = Array.from(sendArea.querySelectorAll('button, [role="button"], span, div, svg'))
+      .filter(visible)
+      .filter(el => !hasBlockedSemantics(el))
+      .filter(el => !containsFileInput(el))
+      .filter(el => !isInToolbarWithFileInput(el) || isSendLike(el))
+      .filter(isSendLike)
+      .sort((a, b) => b.getBoundingClientRect().x - a.getBoundingClientRect().x);
+    if (sendLikeCandidates[0]) {
+      clickAllWays(sendLikeCandidates[0]);
+      return {
+        ok: true,
+        method: 'send_like_rightmost',
+        selector: 'sendArea-rightmost-sendlike',
+        targetText: textOf(sendLikeCandidates[0]).slice(0, 20),
+      };
+    }
+
     const iconTargets = [
       { css: '.FbVIhLlK' },
       { css: '[data-e2e="comment-submit"]' },
@@ -496,6 +535,21 @@ export async function clickReplySendControl(page) {
       if (!target) continue;
       clickAllWays(target);
       return { ok: true, method: 'send_area_safe_sibling_click', selector: 'send-area-child', targetText: textOf(target).slice(0, 20) };
+    }
+
+    const lastSendLike = Array.from(sendArea.querySelectorAll('button, [role="button"], span, div, svg'))
+      .filter(visible)
+      .filter(el => !hasBlockedSemantics(el))
+      .filter(el => !containsFileInput(el))
+      .filter(isSendLike)
+      .sort((a, b) => {
+        const ra = a.getBoundingClientRect();
+        const rb = b.getBoundingClientRect();
+        return rb.x - ra.x;
+      })[0];
+    if (lastSendLike) {
+      clickAllWays(lastSendLike);
+      return { ok: true, method: 'send_area_rightmost_send_like', selector: 'send-area-rightmost', targetText: textOf(lastSendLike).slice(0, 20) };
     }
 
     return { ok: false, reason: 'strict_send_control_not_found' };
