@@ -1,5 +1,6 @@
 import { runMigrations } from '../db/migrations.mjs';
 import { createBrowserSessionManager } from '../browser/session-manager.mjs';
+import { detectDouyinSecurityVerification } from '../browser/douyin-auth-state.mjs';
 import { createRunContext, saveRunSummary } from '../browser/run-context.mjs';
 import { createRunDebugRecorder } from '../browser/run-debug-recorder.mjs';
 import { loadConfig } from '../config/user-config.mjs';
@@ -99,6 +100,41 @@ export function resolveRestartBrowserEveryTasks(value, fallbackValue = 5) {
   return fallbackValue;
 }
 
+export async function waitForSecurityVerificationResolution(page, options = {}) {
+  const {
+    detector = detectDouyinSecurityVerification,
+    pollMs = 1000,
+    timeoutMs = 0,
+    logger = console.error,
+  } = options;
+  const startedAt = Date.now();
+  let prompted = false;
+
+  while (true) {
+    const verification = await detector(page);
+    if (!verification) {
+      if (prompted) logger('[return-visit:execute] 已检测到短信/安全认证弹窗消失，本轮继续执行');
+      return { ok: true, waitedMs: Date.now() - startedAt };
+    }
+
+    if (!prompted) {
+      prompted = true;
+      logger('[return-visit:execute] 已暂停自动回访，请在当前浏览器窗口完成手机号/短信安全认证。窗口会保持打开。');
+    }
+
+    if (timeoutMs > 0 && Date.now() - startedAt >= timeoutMs) {
+      logger('[return-visit:execute] 等待短信/安全认证超时，浏览器窗口保持打开，请完成认证后重新运行');
+      return { ok: false, waitedMs: Date.now() - startedAt, reason: 'security_verification_wait_timeout' };
+    }
+
+    if (typeof page?.waitForTimeout === 'function') {
+      await page.waitForTimeout(pollMs);
+    } else {
+      await new Promise(resolve => setTimeout(resolve, pollMs));
+    }
+  }
+}
+
 export function getReturnVisitTaskExecutionIssue(task) {
   const hasWorkUrl = task?.targetWork?.workUrl && String(task.targetWork.workUrl).trim();
   const hasWorkId = task?.targetWork?.workId && String(task.targetWork.workId).trim();
@@ -173,6 +209,7 @@ async function main() {
   const waitBetweenLikeAndCommentMs = returnVisitConfig.waitBetweenLikeAndCommentMs || [2000, 3000];
   const restEveryTasksRange = getRange(returnVisitConfig.restEveryTasksRange, 1, 1);
   const restDurationMs = returnVisitConfig.restDurationMs || [5000, 5000];
+  const securityVerificationWaitMs = Number(returnVisitConfig.securityVerificationWaitMs ?? 0) || 0;
 
   // 映射视频观看策略与秒数默认值
   const watchPolicy = args.watchPolicy || returnVisitConfig.watchPolicy || 'seconds';
@@ -455,8 +492,14 @@ async function main() {
         consecutiveFailures++;
         log(args.json, `[return-visit:execute] failed: ${result.error || result.status || 'unknown'}`);
         if (result.code === RESULT_CODES.IDENTITY_NOT_VERIFIED || result.error === 'security_verification_required') {
-          log(args.json, '[return-visit:execute] 检测到手机号/短信安全认证，暂停本轮执行，请人工完成认证后再重新运行');
-          break;
+          log(args.json, '[return-visit:execute] 检测到手机号/短信安全认证，暂停自动操作并等待人工验证');
+          if (args.json) break;
+          const verificationWait = await waitForSecurityVerificationResolution(page, {
+            timeoutMs: securityVerificationWaitMs,
+            logger: (message) => log(args.json, message),
+          });
+          if (!verificationWait.ok) break;
+          consecutiveFailures = 0;
         }
       }
       await recorder.capture(page, 'return_visit.task.finish', {

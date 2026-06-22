@@ -1,10 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   buildIdentityKey,
   buildTaskId,
   canMarkDone,
 } from '../../src/services/return-visit-task-service.mjs';
-import { getReturnVisitTaskExecutionIssue, resolveRestartBrowserEveryTasks } from '../../src/cli/execute-return-visit.mjs';
+import {
+  getReturnVisitTaskExecutionIssue,
+  resolveRestartBrowserEveryTasks,
+  waitForSecurityVerificationResolution,
+} from '../../src/cli/execute-return-visit.mjs';
 
 describe('return-visit task identity', () => {
   it('prefers userId over url and name', () => {
@@ -60,6 +64,29 @@ describe('return-visit execute filtering & state flow logic', () => {
     expect(resolveRestartBrowserEveryTasks('8', 3)).toBe(8);
     expect(resolveRestartBrowserEveryTasks(0, 3)).toBe(3);
     expect(resolveRestartBrowserEveryTasks(null, 3)).toBe(3);
+  });
+
+  it('waits while security verification is visible and resumes after it disappears', async () => {
+    const detector = vi.fn()
+      .mockResolvedValueOnce({ reason: 'security_verification_required' })
+      .mockResolvedValueOnce({ reason: 'security_verification_required' })
+      .mockResolvedValueOnce(null);
+    const page = {
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+    const logger = vi.fn();
+
+    const result = await waitForSecurityVerificationResolution(page, {
+      detector,
+      pollMs: 10,
+      logger,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(detector).toHaveBeenCalledTimes(3);
+    expect(page.waitForTimeout).toHaveBeenCalledTimes(2);
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('已暂停自动回访'));
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('弹窗消失'));
   });
 
   it('correctly identifies dirty tasks that should be skipped/marked', () => {
