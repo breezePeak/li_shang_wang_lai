@@ -872,7 +872,9 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     const likeToCommentMs = await waitRandom(page, waitBetweenLikeAndCommentMs, 2000, 3000);
     logTimedStep(logTag, 'like_to_comment_delay', 'done', { waitedMs: likeToCommentMs });
 
-    await pauseCurrentVideo(page);
+    // 暂停视频的操作下移到真正发评论之前执行：评论框展开/激活会触发 modal 布局变化，
+    // 若此时 video 节点被 React 重建，早期的 pause 状态会丢失，又可能被自动连播重新拉起，
+    // 造成声音“暂停一下又继续”。放在 postReturnVisitComment 之前 pause 的是稳定后的 video 节点。
 
     const beforeCommentBoxWorkCheck = await blockIfCurrentWorkChanged(page, task, resolvedWork, 'before_comment_box', {
       likeStatus,
@@ -973,6 +975,8 @@ export async function executeReturnVisitTask(page, task, options = {}) {
         };
       }
     }
+
+    await pauseCurrentVideo(page);
 
     const commentResult = await postReturnVisitComment(page, finalCommentText, presentation, {
       execute: true,

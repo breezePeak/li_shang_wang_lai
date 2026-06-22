@@ -1007,32 +1007,35 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
 
     if (closeAutoPlay) {
       await page.waitForTimeout(1500);
-      for (let retry = 0; retry < 2; retry++) {
-        const autoPlayResult = await page.evaluate(() => {
-          const autoPlayEl = document.querySelector('.xgplayer-autoplay-setting');
-          if (!autoPlayEl) return { found: false };
-          const e2eState = autoPlayEl.querySelector('[data-e2e-state]')?.getAttribute('data-e2e-state') || '';
-          const isOff = e2eState.includes('no-auto-play');
-          if (isOff) return { found: true, alreadyOff: true };
-          const switchBtn = autoPlayEl.querySelector('.xg-switch');
-          if (switchBtn) { switchBtn.click(); return { found: true, alreadyOff: false, method: 'switch' }; }
-          autoPlayEl.click();
-          return { found: true, alreadyOff: false, method: 'parent' };
-        }).catch(() => ({ found: false }));
-        if (!autoPlayResult.found) break;
-        if (autoPlayResult.alreadyOff) {
-          console.error('[work-modal] 连播已关闭');
-          break;
-        }
+      // 只读取一次状态、最多点击一次后即退出。
+      // 旧逻辑在点击后立即校验 data-e2e-state，而抖音的该属性更新存在延迟，
+      // 误判为“未关闭”后会二次点击，把连播开关从关再切回开，造成画面/声音反复跳。
+      const autoPlayResult = await page.evaluate(() => {
+        const autoPlayEl = document.querySelector('.xgplayer-autoplay-setting');
+        if (!autoPlayEl) return { found: false };
+        const e2eState = autoPlayEl.querySelector('[data-e2e-state]')?.getAttribute('data-e2e-state') || '';
+        const isOff = e2eState.includes('no-auto-play');
+        if (isOff) return { found: true, alreadyOff: true };
+        const switchBtn = autoPlayEl.querySelector('.xg-switch');
+        if (switchBtn) { switchBtn.click(); return { found: true, alreadyOff: false, method: 'switch' }; }
+        autoPlayEl.click();
+        return { found: true, alreadyOff: false, method: 'parent' };
+      }).catch(() => ({ found: false }));
+      if (!autoPlayResult.found) {
+        // 未找到连播开关，跳过
+      } else if (autoPlayResult.alreadyOff) {
+        console.error('[work-modal] 连播已关闭');
+      } else {
         console.error(`[work-modal] 尝试关闭连播 (method=${autoPlayResult.method})`);
-        await page.waitForTimeout(800);
+        await page.waitForTimeout(800).catch(() => {});
         const verifyOff = await page.evaluate(() => {
           const el = document.querySelector('.xgplayer-autoplay-setting [data-e2e-state]');
           return el ? el.getAttribute('data-e2e-state') : '';
         }).catch(() => '');
         if (verifyOff.includes('no-auto-play')) {
           console.error('[work-modal] 连播已关闭');
-          break;
+        } else {
+          console.error('[work-modal] 连播开关状态校验未生效，保留当前状态避免反复 toggle');
         }
       }
     }
@@ -2404,7 +2407,15 @@ export async function expandVisibleWorkCommentReplies(page, { maxClicks = 6 } = 
       if (commentItem && commentItem.hasAttribute(expandedAttr)) continue;
 
       const target = node.closest('button,[role="button"]') || node;
-      target.scrollIntoView({ block: 'center', behavior: 'instant' });
+      // 仅在按钮不在可视区内时才 scrollIntoView，避免对已在视口内的按钮反复滚动，
+      // 否则评论区整体位移会连带 modal 视频区布局抖动，造成画面闪烁、声音断续。
+      {
+        const tRect = target.getBoundingClientRect();
+        const vHeight = window.innerHeight || document.documentElement.clientHeight;
+        if (tRect.top < 0 || tRect.bottom > vHeight) {
+          target.scrollIntoView({ block: 'center', behavior: 'instant' });
+        }
+      }
       target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
       target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
       target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
