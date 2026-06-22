@@ -71,7 +71,7 @@ export async function hasDouyinLoginCookies(context) {
 }
 
 export async function detectDouyinSecurityVerification(page) {
-  const currentUrl = page.url();
+  const currentUrl = typeof page?.url === 'function' ? page.url() : '';
   const text = await safePageText(page);
   if (!detectSecurityVerificationFromText(text)) return null;
   return {
@@ -82,7 +82,7 @@ export async function detectDouyinSecurityVerification(page) {
 }
 
 export async function inspectDouyinAuthState(page, context) {
-  const currentUrl = page.url();
+  const currentUrl = typeof page?.url === 'function' ? page.url() : '';
   if (isLoginUrl(currentUrl)) {
     return { loggedIn: false, reason: 'redirected_to_login', currentUrl };
   }

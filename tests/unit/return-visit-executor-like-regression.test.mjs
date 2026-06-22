@@ -41,6 +41,7 @@ vi.mock('../../src/db/database.mjs', () => ({
   getDb: getDbMock,
 }));
 
+const { RESULT_CODES } = await import('../../src/domain/result-codes.mjs');
 const { buildCommentContext, executeReturnVisitTask } = await import('../../src/services/return-visit-executor.mjs');
 
 describe('return-visit executor like/comment regressions', () => {
@@ -463,6 +464,37 @@ describe('return-visit executor like/comment regressions', () => {
 
     expect(result.ok).toBe(false);
     expect(result.status).toBe('failed');
+    expect(result.commentStatus).toBe('failed');
+  });
+
+  it('surfaces Douyin security verification instead of comment_unconfirmed', async () => {
+    postWorkModalCommentMock.mockResolvedValueOnce({
+      ok: false,
+      code: RESULT_CODES.IDENTITY_NOT_VERIFIED,
+      message: '抖音要求手机号/短信安全认证，请在浏览器中手动完成后再继续回访',
+      data: { reason: 'security_verification_required' },
+    });
+
+    const page = {
+      url: vi.fn().mockReturnValue('https://www.douyin.com/user/demo?modal_id=7647191897097693115'),
+      evaluate: vi.fn().mockResolvedValue({ hasVideoElement: false }),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      screenshot: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await executeReturnVisitTask(page, {
+      taskId: 't-verify',
+      userProfileUrl: 'https://www.douyin.com/user/demo',
+      targetWork: { workId: '7647191897097693115', userDigged: 0 },
+      generatedComment: '测试评论',
+      likeStatus: 'pending',
+      commentStatus: 'generated',
+    }, { execute: true });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('failed');
+    expect(result.code).toBe(RESULT_CODES.IDENTITY_NOT_VERIFIED);
+    expect(result.error).toBe('security_verification_required');
     expect(result.commentStatus).toBe('failed');
   });
 

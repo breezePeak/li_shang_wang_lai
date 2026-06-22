@@ -981,9 +981,25 @@ export async function executeReturnVisitTask(page, task, options = {}) {
     });
     if (!commentResult.ok) {
       await saveDebugScreenshot(page, task.taskId, 'comment');
+      if (commentResult.code === RESULT_CODES.IDENTITY_NOT_VERIFIED) {
+        return {
+          ok: false,
+          status: 'failed',
+          code: RESULT_CODES.IDENTITY_NOT_VERIFIED,
+          error: 'security_verification_required',
+          likeStatus,
+          commentStatus: 'failed',
+          resolvedWork,
+          selectionMode,
+          checkedWorks,
+          generatedComment: finalCommentText,
+          data: commentResult.data,
+        };
+      }
       return {
         ok: false,
         status: 'failed_comment',
+        code: commentResult.code,
         error: commentResult.message || 'post_comment_failed',
         likeStatus,
         commentStatus: 'failed',

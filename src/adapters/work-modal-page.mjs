@@ -3,6 +3,7 @@ import { normalizeDouyinUrl } from '../utils/douyin-url.mjs';
 import { ensureDir, writeJSON } from '../utils/filesystem.mjs';
 import { findScrollableContainerBox, scrollContainerByWheel } from './scroll-container.mjs';
 import { createCommentSubmitApiWatcher } from './comment-submit-api-listener.mjs';
+import { detectDouyinSecurityVerification } from '../browser/douyin-auth-state.mjs';
 import path from 'path';
 
 function isTruthyEnv(value) {
@@ -2931,6 +2932,16 @@ export async function postWorkModalComment(page, commentText) {
   const replyNeedle = commentText.trim();
   const submitWatcher = createCommentSubmitApiWatcher(page, { expectedText: replyNeedle });
 
+  async function readSecurityVerification() {
+    const verification = await detectDouyinSecurityVerification(page);
+    if (!verification) return null;
+    return blocking(
+      RESULT_CODES.IDENTITY_NOT_VERIFIED,
+      '抖音要求手机号/短信安全认证，请在浏览器中手动完成后再继续回访',
+      { recoverable: false, data: verification }
+    );
+  }
+
   async function readSubmitState(replyPrefix) {
     return page.evaluate(({ replyNeedle, replyPrefix }) => {
       function isVisible(el) {
@@ -2977,6 +2988,9 @@ export async function postWorkModalComment(page, commentText) {
     const sent = await sendReplyInWorkModal(page, commentText);
     if (!sent.ok) return sent;
 
+    const verificationAfterSend = await readSecurityVerification();
+    if (verificationAfterSend) return verificationAfterSend;
+
     const apiConfirmed = await submitWatcher.waitForSuccess({ timeoutMs: 2500 });
     if (apiConfirmed) {
       console.error(`[work-modal] 顶层评论请求已成功 matchedBy=${apiConfirmed.matchedBy} commentId=${apiConfirmed.commentId || ''}`);
@@ -2988,6 +3002,9 @@ export async function postWorkModalComment(page, commentText) {
     let lastState = { visible: false, inputCleared: false };
 
     while (Date.now() - startedAt < 5000) {
+      const verification = await readSecurityVerification();
+      if (verification) return verification;
+
       const state = await readSubmitState(replyPrefix);
       lastState = state;
       if (state.visible) {
@@ -3005,9 +3022,15 @@ export async function postWorkModalComment(page, commentText) {
 
     const watcherStatsBeforeRetry = submitWatcher.getStats();
     if (!watcherStatsBeforeRetry.requestCount && !lastState.visible && !lastState.inputCleared) {
+      const verificationBeforeRetry = await readSecurityVerification();
+      if (verificationBeforeRetry) return verificationBeforeRetry;
+
       console.error('[work-modal] 发送后未观察到 comment/publish 请求，尝试 Enter 二次提交');
       await page.keyboard.press('Enter').catch(() => {});
       await page.waitForTimeout(300).catch(() => {});
+
+      const verificationAfterRetry = await readSecurityVerification();
+      if (verificationAfterRetry) return verificationAfterRetry;
 
       const retryApiConfirmed = await submitWatcher.waitForSuccess({ timeoutMs: 1800 });
       if (retryApiConfirmed) {
@@ -3034,6 +3057,9 @@ export async function postWorkModalComment(page, commentText) {
 
       lastState = retryState;
     }
+
+    const verificationBeforeUnconfirmed = await readSecurityVerification();
+    if (verificationBeforeUnconfirmed) return verificationBeforeUnconfirmed;
 
     const watcherStats = submitWatcher.getStats();
     console.error(

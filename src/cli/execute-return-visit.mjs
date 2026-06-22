@@ -454,6 +454,10 @@ async function main() {
         failed++;
         consecutiveFailures++;
         log(args.json, `[return-visit:execute] failed: ${result.error || result.status || 'unknown'}`);
+        if (result.code === RESULT_CODES.IDENTITY_NOT_VERIFIED || result.error === 'security_verification_required') {
+          log(args.json, '[return-visit:execute] 检测到手机号/短信安全认证，暂停本轮执行，请人工完成认证后再重新运行');
+          break;
+        }
       }
       await recorder.capture(page, 'return_visit.task.finish', {
         index,
