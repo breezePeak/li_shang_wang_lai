@@ -341,7 +341,7 @@ export async function clickReplySendControl(page) {
         el?.getAttribute?.('title') || '',
         el?.getAttribute?.('data-e2e') || '',
       ].join(' ');
-      return /上传|投稿|选择文件|图片|相册|附件|表情/.test(`${text} ${attrs}`);
+      return /上传|投稿|选择文件|图片|相册|附件|表情|@|at|mention/i.test(`${text} ${attrs}`);
     }
 
     function containsFileInput(el) {

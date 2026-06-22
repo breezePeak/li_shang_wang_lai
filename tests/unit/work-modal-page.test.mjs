@@ -295,6 +295,56 @@ describe('clickReplySendControl', () => {
     expect(page.keyboard.press).toHaveBeenCalledWith('Control+Enter');
     expect(page.keyboard.press).toHaveBeenCalledWith('Enter');
   });
+
+  it('回评输入框右侧 @/表情/图片 都存在时不会误点 @', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+      await page.setContent(`
+        <html>
+          <body>
+            <div class="comment-input-container" style="position:fixed;right:16px;bottom:16px;width:420px;height:120px;background:#1f1f1f;">
+              <div class="commentInput-left-ct">
+                <div contenteditable="true">回复 @小美: 测试评论内容...</div>
+              </div>
+              <div class="commentInput-right-ct" style="display:flex;gap:12px;align-items:center;">
+                <div class="at-shell" id="at-shell" aria-label="@ 朋友" style="width:32px;height:32px;">
+                  <svg width="24" height="24"><path d="@" /></svg>
+                </div>
+                <div class="emoji-shell" id="emoji-shell" aria-label="表情" style="width:32px;height:32px;">
+                  <svg width="24" height="24"></svg>
+                </div>
+                <div class="image-shell" id="image-shell" aria-label="图片" style="width:32px;height:32px;">
+                  <svg width="24" height="24"></svg>
+                </div>
+                <button id="send-btn" type="button" style="background:rgb(255,46,85);color:rgb(255,255,255);width:32px;height:32px;border-radius:50%;">
+                  <svg width="16" height="16" fill="rgb(255,46,85)"></svg>
+                </button>
+              </div>
+            </div>
+            <script>
+              window.clicked = [];
+              document.getElementById('at-shell').addEventListener('click', () => window.clicked.push('at'));
+              document.getElementById('emoji-shell').addEventListener('click', () => window.clicked.push('emoji'));
+              document.getElementById('image-shell').addEventListener('click', () => window.clicked.push('image'));
+              document.getElementById('send-btn').addEventListener('click', () => window.clicked.push('send'));
+            </script>
+          </body>
+        </html>
+      `);
+
+      const result = await clickReplySendControl(page);
+      const clicked = await page.evaluate(() => window.clicked.slice());
+
+      expect(result.ok).toBe(true);
+      expect(clicked).toContain('send');
+      expect(clicked).not.toContain('at');
+      expect(clicked).not.toContain('emoji');
+      expect(clicked).not.toContain('image');
+    } finally {
+      await browser.close();
+    }
+  });
 });
 
 describe('waitForWorkModal', () => {
