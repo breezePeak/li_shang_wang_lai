@@ -1007,22 +1007,31 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
 
     if (closeAutoPlay) {
       await page.waitForTimeout(1500);
-      // 只读取一次状态、最多点击一次后即退出。
-      // 旧逻辑在点击后立即校验 data-e2e-state，而抖音的该属性更新存在延迟，
-      // 误判为“未关闭”后会二次点击，把连播开关从关再切回开，造成画面/声音反复跳。
+      // 同一 modal 只关闭一次连播：回访流程里 waitForWorkModal 会被多次调用
+      // (openCandidateWork / 兜底 / ensureReturnVisitCommentBoxReady / postReturnVisitComment)，
+      // 若每次都点开关，连播在开/关间反复跳，画面闪烁且音频流被打断形成噪音。
+      // 用 modal 容器上的 data-lsw-autoplay-handled 标记做幂等，已处理过就跳过。
       const autoPlayResult = await page.evaluate(() => {
         const autoPlayEl = document.querySelector('.xgplayer-autoplay-setting');
         if (!autoPlayEl) return { found: false };
+        const container = autoPlayEl.closest('[data-e2e="modal-video-container"], .modal-video-container')
+          || autoPlayEl.closest('.xgplayer') || autoPlayEl;
+        if (container.hasAttribute('data-lsw-autoplay-handled')) {
+          return { found: true, alreadyHandled: true };
+        }
         const e2eState = autoPlayEl.querySelector('[data-e2e-state]')?.getAttribute('data-e2e-state') || '';
         const isOff = e2eState.includes('no-auto-play');
-        if (isOff) return { found: true, alreadyOff: true };
+        container.setAttribute('data-lsw-autoplay-handled', '1');
+        if (isOff) return { found: true, alreadyOff: true, alreadyHandled: false };
         const switchBtn = autoPlayEl.querySelector('.xg-switch');
-        if (switchBtn) { switchBtn.click(); return { found: true, alreadyOff: false, method: 'switch' }; }
+        if (switchBtn) { switchBtn.click(); return { found: true, alreadyOff: false, method: 'switch', alreadyHandled: false }; }
         autoPlayEl.click();
-        return { found: true, alreadyOff: false, method: 'parent' };
+        return { found: true, alreadyOff: false, method: 'parent', alreadyHandled: false };
       }).catch(() => ({ found: false }));
       if (!autoPlayResult.found) {
         // 未找到连播开关，跳过
+      } else if (autoPlayResult.alreadyHandled) {
+        // 同一 modal 已处理过，跳过避免重复点击
       } else if (autoPlayResult.alreadyOff) {
         console.error('[work-modal] 连播已关闭');
       } else {
