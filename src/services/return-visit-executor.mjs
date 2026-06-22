@@ -136,12 +136,9 @@ async function ensureVideoPlaybackStarted(page) {
     return null;
   }
 
-  await page.evaluate(() => {
-    const video = document.querySelector('video');
-    if (video && video.paused) {
-      video.play().catch(() => {});
-    }
-  });
+  // 不再主动调用 video.play()：抖音 modal 作品默认自动播放，
+  // 在 modal 加载/解码尚未就绪时手动 play() 会触发音频流异常，听感为爆音/噪音。
+  // 仅做一次性状态采集供 watch gate 计时使用，播放交给抖音原生播放器。
 
   return videoInfo;
 }
