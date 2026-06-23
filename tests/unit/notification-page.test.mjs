@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { findNotificationBell, moveMouseIntoPanel, scrollPanelDown } from '../../src/adapters/notification-page.mjs';
+import { findNotificationBell, moveMouseIntoPanel, resolveNotificationCategoryOption, scrollPanelDown } from '../../src/adapters/notification-page.mjs';
 
 function createPage({ panelBox = null } = {}) {
   return {
@@ -20,6 +20,22 @@ function createLocator(count) {
 }
 
 describe('notification-page scroll integration', () => {
+  it('resolveNotificationCategoryOption maps scan type to panel menu label', () => {
+    expect(resolveNotificationCategoryOption('all')).toMatchObject({
+      label: '全部消息',
+      shouldSelect: false,
+    });
+    expect(resolveNotificationCategoryOption('comment')).toMatchObject({
+      label: '评论',
+      shouldSelect: true,
+    });
+    expect(resolveNotificationCategoryOption('like')).toMatchObject({
+      label: '赞',
+      shouldSelect: true,
+    });
+    expect(resolveNotificationCategoryOption('reply')).toBeNull();
+  });
+
   it('moveMouseIntoPanel 复用通用 moveMouseIntoBox', async () => {
     const page = createPage();
     const result = await moveMouseIntoPanel(page, { x: 20, y: 40, width: 300, height: 240 });

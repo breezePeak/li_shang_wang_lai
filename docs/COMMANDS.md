@@ -246,6 +246,8 @@ npm run db:init
 
 ```bash
 npm run interactions:scan -- --display-only
+npm run interactions:scan -- --type like --display-only
+npm run interactions:scan -- --type comment --display-only
 npm run interactions:scan -- --type comment --days 7 --prepare-replies
 npm run interactions:scan -- --days 7 --prepare-visits
 npm run interactions:scan -- --days 7 --debug
@@ -259,7 +261,7 @@ npm run interactions:scan -- --days 7 --debug
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--type` | `all` | `all` / `comment` / `like` / `reply` / `follow` |
+| `--type` | `all` | `all` / `comment` / `like` / `reply` / `follow`；`comment` 会先在通知下拉菜单选择“评论”，`like` 会先选择“赞”，`all` 保持“全部消息” |
 | `--days` | 与 `--hours` 二选一（非 display-only 必填其一） | 按通知 `create_time` 限定最近 N 天，传 `0` 取消限制 |
 | `--hours` | 与 `--days` 二选一（优先级更高） | 按通知 `create_time` 限定最近 N 小时，传 `0` 取消限制 |
 | `--display-only` | `false` | 只采集和展示互动数据，不查询待回评 / 准备待回访任务 |

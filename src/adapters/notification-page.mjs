@@ -427,6 +427,131 @@ export async function moveMouseIntoPanel(page, panelBox) {
   });
 }
 
+export function resolveNotificationCategoryOption(type = 'all') {
+  const normalized = String(type || 'all').trim().toLowerCase();
+  if (normalized === 'all') return { type: 'all', label: '全部消息', shouldSelect: false };
+  if (normalized === 'comment') return { type: 'comment', label: '评论', shouldSelect: true };
+  if (normalized === 'like') return { type: 'like', label: '赞', shouldSelect: true };
+  return null;
+}
+
+export async function selectNotificationCategory(page, type = 'all') {
+  const option = resolveNotificationCategoryOption(type);
+  if (!option) {
+    return { ok: true, selected: false, reason: 'unsupported_category', type };
+  }
+  if (!option.shouldSelect) {
+    return { ok: true, selected: false, reason: 'default_all', type: option.type, label: option.label };
+  }
+
+  const result = await page.evaluate((targetLabel) => {
+    function visible(el) {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 10 && rect.height > 8 && style.visibility !== 'hidden' && style.display !== 'none';
+    }
+
+    function exactText(el) {
+      return (el.innerText || el.textContent || '').trim();
+    }
+
+    function findNotificationPanel() {
+      for (const el of document.querySelectorAll('*')) {
+        const t = exactText(el);
+        if (t.startsWith('互动消息') || t.startsWith('全部消息')) {
+          const r = el.getBoundingClientRect();
+          if (r.width < 100 || r.height < 30) continue;
+          let c = el.parentElement;
+          for (let i = 0; i < 6 && c && c !== document.body; i++) {
+            const cr = c.getBoundingClientRect();
+            if (cr.width > 250 && cr.height > 300) return c;
+            c = c.parentElement;
+          }
+        }
+      }
+      return null;
+    }
+
+    function clickElement(el) {
+      const clickable = el.closest('button, [role="button"], [aria-haspopup], [class*="select"], [class*="dropdown"]') || el;
+      clickable.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
+      clickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      clickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      clickable.click();
+    }
+
+    const panel = findNotificationPanel();
+    if (!panel) return { opened: false, clicked: false, reason: 'panel_not_found' };
+    const panelRect = panel.getBoundingClientRect();
+    const categoryLabels = new Set(['全部消息', '评论', '赞']);
+    const triggerCandidates = [];
+    for (const el of panel.querySelectorAll('*')) {
+      const text = exactText(el);
+      if (!categoryLabels.has(text)) continue;
+      if (!visible(el)) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.top > panelRect.top + 95) continue;
+      if (rect.left < panelRect.left + panelRect.width * 0.45) continue;
+      triggerCandidates.push({ el, top: rect.top, left: rect.left, text });
+    }
+    triggerCandidates.sort((a, b) => (a.top - b.top) || (b.left - a.left));
+    const trigger = triggerCandidates[0]?.el || null;
+    if (!trigger) return { opened: false, clicked: false, reason: 'trigger_not_found' };
+    if (exactText(trigger) === targetLabel) {
+      return { opened: false, clicked: false, alreadySelected: true, label: targetLabel };
+    }
+    clickElement(trigger);
+    return { opened: true, clicked: false, reason: 'dropdown_opened', label: targetLabel };
+  }, option.label).catch(err => ({ opened: false, clicked: false, reason: err.message || 'open_failed' }));
+
+  if (result.alreadySelected) {
+    console.error(`[notify-page] 通知分类已是 ${option.label}`);
+    return { ok: true, selected: false, alreadySelected: true, type: option.type, label: option.label };
+  }
+  if (!result.opened) {
+    console.error(`[notify-page] 通知分类下拉未打开: ${result.reason}`);
+    return { ok: false, selected: false, reason: result.reason, type: option.type, label: option.label };
+  }
+
+  await page.waitForTimeout(300);
+
+  const clicked = await page.evaluate((targetLabel) => {
+    function visible(el) {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 10 && rect.height > 8 && style.visibility !== 'hidden' && style.display !== 'none';
+    }
+    function exactText(el) {
+      return (el.innerText || el.textContent || '').trim();
+    }
+    const candidates = [];
+    for (const el of document.querySelectorAll('*')) {
+      if (exactText(el) !== targetLabel) continue;
+      if (!visible(el)) continue;
+      const rect = el.getBoundingClientRect();
+      candidates.push({ el, top: rect.top, left: rect.left, width: rect.width, height: rect.height });
+    }
+    candidates.sort((a, b) => (b.top - a.top) || (b.left - a.left));
+    const target = candidates[0]?.el || null;
+    if (!target) return { clicked: false, reason: 'option_not_found' };
+    const clickable = target.closest('button, [role="button"], [class*="item"], [class*="option"], [class*="menu"]') || target;
+    clickable.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
+    clickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+    clickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+    clickable.click();
+    return { clicked: true, label: targetLabel };
+  }, option.label).catch(err => ({ clicked: false, reason: err.message || 'click_failed' }));
+
+  if (!clicked.clicked) {
+    console.error(`[notify-page] 通知分类 ${option.label} 选择失败: ${clicked.reason}`);
+    return { ok: false, selected: false, reason: clicked.reason, type: option.type, label: option.label };
+  }
+
+  console.error(`[notify-page] 已选择通知分类: ${option.label}`);
+  await page.waitForTimeout(1200);
+  return { ok: true, selected: true, type: option.type, label: option.label };
+}
+
 export async function getPanelBoundingBox(page) {
   return await page.evaluate(() => {
     let panel = null;

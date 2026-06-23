@@ -934,6 +934,7 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     openNotificationPanel,
     closeNotificationPanel,
     extractVisibleNotifications,
+    selectNotificationCategory,
     scrollPanelDown,
     waitForNotificationPanelStable,
     moveMouseIntoPanel,
@@ -1217,6 +1218,20 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     await moveMouseIntoPanel(page, panelState.panelBox);
     console.error('[scan] 通知面板已就绪，鼠标保持在面板内');
 
+    const categoryResult = await selectNotificationCategory(page, type);
+    if (categoryResult.selected) {
+      const discardedCount = apiCollector.drainItems().length;
+      console.error(`[scan] 已切换通知分类为 ${categoryResult.label}，丢弃切换前 notice api 数据 ${discardedCount} 条`);
+      const refreshedState = await waitForNotificationPanelStable(page, { timeoutMs: 5000 });
+      if (refreshedState.stable && refreshedState.panelBox) {
+        await moveMouseIntoPanel(page, refreshedState.panelBox);
+      }
+    } else if (categoryResult.ok && categoryResult.reason !== 'default_all') {
+      console.error(`[scan] 通知分类未切换: ${categoryResult.reason}`);
+    } else if (!categoryResult.ok) {
+      console.error(`[scan] 通知分类选择失败，继续使用 --type 后置过滤: ${categoryResult.reason}`);
+    }
+
     if (pauseAfterOpen > 0) {
       console.error(`[scan] --pause-after-open: 暂停 ${pauseAfterOpen}ms，可人工确认面板...`);
       await page.waitForTimeout(pauseAfterOpen);
@@ -1358,6 +1373,7 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
     ensureNotificationPageReady, openNotificationPanel, closeNotificationPanel,
     extractVisibleNotifications, scrollPanelDown,
     waitForNotificationPanelStable, moveMouseIntoPanel, isNotificationPanelVisible,
+    selectNotificationCategory,
     clickNotificationThumbnail,
   } = await import('../adapters/notification-page.mjs');
 
@@ -1437,6 +1453,20 @@ async function runNotificationScanDomFallback(page, run, type, pauseAfterOpen = 
 
   await moveMouseIntoPanel(page, panelBox);
   console.error('[scan] 通知面板已就绪，鼠标保持在面板内');
+
+  const categoryResult = await selectNotificationCategory(page, type);
+  if (categoryResult.selected) {
+    console.error(`[scan] 已切换通知分类为 ${categoryResult.label}`);
+    const refreshedState = await waitForNotificationPanelStable(page, { timeoutMs: 5000 });
+    if (refreshedState.stable && refreshedState.panelBox) {
+      panelBox = refreshedState.panelBox;
+      await moveMouseIntoPanel(page, panelBox);
+    }
+  } else if (categoryResult.ok && categoryResult.reason !== 'default_all') {
+    console.error(`[scan] 通知分类未切换: ${categoryResult.reason}`);
+  } else if (!categoryResult.ok) {
+    console.error(`[scan] 通知分类选择失败，继续使用 --type 后置过滤: ${categoryResult.reason}`);
+  }
 
   if (pauseAfterOpen > 0) {
     console.error(`[scan] --pause-after-open: 暂停 ${pauseAfterOpen}ms，可人工确认面板...`);
