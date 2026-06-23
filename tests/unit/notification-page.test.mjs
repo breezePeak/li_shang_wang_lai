@@ -1,10 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { findNotificationBell, moveMouseIntoPanel, resolveNotificationCategoryOption, scrollPanelDown } from '../../src/adapters/notification-page.mjs';
+import { findNotificationBell, moveMouseIntoPanel, resolveNotificationCategoryOption, scrollPanelDown, selectNotificationCategory } from '../../src/adapters/notification-page.mjs';
 
 function createPage({ panelBox = null } = {}) {
   return {
     mouse: {
       move: vi.fn(async () => {}),
+      click: vi.fn(async () => {}),
       wheel: vi.fn(async () => {}),
     },
     waitForTimeout: vi.fn(async () => {}),
@@ -34,6 +35,26 @@ describe('notification-page scroll integration', () => {
       shouldSelect: true,
     });
     expect(resolveNotificationCategoryOption('reply')).toBeNull();
+  });
+
+  it('selectNotificationCategory clicks trigger then requested menu option by coordinates', async () => {
+    const page = createPage();
+    page.evaluate = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        trigger: { x: 300, y: 92, text: '全部消息' },
+        panelRect: { left: 40, top: 64, right: 380, bottom: 520, width: 340, height: 456 },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        option: { x: 294, y: 292, text: '评论' },
+      });
+
+    const result = await selectNotificationCategory(page, 'comment');
+
+    expect(result).toMatchObject({ ok: true, selected: true, label: '评论' });
+    expect(page.mouse.click).toHaveBeenNthCalledWith(1, 300, 92);
+    expect(page.mouse.click).toHaveBeenNthCalledWith(2, 294, 292);
   });
 
   it('moveMouseIntoPanel 复用通用 moveMouseIntoBox', async () => {
