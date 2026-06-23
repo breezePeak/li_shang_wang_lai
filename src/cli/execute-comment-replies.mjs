@@ -34,6 +34,8 @@ import {
   scrollCommentAreaOnce,
   waitForWorkCommentArea,
   waitForWorkModal,
+  quietWorkModalMedia,
+  releaseWorkModalMediaQuietGuard,
   verifyWorkReplyVisible,
 } from '../adapters/work-modal-page.mjs';
 import { createCommentSubmitApiWatcher } from '../adapters/comment-submit-api-listener.mjs';
@@ -874,7 +876,9 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
   console.log(`[comments:execute] single-pass start work=${currentWork.workId || currentWork.modalId || currentWork.workUrl} pending=${pendingMap.size}`);
 
   while (pendingMap.size > 0) {
+    await quietWorkModalMedia(page, { installGuard: true, reason: 'single_pass_viewport_start' }).catch(() => null);
     await expandReplies(page, { maxClicks: 6 }).catch(() => null);
+    await quietWorkModalMedia(page, { installGuard: true, reason: 'after_expand_replies' }).catch(() => null);
     const collected = await collectCandidates(page);
     const visibleCandidates = normalizeVisibleCandidatesResult(collected);
     const signature = getCandidateSignature(visibleCandidates);
@@ -927,6 +931,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       const opened = await openMatchedReplyBox(page, nextAction.target, nextAction.picked.candidate, {
         matchedBy: nextAction.picked.matchedBy,
       });
+      await quietWorkModalMedia(page, { installGuard: true, reason: 'after_open_reply_box' }).catch(() => null);
       if (!opened.ok) {
         const reason = opened.message || opened.code || 'reply_box_not_opened';
         const finalStatus = saveRetryable(nextAction.item, `reply_box_not_opened:${reason}`) || 'pending';
@@ -1060,7 +1065,9 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
     }
 
     const scrollDirection = rollbackDecision.shouldRollback ? 'up' : 'down';
+    await quietWorkModalMedia(page, { installGuard: true, reason: 'before_comment_scroll' }).catch(() => null);
     const scrollResult = await scrollOnce(page, { direction: scrollDirection });
+    await quietWorkModalMedia(page, { installGuard: true, reason: 'after_comment_scroll' }).catch(() => null);
     if (!scrollResult.ok) {
       break;
     }
@@ -1221,6 +1228,7 @@ async function executeWorkCommentItems(items, args, run, recorder) {
           }
           console.log(`[comments:execute] open_profile_success opened_work_url=${openResult.url || ''}`);
           activeHomepageUrl = openResult.fallback ? '' : targetHomepageUrl;
+          await quietWorkModalMedia(page, { installGuard: true, reason: 'after_open_work' }).catch(() => null);
 
           const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
           if (!modalReady.ok) {
@@ -1283,6 +1291,7 @@ async function executeWorkCommentItems(items, args, run, recorder) {
           }
         } finally {
           commentListCollector.stop();
+          await releaseWorkModalMediaQuietGuard(page).catch(() => null);
         }
       } catch (err) {
         run.hadBlocked = true;
@@ -1303,6 +1312,9 @@ async function executeWorkCommentItems(items, args, run, recorder) {
       }
     }
   } finally {
+    if (page && !page.isClosed?.()) {
+      await releaseWorkModalMediaQuietGuard(page).catch(() => null);
+    }
     const shouldClose = resolveBrowserClose(run);
     if (browser && shouldClose) await browser.close();
     else if (browser && typeof browser.disconnect === 'function') await browser.disconnect();

@@ -635,6 +635,43 @@ export function pickVisibleModalCandidate(candidates = [], viewport = {}) {
   return best || null;
 }
 
+export async function quietWorkModalMedia(page, { installGuard = false, reason = '' } = {}) {
+  return page.evaluate(({ installGuard, reason }) => {
+    function quiet(media) {
+      try { media.muted = true; } catch {}
+      try { media.volume = 0; } catch {}
+      try { media.autoplay = false; } catch {}
+      try { media.pause?.(); } catch {}
+    }
+
+    if (installGuard && !window.__lswWorkModalMediaQuietGuard) {
+      const observer = new MutationObserver(() => {
+        document.querySelectorAll('video, audio').forEach(quiet);
+      });
+      observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+      window.__lswWorkModalMediaQuietGuard = { observer };
+    }
+
+    const media = Array.from(document.querySelectorAll('video, audio'));
+    media.forEach(quiet);
+    return {
+      ok: true,
+      mediaCount: media.length,
+      guardInstalled: Boolean(window.__lswWorkModalMediaQuietGuard),
+      reason,
+    };
+  }, { installGuard, reason }).catch(err => ({ ok: false, reason: err.message }));
+}
+
+export async function releaseWorkModalMediaQuietGuard(page) {
+  return page.evaluate(() => {
+    const guard = window.__lswWorkModalMediaQuietGuard;
+    if (guard?.observer) guard.observer.disconnect();
+    delete window.__lswWorkModalMediaQuietGuard;
+    return { ok: true };
+  }).catch(err => ({ ok: false, reason: err.message }));
+}
+
 async function isWorkModalVisible(page) {
   return await page.evaluate(() => {
     const modals = document.querySelectorAll('[data-e2e="modal-video-container"], .modal-video-container');
@@ -1006,6 +1043,11 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
     }
 
     if (closeAutoPlay) {
+      const quietResult = await quietWorkModalMedia(page, { installGuard: true, reason: 'wait_for_work_modal' });
+      if (quietResult.ok && quietResult.mediaCount > 0) {
+        console.error(`[work-modal] 已静音暂停媒体 media=${quietResult.mediaCount} reason=wait_for_work_modal`);
+      }
+
       await page.waitForTimeout(1500);
       // 同一 modal 只关闭一次连播：回访流程里 waitForWorkModal 会被多次调用
       // (openCandidateWork / 兜底 / ensureReturnVisitCommentBoxReady / postReturnVisitComment)，
@@ -1432,6 +1474,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
         // 新版抖音点击评论图标默认打开"问问AI"，需要再点"评论"tab切换到真实评论区
         if (clicked.clicked) {
           await page.waitForTimeout(800);
+          await quietWorkModalMedia(page, { installGuard: true, reason: 'after_comment_button_click' }).catch(() => null);
           const tabClicked = await clickTopCommentTab();
           if (tabClicked.clicked) {
             console.error(`[work-modal] 已点击评论Tab text="${tabClicked.text}" tag=${tabClicked.tagName} class="${tabClicked.className}" (attempt=${attempt})`);
@@ -1443,6 +1486,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
         const deadline = Date.now() + (attempt < 3 ? 2500 : 5000);
         while (Date.now() < deadline) {
           if (await isCommentAreaVisible()) {
+            await quietWorkModalMedia(page, { installGuard: true, reason: 'comment_area_visible' }).catch(() => null);
             opened = true;
             break;
           }

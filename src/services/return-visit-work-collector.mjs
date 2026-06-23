@@ -6,7 +6,7 @@ import {
   getVideoTitle,
   extractVideoCommentContext,
 } from '../adapters/video-page.mjs';
-import { extractWorkModalContext } from '../adapters/work-modal-page.mjs';
+import { extractWorkModalContext, quietWorkModalMedia } from '../adapters/work-modal-page.mjs';
 
 function createProfilePostApiCollector(page) {
   const awemes = [];
@@ -201,6 +201,8 @@ export async function closeCurrentWorkModalToProfile(page, profileUrl, options =
     return { ok: true, method: 'already_on_profile', url: page.url() };
   }
 
+  await quietWorkModalMedia(page, { installGuard: true, reason: 'before_close_modal' }).catch(() => null);
+
   async function tryCloseButton() {
     return page.evaluate(() => {
       function visible(el) {
@@ -251,6 +253,7 @@ export async function closeCurrentWorkModalToProfile(page, profileUrl, options =
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    await quietWorkModalMedia(page, { installGuard: true, reason: 'closing_modal_loop' }).catch(() => null);
     await page.keyboard.press('Escape').catch(() => {});
     await page.waitForTimeout(500);
     if (await onProfileWithoutModal()) {
@@ -259,6 +262,7 @@ export async function closeCurrentWorkModalToProfile(page, profileUrl, options =
 
     const clicked = await tryCloseButton();
     if (clicked.ok) {
+      await quietWorkModalMedia(page, { installGuard: true, reason: 'after_close_button_click' }).catch(() => null);
       await page.waitForTimeout(700);
       if (await onProfileWithoutModal()) {
         return { ok: true, method: 'close_button', url: page.url() };

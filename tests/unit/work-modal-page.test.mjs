@@ -12,6 +12,8 @@ import {
   parseDouyinTimeText,
   pickWorkCommentCandidate,
   postWorkModalComment,
+  quietWorkModalMedia,
+  releaseWorkModalMediaQuietGuard,
   resolveReplyTypingOptions,
   scrollCommentAreaOnce,
   typeReplyTextWithEffect,
@@ -84,6 +86,46 @@ describe('pickVisibleModalCandidate', () => {
 
     expect(selected.index).toBe(1);
     expect(selected.title).toBe('第二个作品标题');
+  });
+});
+
+describe('quietWorkModalMedia', () => {
+  it('静音并暂停页面内已有和后续插入的媒体元素', async () => {
+    const browser = await chromium.launch({ headless: true });
+    let page = null;
+    try {
+      page = await browser.newPage();
+      await page.setContent(`
+        <html>
+          <body>
+            <video id="initial" autoplay></video>
+          </body>
+        </html>
+      `);
+
+      const result = await quietWorkModalMedia(page, { installGuard: true, reason: 'test' });
+      expect(result.ok).toBe(true);
+      expect(result.mediaCount).toBe(1);
+
+      const initialState = await page.evaluate(() => {
+        const video = document.getElementById('initial');
+        return { muted: video.muted, volume: video.volume, autoplay: video.autoplay };
+      });
+      expect(initialState).toEqual({ muted: true, volume: 0, autoplay: false });
+
+      const insertedState = await page.evaluate(async () => {
+        const video = document.createElement('video');
+        video.id = 'inserted';
+        video.autoplay = true;
+        document.body.appendChild(video);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        return { muted: video.muted, volume: video.volume, autoplay: video.autoplay };
+      });
+      expect(insertedState).toEqual({ muted: true, volume: 0, autoplay: false });
+    } finally {
+      if (page) await releaseWorkModalMediaQuietGuard(page).catch(() => null);
+      await browser.close();
+    }
   });
 });
 
