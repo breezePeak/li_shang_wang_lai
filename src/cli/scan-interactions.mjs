@@ -1218,10 +1218,14 @@ async function runNotificationScan(page, run, type, pauseAfterOpen = 0, debugNot
     await moveMouseIntoPanel(page, panelState.panelBox);
     console.error('[scan] 通知面板已就绪，鼠标保持在面板内');
 
+    const preCategoryDiscardedCount = type === 'all' ? 0 : apiCollector.drainItems().length;
+    if (preCategoryDiscardedCount > 0) {
+      console.error(`[scan] 切换通知分类前丢弃旧 notice api 数据 ${preCategoryDiscardedCount} 条`);
+    }
+
     const categoryResult = await selectNotificationCategory(page, type);
     if (categoryResult.selected) {
-      const discardedCount = apiCollector.drainItems().length;
-      console.error(`[scan] 已切换通知分类为 ${categoryResult.label}，丢弃切换前 notice api 数据 ${discardedCount} 条`);
+      console.error(`[scan] 已切换通知分类为 ${categoryResult.label}`);
       const refreshedState = await waitForNotificationPanelStable(page, { timeoutMs: 5000 });
       if (refreshedState.stable && refreshedState.panelBox) {
         await moveMouseIntoPanel(page, refreshedState.panelBox);
