@@ -6,6 +6,7 @@ import {
 } from '../../src/services/return-visit-task-service.mjs';
 import {
   getReturnVisitTaskExecutionIssue,
+  parseArgs,
   resolveRestartBrowserEveryTasks,
   waitForSecurityVerificationResolution,
 } from '../../src/cli/execute-return-visit.mjs';
@@ -59,6 +60,21 @@ describe('done condition', () => {
 });
 
 describe('return-visit execute filtering & state flow logic', () => {
+  it('parseArgs supports targeted task ids for precise execution', () => {
+    const args = parseArgs([
+      '--execute',
+      '--task-id', 'return_visit_a',
+      '--task-ids', 'return_visit_b, return_visit_a, return_visit_c',
+    ]);
+
+    expect(args.execute).toBe(true);
+    expect(args.taskIds).toEqual([
+      'return_visit_a',
+      'return_visit_b',
+      'return_visit_c',
+    ]);
+  });
+
   it('resolveRestartBrowserEveryTasks falls back to safe default', () => {
     expect(resolveRestartBrowserEveryTasks(5, 3)).toBe(5);
     expect(resolveRestartBrowserEveryTasks('8', 3)).toBe(8);

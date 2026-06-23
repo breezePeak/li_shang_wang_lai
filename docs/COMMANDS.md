@@ -373,6 +373,8 @@ npm run return-visit:comment -- --task-id <taskId> --comment "<评论内容>" --
 npm run return-visit:execute -- --execute
 npm run return-visit:execute -- --dry-run
 npm run visit:run -- --execute --debug
+npm run visit:run -- --execute --task-id <taskId>
+npm run visit:run -- --execute --task-ids <taskId1>,<taskId2>
 ```
 
 源文件：`src/cli/execute-return-visit.mjs`
@@ -390,6 +392,8 @@ npm run visit:run -- --execute --debug
 | `--execute` | `false` | 真实点赞并评论 |
 | `--dry-run` | `true` | 只预演，不真实点赞或评论 |
 | `--limit` / `--max-count` | `null` | 最多处理多少条可执行回访任务；不传默认处理全部 |
+| `--task-id` | `[]` | 只执行指定回访任务，可重复传入；适合扫描后精确处理本轮任务 |
+| `--task-ids` | `[]` | 只执行指定回访任务，逗号分隔 |
 | `--watch-policy` | 配置 `returnVisit.watchPolicy` 或 `seconds` | 看视频策略 |
 | `--watch-seconds` | 配置 `returnVisit.watchSeconds` 或 `5-8` | 看视频秒数 |
 | `--keep-open` | `false` | 复用并保留浏览器 |

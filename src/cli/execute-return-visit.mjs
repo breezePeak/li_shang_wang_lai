@@ -10,6 +10,7 @@ import { RESULT_CODES } from '../domain/result-codes.mjs';
 import {
   RETURN_VISIT_STATUS,
   listReturnVisitExecuteTasks,
+  listReturnVisitTasksByIds,
   updateReturnVisitTask,
   markReturnVisitFailure,
   markReturnVisitDone,
@@ -20,7 +21,7 @@ import {
 } from '../services/return-visit-executor.mjs';
 import { createAgentProvider } from '../agent/agent-provider-factory.mjs';
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = {
     json: false,
     keepOpen: false,
@@ -31,6 +32,7 @@ function parseArgs(argv) {
     watchSeconds: null,
     maxWorksToCheck: null,
     limit: null,
+    taskIds: [],
     unsupportedItemsFile: false,
     debug: false,
   };
@@ -47,12 +49,22 @@ function parseArgs(argv) {
     else if (arg === '--watch-seconds' && i + 1 < argv.length) args.watchSeconds = argv[++i];
     else if (arg === '--max-works-to-check' && i + 1 < argv.length) args.maxWorksToCheck = argv[++i];
     else if ((arg === '--limit' || arg === '--max-count') && i + 1 < argv.length) args.limit = Number(argv[++i] || 0) || null;
+    else if (arg === '--task-id' && i + 1 < argv.length) args.taskIds.push(String(argv[++i] || '').trim());
+    else if (arg === '--task-ids' && i + 1 < argv.length) {
+      args.taskIds.push(
+        ...String(argv[++i] || '')
+          .split(',')
+          .map(id => id.trim())
+          .filter(Boolean)
+      );
+    }
     else if (arg === '--items-file') {
       args.unsupportedItemsFile = true;
       if (argv[i + 1] && !String(argv[i + 1]).startsWith('--')) i++;
     }
   }
 
+  args.taskIds = Array.from(new Set(args.taskIds.filter(Boolean)));
   return args;
 }
 
@@ -234,10 +246,12 @@ async function main() {
     watchSeconds = [watchSecondsRaw, watchSecondsRaw];
   }
 
-  const allTasks = listReturnVisitExecuteTasks({
-    maxRetryCount,
-    limit: args.limit,
-  });
+  const allTasks = args.taskIds.length > 0
+    ? listReturnVisitTasksByIds(args.taskIds)
+    : listReturnVisitExecuteTasks({
+        maxRetryCount,
+        limit: args.limit,
+      });
 
   const tasks = [];
 
