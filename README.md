@@ -90,6 +90,20 @@ npm run comments:execute
 npm run visit:run -- --execute
 ```
 
+如果只想看最近点赞或评论，可以指定互动类型：
+
+```bash
+npm run interactions:scan -- --type like --hours 1 --prepare-visits
+npm run interactions:scan -- --type comment --hours 1 --prepare-replies
+```
+
+扫描后执行本轮回访任务时，推荐使用任务 ID 精确执行，避免历史失败任务插队：
+
+```bash
+npm run visit:run -- --execute --task-id <taskId>
+npm run visit:run -- --execute --task-ids <taskId1>,<taskId2>
+```
+
 ## Skill / 引擎安装
 
 如果你是把它作为 Hermes / OpenClaw Skill 使用，可以放到这些目录：
@@ -120,11 +134,14 @@ npm run auth
 | 初始化数据库 | `npm run db:init` |
 | 清空表数据 | `npm run db:reset` |
 | 只看互动 | `npm run interactions:scan -- --display-only` |
+| 只看点赞 | `npm run interactions:scan -- --type like --display-only` |
+| 只看评论 | `npm run interactions:scan -- --type comment --display-only` |
 | 扫描互动入库 | `npm run interactions:scan -- --days 7` |
 | 扫描最近几小时 | `npm run interactions:scan -- --hours 6` |
 | 评论回复 | `npm run comments:execute` |
-| 准备回访任务 | `npm run interactions:scan -- --days 7 --prepare-visits` |
+| 准备点赞回访任务 | `npm run interactions:scan -- --type like --days 7 --prepare-visits` |
 | 执行回访 | `npm run visit:run -- --execute` |
+| 精确执行回访 | `npm run visit:run -- --execute --task-id <taskId>` |
 | 启动控制台 | `npm run server` |
 | 运行测试 | `npm test` |
 
