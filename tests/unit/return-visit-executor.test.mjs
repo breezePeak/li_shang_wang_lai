@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import { resolve } from 'path';
-import { detectWorkPresentationKind, waitForInteractionWatchGate } from '../../src/services/return-visit-executor.mjs';
+import { detectWorkPresentationKind, pauseCurrentVideo, waitForInteractionWatchGate } from '../../src/services/return-visit-executor.mjs';
 
 describe('return-visit executor work presentation detection', () => {
   it('modal_id 图文页会被识别为 note-like 页面', async () => {
@@ -77,5 +77,31 @@ describe('return-visit executor interaction watch gate', () => {
 
     expect(waited).toBe(0);
     expect(page.waitForTimeout).not.toHaveBeenCalled();
+  });
+
+  it('评论前只静音当前视频，不主动 pause 以避免音频毛刺', async () => {
+    const video = {
+      paused: false,
+      muted: false,
+      volume: 1,
+      currentTime: 12.3,
+      pause: vi.fn(),
+    };
+    const page = {
+      evaluate: vi.fn(async (fn) => {
+        const previousDocument = globalThis.document;
+        globalThis.document = { querySelector: vi.fn(() => video) };
+        try {
+          return fn();
+        } finally {
+          globalThis.document = previousDocument;
+        }
+      }),
+    };
+
+    const result = await pauseCurrentVideo(page);
+
+    expect(result).toMatchObject({ found: true, paused: false, muted: true, volume: 0 });
+    expect(video.pause).not.toHaveBeenCalled();
   });
 });

@@ -11,6 +11,7 @@ import {
 import {
   ensureWorkModalCommentBoxReady,
   postWorkModalComment,
+  quietWorkModalMedia,
   waitForWorkModal,
 } from '../adapters/work-modal-page.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
@@ -238,21 +239,22 @@ export async function pauseCurrentVideo(page) {
     const result = await page.evaluate(() => {
       const video = document.querySelector('video');
       if (!video) return { found: false, paused: false };
-      if (!video.paused) {
-        video.pause();
-      }
+      try { video.muted = true; } catch {}
+      try { video.volume = 0; } catch {}
       return {
         found: true,
         paused: video.paused,
+        muted: video.muted,
+        volume: Number(video.volume || 0),
         currentTime: Number(video.currentTime || 0),
       };
     });
     if (result?.found) {
-      console.error(`[return-visit:watch] 评论阶段前暂停视频 paused=${result.paused} currentTime=${Number(result.currentTime || 0).toFixed(1)}s`);
+      console.error(`[return-visit:watch] 评论阶段前静音视频 paused=${result.paused} muted=${result.muted} volume=${result.volume} currentTime=${Number(result.currentTime || 0).toFixed(1)}s`);
     }
     return result;
   } catch (err) {
-    console.error(`[return-visit:watch] 暂停视频失败: ${err.message}`);
+    console.error(`[return-visit:watch] 静音视频失败: ${err.message}`);
     return { found: false, paused: false };
   }
 }
@@ -973,6 +975,7 @@ export async function executeReturnVisitTask(page, task, options = {}) {
       }
     }
 
+    await quietWorkModalMedia(page, { installGuard: true, reason: 'before_comment_send' }).catch(() => null);
     await pauseCurrentVideo(page);
 
     const commentResult = await postReturnVisitComment(page, finalCommentText, presentation, {

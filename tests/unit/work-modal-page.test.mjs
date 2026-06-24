@@ -90,7 +90,7 @@ describe('pickVisibleModalCandidate', () => {
 });
 
 describe('quietWorkModalMedia', () => {
-  it('静音并暂停页面内已有和后续插入的媒体元素', async () => {
+  it('静音但不暂停页面内已有和后续插入的媒体元素', async () => {
     const browser = await chromium.launch({ headless: true });
     let page = null;
     try {
@@ -99,6 +99,12 @@ describe('quietWorkModalMedia', () => {
         <html>
           <body>
             <video id="initial" autoplay></video>
+            <script>
+              window.pauseCalls = 0;
+              HTMLMediaElement.prototype.pause = function() {
+                window.pauseCalls += 1;
+              };
+            </script>
           </body>
         </html>
       `);
@@ -109,9 +115,9 @@ describe('quietWorkModalMedia', () => {
 
       const initialState = await page.evaluate(() => {
         const video = document.getElementById('initial');
-        return { muted: video.muted, volume: video.volume, autoplay: video.autoplay };
+        return { muted: video.muted, volume: video.volume, autoplay: video.autoplay, paused: video.paused };
       });
-      expect(initialState).toEqual({ muted: true, volume: 0, autoplay: false });
+      expect(initialState).toEqual({ muted: true, volume: 0, autoplay: false, paused: true });
 
       const insertedState = await page.evaluate(async () => {
         const video = document.createElement('video');
@@ -119,9 +125,12 @@ describe('quietWorkModalMedia', () => {
         video.autoplay = true;
         document.body.appendChild(video);
         await new Promise(resolve => setTimeout(resolve, 0));
-        return { muted: video.muted, volume: video.volume, autoplay: video.autoplay };
+        return { muted: video.muted, volume: video.volume, autoplay: video.autoplay, paused: video.paused };
       });
-      expect(insertedState).toEqual({ muted: true, volume: 0, autoplay: false });
+      expect(insertedState).toEqual({ muted: true, volume: 0, autoplay: false, paused: true });
+
+      const pauseCalls = await page.evaluate(() => window.pauseCalls);
+      expect(pauseCalls).toBe(0);
     } finally {
       if (page) await releaseWorkModalMediaQuietGuard(page).catch(() => null);
       await browser.close();
@@ -592,7 +601,22 @@ describe('replyText 前缀匹配逻辑', () => {
 });
 
 describe('回复输入打字效果', () => {
-  it('默认逐字 insertText 并等待短暂停顿', async () => {
+  it('默认一次性 insertText，避免富文本输入框逐字重排闪烁', async () => {
+    const page = {
+      keyboard: { insertText: vi.fn(async () => {}) },
+      waitForTimeout: vi.fn(async () => {}),
+    };
+
+    const options = resolveReplyTypingOptions({});
+    const result = await typeReplyTextWithEffect(page, '谢谢支持', options);
+
+    expect(result.method).toBe('keyboard_insert_text');
+    expect(page.keyboard.insertText).toHaveBeenCalledTimes(1);
+    expect(page.keyboard.insertText).toHaveBeenCalledWith('谢谢支持');
+    expect(page.waitForTimeout).not.toHaveBeenCalled();
+  });
+
+  it('显式开启时逐字 insertText 并等待短暂停顿', async () => {
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
     const page = {
       keyboard: { insertText: vi.fn(async () => {}) },
@@ -600,7 +624,12 @@ describe('回复输入打字效果', () => {
     };
 
     try {
-      const result = await typeReplyTextWithEffect(page, '谢谢支持', { enabled: true, delayMs: 10, jitterMs: 0 });
+      const options = resolveReplyTypingOptions({
+        LISHANGWANGLAI_REPLY_TYPING: '1',
+        LISHANGWANGLAI_REPLY_TYPE_DELAY_MS: '10',
+        LISHANGWANGLAI_REPLY_TYPE_JITTER_MS: '0',
+      });
+      const result = await typeReplyTextWithEffect(page, '谢谢支持', options);
       expect(result.method).toBe('keyboard_type_effect');
       expect(page.keyboard.insertText).toHaveBeenCalledTimes(4);
       expect(page.keyboard.insertText.mock.calls.map(([text]) => text)).toEqual(['谢', '谢', '支', '持']);

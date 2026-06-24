@@ -17,8 +17,9 @@ function toNonNegativeNumber(value, fallback) {
 }
 
 export function resolveReplyTypingOptions(env = process.env) {
+  const rawEnabled = String(env.LISHANGWANGLAI_REPLY_TYPING || '').trim().toLowerCase();
   return {
-    enabled: !['0', 'false', 'no', 'off'].includes(String(env.LISHANGWANGLAI_REPLY_TYPING || '').trim().toLowerCase()),
+    enabled: ['1', 'true', 'yes', 'on'].includes(rawEnabled),
     delayMs: toNonNegativeNumber(env.LISHANGWANGLAI_REPLY_TYPE_DELAY_MS, 45),
     jitterMs: toNonNegativeNumber(env.LISHANGWANGLAI_REPLY_TYPE_JITTER_MS, 35),
   };
@@ -641,7 +642,6 @@ export async function quietWorkModalMedia(page, { installGuard = false, reason =
       try { media.muted = true; } catch {}
       try { media.volume = 0; } catch {}
       try { media.autoplay = false; } catch {}
-      try { media.pause?.(); } catch {}
     }
 
     if (installGuard && !window.__lswWorkModalMediaQuietGuard) {
@@ -1045,7 +1045,7 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
     if (closeAutoPlay) {
       const quietResult = await quietWorkModalMedia(page, { installGuard: true, reason: 'wait_for_work_modal' });
       if (quietResult.ok && quietResult.mediaCount > 0) {
-        console.error(`[work-modal] 已静音暂停媒体 media=${quietResult.mediaCount} reason=wait_for_work_modal`);
+        console.error(`[work-modal] 已静音媒体 media=${quietResult.mediaCount} reason=wait_for_work_modal`);
       }
 
       await page.waitForTimeout(1500);

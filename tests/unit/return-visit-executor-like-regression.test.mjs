@@ -7,6 +7,7 @@ const postVideoCommentMock = vi.fn();
 const waitForWorkModalMock = vi.fn();
 const ensureWorkModalCommentBoxReadyMock = vi.fn();
 const postWorkModalCommentMock = vi.fn();
+const quietWorkModalMediaMock = vi.fn();
 const collectCurrentOpenedWorkMock = vi.fn();
 const openProfileWorkByAwemeIdMock = vi.fn();
 const collectCandidateAwemesFromProfileMock = vi.fn();
@@ -23,6 +24,7 @@ vi.mock('../../src/adapters/work-modal-page.mjs', () => ({
   waitForWorkModal: waitForWorkModalMock,
   ensureWorkModalCommentBoxReady: ensureWorkModalCommentBoxReadyMock,
   postWorkModalComment: postWorkModalCommentMock,
+  quietWorkModalMedia: quietWorkModalMediaMock,
 }));
 
 vi.mock('../../src/services/return-visit-work-collector.mjs', () => ({
@@ -74,6 +76,7 @@ describe('return-visit executor like/comment regressions', () => {
     waitForWorkModalMock.mockResolvedValue({ ok: true });
     ensureWorkModalCommentBoxReadyMock.mockResolvedValue({ ok: true });
     postWorkModalCommentMock.mockResolvedValue({ ok: true, data: { sent: true } });
+    quietWorkModalMediaMock.mockResolvedValue({ ok: true, mediaCount: 0 });
   });
 
   it('does not skip like click just because prepared userDigged=1', async () => {
