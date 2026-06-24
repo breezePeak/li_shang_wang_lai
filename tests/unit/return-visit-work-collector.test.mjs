@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { chromium } from 'playwright';
 import {
   closeCurrentWorkModalToProfile,
   collectCandidateAwemesFromProfile,
@@ -9,6 +10,7 @@ import {
   normalizeAwemeForVisit,
   normalizeAwemeIdForMatching,
   openProfileWorkByAwemeIdFromPostApi,
+  stabilizeProfilePageChrome,
 } from '../../src/services/return-visit-work-collector.mjs';
 
 describe('return-visit work collector url normalization', () => {
@@ -96,6 +98,62 @@ describe('return-visit work collector url normalization', () => {
       'https://www.douyin.com/user/abc?modal_id=123',
       'https://www.douyin.com/user/abc',
     )).toBe(true);
+  });
+
+  it('stabilizeProfilePageChrome 会 blur 搜索框并暂停主页预览媒体但不改音量', async () => {
+    const browser = await chromium.launch({ headless: true });
+    let page = null;
+    try {
+      page = await browser.newPage();
+      await page.setContent(`
+        <html>
+          <head></head>
+          <body>
+            <input id="global-search" placeholder="搜索你感兴趣的内容" />
+            <video id="profile-video" autoplay></video>
+            <script>
+              window.pauseCalls = 0;
+              HTMLMediaElement.prototype.pause = function() {
+                window.pauseCalls += 1;
+              };
+              document.getElementById('global-search').focus();
+            </script>
+          </body>
+        </html>
+      `);
+
+      const result = await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'test' });
+
+      expect(result.ok).toBe(true);
+      const state = await page.evaluate(async () => {
+        const input = document.getElementById('global-search');
+        const video = document.getElementById('profile-video');
+        const inserted = document.createElement('video');
+        inserted.id = 'inserted-video';
+        inserted.autoplay = true;
+        document.body.appendChild(inserted);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        return {
+          activeTag: document.activeElement?.tagName || '',
+          caretColor: getComputedStyle(input).caretColor,
+          videoMuted: video.muted,
+          videoVolume: video.volume,
+          insertedMuted: inserted.muted,
+          insertedVolume: inserted.volume,
+          pauseCalls: window.pauseCalls,
+        };
+      });
+
+      expect(state.activeTag).not.toBe('INPUT');
+      expect(['transparent', 'rgba(0, 0, 0, 0)']).toContain(state.caretColor);
+      expect(state.videoMuted).toBe(false);
+      expect(state.videoVolume).toBe(1);
+      expect(state.insertedMuted).toBe(false);
+      expect(state.insertedVolume).toBe(1);
+      expect(state.pauseCalls).toBeGreaterThanOrEqual(2);
+    } finally {
+      await browser.close();
+    }
   });
 
   it('openProfileWorkByAwemeIdFromPostApi 在卡片数量不足时失败', async () => {

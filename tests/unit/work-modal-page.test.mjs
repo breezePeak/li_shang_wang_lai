@@ -90,7 +90,7 @@ describe('pickVisibleModalCandidate', () => {
 });
 
 describe('quietWorkModalMedia', () => {
-  it('静音但不暂停页面内已有和后续插入的媒体元素', async () => {
+  it('保留当前可见视频音量，只暂停后续插入的非主媒体', async () => {
     const browser = await chromium.launch({ headless: true });
     let page = null;
     try {
@@ -98,7 +98,7 @@ describe('quietWorkModalMedia', () => {
       await page.setContent(`
         <html>
           <body>
-            <video id="initial" autoplay></video>
+            <video id="initial" autoplay style="width:320px;height:240px"></video>
             <script>
               window.pauseCalls = 0;
               HTMLMediaElement.prototype.pause = function() {
@@ -117,7 +117,7 @@ describe('quietWorkModalMedia', () => {
         const video = document.getElementById('initial');
         return { muted: video.muted, volume: video.volume, autoplay: video.autoplay, paused: video.paused };
       });
-      expect(initialState).toEqual({ muted: true, volume: 0, autoplay: false, paused: true });
+      expect(initialState).toEqual({ muted: false, volume: 1, autoplay: true, paused: true });
 
       const insertedState = await page.evaluate(async () => {
         const video = document.createElement('video');
@@ -127,10 +127,10 @@ describe('quietWorkModalMedia', () => {
         await new Promise(resolve => setTimeout(resolve, 0));
         return { muted: video.muted, volume: video.volume, autoplay: video.autoplay, paused: video.paused };
       });
-      expect(insertedState).toEqual({ muted: true, volume: 0, autoplay: false, paused: true });
+      expect(insertedState).toEqual({ muted: false, volume: 1, autoplay: true, paused: true });
 
       const pauseCalls = await page.evaluate(() => window.pauseCalls);
-      expect(pauseCalls).toBe(0);
+      expect(pauseCalls).toBeGreaterThanOrEqual(1);
     } finally {
       if (page) await releaseWorkModalMediaQuietGuard(page).catch(() => null);
       await browser.close();

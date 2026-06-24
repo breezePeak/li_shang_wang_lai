@@ -79,7 +79,7 @@ describe('return-visit executor interaction watch gate', () => {
     expect(page.waitForTimeout).not.toHaveBeenCalled();
   });
 
-  it('评论前只静音当前视频，不主动 pause 以避免音频毛刺', async () => {
+  it('评论前只读取当前视频状态，不改音量也不主动 pause', async () => {
     const video = {
       paused: false,
       muted: false,
@@ -101,7 +101,7 @@ describe('return-visit executor interaction watch gate', () => {
 
     const result = await pauseCurrentVideo(page);
 
-    expect(result).toMatchObject({ found: true, paused: false, muted: true, volume: 0 });
+    expect(result).toMatchObject({ found: true, paused: false, muted: false, volume: 1 });
     expect(video.pause).not.toHaveBeenCalled();
   });
 });

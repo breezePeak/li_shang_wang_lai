@@ -638,25 +638,61 @@ export function pickVisibleModalCandidate(candidates = [], viewport = {}) {
 
 export async function quietWorkModalMedia(page, { installGuard = false, reason = '' } = {}) {
   return page.evaluate(({ installGuard, reason }) => {
-    function quiet(media) {
-      try { media.muted = true; } catch {}
-      try { media.volume = 0; } catch {}
-      try { media.autoplay = false; } catch {}
+    function mediaSnapshot(media, index) {
+      const rect = media.getBoundingClientRect?.() || { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0 };
+      const visibleWidth = Math.max(0, Math.min(rect.right || rect.left + rect.width, window.innerWidth) - Math.max(rect.left || 0, 0));
+      const visibleHeight = Math.max(0, Math.min(rect.bottom || rect.top + rect.height, window.innerHeight) - Math.max(rect.top || 0, 0));
+      const visibleArea = visibleWidth * visibleHeight;
+      return {
+        media,
+        index,
+        tag: media.tagName?.toLowerCase?.() || '',
+        paused: Boolean(media.paused),
+        ended: Boolean(media.ended),
+        muted: Boolean(media.muted),
+        volume: Number(media.volume ?? 0),
+        currentTime: Number(media.currentTime || 0),
+        visibleArea,
+        audible: !media.paused && !media.muted && Number(media.volume ?? 0) > 0,
+      };
+    }
+
+    function stabilize() {
+      const media = Array.from(document.querySelectorAll('video, audio'));
+      const snapshots = media.map(mediaSnapshot);
+      const primary = snapshots
+        .filter(item => item.tag === 'video' && item.visibleArea > 1000)
+        .sort((a, b) => b.visibleArea - a.visibleArea)[0] || null;
+      const pauseAll = /close|closing|after_close/i.test(String(reason || ''));
+      let pausedCount = 0;
+      for (const item of snapshots) {
+        if (!pauseAll && primary && item.index === primary.index) continue;
+        try {
+          item.media.pause?.();
+          pausedCount++;
+        } catch {}
+      }
+      return {
+        mediaCount: media.length,
+        pausedCount,
+        primaryIndex: primary?.index ?? -1,
+        playingCount: snapshots.filter(item => !item.paused && !item.ended).length,
+        audibleCount: snapshots.filter(item => item.audible).length,
+      };
     }
 
     if (installGuard && !window.__lswWorkModalMediaQuietGuard) {
       const observer = new MutationObserver(() => {
-        document.querySelectorAll('video, audio').forEach(quiet);
+        stabilize();
       });
       observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
       window.__lswWorkModalMediaQuietGuard = { observer };
     }
 
-    const media = Array.from(document.querySelectorAll('video, audio'));
-    media.forEach(quiet);
+    const result = stabilize();
     return {
       ok: true,
-      mediaCount: media.length,
+      ...result,
       guardInstalled: Boolean(window.__lswWorkModalMediaQuietGuard),
       reason,
     };
@@ -1045,7 +1081,14 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
     if (closeAutoPlay) {
       const quietResult = await quietWorkModalMedia(page, { installGuard: true, reason: 'wait_for_work_modal' });
       if (quietResult.ok && quietResult.mediaCount > 0) {
-        console.error(`[work-modal] 已静音媒体 media=${quietResult.mediaCount} reason=wait_for_work_modal`);
+        console.error(
+          `[work-modal] 已稳定媒体播放 media=${quietResult.mediaCount}` +
+            ` pausedNonPrimary=${quietResult.pausedCount || 0}` +
+            ` primary=${quietResult.primaryIndex ?? -1}` +
+            ` playing=${quietResult.playingCount || 0}` +
+            ` audible=${quietResult.audibleCount || 0}` +
+            ' reason=wait_for_work_modal'
+        );
       }
 
       await page.waitForTimeout(1500);

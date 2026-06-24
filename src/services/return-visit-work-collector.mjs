@@ -172,6 +172,11 @@ async function clickProfileCardByIndex(page, index, expectedAwemeId = '') {
       : cards[targetIndex];
     if (!target) return { ok: false };
 
+    const active = document.activeElement;
+    if (active?.matches?.('input, textarea, [contenteditable="true"], [role="textbox"], [role="searchbox"]')) {
+      active.blur?.();
+    }
+
     const candidate = Array.from(links).find(link => (link.getAttribute('href') || '') === target.href && visible(link));
     if (!candidate) return { ok: false };
     candidate.scrollIntoView({ block: 'center', behavior: 'instant' });
@@ -180,9 +185,78 @@ async function clickProfileCardByIndex(page, index, expectedAwemeId = '') {
   }, { targetIndex: index, expectedAwemeId });
 }
 
+export async function stabilizeProfilePageChrome(page, { installGuard = true, reason = '' } = {}) {
+  return page.evaluate(({ installGuard, reason }) => {
+    const searchLikeSelector = [
+      'input[placeholder*="搜索"]',
+      'input[placeholder*="感兴趣"]',
+      'input[placeholder*="Ta 的作品"]',
+      'input[placeholder*="TA 的作品"]',
+      '[role="searchbox"]',
+      '[aria-label*="搜索"]',
+    ].join(',');
+
+    function pauseProfileMedia() {
+      let pausedCount = 0;
+      const media = Array.from(document.querySelectorAll('video, audio'));
+      for (const item of media) {
+        try {
+          item.autoplay = false;
+          item.pause?.();
+          pausedCount++;
+        } catch {}
+      }
+      return {
+        mediaCount: media.length,
+        pausedCount,
+        playingCount: media.filter(item => !item.paused && !item.ended).length,
+        audibleCount: media.filter(item => !item.paused && !item.muted && Number(item.volume ?? 0) > 0).length,
+      };
+    }
+
+    function blurSearchLikeInput(target = document.activeElement) {
+      if (!target?.matches?.(searchLikeSelector)) return false;
+      target.blur?.();
+      return true;
+    }
+
+    if (installGuard && !window.__lswProfileStabilityGuard) {
+      const style = document.createElement('style');
+      style.id = 'lsw-profile-stability-style';
+      style.textContent = `${searchLikeSelector}{caret-color:transparent!important;}`;
+      document.head?.appendChild(style);
+
+      const observer = new MutationObserver(() => pauseProfileMedia());
+      observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+      const onFocusIn = event => blurSearchLikeInput(event.target);
+      document.addEventListener('focusin', onFocusIn, true);
+      window.__lswProfileStabilityGuard = { observer, onFocusIn };
+    }
+
+    const blurred = blurSearchLikeInput();
+    const mediaState = pauseProfileMedia();
+    return {
+      ok: true,
+      blurred,
+      ...mediaState,
+      guardInstalled: Boolean(window.__lswProfileStabilityGuard),
+      reason,
+    };
+  }, { installGuard, reason }).catch(err => ({ ok: false, reason: err.message }));
+}
+
 async function scrollProfileOnce(page) {
+  await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'before_profile_scroll' }).catch(() => null);
+  const point = await page.evaluate(() => ({
+    x: Math.round(window.innerWidth * 0.75),
+    y: Math.round(Math.min(window.innerHeight - 80, Math.max(320, window.innerHeight * 0.58))),
+  })).catch(() => null);
+  if (point && typeof page.mouse?.move === 'function') {
+    await page.mouse.move(point.x, point.y).catch(() => {});
+  }
   await page.mouse.wheel(0, 1200);
   await page.waitForTimeout(1000);
+  await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'after_profile_scroll' }).catch(() => null);
 }
 
 export async function closeCurrentWorkModalToProfile(page, profileUrl, options = {}) {
@@ -409,6 +483,7 @@ export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awem
         return { ok: false, reason: 'profile_navigation_failed', error: open.error || '' };
       }
     }
+    await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'after_profile_navigation' }).catch(() => null);
 
     const isPrivate = await detectPrivate(page);
     if (isPrivate) {
@@ -416,6 +491,7 @@ export async function openProfileWorkByAwemeIdFromPostApi(page, profileUrl, awem
     }
 
     await page.waitForTimeout(1200);
+    await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'before_profile_aweme_wait' }).catch(() => null);
     const beforeCount = collector.getAwemes().length;
     await collector.waitForAwemes({ beforeCount, timeoutMs: 3000 });
 
@@ -734,6 +810,7 @@ export async function collectCandidateWorkFromProfile(page, profileUrl, options 
   if (!open.ok) {
     return { ok: false, status: 'failed_collect', reason: `profile_navigation_failed:${open.error}`, checkedWorks: [] };
   }
+  await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'collect_work_after_profile_navigation' }).catch(() => null);
 
   const isPrivate = await detectPrivateProfile(page);
   if (isPrivate) {
@@ -812,6 +889,7 @@ export async function collectFirstNonTopAwemeFromProfile(page, profileUrl, optio
     if (!open.ok) {
       return { ok: false, status: 'skipped', reason: 'skip_homepage_load_failed' };
     }
+    await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'first_aweme_after_profile_navigation' }).catch(() => null);
 
     const isPrivate = await detectPrivateProfile(page);
     if (isPrivate) {
@@ -820,11 +898,14 @@ export async function collectFirstNonTopAwemeFromProfile(page, profileUrl, optio
 
     const beforeCount = collector.getAwemes().length;
     await page.waitForTimeout(1200);
+    await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'first_aweme_before_wait' }).catch(() => null);
     await collector.waitForAwemes({ beforeCount, timeoutMs: waitTimeoutMs });
 
     if (collector.getAwemes().length === 0) {
+      await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'first_aweme_before_fallback_scroll' }).catch(() => null);
       await page.mouse.wheel(0, 900).catch(() => {});
       await page.waitForTimeout(1000);
+      await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'first_aweme_after_fallback_scroll' }).catch(() => null);
       await collector.waitForAwemes({ beforeCount, timeoutMs: waitTimeoutMs });
     }
 
@@ -875,6 +956,7 @@ export async function collectCandidateAwemesFromProfile(page, profileUrl, option
     if (!open.ok) {
       return { ok: false, status: 'failed_collect', reason: 'skip_homepage_load_failed', candidates: [], stats: null };
     }
+    await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'candidate_after_profile_navigation' }).catch(() => null);
 
     const isPrivate = await detectPrivate(page);
     if (isPrivate) {
@@ -883,11 +965,14 @@ export async function collectCandidateAwemesFromProfile(page, profileUrl, option
 
     const beforeCount = collector.getAwemes().length;
     await page.waitForTimeout(1200);
+    await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'candidate_before_wait' }).catch(() => null);
     await collector.waitForAwemes({ beforeCount, timeoutMs: waitTimeoutMs });
 
     if (collector.getAwemes().length === 0) {
+      await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'candidate_before_fallback_scroll' }).catch(() => null);
       await page.mouse.wheel(0, 900).catch(() => {});
       await page.waitForTimeout(1000);
+      await stabilizeProfilePageChrome(page, { installGuard: true, reason: 'candidate_after_fallback_scroll' }).catch(() => null);
       await collector.waitForAwemes({ beforeCount, timeoutMs: waitTimeoutMs });
     }
 

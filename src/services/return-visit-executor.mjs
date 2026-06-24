@@ -239,8 +239,6 @@ export async function pauseCurrentVideo(page) {
     const result = await page.evaluate(() => {
       const video = document.querySelector('video');
       if (!video) return { found: false, paused: false };
-      try { video.muted = true; } catch {}
-      try { video.volume = 0; } catch {}
       return {
         found: true,
         paused: video.paused,
@@ -250,11 +248,11 @@ export async function pauseCurrentVideo(page) {
       };
     });
     if (result?.found) {
-      console.error(`[return-visit:watch] 评论阶段前静音视频 paused=${result.paused} muted=${result.muted} volume=${result.volume} currentTime=${Number(result.currentTime || 0).toFixed(1)}s`);
+      console.error(`[return-visit:watch] 评论阶段前视频状态 paused=${result.paused} muted=${result.muted} volume=${result.volume} currentTime=${Number(result.currentTime || 0).toFixed(1)}s`);
     }
     return result;
   } catch (err) {
-    console.error(`[return-visit:watch] 静音视频失败: ${err.message}`);
+    console.error(`[return-visit:watch] 读取视频状态失败: ${err.message}`);
     return { found: false, paused: false };
   }
 }
