@@ -24,6 +24,16 @@
           <span class="brand-eyebrow">Li Shang Wang Lai</span>
           <h1>互动回评 / 回访流程图</h1>
           <p>点击任意节点先从右侧推出作品页，再继续向左推进到评论详情页，把回评和回访推进串起来。</p>
+          <div class="view-switch" aria-label="页面切换">
+            <button class="view-tab is-active" id="btn-view-flow" type="button">
+              <i class="fa-solid fa-diagram-project"></i>
+              <span>流程图</span>
+            </button>
+            <button class="view-tab" id="btn-view-ranking" type="button">
+              <i class="fa-solid fa-ranking-star"></i>
+              <span>互动排行榜</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -48,7 +58,7 @@
     </header>
 
     <main class="workspace-shell">
-      <section class="flow-panel">
+      <section class="flow-panel view-panel" id="flow-view">
         <div id="graph-root" class="graph-root"></div>
 
         <section class="ops-overview">
@@ -93,6 +103,31 @@
             </article>
           </div>
         </section>
+      </section>
+
+      <section class="ranking-panel view-panel" id="ranking-view" hidden>
+        <div class="ranking-head">
+          <div>
+            <span class="lane-tag">Interaction Ranking</span>
+            <h2>互动排行榜</h2>
+            <p>按好友聚合评论、点赞、回复、回评和回访任务，点选好友后在右侧查看完整互动信息。</p>
+          </div>
+          <span id="ranking-count">0 位好友</span>
+        </div>
+
+        <div class="ranking-shell">
+          <section class="ranking-list-panel">
+            <div class="ranking-list" id="ranking-list"></div>
+          </section>
+          <section class="ranking-detail-panel" id="ranking-detail-panel">
+            <div class="ranking-detail-empty" id="ranking-detail-empty">
+              <div class="drawer-empty-mark"><i class="fa-solid fa-ranking-star"></i></div>
+              <h3>选择一位好友</h3>
+              <p>右侧会显示这位好友的互动摘要、来源作品、回评内容和回访处理记录。</p>
+            </div>
+            <div class="ranking-detail" id="ranking-detail"></div>
+          </section>
+        </div>
       </section>
 
       <aside id="stage-drawer" class="stage-drawer">

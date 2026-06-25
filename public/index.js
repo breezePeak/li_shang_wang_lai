@@ -9,6 +9,8 @@ let unhandledEvents = [];
 let scanSchedules = [];
 let selectedStageId = null;
 let selectedWorkKey = null;
+let selectedFriendKey = null;
+let currentView = 'flow';
 const EXECUTION_BATCH_GAP_MS = 2 * 60 * 1000;
 
 const STAGE_IDS = {
@@ -39,6 +41,8 @@ async function initApp() {
 
 function bindEvents() {
   document.getElementById('btn-refresh').addEventListener('click', refreshAll);
+  document.getElementById('btn-view-flow')?.addEventListener('click', () => setActiveView('flow'));
+  document.getElementById('btn-view-ranking')?.addEventListener('click', () => setActiveView('ranking'));
   document.getElementById('btn-close-drawer').addEventListener('click', closeDrawer);
   document.getElementById('drawer-backdrop').addEventListener('click', closeDrawer);
   document.getElementById('detail-modal-backdrop').addEventListener('click', () => {
@@ -56,9 +60,38 @@ async function refreshAll() {
     fetchUnhandledEvents(),
   ]);
   renderHeaderStats();
+  renderMainViews();
+  renderDrawer();
+}
+
+function setActiveView(view) {
+  currentView = view === 'ranking' ? 'ranking' : 'flow';
+  if (currentView === 'ranking') {
+    selectedStageId = null;
+    selectedWorkKey = null;
+  }
+  renderMainViews();
+  renderDrawer();
+}
+
+function renderMainViews() {
+  const flowView = document.getElementById('flow-view');
+  const rankingView = document.getElementById('ranking-view');
+  const flowTab = document.getElementById('btn-view-flow');
+  const rankingTab = document.getElementById('btn-view-ranking');
+  const isRanking = currentView === 'ranking';
+
+  flowView.hidden = isRanking;
+  rankingView.hidden = !isRanking;
+  flowTab.classList.toggle('is-active', !isRanking);
+  rankingTab.classList.toggle('is-active', isRanking);
+
+  if (isRanking) {
+    renderRankingView();
+    return;
+  }
   renderFlowGraph();
   renderOpsBoards();
-  renderDrawer();
 }
 
 async function fetchStats() {
@@ -511,6 +544,11 @@ window.selectWork = function selectWork(encodedKey) {
 window.clearSelectedWork = function clearSelectedWork() {
   selectedWorkKey = null;
   renderDrawer();
+};
+
+window.selectFriend = function selectFriend(encodedKey) {
+  selectedFriendKey = decodeURIComponent(encodedKey);
+  renderRankingView();
 };
 
 window.closeDrawer = closeDrawer;
@@ -1280,6 +1318,236 @@ function buildVisitActionGroups(tasks, events, mode = 'all') {
   }
 
   return Array.from(groups.values()).sort((a, b) => sortByCreatedDesc({ createdAt: a.items?.[0]?.createdAt || '' }, { createdAt: b.items?.[0]?.createdAt || '' }) || a.title.localeCompare(b.title, 'zh-CN'));
+}
+
+function renderRankingView() {
+  const ranking = buildInteractionRanking();
+  const listEl = document.getElementById('ranking-list');
+  const countEl = document.getElementById('ranking-count');
+  const detailEl = document.getElementById('ranking-detail');
+  const emptyEl = document.getElementById('ranking-detail-empty');
+  if (!listEl || !countEl || !detailEl || !emptyEl) return;
+
+  if (!ranking.length) {
+    selectedFriendKey = null;
+    countEl.textContent = '0 位好友';
+    listEl.innerHTML = renderEmpty('暂时还没有可统计的好友互动。');
+    emptyEl.style.display = 'flex';
+    detailEl.innerHTML = '';
+    return;
+  }
+
+  if (!selectedFriendKey || !ranking.some((item) => item.key === selectedFriendKey)) {
+    selectedFriendKey = ranking[0].key;
+  }
+
+  const selected = ranking.find((item) => item.key === selectedFriendKey) || ranking[0];
+  countEl.textContent = `${ranking.length} 位好友`;
+  listEl.innerHTML = ranking.map((friend, index) => renderRankingRow(friend, index)).join('');
+  emptyEl.style.display = 'none';
+  detailEl.innerHTML = renderFriendDetail(selected);
+}
+
+function buildInteractionRanking() {
+  const map = new Map();
+
+  for (const event of getAllInteractionEvents()) {
+    const record = getFriendRecord(map, event.actor_profile_url || '', event.actor_name || '', `event-${event.id}`);
+    addFriendEvent(record, event);
+  }
+
+  for (const comment of pendingComments) {
+    const record = getFriendRecord(map, comment.actor_profile_url || '', comment.actor_name || '', `comment-${comment.id}`);
+    addFriendComment(record, comment);
+  }
+
+  for (const task of reviewTasks) {
+    const sourceEvents = Array.isArray(task.sourceEvents) ? task.sourceEvents : [];
+    const firstEvent = sourceEvents.find((event) => event?.actor_profile_url || event?.actor_name) || null;
+    const record = getFriendRecord(
+      map,
+      firstEvent?.actor_profile_url || task.userProfileUrl || '',
+      firstEvent?.actor_name || task.userName || '',
+      task.identityKey || `task-${task.id}`
+    );
+    for (const event of sourceEvents) addFriendEvent(record, event);
+    addFriendTask(record, task);
+  }
+
+  return Array.from(map.values())
+    .map(finalizeFriendRecord)
+    .sort((a, b) => b.score - a.score || parseDateValue(b.latestAt) - parseDateValue(a.latestAt) || a.name.localeCompare(b.name, 'zh-CN'));
+}
+
+function getAllInteractionEvents() {
+  const events = [];
+  const seen = new Set();
+  const add = (event) => {
+    if (!event) return;
+    const key = event.id != null ? `id:${event.id}` : `${event.actor_profile_url || ''}|${event.actor_name || ''}|${event.event_type || ''}|${event.created_at || ''}|${event.comment_text || ''}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    events.push(event);
+  };
+  for (const batch of scanSchedules) {
+    for (const event of batch.events || []) add(event);
+  }
+  for (const event of unhandledEvents) add(event);
+  return events;
+}
+
+function getFriendRecord(map, profileUrl, name, fallbackKey) {
+  const key = String(profileUrl || name || fallbackKey || 'unknown');
+  const existing = map.get(key) || {
+    key,
+    name: name || '未知好友',
+    profileUrl: profileUrl || '',
+    eventIds: new Set(),
+    commentIds: new Set(),
+    taskIds: new Set(),
+    workTitles: new Set(),
+    counts: { like: 0, comment: 0, reply: 0, follow: 0, workComment: 0, task: 0, doneVisit: 0, pendingVisit: 0 },
+    latestAt: '',
+    items: [],
+  };
+  if (name && existing.name === '未知好友') existing.name = name;
+  if (profileUrl && !existing.profileUrl) existing.profileUrl = profileUrl;
+  map.set(key, existing);
+  return existing;
+}
+
+function addFriendEvent(record, event) {
+  if (!record || !event) return;
+  const key = event.id != null ? event.id : `${event.event_type || ''}|${event.created_at || ''}|${event.comment_text || ''}`;
+  if (record.eventIds.has(key)) return;
+  record.eventIds.add(key);
+  if (record.counts[event.event_type] !== undefined) record.counts[event.event_type] += 1;
+  addFriendWorkTitle(record, event.my_work_title || event.target_work_id);
+  updateFriendLatest(record, event.created_at || event.scanned_at || '');
+  record.items.push({ kind: 'event', createdAt: event.created_at || event.scanned_at || '', data: event });
+}
+
+function addFriendComment(record, comment) {
+  if (!record || !comment) return;
+  if (record.commentIds.has(comment.id)) return;
+  record.commentIds.add(comment.id);
+  record.counts.workComment += 1;
+  addFriendWorkTitle(record, comment.joined_work_title || comment.work_id || comment.modal_id);
+  updateFriendLatest(record, comment.replied_at || comment.last_seen_at || comment.first_seen_at || '');
+  record.items.push({ kind: 'comment', createdAt: comment.replied_at || comment.last_seen_at || comment.first_seen_at || '', data: comment });
+}
+
+function addFriendTask(record, task) {
+  if (!record || !task) return;
+  if (record.taskIds.has(task.id)) return;
+  record.taskIds.add(task.id);
+  record.counts.task += 1;
+  if (task.status === 'done') record.counts.doneVisit += 1;
+  else if (!String(task.status || '').startsWith('skipped')) record.counts.pendingVisit += 1;
+  addFriendWorkTitle(record, task.targetWork?.workTitle || task.targetWork?.workId);
+  updateFriendLatest(record, getVisitBatchTime(task));
+  record.items.push({ kind: 'task', createdAt: getVisitBatchTime(task), data: task });
+}
+
+function addFriendWorkTitle(record, title) {
+  const value = String(title || '').trim();
+  if (value) record.workTitles.add(value);
+}
+
+function updateFriendLatest(record, value) {
+  if (!value) return;
+  record.latestAt = pickLaterTime(record.latestAt, value);
+}
+
+function finalizeFriendRecord(record) {
+  const directEvents = record.eventIds.size;
+  const replyDone = record.items.filter((item) => item.kind === 'comment' && ['succeeded', 'manually_replied'].includes(item.data.reply_status)).length;
+  const score = directEvents
+    + record.counts.workComment * 2
+    + record.counts.task * 2
+    + record.counts.doneVisit * 2
+    + replyDone;
+  return {
+    ...record,
+    total: directEvents + record.counts.workComment + record.counts.task,
+    score,
+    replyDone,
+    workCount: record.workTitles.size,
+    workTitles: Array.from(record.workTitles),
+    items: record.items.slice().sort(sortByCreatedDesc),
+  };
+}
+
+function renderRankingRow(friend, index) {
+  const active = selectedFriendKey === friend.key ? 'is-active' : '';
+  const encodedKey = encodeURIComponent(friend.key);
+  return `
+    <button class="ranking-row ${active}" onclick="selectFriend('${encodedKey}')">
+      <span class="ranking-index">${index + 1}</span>
+      <span class="ranking-person">
+        <strong>${escapeHtml(friend.name)}</strong>
+        <small>${escapeHtml(buildFriendActionSummary(friend))}</small>
+      </span>
+      <span class="ranking-score">
+        <strong>${friend.score}</strong>
+        <small>分</small>
+      </span>
+    </button>
+  `;
+}
+
+function renderFriendDetail(friend) {
+  const latestText = formatTime(friend.latestAt) || '暂无时间';
+  const sourceWorks = friend.workTitles.slice(0, 6);
+  return `
+    <div class="ranking-detail-head">
+      <div>
+        <span class="work-chip">好友</span>
+        <h3>${escapeHtml(friend.name)}</h3>
+        <p>${escapeHtml(friend.profileUrl || '未记录主页链接')}</p>
+      </div>
+      <strong>${friend.score}</strong>
+    </div>
+    <div class="ranking-metrics">
+      <article><span>互动总数</span><strong>${friend.total}</strong></article>
+      <article><span>来源作品</span><strong>${friend.workCount}</strong></article>
+      <article><span>已回评</span><strong>${friend.replyDone}</strong></article>
+      <article><span>回访完成</span><strong>${friend.counts.doneVisit}</strong></article>
+    </div>
+    <div class="ranking-summary-line">
+      <span>${escapeHtml(buildFriendActionSummary(friend))}</span>
+      <span>最近 ${escapeHtml(latestText)}</span>
+    </div>
+    <section class="ranking-source-works">
+      <div class="ranking-section-title">
+        <strong>关联作品</strong>
+        <span>${friend.workCount} 个</span>
+      </div>
+      <div class="ranking-work-tags">
+        ${sourceWorks.length ? sourceWorks.map((title) => `<span>${escapeHtml(title)}</span>`).join('') : '<span>暂未识别作品</span>'}
+      </div>
+    </section>
+    <section class="ranking-detail-list">
+      <div class="ranking-section-title">
+        <strong>互动明细</strong>
+        <span>${friend.items.length} 条</span>
+      </div>
+      <div class="item-list">
+        ${friend.items.length ? friend.items.map(renderDetailItem).join('') : renderEmpty('暂无互动明细。')}
+      </div>
+    </section>
+  `;
+}
+
+function buildFriendActionSummary(friend) {
+  const parts = [];
+  if (friend.counts.like) parts.push(`点赞 ${friend.counts.like}`);
+  if (friend.counts.comment) parts.push(`评论 ${friend.counts.comment}`);
+  if (friend.counts.reply) parts.push(`回复 ${friend.counts.reply}`);
+  if (friend.counts.follow) parts.push(`关注 ${friend.counts.follow}`);
+  if (friend.counts.workComment) parts.push(`回评 ${friend.counts.workComment}`);
+  if (friend.counts.task) parts.push(`回访 ${friend.counts.task}`);
+  return parts.join(' / ') || '暂无互动摘要';
 }
 
 function renderDetailItem(item) {
