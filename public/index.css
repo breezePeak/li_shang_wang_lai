@@ -27,6 +27,8 @@
   --radius-lg: 22px;
   --radius-md: 16px;
   --radius-sm: 12px;
+  --drawer-width: clamp(420px, 34vw, 620px);
+  --drawer-offset: 18px;
 }
 
 * {
@@ -103,7 +105,10 @@ textarea {
 
 .drawer-backdrop {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: calc(var(--drawer-width) + var(--drawer-offset));
+  bottom: 0;
+  left: 0;
   background:
     linear-gradient(270deg, rgba(31, 43, 40, 0.08) 0%, rgba(31, 43, 40, 0.04) 14%, rgba(31, 43, 40, 0.01) 28%, rgba(31, 43, 40, 0) 42%);
   opacity: 0;
@@ -1395,10 +1400,10 @@ textarea {
 
 .stage-drawer {
   position: fixed;
-  top: 18px;
-  right: 18px;
-  bottom: 18px;
-  width: clamp(420px, 34vw, 620px);
+  top: var(--drawer-offset);
+  right: var(--drawer-offset);
+  bottom: var(--drawer-offset);
+  width: var(--drawer-width);
   min-height: 0;
   overflow: hidden;
   transform: translateX(calc(100% + 28px));
@@ -1935,6 +1940,12 @@ textarea {
   background: linear-gradient(180deg, rgba(253, 248, 242, 0.96), rgba(249, 244, 235, 0.88));
 }
 
+.journey-panel-body {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+}
+
 .journey-panel-head {
   display: flex;
   align-items: flex-start;
@@ -2009,6 +2020,45 @@ textarea {
   background: rgba(109, 119, 111, 0.08);
 }
 
+.journey-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.journey-kpi {
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(48, 63, 57, 0.06);
+  display: grid;
+  gap: 3px;
+}
+
+.journey-kpi label {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.journey-kpi strong {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.journey-kpi small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .journey-event-list {
   display: grid;
   gap: 8px;
@@ -2028,6 +2078,12 @@ textarea {
 .journey-event-row {
   display: grid;
   gap: 4px;
+}
+
+.journey-event-row strong {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
 }
 
 .journey-note {
@@ -2095,6 +2151,35 @@ textarea {
 .detail-item-block > p {
   max-height: 138px;
   overflow: auto;
+}
+
+.detail-rich-text {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(48, 63, 57, 0.06);
+  display: grid;
+  gap: 6px;
+}
+
+.detail-rich-text label {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.detail-rich-text p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+  max-height: 132px;
+  overflow: auto;
+}
+
+.detail-rich-text .inline-textarea,
+.detail-rich-text .reply-readonly {
+  min-height: 92px;
 }
 
 .detail-item-block label {
@@ -2206,19 +2291,17 @@ textarea {
 .toast.error { background: linear-gradient(135deg, var(--danger), #994733); }
 
 @media (max-width: 1220px) {
+  :root {
+    --drawer-width: min(620px, calc(100vw - 20px));
+    --drawer-offset: 10px;
+  }
+
   .action-focus {
     grid-template-columns: 1fr;
   }
 
   .action-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .stage-drawer {
-    width: min(620px, calc(100vw - 20px));
-    top: 10px;
-    right: 10px;
-    bottom: 10px;
   }
 
   .hero-band {
@@ -2256,6 +2339,10 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .journey-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
   .journey-timeline {
     grid-template-columns: 1fr;
   }
@@ -2271,6 +2358,11 @@ textarea {
 }
 
 @media (max-width: 760px) {
+  :root {
+    --drawer-width: calc(100vw - 20px);
+    --drawer-offset: 10px;
+  }
+
   body {
     overflow: auto;
   }

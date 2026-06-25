@@ -1600,17 +1600,27 @@ function renderScanJourneyItem(journey) {
               <p>${escapeHtml(sourceWork)}</p>
             </div>
           </div>
-          <div class="journey-summary">
-            <span>${escapeHtml(summarizeVisitActions(sourceEvents, task?.sourceTypes || []) || describeSingleVisitEvent(primaryEvent) || '发现了一条互动')}</span>
-            <small>${escapeHtml(buildSourceEventTimeline(sourceEvents, primaryEvent))}</small>
-          </div>
-          ${renderSourceEventList(sourceEvents, primaryEvent)}
-          ${replySummary ? `
-            <div class="journey-note">
-              <label>我在这条作品里的回复</label>
-              <p>${escapeHtml(replySummary)}</p>
+          <div class="journey-panel-body">
+            <div class="journey-kpi-grid">
+              <div class="journey-kpi">
+                <label>互动摘要</label>
+                <strong>${escapeHtml(summarizeVisitActions(sourceEvents, task?.sourceTypes || []) || describeSingleVisitEvent(primaryEvent) || '发现了一条互动')}</strong>
+                <small>${escapeHtml(buildSourceEventTimeline(sourceEvents, primaryEvent) || '等待补充时间线')}</small>
+              </div>
+              <div class="journey-kpi">
+                <label>原作品侧</label>
+                <strong>${replySnapshot?.reply_text ? '已形成回应' : '还没有清晰回应'}</strong>
+                <small>${escapeHtml(replySnapshot?.replied_at ? formatTime(replySnapshot.replied_at) : '当前没有回评落地时间')}</small>
+              </div>
             </div>
-          ` : ''}
+            ${renderSourceEventList(sourceEvents, primaryEvent)}
+            ${replySummary ? `
+              <div class="journey-note">
+                <label>我在这条作品里的回复</label>
+                <p>${escapeHtml(replySummary)}</p>
+              </div>
+            ` : ''}
+          </div>
         </section>
 
         <section class="journey-panel journey-target">
@@ -1621,28 +1631,38 @@ function renderScanJourneyItem(journey) {
               <p>${escapeHtml(revisitWork)}</p>
             </div>
           </div>
-          ${task ? `
-            <div class="journey-summary">
-              <span>${escapeHtml(visitSummary.title)}</span>
-              <small>${escapeHtml(visitSummary.meta)}</small>
-            </div>
-            <div class="journey-status-chips">
-              <span class="journey-chip ${getLikeStatusTone(task.likeStatus)}">点赞：${escapeHtml(humanizeLikeStatus(task.likeStatus))}</span>
-              <span class="journey-chip ${getCommentStatusTone(task.commentStatus)}">评论：${escapeHtml(humanizeCommentStatus(task.commentStatus))}</span>
-              <span class="journey-chip ${getTaskStatusTone(task.status)}">任务：${escapeHtml(humanizeTaskStatus(task.status))}</span>
-            </div>
-            ${task.generatedComment ? `
-              <div class="journey-note">
-                <label>本次回访评论</label>
-                <p>${escapeHtml(task.generatedComment)}</p>
+          <div class="journey-panel-body">
+            ${task ? `
+              <div class="journey-kpi-grid">
+                <div class="journey-kpi">
+                  <label>回访状态</label>
+                  <strong>${escapeHtml(humanizeTaskStatus(task.status))}</strong>
+                  <small>${escapeHtml(visitSummary.title)}</small>
+                </div>
+                <div class="journey-kpi">
+                  <label>回访作品</label>
+                  <strong>${escapeHtml(revisitWork)}</strong>
+                  <small>${escapeHtml(visitSummary.meta)}</small>
+                </div>
               </div>
-            ` : ''}
-          ` : `
-            <div class="journey-summary empty">
-              <span>这一条互动还没有进入回访任务</span>
-              <small>${replySummary ? '目前只记录到回评处理。' : '目前只有扫描线索，还没有回访动作。'}</small>
-            </div>
-          `}
+              <div class="journey-status-chips">
+                <span class="journey-chip ${getLikeStatusTone(task.likeStatus)}">点赞：${escapeHtml(humanizeLikeStatus(task.likeStatus))}</span>
+                <span class="journey-chip ${getCommentStatusTone(task.commentStatus)}">评论：${escapeHtml(humanizeCommentStatus(task.commentStatus))}</span>
+                <span class="journey-chip ${getTaskStatusTone(task.status)}">任务：${escapeHtml(humanizeTaskStatus(task.status))}</span>
+              </div>
+              ${task.generatedComment ? `
+                <div class="journey-note">
+                  <label>本次回访评论</label>
+                  <p>${escapeHtml(task.generatedComment)}</p>
+                </div>
+              ` : ''}
+            ` : `
+              <div class="journey-summary empty">
+                <span>这一条互动还没有进入回访任务</span>
+                <small>${replySummary ? '目前只记录到回评处理。' : '目前只有扫描线索，还没有回访动作。'}</small>
+              </div>
+            `}
+          </div>
         </section>
       </div>
     </article>
@@ -1654,6 +1674,7 @@ function renderCommentDetailItem(comment) {
   const isLocked = isReplyStatusLocked(comment.reply_status);
   const isException = ['blocked', 'sent_unverified'].includes(comment.reply_status);
   const canEdit = !isLocked;
+  const hasReply = Boolean(comment.reply_text);
   const textareaId = `reply-text-${comment.id}`;
   const sourceWork = comment.joined_work_title || comment.work_id || comment.modal_id || '未识别到你的作品';
 
@@ -1667,37 +1688,74 @@ function renderCommentDetailItem(comment) {
         <span class="detail-time">${escapeHtml(comment.event_time_text || '')}${comment.last_seen_at ? ` · ${formatTime(comment.last_seen_at)}` : ''}</span>
       </div>
       ${renderCommentTimeline(comment, sourceWork)}
-      <div class="detail-item-block">
-        <label>原评论</label>
-        <p>${escapeHtml(comment.comment_text || '')}</p>
+      <div class="journey-grid">
+        <section class="journey-panel journey-source">
+          <div class="journey-panel-head">
+            <span class="journey-step">1</span>
+            <div>
+              <strong>原始评论</strong>
+              <p>${escapeHtml(sourceWork)}</p>
+            </div>
+          </div>
+          <div class="journey-panel-body">
+            <div class="journey-kpi-grid">
+              <div class="journey-kpi">
+                <label>当前状态</label>
+                <strong>${escapeHtml(badge.text)}</strong>
+                <small>${escapeHtml(comment.reply_status || 'pending')}</small>
+              </div>
+              <div class="journey-kpi">
+                <label>最近处理</label>
+                <strong>${escapeHtml(formatTime(comment.last_seen_at || comment.replied_at || comment.first_seen_at || '') || '尚未处理')}</strong>
+                <small>${escapeHtml(comment.event_time_text || '等待你推进')}</small>
+              </div>
+            </div>
+            <div class="detail-rich-text">
+              <label>对方原评论</label>
+              <p>${escapeHtml(comment.comment_text || '')}</p>
+            </div>
+            ${comment.reply_reason ? `
+              <div class="journey-note">
+                <label>异常原因</label>
+                <p>${escapeHtml(comment.reply_reason)}</p>
+              </div>
+            ` : ''}
+          </div>
+        </section>
+
+        <section class="journey-panel journey-target">
+          <div class="journey-panel-head">
+            <span class="journey-step">2</span>
+            <div>
+              <strong>回评处理</strong>
+              <p>${hasReply ? '已有文案，可继续修改或确认。' : '先准备一条清晰的回评。'} </p>
+            </div>
+          </div>
+          <div class="journey-panel-body">
+            <div class="detail-rich-text">
+              <label>回评文本</label>
+              ${canEdit ? `
+                <textarea id="${textareaId}" class="inline-textarea" placeholder="可直接修改回评内容...">${escapeHtml(comment.reply_text || '')}</textarea>
+              ` : `
+                <p class="reply-readonly">${escapeHtml(comment.reply_text || '已成功，但没有保存回复文本')}</p>
+              `}
+            </div>
+            ${isLocked ? `
+              <div class="journey-note">
+                <label>当前说明</label>
+                <p>${comment.reply_status === 'skipped' ? '这条评论已被忽略，状态已锁定。' : '这条评论已经处理完成，状态已锁定。'}</p>
+              </div>
+            ` : ''}
+            ${canEdit ? `
+              <div class="item-actions">
+                ${isException ? `<button class="mini-btn primary" onclick="resetCommentToPending(${comment.id})"><i class="fa-solid fa-rotate-left"></i> 重置为待执行</button>` : ''}
+                <button class="mini-btn" onclick="saveCommentReply(${comment.id})"><i class="fa-solid fa-floppy-disk"></i> 保存文本</button>
+                <button class="mini-btn ghost" onclick="ignoreComment(${comment.id})"><i class="fa-solid fa-ban"></i> 忽略</button>
+              </div>
+            ` : ''}
+          </div>
+        </section>
       </div>
-      ${comment.reply_reason ? `
-        <div class="detail-item-block subtle danger-text">
-          <label>异常原因</label>
-          <p>${escapeHtml(comment.reply_reason)}</p>
-        </div>
-      ` : ''}
-      <div class="detail-item-block">
-        <label>回评文本</label>
-        ${canEdit ? `
-          <textarea id="${textareaId}" class="inline-textarea" placeholder="可直接修改回评内容...">${escapeHtml(comment.reply_text || '')}</textarea>
-        ` : `
-          <p class="reply-readonly">${escapeHtml(comment.reply_text || '已成功，但没有保存回复文本')}</p>
-        `}
-      </div>
-      ${isLocked ? `
-        <div class="detail-item-block subtle">
-          <label>当前状态</label>
-          <p>${comment.reply_status === 'skipped' ? '这条评论已被忽略，状态已锁定。' : '这条评论已经处理完成，状态已锁定。'}</p>
-        </div>
-      ` : ''}
-      ${canEdit ? `
-        <div class="item-actions">
-          ${isException ? `<button class="mini-btn primary" onclick="resetCommentToPending(${comment.id})"><i class="fa-solid fa-rotate-left"></i> 重置为待执行</button>` : ''}
-          <button class="mini-btn" onclick="saveCommentReply(${comment.id})"><i class="fa-solid fa-floppy-disk"></i> 保存文本</button>
-          <button class="mini-btn ghost" onclick="ignoreComment(${comment.id})"><i class="fa-solid fa-ban"></i> 忽略</button>
-        </div>
-      ` : ''}
     </article>
   `;
 }
@@ -1709,6 +1767,7 @@ function renderTaskDetailItem(task) {
   const linkedReplies = Array.isArray(task.linkedReplies) ? task.linkedReplies.filter((item) => item.reply_text) : [];
   const workSummary = task.targetWork?.workTitle || task.targetWork?.contentSummary || task.targetWork?.workText || task.lastError || '暂无作品信息';
   const sourceWork = sourceEvents[0]?.my_work_title || linkedReplies[0]?.joined_work_title || '未识别到你的作品';
+  const sourceSummary = summarizeVisitActions(sourceEvents, task.sourceTypes || [task.sourceType]) || '暂无互动摘要';
   return `
     <article class="detail-card-item journey-card">
       <div class="detail-item-head">
@@ -1719,34 +1778,75 @@ function renderTaskDetailItem(task) {
         <span class="detail-time">${formatTime(task.updatedAt || task.createdAt)}</span>
       </div>
       ${renderVisitTaskTimeline(task, sourceWork, workSummary, sourceEvents, linkedReplies)}
-      <div class="detail-item-block">
-        <label>好友做了什么</label>
-        <p>${escapeHtml(summarizeVisitActions(sourceEvents, task.sourceTypes || [task.sourceType]) || '暂无互动摘要')}</p>
-      </div>
-      <div class="detail-item-block">
-        <label>我的作品</label>
-        <p>${escapeHtml(workSummary)}</p>
-      </div>
-      <div class="detail-item-block">
-        <label>互动详情</label>
-        ${renderVisitSourceEvents(sourceEvents)}
-      </div>
-      <div class="detail-item-block">
-        <label>我给这位好友回复过的话</label>
-        ${renderLinkedReplies(linkedReplies)}
-      </div>
-      <div class="detail-item-block">
-        <label>本次回访消息</label>
-        <textarea id="${textareaId}" class="inline-textarea" placeholder="输入回访评论...">${escapeHtml(task.generatedComment || '')}</textarea>
-      </div>
-      <div class="task-status-line">
-        <span>点赞：${escapeHtml(task.likeStatus || 'pending')}</span>
-        <span>评论：${escapeHtml(task.commentStatus || 'pending')}</span>
-        <span>状态：${escapeHtml(task.status || '-')}</span>
-      </div>
-      <div class="item-actions">
-        <button class="mini-btn primary" onclick="approveTask(${task.id})"><i class="fa-solid fa-floppy-disk"></i> 保存待执行</button>
-        <button class="mini-btn ghost" onclick="skipTask(${task.id})"><i class="fa-solid fa-circle-xmark"></i> 跳过</button>
+      <div class="journey-grid">
+        <section class="journey-panel journey-source">
+          <div class="journey-panel-head">
+            <span class="journey-step">1</span>
+            <div>
+              <strong>源互动</strong>
+              <p>${escapeHtml(sourceWork)}</p>
+            </div>
+          </div>
+          <div class="journey-panel-body">
+            <div class="journey-kpi-grid">
+              <div class="journey-kpi">
+                <label>互动摘要</label>
+                <strong>${escapeHtml(sourceSummary)}</strong>
+                <small>${escapeHtml(task.userName || '未知用户')}</small>
+              </div>
+              <div class="journey-kpi">
+                <label>原地回应</label>
+                <strong>${linkedReplies.length ? '已找到回评记录' : '没有找到回评记录'}</strong>
+                <small>${escapeHtml(linkedReplies[0]?.replied_at ? formatTime(linkedReplies[0].replied_at) : '当前没有回评时间')}</small>
+              </div>
+            </div>
+            <div class="detail-rich-text">
+              <label>互动详情</label>
+              ${renderVisitSourceEvents(sourceEvents)}
+            </div>
+            <div class="detail-rich-text">
+              <label>我给这位好友回复过的话</label>
+              ${renderLinkedReplies(linkedReplies)}
+            </div>
+          </div>
+        </section>
+
+        <section class="journey-panel journey-target">
+          <div class="journey-panel-head">
+            <span class="journey-step">2</span>
+            <div>
+              <strong>回访执行</strong>
+              <p>${escapeHtml(workSummary)}</p>
+            </div>
+          </div>
+          <div class="journey-panel-body">
+            <div class="journey-kpi-grid">
+              <div class="journey-kpi">
+                <label>点赞</label>
+                <strong>${escapeHtml(humanizeLikeStatus(task.likeStatus))}</strong>
+                <small>${escapeHtml(task.likeStatus || 'pending')}</small>
+              </div>
+              <div class="journey-kpi">
+                <label>评论</label>
+                <strong>${escapeHtml(humanizeCommentStatus(task.commentStatus))}</strong>
+                <small>${escapeHtml(task.commentStatus || 'pending')}</small>
+              </div>
+            </div>
+            <div class="detail-rich-text">
+              <label>本次回访消息</label>
+              <textarea id="${textareaId}" class="inline-textarea" placeholder="输入回访评论...">${escapeHtml(task.generatedComment || '')}</textarea>
+            </div>
+            <div class="journey-status-chips">
+              <span class="journey-chip ${getLikeStatusTone(task.likeStatus)}">点赞：${escapeHtml(task.likeStatus || 'pending')}</span>
+              <span class="journey-chip ${getCommentStatusTone(task.commentStatus)}">评论：${escapeHtml(task.commentStatus || 'pending')}</span>
+              <span class="journey-chip ${getTaskStatusTone(task.status)}">状态：${escapeHtml(task.status || '-')}</span>
+            </div>
+            <div class="item-actions">
+              <button class="mini-btn primary" onclick="approveTask(${task.id})"><i class="fa-solid fa-floppy-disk"></i> 保存待执行</button>
+              <button class="mini-btn ghost" onclick="skipTask(${task.id})"><i class="fa-solid fa-circle-xmark"></i> 跳过</button>
+            </div>
+          </div>
+        </section>
       </div>
     </article>
   `;
@@ -1831,7 +1931,7 @@ function renderVisitTaskTimeline(task, sourceWork, revisitWork, sourceEvents, li
 function renderEventDetailItem(event) {
   const badge = getEventBadge(event.event_type);
   return `
-    <article class="detail-card-item">
+    <article class="detail-card-item journey-card">
       <div class="detail-item-head">
         <div>
           <span class="status-badge ${badge.className}">${badge.text}</span>
@@ -1839,21 +1939,55 @@ function renderEventDetailItem(event) {
         </div>
         <span class="detail-time">${escapeHtml(event.event_time_text || '')}${event.created_at ? ` · ${formatTime(event.created_at)}` : ''}</span>
       </div>
-      <div class="detail-item-block">
-        <label>好友做了什么</label>
-        <p>${describeSingleVisitEvent(event)}</p>
-      </div>
-      <div class="detail-item-block">
-        <label>我的作品</label>
-        <p>${escapeHtml(event.my_work_title || event.target_work_id || '暂未识别到作品')}</p>
-      </div>
-      <div class="detail-item-block">
-        <label>互动详情</label>
-        <p>${getEventActionText(event)}</p>
-      </div>
-      <div class="task-status-line">
-        <span>关系：${escapeHtml(event.relation || 'unknown')}</span>
-        <span>状态：${escapeHtml(event.status || 'new')}</span>
+      <div class="journey-grid">
+        <section class="journey-panel journey-source">
+          <div class="journey-panel-head">
+            <span class="journey-step">1</span>
+            <div>
+              <strong>这次互动</strong>
+              <p>${escapeHtml(event.my_work_title || event.target_work_id || '暂未识别到作品')}</p>
+            </div>
+          </div>
+          <div class="journey-panel-body">
+            <div class="journey-kpi-grid">
+              <div class="journey-kpi">
+                <label>互动类型</label>
+                <strong>${escapeHtml(badge.text)}</strong>
+                <small>${escapeHtml(event.status || 'new')}</small>
+              </div>
+              <div class="journey-kpi">
+                <label>关系</label>
+                <strong>${escapeHtml(event.relation || 'unknown')}</strong>
+                <small>${escapeHtml(event.actor_name || '未知用户')}</small>
+              </div>
+            </div>
+            <div class="detail-rich-text">
+              <label>好友做了什么</label>
+              <p>${escapeHtml(describeSingleVisitEvent(event))}</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="journey-panel journey-target">
+          <div class="journey-panel-head">
+            <span class="journey-step">2</span>
+            <div>
+              <strong>记录细节</strong>
+              <p>${escapeHtml(event.event_time_text || '等待后续处理')}</p>
+            </div>
+          </div>
+          <div class="journey-panel-body">
+            <div class="detail-rich-text">
+              <label>互动详情</label>
+              <p>${getEventActionText(event)}</p>
+            </div>
+            <div class="journey-status-chips">
+              <span class="journey-chip ${badge.className}">类型：${escapeHtml(badge.text)}</span>
+              <span class="journey-chip muted">关系：${escapeHtml(event.relation || 'unknown')}</span>
+              <span class="journey-chip muted">状态：${escapeHtml(event.status || 'new')}</span>
+            </div>
+          </div>
+        </section>
       </div>
     </article>
   `;
