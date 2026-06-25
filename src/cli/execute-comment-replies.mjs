@@ -678,6 +678,23 @@ function summarizeViewportTimeRange(visibleCandidates = []) {
   };
 }
 
+function distanceFromTimeRangeToTarget(range, targetMs) {
+  if (!range || !Number.isFinite(targetMs)) return null;
+  if (targetMs >= range.oldestMs && targetMs <= range.newestMs) return 0;
+  return Math.min(
+    Math.abs(targetMs - range.newestMs),
+    Math.abs(targetMs - range.oldestMs),
+  );
+}
+
+function closestDistanceFromTimeRange(range, targetTimes = []) {
+  const distances = (targetTimes || [])
+    .map(targetMs => distanceFromTimeRangeToTarget(range, targetMs))
+    .filter(distance => Number.isFinite(distance));
+  if (distances.length === 0) return null;
+  return Math.min(...distances);
+}
+
 function shouldStartRollbackByTime(pendingItems = [], visibleCandidates = [], lastViewportTimeRange = null) {
   const currentRange = summarizeViewportTimeRange(visibleCandidates);
   if (!currentRange || !lastViewportTimeRange) {
@@ -691,14 +708,25 @@ function shouldStartRollbackByTime(pendingItems = [], visibleCandidates = [], la
     return { shouldRollback: false, currentRange };
   }
 
+  const currentClosestDistanceMs = closestDistanceFromTimeRange(currentRange, pendingTimes);
+  const lastClosestDistanceMs = closestDistanceFromTimeRange(lastViewportTimeRange, pendingTimes);
+  const minMeaningfulDriftMs = 60 * 1000;
+  const movingFarther =
+    Number.isFinite(currentClosestDistanceMs) &&
+    Number.isFinite(lastClosestDistanceMs) &&
+    currentClosestDistanceMs > lastClosestDistanceMs + minMeaningfulDriftMs;
+
   const overshot = pendingTimes.some(targetMs => currentRange.newestMs < targetMs);
   const movingOlder =
     currentRange.newestMs < lastViewportTimeRange.newestMs &&
     currentRange.oldestMs < lastViewportTimeRange.oldestMs;
 
   return {
-    shouldRollback: overshot && movingOlder,
-    currentRange,
+    shouldRollback: movingFarther || (overshot && movingOlder),
+    currentRange: {
+      ...currentRange,
+      closestDistanceMs: currentClosestDistanceMs,
+    },
   };
 }
 
