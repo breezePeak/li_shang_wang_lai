@@ -415,8 +415,10 @@ async function main() {
       }
 
       if (result.resolvedWork) {
-        updateReturnVisitTask(task.taskId, {
+        const resolvedAt = new Date().toISOString();
+        const patch = {
           generatedComment: result.generatedComment || task.generatedComment || null,
+          collectedAt: resolvedAt,
           targetWork: {
             workId: result.resolvedWork.workId,
             workUrl: result.resolvedWork.workUrl,
@@ -437,7 +439,11 @@ async function main() {
             isMultiContent: result.resolvedWork.isMultiContent,
           },
           referenceComments: result.resolvedWork.referenceComments || [],
-        });
+        };
+        if (result.generatedComment) {
+          patch.generatedAt = result.generatedAt || resolvedAt;
+        }
+        updateReturnVisitTask(task.taskId, patch);
       }
 
       if (result.ok && result.status === RETURN_VISIT_STATUS.DONE) {
@@ -457,10 +463,12 @@ async function main() {
         consecutiveFailures = 0;
         log(args.json, '[return-visit:execute] task done');
       } else if (result.ok && result.dryRun) {
+        const generatedAt = new Date().toISOString();
         updateReturnVisitTask(task.taskId, {
           status: RETURN_VISIT_STATUS.PENDING_EXECUTE,
           likeStatus: result.likeStatus,
           commentStatus: result.commentStatus,
+          generatedAt,
         });
         taskResults.push({
           taskId: task.taskId,

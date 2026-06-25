@@ -114,6 +114,9 @@ function formatTaskRow(db, row) {
     linkedReplies: loadLinkedReplies(db, sourceEventIds),
     likeStatus: row.like_status,
     commentStatus: row.comment_status,
+    collectedAt: row.collected_at,
+    generatedAt: row.generated_at,
+    executedAt: row.executed_at,
     retryCount: row.retry_count,
     lastError: row.last_error,
     createdAt: row.created_at,
@@ -453,9 +456,9 @@ app.post('/api/revisit-tasks/:id/approve', (req, res) => {
 
     const result = db.prepare(`
       UPDATE return_visit_tasks 
-      SET generated_comment = ?, status = 'pending_execute', comment_status = 'generated', updated_at = ?, retry_count = 0, last_error = null
+      SET generated_comment = ?, status = 'pending_execute', comment_status = 'generated', generated_at = ?, updated_at = ?, retry_count = 0, last_error = null
       WHERE id = ?
-    `).run(commentText.trim(), now, id);
+    `).run(commentText.trim(), now, now, id);
 
     if (result.changes === 0) {
       return res.status(404).json({ ok: false, error: '未找到该任务' });
@@ -502,19 +505,19 @@ app.post('/api/revisit-tasks/bulk-approve', (req, res) => {
 
   try {
     const db = getDb();
-    const now = new Date().toISOString();
 
     const bulkApprove = db.transaction((taskList) => {
       const updateStmt = db.prepare(`
         UPDATE return_visit_tasks 
-        SET generated_comment = ?, status = 'pending_execute', comment_status = 'generated', updated_at = ?, retry_count = 0, last_error = null
+        SET generated_comment = ?, status = 'pending_execute', comment_status = 'generated', generated_at = ?, updated_at = ?, retry_count = 0, last_error = null
         WHERE id = ?
       `);
 
       let updatedCount = 0;
       for (const task of taskList) {
         if (task.id && task.commentText && task.commentText.trim()) {
-          const result = updateStmt.run(task.commentText.trim(), now, task.id);
+          const taskNow = new Date().toISOString();
+          const result = updateStmt.run(task.commentText.trim(), taskNow, taskNow, task.id);
           if (result.changes > 0) {
             updatedCount++;
           }

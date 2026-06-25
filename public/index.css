@@ -36,7 +36,8 @@
 html,
 body {
   margin: 0;
-  min-height: 100%;
+  width: 100%;
+  height: 100%;
 }
 
 body {
@@ -47,6 +48,7 @@ body {
     radial-gradient(circle at 88% 12%, rgba(200, 136, 38, 0.16), transparent 22%),
     radial-gradient(circle at 76% 70%, rgba(40, 122, 95, 0.10), transparent 22%),
     linear-gradient(180deg, #fcf7ef 0%, #efe4d2 52%, #e7dfd3 100%);
+  overflow: hidden;
 }
 
 button,
@@ -92,7 +94,11 @@ textarea {
 .app-shell {
   position: relative;
   width: min(1480px, calc(100vw - 48px));
-  margin: 22px auto 28px;
+  height: calc(100vh - 44px);
+  margin: 22px auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .drawer-backdrop {
@@ -117,6 +123,7 @@ textarea {
   justify-content: space-between;
   gap: 24px;
   margin-bottom: 22px;
+  flex: 0 0 auto;
 }
 
 .brand-block {
@@ -286,11 +293,12 @@ textarea {
 
 .workspace-shell {
   display: block;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .flow-panel,
 .stage-drawer {
-  min-height: 760px;
   border-radius: var(--radius-xl);
   border: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(255, 253, 248, 0.90), rgba(251, 245, 235, 0.82));
@@ -299,8 +307,12 @@ textarea {
 }
 
 .flow-panel {
+  height: 100%;
+  min-height: 0;
   padding: 18px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .panel-head {
@@ -334,10 +346,11 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  flex: 0 0 auto;
 }
 
 .action-focus {
-  padding: 18px;
+  padding: 14px;
   border-radius: 26px;
   border: 1px solid rgba(40, 53, 63, 0.08);
   background:
@@ -346,7 +359,7 @@ textarea {
   box-shadow: var(--shadow-soft);
   display: grid;
   grid-template-columns: minmax(0, 1.16fr) minmax(320px, 0.84fr);
-  gap: 12px;
+  gap: 10px;
   align-items: start;
 }
 
@@ -469,8 +482,8 @@ textarea {
 }
 
 .action-card {
-  min-height: 108px;
-  padding: 14px;
+  min-height: 94px;
+  padding: 12px;
   border-radius: 18px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -492,8 +505,8 @@ textarea {
 }
 
 .action-card-count {
-  min-width: 42px;
-  height: 42px;
+  min-width: 38px;
+  height: 38px;
   border-radius: 999px;
   display: grid;
   place-items: center;
@@ -581,11 +594,13 @@ textarea {
 }
 
 .ops-overview {
-  margin-top: 24px;
-  padding-top: 24px;
+  margin-top: 18px;
+  padding-top: 18px;
   border-top: 1px solid var(--line);
   display: grid;
   gap: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .overview-head,
@@ -617,7 +632,9 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.05fr) minmax(300px, 0.92fr);
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
+  min-height: 0;
+  height: 100%;
 }
 
 .overview-card {
@@ -630,17 +647,21 @@ textarea {
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.32), transparent 34%);
   box-shadow: var(--shadow-soft);
   display: grid;
-  grid-template-rows: auto auto;
+  grid-template-rows: auto minmax(0, 1fr);
   align-content: start;
   gap: 14px;
+  min-height: 0;
+  height: 100%;
 }
 
 .overview-table-wrap {
   min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .overview-card-head {
-  min-height: 86px;
+  min-height: 72px;
   align-items: flex-start;
 }
 
@@ -653,6 +674,7 @@ textarea {
 .overview-table {
   display: grid;
   gap: 8px;
+  align-content: start;
 }
 
 .overview-table-head,
@@ -671,7 +693,7 @@ textarea {
 
 .overview-row {
   width: 100%;
-  min-height: 96px;
+  min-height: 86px;
   padding: 12px 12px;
   border: 1px solid rgba(48, 63, 57, 0.08);
   border-radius: 16px;
@@ -852,14 +874,20 @@ textarea {
 
 .lane-track::-webkit-scrollbar,
 .works-list::-webkit-scrollbar,
-.item-list::-webkit-scrollbar {
+.item-list::-webkit-scrollbar,
+.overview-table-wrap::-webkit-scrollbar,
+.journey-note::-webkit-scrollbar,
+.journey-event-list::-webkit-scrollbar {
   height: 8px;
   width: 8px;
 }
 
 .lane-track::-webkit-scrollbar-thumb,
 .works-list::-webkit-scrollbar-thumb,
-.item-list::-webkit-scrollbar-thumb {
+.item-list::-webkit-scrollbar-thumb,
+.overview-table-wrap::-webkit-scrollbar-thumb,
+.journey-note::-webkit-scrollbar-thumb,
+.journey-event-list::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(66, 78, 74, 0.16);
 }
@@ -1350,7 +1378,7 @@ textarea {
   inset: 0;
   width: 100%;
   min-width: 0;
-  padding: 18px 20px 20px;
+  padding: 14px 18px 18px;
   border-left: none;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 249, 241, 0.92)),
@@ -1358,7 +1386,7 @@ textarea {
   box-shadow: 0 28px 60px rgba(24, 35, 43, 0.22);
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
   opacity: 0;
   transform: translateX(100%);
   pointer-events: none;
@@ -1423,7 +1451,7 @@ textarea {
 .detail-title-inline h4 {
   min-width: 0;
   margin: 0;
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1.25;
 }
 
@@ -1469,45 +1497,49 @@ textarea {
 }
 
 .journey-card {
-  gap: 14px;
-  padding: 14px;
+  gap: 10px;
+  padding: 12px;
 }
 
 .journey-timeline {
   display: grid;
-  gap: 0;
-  padding: 6px 4px 0 4px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0;
 }
 
 .journey-timeline-item {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 8px;
   position: relative;
-  padding: 0 0 14px;
+  padding: 9px;
+  border-radius: 14px;
+  border: 1px solid rgba(48, 63, 57, 0.06);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .journey-timeline-item:last-child {
-  padding-bottom: 0;
+  padding-bottom: 9px;
 }
 
 .journey-timeline-item:not(:last-child)::after {
   content: '';
   position: absolute;
-  left: 11px;
-  top: 22px;
-  bottom: 0;
-  width: 2px;
-  background: linear-gradient(180deg, rgba(31, 111, 130, 0.22), rgba(109, 119, 111, 0.08));
+  left: calc(100% - 2px);
+  top: 18px;
+  width: 12px;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(31, 111, 130, 0.22), rgba(109, 119, 111, 0.08));
 }
 
 .journey-dot {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   border-radius: 999px;
   position: relative;
   z-index: 1;
-  border: 4px solid rgba(255, 255, 255, 0.94);
+  border: 3px solid rgba(255, 255, 255, 0.94);
   box-shadow: 0 6px 18px rgba(24, 35, 43, 0.10);
   background: rgba(109, 119, 111, 0.18);
 }
@@ -1520,41 +1552,47 @@ textarea {
 
 .journey-line-copy {
   min-width: 0;
-  padding: 2px 0 0;
+  padding: 0;
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 .journey-line-copy label {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 9px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .journey-line-copy strong {
-  font-size: 14px;
-  line-height: 1.4;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .journey-line-copy p {
   margin: 0;
   color: var(--muted);
-  line-height: 1.55;
+  line-height: 1.45;
+  font-size: 11px;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .journey-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 10px;
 }
 
 .journey-panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  padding: 12px;
+  padding: 10px;
   border-radius: 16px;
   border: 1px solid rgba(48, 63, 57, 0.08);
 }
@@ -1570,7 +1608,7 @@ textarea {
 .journey-panel-head {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
 }
 
 .journey-panel-head strong,
@@ -1585,7 +1623,15 @@ textarea {
 .journey-note p {
   margin: 0;
   color: var(--muted);
-  line-height: 1.55;
+  line-height: 1.5;
+}
+
+.journey-panel-head p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .journey-step {
@@ -1611,6 +1657,22 @@ textarea {
   gap: 4px;
 }
 
+.journey-summary span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+}
+
+.journey-summary small {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
 .journey-summary.empty {
   padding: 10px 12px;
   border-radius: 12px;
@@ -1620,11 +1682,14 @@ textarea {
 .journey-event-list {
   display: grid;
   gap: 8px;
+  max-height: 150px;
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .journey-event-row,
 .journey-note {
-  padding: 10px 12px;
+  padding: 9px 10px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid rgba(48, 63, 57, 0.06);
@@ -1633,6 +1698,11 @@ textarea {
 .journey-event-row {
   display: grid;
   gap: 4px;
+}
+
+.journey-note {
+  max-height: 132px;
+  overflow: auto;
 }
 
 .journey-event-type,
@@ -1646,7 +1716,7 @@ textarea {
 .journey-status-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .journey-chip {
@@ -1690,6 +1760,11 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.detail-item-block > p {
+  max-height: 138px;
+  overflow: auto;
 }
 
 .detail-item-block label {
@@ -1822,6 +1897,7 @@ textarea {
 
   .overview-grid {
     grid-template-columns: 1fr;
+    overflow: auto;
   }
 
   .topbar {
@@ -1836,12 +1912,40 @@ textarea {
   .journey-grid {
     grid-template-columns: 1fr;
   }
+
+  .journey-timeline {
+    grid-template-columns: 1fr;
+  }
+
+  .journey-timeline-item:not(:last-child)::after {
+    left: 18px;
+    top: 26px;
+    bottom: -8px;
+    width: 2px;
+    height: auto;
+    background: linear-gradient(180deg, rgba(31, 111, 130, 0.22), rgba(109, 119, 111, 0.08));
+  }
 }
 
 @media (max-width: 760px) {
+  body {
+    overflow: auto;
+  }
+
   .app-shell {
     width: calc(100vw - 20px);
+    height: auto;
+    min-height: calc(100vh - 20px);
     margin: 10px auto 20px;
+  }
+
+  .workspace-shell,
+  .flow-panel {
+    height: auto;
+  }
+
+  .ops-overview {
+    min-height: 680px;
   }
 
   .flow-panel,

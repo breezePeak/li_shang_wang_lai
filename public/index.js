@@ -118,10 +118,6 @@ function renderHeaderStats() {
   setText('hero-collected-total', statsData.collectedTotal || 0);
   setText('hero-total-tasks', waitingCount);
   setText('hero-error-total', errorCount);
-
-  setText('summary-collected-total', statsData.collectedTotal || 0);
-  setText('summary-reply-total', pendingComments.length);
-  setText('summary-visit-total', reviewTasks.length + unhandledEvents.length);
 }
 
 function buildStageMeta() {
@@ -354,7 +350,7 @@ function renderScanScheduleBoard() {
       <span>待回评</span>
       <span>待回访</span>
     </div>
-    ${scanSchedules.slice(0, 8).map((batch) => `
+    ${scanSchedules.map((batch) => `
       <button class="overview-row scan-accent" onclick="openScanBatch('${encodeURIComponent(batch.key)}')">
         <div>
           <strong>${escapeHtml(formatTime(batch.scannedEndAt || batch.scannedStartAt) || batch.key)}</strong>
@@ -1006,7 +1002,7 @@ function buildVisitScheduleRows() {
 function buildVisitScheduleGroups() {
   const batches = clusterItemsByExecutionWindow(
     reviewTasks,
-    (task) => task.updatedAt || task.createdAt || '',
+    (task) => getVisitBatchTime(task),
     'visit-batch'
   );
 
@@ -1028,7 +1024,7 @@ function buildVisitScheduleGroups() {
 
     for (const task of batch.items) {
       const status = String(task.status || '');
-      const timeValue = task.updatedAt || task.createdAt || '';
+      const timeValue = getVisitBatchTime(task);
       const personKey = String(task.userProfileUrl || task.identityKey || task.userName || task.id);
       group.count += 1;
       group.personKeys.add(personKey);
@@ -1092,6 +1088,10 @@ function clusterItemsByExecutionWindow(items, getTimeValue, keyPrefix) {
 
 function getReplyBatchTime(comment) {
   return comment.replied_at || comment.last_seen_at || comment.first_seen_at || '';
+}
+
+function getVisitBatchTime(task) {
+  return task?.executedAt || task?.generatedAt || task?.collectedAt || task?.updatedAt || task?.createdAt || '';
 }
 
 function buildCollectGroups() {
