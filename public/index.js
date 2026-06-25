@@ -286,7 +286,6 @@ function renderFlowGraph() {
         <div>
           <span class="lane-tag">Action Board</span>
           <h3>现在要处理什么</h3>
-          <p>${totalActionCount > 0 ? `当前还有 ${totalActionCount} 项需要你推进，先处理数量不为 0 的卡片。` : '当前没有待处理项，下面时间表主要用于回看批次。'} </p>
         </div>
       </div>
 
