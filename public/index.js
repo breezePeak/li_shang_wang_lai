@@ -922,7 +922,7 @@ function buildReplyScheduleDataset() {
     kicker: 'Reply Schedule',
     shortLabel: '回评批次',
     title: '回评时间表',
-    subtitle: '按回评时间批次汇总，点开就能看到当批次下的评论与回复明细。',
+    subtitle: '已完成按真实回评时间汇总，待处理按评论发生时间汇总。',
     listTitle: '回评批次',
     countUnit: '批回评',
     metrics: [
@@ -1124,7 +1124,72 @@ function clusterItemsByExecutionWindow(items, getTimeValue, keyPrefix) {
 }
 
 function getReplyBatchTime(comment) {
-  return comment.replied_at || comment.last_seen_at || comment.first_seen_at || '';
+  const status = String(comment?.reply_status || '').trim();
+  if (['succeeded', 'manually_replied'].includes(status)) {
+    return comment.replied_at || getReplyInteractionTime(comment) || comment.last_seen_at || comment.first_seen_at || comment.created_at || '';
+  }
+  return getReplyInteractionTime(comment) || comment.first_seen_at || comment.created_at || comment.last_seen_at || '';
+}
+
+function getReplyInteractionTime(comment) {
+  const eventTimeText = String(comment?.event_time_text || '').trim();
+  if (!eventTimeText) return '';
+  const anchor = comment?.first_seen_at || comment?.created_at || comment?.last_seen_at || '';
+  const ms = parseDouyinEventTimeText(eventTimeText, anchor);
+  return Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : '';
+}
+
+function parseDouyinEventTimeText(text, anchorValue = '') {
+  const value = String(text || '').trim();
+  if (!value) return 0;
+  const anchorMs = parseDateValue(anchorValue) || Date.now();
+  const anchor = new Date(anchorMs);
+  const cleaned = value.split('·')[0].trim();
+
+  const fullDate = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (fullDate) {
+    return new Date(
+      Number(fullDate[1]),
+      Number(fullDate[2]) - 1,
+      Number(fullDate[3]),
+      Number(fullDate[4] || 0),
+      Number(fullDate[5] || 0),
+      Number(fullDate[6] || 0),
+      0,
+    ).getTime();
+  }
+
+  if (/^刚刚/.test(cleaned)) return anchorMs;
+
+  const sec = cleaned.match(/^(\d+)秒前$/);
+  if (sec) return anchorMs - Number(sec[1]) * 1000;
+  const min = cleaned.match(/^(\d+)分钟前$/);
+  if (min) return anchorMs - Number(min[1]) * 60 * 1000;
+  const hour = cleaned.match(/^(\d+)小时前$/);
+  if (hour) return anchorMs - Number(hour[1]) * 60 * 60 * 1000;
+  const day = cleaned.match(/^(\d+)天前$/);
+  if (day) return anchorMs - Number(day[1]) * 24 * 60 * 60 * 1000;
+
+  const dayWithClock = cleaned.match(/^(昨天|前天)\s*(\d{1,2}):(\d{2})$/);
+  if (dayWithClock) {
+    const days = dayWithClock[1] === '昨天' ? 1 : 2;
+    const dt = new Date(anchorMs - days * 24 * 60 * 60 * 1000);
+    dt.setHours(Number(dayWithClock[2]), Number(dayWithClock[3]), 0, 0);
+    return dt.getTime();
+  }
+
+  const monthDayWithClock = cleaned.match(/^(\d{1,2})[-月](\d{1,2})(?:日)?(?:\s+(\d{1,2}):(\d{2}))?$/);
+  if (monthDayWithClock) {
+    const dt = new Date(anchor);
+    dt.setMonth(Number(monthDayWithClock[1]) - 1, Number(monthDayWithClock[2]));
+    dt.setHours(Number(monthDayWithClock[3] || 0), Number(monthDayWithClock[4] || 0), 0, 0);
+    return dt.getTime();
+  }
+
+  const numericMs = parseDateValue(cleaned);
+  if (numericMs) return numericMs;
+
+  return 0;
 }
 
 function getVisitBatchTime(task) {

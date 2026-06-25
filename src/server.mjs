@@ -574,7 +574,7 @@ app.get('/api/pending-comments', (req, res) => {
   try {
     const db = getDb();
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const offset = (page - 1) * limit;
     const statusParam = req.query.status || '';
     const defaultStatuses = ['pending', 'blocked', 'sent_unverified', 'skipped', 'succeeded'];
@@ -604,7 +604,9 @@ app.get('/api/pending-comments', (req, res) => {
         AND wc.modal_id != ''
         AND w_by_modal.modal_id = wc.modal_id
       WHERE wc.reply_status IN (${placeholders})
-      ORDER BY wc.last_seen_at DESC
+      ORDER BY
+        COALESCE(wc.replied_at, wc.first_seen_at, wc.created_at, wc.last_seen_at) DESC,
+        wc.id DESC
       LIMIT ? OFFSET ?
     `).all(...allowed, limit, offset);
 
