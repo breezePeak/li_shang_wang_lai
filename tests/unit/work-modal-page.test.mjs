@@ -995,6 +995,21 @@ describe('parseDouyinTimeText', () => {
     expect(iso).toBeTruthy();
   });
 
+  it('支持 1周前 和 1月前', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-25T22:00:00+08:00'));
+    try {
+      const weekIso = parseDouyinTimeText('1周前·北京');
+      const monthIso = parseDouyinTimeText('1月前');
+      expect(weekIso).toBeTruthy();
+      expect(monthIso).toBeTruthy();
+      expect(new Date(weekIso).getDate()).toBe(18);
+      expect(new Date(monthIso).getMonth() + 1).toBe(5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('支持 10分钟前', () => {
     const iso = parseDouyinTimeText('10分钟前');
     expect(iso).toBeTruthy();

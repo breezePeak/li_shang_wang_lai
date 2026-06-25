@@ -103,6 +103,10 @@ export function buildWorkCommentItemsFromDbRows(rows = []) {
     actorProfileKey: row.actor_profile_key || '',
     commentText: row.comment_text || '',
     eventTimeText: row.event_time_text || '',
+    firstSeenAt: row.first_seen_at || '',
+    lastSeenAt: row.last_seen_at || '',
+    repliedAt: row.replied_at || '',
+    createdAt: row.created_at || '',
     targetCommentId: extractTargetCommentId({}, row),
     raw_comment_json: row.raw_comment_json || '',
   }));
@@ -528,6 +532,10 @@ export function validateWorkCommentItem(item) {
     status: row.reply_status,
     rowId: row.id,
     rawCommentJson: row.raw_comment_json || '',
+    firstSeenAt: row.first_seen_at || item.firstSeenAt || '',
+    lastSeenAt: row.last_seen_at || item.lastSeenAt || '',
+    repliedAt: row.replied_at || item.repliedAt || '',
+    createdAt: row.created_at || item.createdAt || '',
     homepageUrl,
     homepage_url: homepageUrl,
     authorProfileUrl: homepageUrl,
@@ -660,16 +668,68 @@ function getCandidateSignature(candidates = []) {
     .join('|');
 }
 
-function toComparableTimestamp(text) {
+function getUnixTimestampMs(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  if (num > 1000000000000) return num;
+  if (num > 1000000000) return num * 1000;
+  return null;
+}
+
+function parseRawCommentCreateTime(rawCommentJson = '') {
+  if (!rawCommentJson) return null;
+  try {
+    const parsed = JSON.parse(rawCommentJson);
+    return getUnixTimestampMs(
+      parsed?.comment?.comment?.create_time ??
+      parsed?.comment?.create_time ??
+      parsed?.create_time ??
+      parsed?.comment?.comment?.createTime ??
+      parsed?.comment?.createTime ??
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function getApiCommentTimestampMs(apiComment = null) {
+  if (!apiComment) return null;
+  const unixMs = getUnixTimestampMs(apiComment.createTime ?? apiComment.create_time);
+  if (unixMs) return unixMs;
+  const parsed = Date.parse(apiComment.eventCreatedAt || apiComment.createdAt || '');
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toComparableTimestamp(text, { anchorAt = '' } = {}) {
   if (!text) return null;
-  const iso = parseDouyinTimeText(text);
+  const anchorMs = Date.parse(anchorAt || '');
+  const iso = parseDouyinTimeText(text, Number.isFinite(anchorMs) ? { now: new Date(anchorMs) } : {});
   const ms = Date.parse(iso || '');
   return Number.isFinite(ms) ? ms : null;
 }
 
-function summarizeViewportTimeRange(visibleCandidates = []) {
+function getCandidateTimestampMs(candidate = {}, commentListCollector = null) {
+  const apiComment = candidate?.cid && commentListCollector?.getByCid
+    ? commentListCollector.getByCid(candidate.cid)
+    : null;
+  return getApiCommentTimestampMs(apiComment) ?? toComparableTimestamp(candidate?.timeText || '');
+}
+
+function getPendingItemTimestampMs(item = {}, commentListCollector = null) {
+  const apiComment = item?.targetCommentId && commentListCollector?.getByCid
+    ? commentListCollector.getByCid(item.targetCommentId)
+    : null;
+  return getApiCommentTimestampMs(apiComment)
+    ?? parseRawCommentCreateTime(item.rawCommentJson || item.raw_comment_json || '')
+    ?? toComparableTimestamp(item?.eventTimeText || '', {
+      anchorAt: item.firstSeenAt || item.first_seen_at || item.createdAt || item.created_at || item.lastSeenAt || item.last_seen_at || '',
+    });
+}
+
+function summarizeViewportTimeRange(visibleCandidates = [], commentListCollector = null) {
   const timestamps = (visibleCandidates || [])
-    .map(candidate => toComparableTimestamp(candidate?.timeText || ''))
+    .map(candidate => getCandidateTimestampMs(candidate, commentListCollector))
     .filter(ms => Number.isFinite(ms));
   if (timestamps.length === 0) return null;
   return {
@@ -695,14 +755,14 @@ function closestDistanceFromTimeRange(range, targetTimes = []) {
   return Math.min(...distances);
 }
 
-function shouldStartRollbackByTime(pendingItems = [], visibleCandidates = [], lastViewportTimeRange = null) {
-  const currentRange = summarizeViewportTimeRange(visibleCandidates);
+function shouldStartRollbackByTime(pendingItems = [], visibleCandidates = [], lastViewportTimeRange = null, { commentListCollector = null } = {}) {
+  const currentRange = summarizeViewportTimeRange(visibleCandidates, commentListCollector);
   if (!currentRange || !lastViewportTimeRange) {
     return { shouldRollback: false, currentRange };
   }
 
   const pendingTimes = (pendingItems || [])
-    .map(item => toComparableTimestamp(item?.eventTimeText || ''))
+    .map(item => getPendingItemTimestampMs(item, commentListCollector))
     .filter(ms => Number.isFinite(ms));
   if (pendingTimes.length === 0) {
     return { shouldRollback: false, currentRange };
@@ -1064,6 +1124,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       pendingItems,
       visibleCandidates,
       lastViewportTimeRange,
+      { commentListCollector },
     );
     lastViewportTimeRange = rollbackDecision.currentRange || lastViewportTimeRange;
 

@@ -557,43 +557,71 @@ export async function clickReplySendControl(page) {
   });
 }
 
-export function parseDouyinTimeText(text) {
+export function parseDouyinTimeText(text, { now = new Date() } = {}) {
   if (!text) return null;
-  const now = new Date();
-  const trimmed = String(text || '').trim();
+  const anchor = now instanceof Date ? now : new Date(now);
+  const trimmed = String(text || '').trim().split('·')[0].trim();
+  const numeric = Number(trimmed);
+  if (Number.isFinite(numeric) && numeric > 1000000000) {
+    return new Date(numeric < 1000000000000 ? numeric * 1000 : numeric).toISOString();
+  }
+  const full = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (full) {
+    return new Date(
+      parseInt(full[1], 10),
+      parseInt(full[2], 10) - 1,
+      parseInt(full[3], 10),
+      parseInt(full[4] || '0', 10),
+      parseInt(full[5] || '0', 10),
+      parseInt(full[6] || '0', 10),
+      0,
+    ).toISOString();
+  }
   const weekdayMatch = trimmed.match(/^(?:星期|周)([一二三四五六日天])$/);
   if (weekdayMatch) {
     const weekdayMap = { '日': 0, '天': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6 };
     const targetDay = weekdayMap[weekdayMatch[1]];
-    const currentDay = now.getDay();
+    const currentDay = anchor.getDay();
     let diffDays = (currentDay - targetDay + 7) % 7;
     if (diffDays === 0) diffDays = 7;
-    return new Date(now.getTime() - diffDays * 86400000).toISOString();
+    return new Date(anchor.getTime() - diffDays * 86400000).toISOString();
   }
   const dayWithClock = trimmed.match(/^(昨天|前天)\s*(\d{1,2}):(\d{2})$/);
   if (dayWithClock) {
     const days = dayWithClock[1] === '昨天' ? 1 : 2;
-    const dt = new Date(now.getTime() - days * 86400000);
+    const dt = new Date(anchor.getTime() - days * 86400000);
     dt.setHours(parseInt(dayWithClock[2], 10), parseInt(dayWithClock[3], 10), 0, 0);
     return dt.toISOString();
   }
-  const m = text.match(/(\d+)天前/);
-  if (m) return new Date(now.getTime() - parseInt(m[1]) * 86400000).toISOString();
-  const h = text.match(/(\d+)小时前/);
-  if (h) return new Date(now.getTime() - parseInt(h[1]) * 3600000).toISOString();
-  const min = text.match(/(\d+)分钟前/);
-  if (min) return new Date(now.getTime() - parseInt(min[1]) * 60000).toISOString();
-  const sec = text.match(/(\d+)秒前/);
-  if (sec) return new Date(now.getTime() - parseInt(sec[1]) * 1000).toISOString();
-  if (text.startsWith('刚刚')) return now.toISOString();
-  if (text.startsWith('昨天')) return new Date(now.getTime() - 86400000).toISOString();
-  if (text.startsWith('前天')) return new Date(now.getTime() - 2 * 86400000).toISOString();
-  const md = text.match(/(\d{1,2})月(\d{1,2})日/);
-  if (md) return new Date(now.getFullYear(), parseInt(md[1]) - 1, parseInt(md[2])).toISOString();
-  const dash = text.match(/(\d{2})-(\d{2})/);
-  if (dash) return new Date(now.getFullYear(), parseInt(dash[1]) - 1, parseInt(dash[2])).toISOString();
-  const full = text.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if (full) return new Date(parseInt(full[1]), parseInt(full[2]) - 1, parseInt(full[3])).toISOString();
+  const m = trimmed.match(/(\d+)天前/);
+  if (m) return new Date(anchor.getTime() - parseInt(m[1], 10) * 86400000).toISOString();
+  const w = trimmed.match(/(\d+)(?:周|星期)前/);
+  if (w) return new Date(anchor.getTime() - parseInt(w[1], 10) * 7 * 86400000).toISOString();
+  const month = trimmed.match(/(\d+)个?月前/);
+  if (month) {
+    const dt = new Date(anchor);
+    dt.setMonth(dt.getMonth() - parseInt(month[1], 10));
+    return dt.toISOString();
+  }
+  const year = trimmed.match(/(\d+)年前/);
+  if (year) {
+    const dt = new Date(anchor);
+    dt.setFullYear(dt.getFullYear() - parseInt(year[1], 10));
+    return dt.toISOString();
+  }
+  const h = trimmed.match(/(\d+)小时前/);
+  if (h) return new Date(anchor.getTime() - parseInt(h[1], 10) * 3600000).toISOString();
+  const min = trimmed.match(/(\d+)分钟前/);
+  if (min) return new Date(anchor.getTime() - parseInt(min[1], 10) * 60000).toISOString();
+  const sec = trimmed.match(/(\d+)秒前/);
+  if (sec) return new Date(anchor.getTime() - parseInt(sec[1], 10) * 1000).toISOString();
+  if (trimmed.startsWith('刚刚')) return anchor.toISOString();
+  if (trimmed.startsWith('昨天')) return new Date(anchor.getTime() - 86400000).toISOString();
+  if (trimmed.startsWith('前天')) return new Date(anchor.getTime() - 2 * 86400000).toISOString();
+  const md = trimmed.match(/^(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2}):(\d{2}))?$/);
+  if (md) return new Date(anchor.getFullYear(), parseInt(md[1], 10) - 1, parseInt(md[2], 10), parseInt(md[3] || '0', 10), parseInt(md[4] || '0', 10)).toISOString();
+  const dash = trimmed.match(/^(\d{1,2})-(\d{1,2})(?:\s*(\d{1,2}):(\d{2}))?$/);
+  if (dash) return new Date(anchor.getFullYear(), parseInt(dash[1], 10) - 1, parseInt(dash[2], 10), parseInt(dash[3] || '0', 10), parseInt(dash[4] || '0', 10)).toISOString();
   return null;
 }
 

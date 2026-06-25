@@ -1013,6 +1013,56 @@ describe('comments:execute single-pass per work', () => {
     expect(results.some(item => item.status === 'succeeded')).toBe(true);
   });
 
+  it('滚动方向优先用 comment-list API 的 createTime，不被 DOM 的 1月前 文案拖死', async () => {
+    const page = createFakePage();
+    let collectRound = 0;
+    const directions = [];
+    const apiByCid = new Map([
+      ['visible-near', { commentId: 'visible-near', createTime: 1780002000 }],
+      ['visible-far', { commentId: 'visible-far', createTime: 1780000000 }],
+    ]);
+
+    const results = await executeSinglePassForWorkGroup(page, [
+      {
+        commentId: 1,
+        replyText: 'r1',
+        targetCommentId: 'target-cid',
+        actorName: 'u1',
+        commentText: '目标评论',
+        eventTimeText: '2小时前',
+        rawCommentJson: JSON.stringify({ comment: { comment: { create_time: 1780002050 } } }),
+      },
+    ], {
+      getByCid: (cid) => apiByCid.get(cid) || null,
+      getStats: () => ({ hasMore: 1 }),
+    }, {
+      collectCandidates: vi.fn(async () => {
+        collectRound++;
+        if (collectRound === 1) {
+          return { ok: true, candidates: [{ domIndex: 0, cid: 'visible-near', actorName: 'u2', commentText: '近一点', timeText: '1月前', hasReplyButton: true }] };
+        }
+        if (collectRound === 2) {
+          return { ok: true, candidates: [{ domIndex: 0, cid: 'visible-far', actorName: 'u3', commentText: '远很多', timeText: '1月前', hasReplyButton: true }] };
+        }
+        return { ok: true, candidates: [{ domIndex: 0, cid: 'target-cid', actorName: 'u1', commentText: '目标评论', timeText: '2小时前', hasReplyButton: true }] };
+      }),
+      scrollOnce: vi.fn(async (_page, options = {}) => {
+        directions.push(options.direction || 'down');
+        return { ok: true, atStart: false };
+      }),
+      openMatchedReplyBox: vi.fn(async () => ({ ok: true })),
+      fillReply: vi.fn(async () => ({ ok: true })),
+      clickSend: vi.fn(async () => ({ ok: true })),
+      verifyReply: vi.fn(async () => ({ ok: true })),
+      saveSucceeded: vi.fn(),
+      saveSentUnverified: vi.fn(),
+      onResult: vi.fn(),
+    });
+
+    expect(directions).toEqual(['down', 'up']);
+    expect(results.some(item => item.status === 'succeeded')).toBe(true);
+  });
+
   it('回复框打不开属于可重试失败，保留 pending 状态而不是 blocked', async () => {
     const page = createFakePage();
     const saveBlocked = vi.fn();
