@@ -9,7 +9,7 @@ export const REPLY_TEMPLATES = {
   ],
   encouragement: [
     '谢谢鼓励，继续努力～',
-    '感谢关注，持续更新中～',
+    '感谢关注，我继续打磨～',
     '有你们的支持真好～',
   ],
   useful: [

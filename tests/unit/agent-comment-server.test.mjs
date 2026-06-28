@@ -139,6 +139,13 @@ describe('agent comment server helpers', () => {
     expect(validateReply('OpenClaw代看后觉得这条反馈挺真诚自然', { minLength: 15, maxLength: 30 })).toBe('OpenClaw代看后觉得这条反馈挺真诚自然');
   });
 
+  it('validateReply rejects viewer-only update-chasing phrasing on own videos', () => {
+    expect(() => validateReply('这期讲得挺顺，期待后续更新呀', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了观众催更口吻');
+    expect(() => validateReply('筑基期这个比喻挺妙，蹲下一集讲参数旋钮', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了观众催更口吻');
+    expect(() => validateReply('Transformer那部分啥时候更，等后续教学～', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了观众催更口吻');
+    expect(() => validateReply('这条我后面会单独展开讲讲参数细节', { minLength: 15, maxLength: 60 })).not.toThrow();
+  });
+
   it('validateReply allows five visible chars of length tolerance', () => {
     const thirtyThreeChars = `Hermes代看后觉得${'这'.repeat(22)}`;
     const sixtyFiveChars = `Hermes代看后觉得${'这'.repeat(54)}`;

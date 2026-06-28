@@ -54,12 +54,17 @@ export function hasLowQualityReplyText(text = '') {
   return /代班|已阅|留言收到|感谢互动|test留言|测试留言/i.test(String(text || '')) || /^\s*\d{3,}\s*$/.test(String(text || ''));
 }
 
+export function hasViewerOnlyReplyText(text = '') {
+  return /期待.{0,8}(更新|下次|下一期|下一集|下集|后续)|等.{0,8}(更新|下次|下一期|下一集|下集|后续)|蹲.{0,8}(更新|下次|下一期|下一集|下集|后续)|坐等.{0,8}(更新|下次|下一期|下一集|下集|后续)|催更|快更|啥时候更新|什么时候更新|求更新|更新了踢我|更新踢我/.test(String(text || ''));
+}
+
 function getReplyRiskHintLines() {
   return [
     '额外要求：这条回复会真实发送到评论区，请优先写得像真人临场回复，尽量降低被平台静默吞评或风控拦截的概率。',
     '避免客服腔、公告腔、机械感谢、批量模板味，不要写“留言收到”“感谢互动”“已阅”“路过打卡”这类容易显得像机器批量回复的话。',
     '避免过度热情或格式过整齐，不要连续堆砌感叹号、波浪号、emoji，也不要把每条回复都写成同一种句式。',
     '优先结合对方评论里的具体点自然接一句，像作者本人顺手回，不要像运营号统一回评。',
+    '这是账号在回复自己作品下的评论，不要写成观众视角；严禁“期待更新”“蹲更新”“等下次”“催更”这类让作者自己催自己更新的表达。',
   ];
 }
 
@@ -136,6 +141,7 @@ export function buildReplyPrompt(context = {}) {
         minLength,
         maxLength,
         tone: context?.requirements?.tone || '自然、简短、像真人',
+        perspective: context?.requirements?.perspective || '作者账号回复自己作品下的评论',
         uniquenessPolicy: context?.requirements?.uniquenessPolicy || '',
         avoidReplyText: context?.requirements?.avoidReplyText || '',
       },
@@ -172,6 +178,7 @@ export function buildReplyBatchPrompt(contexts = []) {
         minLength,
         maxLength,
         tone: context?.requirements?.tone || '自然、简短、像真人',
+        perspective: context?.requirements?.perspective || '作者账号回复自己作品下的评论',
         uniquenessPolicy: context?.requirements?.uniquenessPolicy || '',
         avoidReplyText: context?.requirements?.avoidReplyText || '',
       },
@@ -239,6 +246,7 @@ export function validateReply(reply, { minLength = getReplyMinLength(), maxLengt
   if (visibleLength > maxAllowed) throw new Error(`reply 超长: ${visibleLength}/${maxAllowed}`);
   if (hasForbiddenReplyPersona(text)) throw new Error('reply 使用了泛化或伪装身份提示');
   if (hasLowQualityReplyText(text)) throw new Error('reply 使用了低质套话或复读内容');
+  if (hasViewerOnlyReplyText(text)) throw new Error('reply 使用了观众催更口吻');
   if (/```|\{\s*"reply"|^\s*\[/.test(text)) throw new Error('reply 必须是纯文本');
   return text;
 }
