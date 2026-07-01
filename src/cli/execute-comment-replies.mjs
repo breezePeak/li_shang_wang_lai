@@ -948,7 +948,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
   saveManuallyReplied = (item, reason) => {
     markCommentManuallyReplied(item.commentId, reason);
   },
-  createSubmitWatcher = (currentPage, expectedText) => createCommentSubmitApiWatcher(currentPage, { expectedText }),
+  createSubmitWatcher = (currentPage, expectedText, expectedTargetCommentId = '') => createCommentSubmitApiWatcher(currentPage, { expectedText, expectedTargetCommentId }),
   onResult = () => {},
 } = {}) {
   const currentWork = group[0] || {};
@@ -1047,7 +1047,11 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
         continue;
       }
 
-      const submitWatcher = createSubmitWatcher(page, nextAction.item.replyText);
+      const submitWatcher = createSubmitWatcher(
+        page,
+        nextAction.item.replyText,
+        nextAction.item.targetCommentId || nextAction.target.targetCommentId || ''
+      );
       let apiConfirmed = null;
       try {
         const sent = await clickSend(page);
@@ -1064,21 +1068,22 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
         }
 
         apiConfirmed = await submitWatcher.waitForSuccess({ timeoutMs: 2500 });
-        const verified = await verifyReply(page, {
-          commentText: nextAction.target.commentText,
-          actorName: nextAction.target.actorName,
-        }, nextAction.item.replyText, { timeoutMs: 20000 });
-        if (!verified.ok) {
-          const reason = verified.message || verified.code || 'send_unverified';
-          const finalReason = apiConfirmed ? `api_success_but_unverified:${reason}` : reason;
-          saveSentUnverified(nextAction.item, finalReason);
-          pendingMap.delete(nextAction.item.commentId);
-          progressedInViewport = true;
-          const result = { ...nextAction.item, ok: false, status: 'sent_unverified', error: finalReason };
-          localResults.push(result);
-          onResult(result);
-          console.log(`[comments:execute] sent_unverified commentId=${nextAction.item.commentId} pending=${pendingMap.size}`);
-          continue;
+        if (!apiConfirmed) {
+          const verified = await verifyReply(page, {
+            commentText: nextAction.target.commentText,
+            actorName: nextAction.target.actorName,
+          }, nextAction.item.replyText, { timeoutMs: 20000 });
+          if (!verified.ok) {
+            const reason = verified.message || verified.code || 'send_unverified';
+            saveSentUnverified(nextAction.item, reason);
+            pendingMap.delete(nextAction.item.commentId);
+            progressedInViewport = true;
+            const result = { ...nextAction.item, ok: false, status: 'sent_unverified', error: reason };
+            localResults.push(result);
+            onResult(result);
+            console.log(`[comments:execute] sent_unverified commentId=${nextAction.item.commentId} pending=${pendingMap.size}`);
+            continue;
+          }
         }
       } finally {
         submitWatcher.stop();
@@ -1093,7 +1098,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
         ok: true,
         status: 'succeeded',
         mode: 'execute',
-        matchedBy: apiConfirmed ? 'submit_api_success_and_visible' : nextAction.picked.matchedBy,
+        matchedBy: apiConfirmed ? 'submit_api_success' : nextAction.picked.matchedBy,
       };
       localResults.push(result);
       onResult(result);

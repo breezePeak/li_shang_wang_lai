@@ -17,6 +17,11 @@ function normalizeExpectedText(expectedText = '') {
   return Array.from(new Set([trimmed, prefix].filter(Boolean)));
 }
 
+function normalizeExpectedIds(expectedId = '') {
+  const text = String(expectedId || '').trim();
+  return text ? [text] : [];
+}
+
 function getRequestPostData(request) {
   if (!request || typeof request.postData !== 'function') return '';
   try {
@@ -26,8 +31,46 @@ function getRequestPostData(request) {
   }
 }
 
-export function createCommentSubmitApiWatcher(page, { expectedText = '' } = {}) {
+function getDecodedPostData(postData = '') {
+  const raw = String(postData || '');
+  if (!raw) return '';
+  const parts = [raw];
+  try {
+    const params = new URLSearchParams(raw);
+    for (const [key, value] of params.entries()) {
+      parts.push(key, value);
+    }
+  } catch {}
+  try {
+    parts.push(decodeURIComponent(raw.replace(/\+/g, ' ')));
+  } catch {}
+  return parts.join('\n');
+}
+
+function includesAnyNeedle(haystack = '', needles = []) {
+  if (!needles.length) return true;
+  const text = String(haystack || '');
+  return needles.some((needle) => needle && text.includes(needle));
+}
+
+function getResponseTargetIds(json = {}) {
+  return [
+    json?.comment?.reply_id,
+    json?.comment?.reply_to_comment_id,
+    json?.comment?.reply_to_reply_id,
+    json?.comment?.parent_id,
+    json?.comment?.reply_comment_id,
+    json?.data?.reply_id,
+    json?.data?.reply_to_comment_id,
+    json?.data?.reply_to_reply_id,
+    json?.data?.parent_id,
+    json?.data?.reply_comment_id,
+  ].map(value => String(value || '').trim()).filter(Boolean);
+}
+
+export function createCommentSubmitApiWatcher(page, { expectedText = '', expectedTargetCommentId = '' } = {}) {
   const expectedNeedles = normalizeExpectedText(expectedText);
+  const expectedTargetIds = normalizeExpectedIds(expectedTargetCommentId);
   const state = {
     success: null,
     requestCount: 0,
@@ -35,6 +78,8 @@ export function createCommentSubmitApiWatcher(page, { expectedText = '' } = {}) 
     non200Count: 0,
     parseFailed: 0,
     successWithoutCommentId: 0,
+    textMismatchCount: 0,
+    targetMismatchCount: 0,
     lastUrl: '',
     lastStatus: 0,
     lastMatchedBy: '',
@@ -84,11 +129,28 @@ export function createCommentSubmitApiWatcher(page, { expectedText = '' } = {}) 
     state.responseCount += 1;
     state.lastSeenAt = Date.now();
     const postData = getRequestPostData(request);
-    const matchedBy = expectedNeedles.length > 0 && expectedNeedles.some((needle) => postData.includes(needle))
-      ? 'request_payload'
-      : 'request_scope';
+    const decodedPostData = getDecodedPostData(postData);
+    const textMatched = includesAnyNeedle(decodedPostData, expectedNeedles);
+    const responseTargetIds = getResponseTargetIds(json);
+    const targetMatched = includesAnyNeedle(decodedPostData, expectedTargetIds)
+      || expectedTargetIds.some((targetId) => responseTargetIds.includes(targetId));
+    const matchedParts = [
+      textMatched ? 'text' : '',
+      targetMatched ? 'target_comment' : '',
+    ].filter(Boolean);
+    const matchedBy = matchedParts.length ? `request_${matchedParts.join('+')}` : 'request_scope';
     state.lastMatchedBy = matchedBy;
     state.lastPostDataPreview = postData.slice(0, 200);
+
+    if (!textMatched) {
+      state.textMismatchCount += 1;
+      return;
+    }
+
+    if (!targetMatched) {
+      state.targetMismatchCount += 1;
+      return;
+    }
 
     if (!isSuccessPayload(json)) {
       const statusCode = json.status_code ?? json.statusCode ?? json.code ?? json.err_no ?? json.error_code;
@@ -104,6 +166,7 @@ export function createCommentSubmitApiWatcher(page, { expectedText = '' } = {}) 
       matchedBy,
       statusCode: json.status_code ?? json.statusCode ?? json.code ?? json.err_no ?? json.error_code ?? null,
       commentId: json?.comment?.cid || json?.comment?.comment_id || json?.data?.cid || json?.data?.comment_id || null,
+      targetCommentId: expectedTargetIds[0] || null,
     };
   }
 

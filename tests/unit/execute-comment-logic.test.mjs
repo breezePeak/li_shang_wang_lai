@@ -816,7 +816,7 @@ describe('comments:execute single-pass per work', () => {
     expect(collectCandidates.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('回评提交 API 成功后仍需目标评论可见校验', async () => {
+  it('回评提交 API 同时命中回复内容和目标 cid 时直接判定 succeeded', async () => {
     const listeners = new Map();
     const page = {
       keyboard: { press: vi.fn(async () => {}) },
@@ -845,7 +845,69 @@ describe('comments:execute single-pass per work', () => {
         json: async () => ({ status_code: 0, comment: { cid: 'reply-cid-1' } }),
         request: () => ({
           method: () => 'POST',
-          postData: () => 'text=Hermes代看后觉得这条回复可以直接算成功',
+          postData: () => 'reply_id=A&text=Hermes代看后觉得这条回复可以直接算成功',
+        }),
+      };
+      for (const handler of listeners.get('response') || []) {
+        await handler(response);
+      }
+      return { ok: true };
+    });
+    const verifyReply = vi.fn(async () => ({ ok: false, message: 'dom fallback should not run after matched api success' }));
+    const saveSucceeded = vi.fn();
+    const saveSentUnverified = vi.fn();
+
+    const results = await executeSinglePassForWorkGroup(page, [
+      { commentId: 1, replyText: 'Hermes代看后觉得这条回复可以直接算成功', targetCommentId: 'A', actorName: 'u1', commentText: 'A' },
+    ], { getByCid: () => null, getStats: () => ({ hasMore: 1 }) }, {
+      collectCandidates,
+      scrollOnce: vi.fn(async () => ({ ok: true })),
+      openMatchedReplyBox,
+      fillReply,
+      clickSend,
+      verifyReply,
+      saveSucceeded,
+      saveBlocked: vi.fn(),
+      saveSentUnverified,
+      onResult: vi.fn(),
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(true);
+    expect(results[0].status).toBe('succeeded');
+    expect(results[0].matchedBy).toBe('submit_api_success');
+    expect(verifyReply).not.toHaveBeenCalled();
+    expect(saveSucceeded).toHaveBeenCalledTimes(1);
+    expect(saveSentUnverified).not.toHaveBeenCalled();
+  });
+
+  it('回评提交 API 未命中目标 cid 时不能直接写 succeeded', async () => {
+    const listeners = new Map();
+    const page = {
+      keyboard: { press: vi.fn(async () => {}) },
+      waitForTimeout: vi.fn(async () => {}),
+      on: vi.fn((event, handler) => {
+        if (!listeners.has(event)) listeners.set(event, []);
+        listeners.get(event).push(handler);
+      }),
+      off: vi.fn(),
+    };
+    const collectCandidates = vi.fn(async () => ({
+      ok: true,
+      candidates: [
+        { domIndex: 0, cid: 'A', actorName: 'u1', commentText: 'A', timeText: '', hasReplyButton: true },
+      ],
+    }));
+    const openMatchedReplyBox = vi.fn(async () => ({ ok: true }));
+    const fillReply = vi.fn(async () => ({ ok: true }));
+    const clickSend = vi.fn(async () => {
+      const response = {
+        url: () => 'https://www.douyin.com/aweme/v1/web/comment/publish/',
+        status: () => 200,
+        json: async () => ({ status_code: 0, comment: { cid: 'reply-cid-1' } }),
+        request: () => ({
+          method: () => 'POST',
+          postData: () => 'reply_id=other-cid&text=Hermes代看后觉得这条回复可以直接算成功',
         }),
       };
       for (const handler of listeners.get('response') || []) {
@@ -875,7 +937,6 @@ describe('comments:execute single-pass per work', () => {
     expect(results).toHaveLength(1);
     expect(results[0].ok).toBe(false);
     expect(results[0].status).toBe('sent_unverified');
-    expect(results[0].error).toContain('api_success_but_unverified');
     expect(verifyReply).toHaveBeenCalledTimes(1);
     expect(saveSucceeded).not.toHaveBeenCalled();
     expect(saveSentUnverified).toHaveBeenCalledTimes(1);
