@@ -360,7 +360,7 @@ export async function postReturnVisitComment(page, text, presentation = {}, { ex
       }
     }
     console.error(`[comment] modal就绪, 发送评论...`);
-    return postWorkModalComment(page, text);
+    return postWorkModalComment(page, text, { expectedWorkId });
   }
 
   if (expectedWorkId) {
@@ -377,7 +377,7 @@ export async function postReturnVisitComment(page, text, presentation = {}, { ex
   }
 
   console.error(`[comment] 发评论: 视频页...`);
-  return postVideoComment(page, text, { execute });
+  return postVideoComment(page, text, { execute, expectedWorkId });
 }
 
 export async function ensureReturnVisitCommentBoxReady(page, presentation = {}) {

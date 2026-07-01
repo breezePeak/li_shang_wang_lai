@@ -1670,7 +1670,7 @@ export async function activateCommentComposer(page) {
   });
 }
 
-export async function postVideoComment(page, text, { execute = false } = {}) {
+export async function postVideoComment(page, text, { execute = false, expectedWorkId = '' } = {}) {
   let submitWatcher = null;
   try {
     if (!text || !text.trim()) {
@@ -1690,7 +1690,7 @@ export async function postVideoComment(page, text, { execute = false } = {}) {
     }
 
     const trimmed = text.trim();
-    submitWatcher = createCommentSubmitApiWatcher(page, { expectedText: trimmed });
+    submitWatcher = createCommentSubmitApiWatcher(page, { expectedText: trimmed, expectedAwemeId: expectedWorkId });
 
     // 1. 尝试打开评论面板
     let clickCommentPanelSuccess = await ensureCommentPanelOpen(page);

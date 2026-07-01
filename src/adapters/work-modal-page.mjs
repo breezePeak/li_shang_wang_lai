@@ -3171,14 +3171,14 @@ export async function sendReplyInWorkModal(page, replyText) {
   return success({ ...filled.data, ...clicked.data });
 }
 
-export async function postWorkModalComment(page, commentText) {
+export async function postWorkModalComment(page, commentText, { expectedWorkId = '' } = {}) {
   if (!commentText || !commentText.trim()) {
     return blocking(RESULT_CODES.EMPTY_REPLY_TEXT, '评论内容为空', { recoverable: false });
   }
 
   console.error(`[work-modal] 发送顶层评论: "${commentText.slice(0, 60)}"`);
   const replyNeedle = commentText.trim();
-  const submitWatcher = createCommentSubmitApiWatcher(page, { expectedText: replyNeedle });
+  const submitWatcher = createCommentSubmitApiWatcher(page, { expectedText: replyNeedle, expectedAwemeId: expectedWorkId });
 
   async function readSecurityVerification() {
     const verification = await detectDouyinSecurityVerification(page);

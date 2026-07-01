@@ -47,6 +47,22 @@ function getDecodedPostData(postData = '') {
   return parts.join('\n');
 }
 
+function getDecodedUrl(url = '') {
+  const raw = String(url || '');
+  if (!raw) return '';
+  const parts = [raw];
+  try {
+    const parsed = new URL(raw);
+    for (const [key, value] of parsed.searchParams.entries()) {
+      parts.push(key, value);
+    }
+  } catch {}
+  try {
+    parts.push(decodeURIComponent(raw.replace(/\+/g, ' ')));
+  } catch {}
+  return parts.join('\n');
+}
+
 function includesAnyNeedle(haystack = '', needles = []) {
   if (!needles.length) return true;
   const text = String(haystack || '');
@@ -68,9 +84,24 @@ function getResponseTargetIds(json = {}) {
   ].map(value => String(value || '').trim()).filter(Boolean);
 }
 
-export function createCommentSubmitApiWatcher(page, { expectedText = '', expectedTargetCommentId = '' } = {}) {
+function getResponseWorkIds(json = {}) {
+  return [
+    json?.aweme_id,
+    json?.item_id,
+    json?.group_id,
+    json?.comment?.aweme_id,
+    json?.comment?.item_id,
+    json?.comment?.group_id,
+    json?.data?.aweme_id,
+    json?.data?.item_id,
+    json?.data?.group_id,
+  ].map(value => String(value || '').trim()).filter(Boolean);
+}
+
+export function createCommentSubmitApiWatcher(page, { expectedText = '', expectedTargetCommentId = '', expectedAwemeId = '' } = {}) {
   const expectedNeedles = normalizeExpectedText(expectedText);
   const expectedTargetIds = normalizeExpectedIds(expectedTargetCommentId);
+  const expectedWorkIds = normalizeExpectedIds(expectedAwemeId);
   const state = {
     success: null,
     requestCount: 0,
@@ -80,6 +111,7 @@ export function createCommentSubmitApiWatcher(page, { expectedText = '', expecte
     successWithoutCommentId: 0,
     textMismatchCount: 0,
     targetMismatchCount: 0,
+    workMismatchCount: 0,
     lastUrl: '',
     lastStatus: 0,
     lastMatchedBy: '',
@@ -130,13 +162,18 @@ export function createCommentSubmitApiWatcher(page, { expectedText = '', expecte
     state.lastSeenAt = Date.now();
     const postData = getRequestPostData(request);
     const decodedPostData = getDecodedPostData(postData);
-    const textMatched = includesAnyNeedle(decodedPostData, expectedNeedles);
+    const requestScope = [getDecodedUrl(url), decodedPostData].filter(Boolean).join('\n');
+    const textMatched = includesAnyNeedle(requestScope, expectedNeedles);
     const responseTargetIds = getResponseTargetIds(json);
-    const targetMatched = includesAnyNeedle(decodedPostData, expectedTargetIds)
+    const targetMatched = includesAnyNeedle(requestScope, expectedTargetIds)
       || expectedTargetIds.some((targetId) => responseTargetIds.includes(targetId));
+    const responseWorkIds = getResponseWorkIds(json);
+    const workMatched = includesAnyNeedle(requestScope, expectedWorkIds)
+      || expectedWorkIds.some((workId) => responseWorkIds.includes(workId));
     const matchedParts = [
-      textMatched ? 'text' : '',
-      targetMatched ? 'target_comment' : '',
+      expectedNeedles.length && textMatched ? 'text' : '',
+      expectedTargetIds.length && targetMatched ? 'target_comment' : '',
+      expectedWorkIds.length && workMatched ? 'work' : '',
     ].filter(Boolean);
     const matchedBy = matchedParts.length ? `request_${matchedParts.join('+')}` : 'request_scope';
     state.lastMatchedBy = matchedBy;
@@ -149,6 +186,11 @@ export function createCommentSubmitApiWatcher(page, { expectedText = '', expecte
 
     if (!targetMatched) {
       state.targetMismatchCount += 1;
+      return;
+    }
+
+    if (!workMatched) {
+      state.workMismatchCount += 1;
       return;
     }
 
@@ -167,6 +209,7 @@ export function createCommentSubmitApiWatcher(page, { expectedText = '', expecte
       statusCode: json.status_code ?? json.statusCode ?? json.code ?? json.err_no ?? json.error_code ?? null,
       commentId: json?.comment?.cid || json?.comment?.comment_id || json?.data?.cid || json?.data?.comment_id || null,
       targetCommentId: expectedTargetIds[0] || null,
+      targetWorkId: expectedWorkIds[0] || null,
     };
   }
 

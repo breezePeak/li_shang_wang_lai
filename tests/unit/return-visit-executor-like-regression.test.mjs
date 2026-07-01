@@ -773,7 +773,7 @@ describe('return-visit executor like/comment regressions', () => {
 
     expect(result.ok).toBe(true);
     expect(agentProvider.generateComment).toHaveBeenCalledTimes(1);
-    expect(postWorkModalCommentMock).toHaveBeenCalledWith(page, 'Think Max 这个说法挺形象的😂');
+    expect(postWorkModalCommentMock).toHaveBeenCalledWith(page, 'Think Max 这个说法挺形象的😂', { expectedWorkId: '7648591042014994938' });
     expect(result.generatedComment).toBe('Think Max 这个说法挺形象的😂');
   });
 });

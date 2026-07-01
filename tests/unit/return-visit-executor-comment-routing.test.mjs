@@ -36,23 +36,25 @@ describe('return-visit executor comment routing', () => {
   });
 
   it('modal 页面评论走 work-modal 定位', async () => {
+    const page = { url: () => 'https://www.douyin.com/?modal_id=7657537622084457593' };
     waitForWorkModalMock.mockResolvedValueOnce({ ok: true });
     postWorkModalCommentMock.mockResolvedValueOnce({ ok: true, data: { sent: true } });
 
-    const result = await postReturnVisitComment({}, '测试评论', { isModalPage: true }, { execute: true });
+    const result = await postReturnVisitComment(page, '测试评论', { isModalPage: true }, { execute: true, expectedWorkId: '7657537622084457593' });
 
-    expect(waitForWorkModalMock).toHaveBeenCalledWith({}, { timeoutMs: 8000, closeAutoPlay: true });
-    expect(postWorkModalCommentMock).toHaveBeenCalledWith({}, '测试评论');
+    expect(waitForWorkModalMock).toHaveBeenCalledWith(page, { timeoutMs: 8000, closeAutoPlay: true });
+    expect(postWorkModalCommentMock).toHaveBeenCalledWith(page, '测试评论', { expectedWorkId: '7657537622084457593' });
     expect(postVideoCommentMock).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
   });
 
   it('普通详情页评论仍走 video-page', async () => {
+    const page = { url: () => 'https://www.douyin.com/video/7657537622084457593' };
     postVideoCommentMock.mockResolvedValueOnce({ ok: true, data: { text: '测试评论' } });
 
-    const result = await postReturnVisitComment({}, '测试评论', { isModalPage: false }, { execute: true });
+    const result = await postReturnVisitComment(page, '测试评论', { isModalPage: false }, { execute: true, expectedWorkId: '7657537622084457593' });
 
-    expect(postVideoCommentMock).toHaveBeenCalledWith({}, '测试评论', { execute: true });
+    expect(postVideoCommentMock).toHaveBeenCalledWith(page, '测试评论', { execute: true, expectedWorkId: '7657537622084457593' });
     expect(waitForWorkModalMock).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
   });
