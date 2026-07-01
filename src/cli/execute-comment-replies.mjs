@@ -58,6 +58,7 @@ export function parseArgs(argv) {
     keepOpen: false,
     headless: undefined,
     limit: null,
+    maxScrollRounds: null,
     agentOnly: false,
     debug: false,
   };
@@ -73,6 +74,7 @@ export function parseArgs(argv) {
     if (argv[i] === '--headless') args.headless = true;
     if (argv[i] === '--debug') args.debug = true;
     if ((argv[i] === '--limit' || argv[i] === '--max-count') && argv[i + 1]) args.limit = Number(argv[++i] || 0) || null;
+    if (argv[i] === '--max-scroll-rounds' && argv[i + 1]) args.maxScrollRounds = Number(argv[++i] || 0) || null;
     if (argv[i] === '--agent-only') args.agentOnly = true;
   }
 
@@ -1062,22 +1064,21 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
         }
 
         apiConfirmed = await submitWatcher.waitForSuccess({ timeoutMs: 2500 });
-        if (!apiConfirmed) {
-          const verified = await verifyReply(page, {
-            commentText: nextAction.target.commentText,
-            actorName: nextAction.target.actorName,
-          }, nextAction.item.replyText, { timeoutMs: 20000 });
-          if (!verified.ok) {
-            const reason = verified.message || verified.code || 'send_unverified';
-            saveSentUnverified(nextAction.item, reason);
-            pendingMap.delete(nextAction.item.commentId);
-            progressedInViewport = true;
-            const result = { ...nextAction.item, ok: false, status: 'sent_unverified', error: reason };
-            localResults.push(result);
-            onResult(result);
-            console.log(`[comments:execute] sent_unverified commentId=${nextAction.item.commentId} pending=${pendingMap.size}`);
-            continue;
-          }
+        const verified = await verifyReply(page, {
+          commentText: nextAction.target.commentText,
+          actorName: nextAction.target.actorName,
+        }, nextAction.item.replyText, { timeoutMs: 20000 });
+        if (!verified.ok) {
+          const reason = verified.message || verified.code || 'send_unverified';
+          const finalReason = apiConfirmed ? `api_success_but_unverified:${reason}` : reason;
+          saveSentUnverified(nextAction.item, finalReason);
+          pendingMap.delete(nextAction.item.commentId);
+          progressedInViewport = true;
+          const result = { ...nextAction.item, ok: false, status: 'sent_unverified', error: finalReason };
+          localResults.push(result);
+          onResult(result);
+          console.log(`[comments:execute] sent_unverified commentId=${nextAction.item.commentId} pending=${pendingMap.size}`);
+          continue;
         }
       } finally {
         submitWatcher.stop();
@@ -1092,7 +1093,7 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
         ok: true,
         status: 'succeeded',
         mode: 'execute',
-        matchedBy: apiConfirmed ? 'submit_api_success' : nextAction.picked.matchedBy,
+        matchedBy: apiConfirmed ? 'submit_api_success_and_visible' : nextAction.picked.matchedBy,
       };
       localResults.push(result);
       onResult(result);
@@ -1341,6 +1342,7 @@ async function executeWorkCommentItems(items, args, run, recorder) {
 
           const groupResults = await executeSinglePassForWorkGroup(page, group, commentListCollector, {
             days: args.days,
+            maxScrollRounds: args.maxScrollRounds || Number(process.env.LISHANGWANGLAI_COMMENT_MAX_SCROLL_ROUNDS || 0) || undefined,
             ...(diagnosePosition ? {
               openMatchedReplyBox: async (_page, target, candidate, { matchedBy }) => {
                 console.log(`[comments:execute:diagnose] matched commentId=${target?.targetCommentId || ''} matchedBy=${matchedBy} actor="${target?.actorName || ''}" comment="${String(target?.commentText || '').slice(0, 60)}" domIndex=${candidate?.domIndex}`);

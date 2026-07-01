@@ -461,6 +461,11 @@ describe('comments:execute refactored logic', () => {
     expect(args.limit).toBe(2);
   });
 
+  it('parseArgs 支持 --max-scroll-rounds，允许深评论区继续定位', () => {
+    const args = parseArgs(['--max-scroll-rounds', '80']);
+    expect(args.maxScrollRounds).toBe(80);
+  });
+
   it('extractTargetCommentId 能从 raw_comment_json 回推 cid', () => {
     const cid = extractTargetCommentId({}, {
       raw_comment_json: JSON.stringify({
@@ -811,7 +816,7 @@ describe('comments:execute single-pass per work', () => {
     expect(collectCandidates.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('回评提交 API 成功时直接判定 succeeded，不再依赖 DOM 回显', async () => {
+  it('回评提交 API 成功后仍需目标评论可见校验', async () => {
     const listeners = new Map();
     const page = {
       keyboard: { press: vi.fn(async () => {}) },
@@ -848,8 +853,9 @@ describe('comments:execute single-pass per work', () => {
       }
       return { ok: true };
     });
-    const verifyReply = vi.fn(async () => ({ ok: false, message: 'dom should not be used after api success' }));
+    const verifyReply = vi.fn(async () => ({ ok: false, message: 'reply still missing under target comment' }));
     const saveSucceeded = vi.fn();
+    const saveSentUnverified = vi.fn();
 
     const results = await executeSinglePassForWorkGroup(page, [
       { commentId: 1, replyText: 'Hermes代看后觉得这条回复可以直接算成功', targetCommentId: 'A', actorName: 'u1', commentText: 'A' },
@@ -862,16 +868,17 @@ describe('comments:execute single-pass per work', () => {
       verifyReply,
       saveSucceeded,
       saveBlocked: vi.fn(),
-      saveSentUnverified: vi.fn(),
+      saveSentUnverified,
       onResult: vi.fn(),
     });
 
     expect(results).toHaveLength(1);
-    expect(results[0].ok).toBe(true);
-    expect(results[0].status).toBe('succeeded');
-    expect(results[0].matchedBy).toBe('submit_api_success');
-    expect(verifyReply).not.toHaveBeenCalled();
-    expect(saveSucceeded).toHaveBeenCalledTimes(1);
+    expect(results[0].ok).toBe(false);
+    expect(results[0].status).toBe('sent_unverified');
+    expect(results[0].error).toContain('api_success_but_unverified');
+    expect(verifyReply).toHaveBeenCalledTimes(1);
+    expect(saveSucceeded).not.toHaveBeenCalled();
+    expect(saveSentUnverified).toHaveBeenCalledTimes(1);
   });
 
   it('not_unique 会阻断当前项，但无 cid 的 actor_not_verified 会继续往下找其他 pending', async () => {
