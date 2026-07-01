@@ -3005,6 +3005,7 @@ export async function clickSendWorkReply(page) {
 }
 
 export async function verifyWorkReplyVisible(page, item, replyText, { timeoutMs = 5000 } = {}) {
+  const actorName = (item?.actorName || '').trim();
   const commentText = (item?.commentText || '').trim();
   const replyNeedle = replyText.trim();
   const replyPrefix = replyNeedle.slice(0, 20);
@@ -3014,23 +3015,53 @@ export async function verifyWorkReplyVisible(page, item, replyText, { timeoutMs 
   const startedAt = Date.now();
   let expandRound = 0;
   while (Date.now() - startedAt < timeoutMs) {
-    const found = await page.evaluate(({ commentText, replyNeedle, replyPrefix }) => {
-      const commentArea = document.querySelector('.comment-mainContent')
-        || document.querySelector('[class*="comment-main"]')
-        || document.querySelector('[class*="comment-list"]')
-        || document.querySelector('[class*="commentContainer"]')
-        || document.querySelector('[class*="comment-container"]');
-      const bodyText = (document.body?.innerText || '').trim();
-      if (bodyText.includes(replyNeedle)) return { verified: true, method: 'body_full' };
-      if (replyPrefix.length >= 5 && bodyText.includes(replyPrefix)) return { verified: true, method: 'body_prefix' };
-      if (!commentArea) return { verified: false };
+    const found = await page.evaluate(({ actorName, commentText, replyNeedle, replyPrefix, itemSelectors }) => {
+      function visible(el) {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }
 
-      const text = (commentArea.innerText || '').trim();
-      if (text.includes(replyNeedle)) return { verified: true, method: 'full' };
-      if (replyPrefix.length >= 5 && text.includes(replyPrefix)) return { verified: true, method: 'prefix' };
+      function cleanText(root) {
+        if (!root) return '';
+        const clone = root.cloneNode(true);
+        clone.querySelectorAll(
+          '[contenteditable="true"], textarea, input[type="text"], input:not([type]), [role="textbox"], ' +
+          '.comment-input-container, .comment-input-inner-container, [class*="comment-input"], [class*="commentInput"]'
+        ).forEach(node => node.remove());
+        return (clone.innerText || clone.textContent || '').trim();
+      }
+
+      function matchesTarget(text) {
+        if (!text) return false;
+        if (commentText && !text.includes(commentText)) return false;
+        if (actorName && !text.includes(actorName)) return false;
+        return true;
+      }
+
+      const candidates = [];
+      for (const selector of itemSelectors) {
+        for (const node of document.querySelectorAll(selector)) {
+          if (!visible(node)) continue;
+          candidates.push(node);
+        }
+      }
+
+      for (const node of candidates) {
+        const text = cleanText(node);
+        if (!matchesTarget(text)) continue;
+        if (text.includes(replyNeedle)) return { verified: true, method: 'target_item_full' };
+        if (replyPrefix.length >= 5 && text.includes(replyPrefix)) return { verified: true, method: 'target_item_prefix' };
+      }
 
       return { verified: false };
-    }, { commentText, replyNeedle, replyPrefix }).catch(() => ({ verified: false }));
+    }, {
+      actorName,
+      commentText,
+      replyNeedle,
+      replyPrefix,
+      itemSelectors: WORK_COMMENT_ITEM_SELECTORS,
+    }).catch(() => ({ verified: false }));
 
     if (found.verified) {
       console.error(`[work-modal] 验证成功 method=${found.method}`);
