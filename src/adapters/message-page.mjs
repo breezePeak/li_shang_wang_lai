@@ -21,18 +21,22 @@ async function waitForPrivateMessagePanel(page, { timeoutMs = 5000 } = {}) {
       }
 
       function findPanel() {
-        const searchCandidates = Array.from(document.querySelectorAll('input[placeholder*="搜索"], [placeholder*="搜索"]'));
-        for (const input of searchCandidates) {
-          let current = input;
-          for (let i = 0; i < 6 && current && current !== document.body; i++) {
-            if (isVisible(current)) {
-              const rect = current.getBoundingClientRect();
-              if (rect.width >= 240 && rect.height >= 300 && rect.top <= 160) return true;
-            }
-            current = current.parentElement;
+        const candidates = [];
+        for (const el of document.querySelectorAll('body *')) {
+          if (!isVisible(el)) continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.width < 240 || rect.width > 420 || rect.height < 300) continue;
+          if (rect.top > 180 || rect.left < window.innerWidth * 0.68) continue;
+          const text = (el.innerText || el.textContent || '').trim();
+          const hasSearch = text.includes('搜索');
+          const hasRecentTime = /刚刚|\d{1,2}:\d{2}|昨天/.test(text);
+          const hasSharePreview = text.includes('[分享用户]') || text.includes('[图片]') || text.includes('[视频]');
+          const hasMessageDots = (text.match(/刚刚/g) || []).length >= 2;
+          if (hasSearch || (hasRecentTime && (hasSharePreview || hasMessageDots))) {
+            candidates.push(rect.width * rect.height);
           }
         }
-        return false;
+        return candidates.length > 0;
       }
 
       return findPanel();
@@ -99,22 +103,23 @@ export async function locateFirstPrivateConversation(page) {
     }
 
     function findPanel() {
-      const searchCandidates = Array.from(document.querySelectorAll('input[placeholder*="搜索"], [placeholder*="搜索"]'));
-      for (const input of searchCandidates) {
-        let current = input;
-        for (let i = 0; i < 6 && current && current !== document.body; i++) {
-          if (!isVisible(current)) {
-            current = current.parentElement;
-            continue;
-          }
-          const rect = current.getBoundingClientRect();
-          if (rect.width >= 240 && rect.height >= 300 && rect.top <= 160) {
-            return current;
-          }
-          current = current.parentElement;
+      const candidates = [];
+      for (const el of document.querySelectorAll('body *')) {
+        if (!isVisible(el)) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 240 || rect.width > 420 || rect.height < 300) continue;
+        if (rect.top > 180 || rect.left < window.innerWidth * 0.68) continue;
+        const text = (el.innerText || el.textContent || '').trim();
+        const hasSearch = text.includes('搜索');
+        const hasRecentTime = /刚刚|\d{1,2}:\d{2}|昨天/.test(text);
+        const hasSharePreview = text.includes('[分享用户]') || text.includes('[图片]') || text.includes('[视频]');
+        const hasMessageDots = (text.match(/刚刚/g) || []).length >= 2;
+        if (hasSearch || (hasRecentTime && (hasSharePreview || hasMessageDots))) {
+          candidates.push({ el, area: rect.width * rect.height, right: rect.right });
         }
       }
-      return null;
+      candidates.sort((a, b) => (b.area - a.area) || (b.right - a.right));
+      return candidates[0]?.el || null;
     }
 
     const panel = findPanel();
@@ -124,7 +129,44 @@ export async function locateFirstPrivateConversation(page) {
     const searchNode = panel.querySelector('input[placeholder*="搜索"], [placeholder*="搜索"]');
     const minTop = searchNode
       ? searchNode.getBoundingClientRect().bottom + 8
-      : panelRect.top + Math.min(panelRect.height * 0.18, 90);
+      : panelRect.top + Math.min(panelRect.height * 0.12, 72);
+
+    const directRows = Array.from(panel.querySelectorAll('[class*="conversationConversationItemwrapper"], [class*="ConversationItemwrapper"]'))
+      .filter(isVisible)
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        return {
+          el,
+          rect,
+          text: (el.innerText || '').trim(),
+        };
+      })
+      .filter(item =>
+        item.text.length >= 2 &&
+        item.rect.top >= minTop &&
+        item.rect.bottom <= panelRect.bottom + 2 &&
+        item.rect.left >= panelRect.left &&
+        item.rect.right <= panelRect.right + 2 &&
+        item.rect.height >= 48 &&
+        item.rect.height <= 160
+      )
+      .sort((a, b) => (a.rect.top - b.rect.top) || (a.rect.left - b.rect.left));
+
+    if (directRows[0]) {
+      const first = directRows[0];
+      return {
+        ok: true,
+        conversation: {
+          x: first.rect.left + first.rect.width / 2,
+          y: first.rect.top + first.rect.height / 2,
+          top: first.rect.top,
+          left: first.rect.left,
+          width: first.rect.width,
+          height: first.rect.height,
+          text: first.text.slice(0, 200),
+        },
+      };
+    }
 
     const rows = [];
     const seen = new Set();
@@ -240,7 +282,7 @@ export async function confirmPrivateMessageDeletion(page) {
       let insideDialog = false;
       for (let i = 0; i < 5 && current && current !== document.body; i++) {
         const dialogText = (current.innerText || current.textContent || '').trim();
-        if (dialogText.includes('确认删除聊天')) {
+        if (dialogText.includes('确认删除') && dialogText.includes('聊天')) {
           insideDialog = true;
           break;
         }
