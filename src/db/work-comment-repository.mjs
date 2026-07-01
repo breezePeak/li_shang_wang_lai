@@ -67,9 +67,10 @@ export function upsertWorkComment(comment) {
 
 export function listPendingCommentsGroupedByWork(options = {}) {
   const db = getDb();
-  const { limit = null } = options;
+  const { limit = null, includeBlocked = false } = options;
   const params = [];
-  let sql = "SELECT * FROM work_comments WHERE reply_status = 'pending'";
+  const statuses = includeBlocked ? ["'pending'", "'blocked'"] : ["'pending'"];
+  let sql = `SELECT * FROM work_comments WHERE reply_status IN (${statuses.join(',')})`;
   const since = resolveTimeWindowSinceIso(options);
   if (since) {
     sql += ' AND COALESCE(first_seen_at, last_seen_at) >= ?';
@@ -93,8 +94,9 @@ export function listPendingCommentsGroupedByWork(options = {}) {
 
 export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
   const db = getDb();
-  const { limit = null } = options;
+  const { limit = null, includeBlocked = false } = options;
   const params = [];
+  const statuses = includeBlocked ? ["'pending'", "'blocked'"] : ["'pending'"];
   let sql = `
     SELECT
       wc.*,
@@ -120,7 +122,7 @@ export function listPendingCommentsGroupedByHomepageAndWork(options = {}) {
       AND wc.modal_id IS NOT NULL
       AND wc.modal_id != ''
       AND w_by_modal.modal_id = wc.modal_id
-    WHERE wc.reply_status = 'pending'
+    WHERE wc.reply_status IN (${statuses.join(',')})
   `;
 
   const since = resolveTimeWindowSinceIso(options);

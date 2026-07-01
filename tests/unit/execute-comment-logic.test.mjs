@@ -152,6 +152,26 @@ describe('comments:execute refactored logic', () => {
     expect(rows.map(row => row.id)).toEqual([2, 1]);
   });
 
+  it('includeBlocked=true 时也查出 blocked 状态的评论用于重试回评', () => {
+    const db = new Database(testDb);
+    db.prepare("INSERT INTO work_comments (id, work_url, actor_name, comment_text, comment_key, reply_text, reply_status, reply_reason, retry_count) VALUES (5, 'https://douyin.com/video/5', 'user5', 'blocked comment', 'key5', '之前的回复', 'blocked', 'group_execute_failed:browser_closed', 3)").run();
+    db.close();
+    resetDb();
+    getDb(testDb);
+
+    const rowsPendingOnly = listPendingCommentsGroupedByHomepageAndWork({ limit: null });
+    expect(rowsPendingOnly.map(row => row.id)).toEqual([2, 1]);
+
+    const rowsWithBlocked = listPendingCommentsGroupedByHomepageAndWork({ limit: null, includeBlocked: true });
+    const ids = rowsWithBlocked.map(row => row.id);
+    expect(ids).toContain(5);
+    expect(ids).toContain(2);
+    expect(ids).toContain(1);
+    const blockedRow = rowsWithBlocked.find(row => row.id === 5);
+    expect(blockedRow.reply_status).toBe('blocked');
+    expect(blockedRow.reply_reason).toContain('browser_closed');
+  });
+
   it('rejects --items-file because comments:execute is DB-only', async () => {
     const result = await runCli('execute-comment-replies.mjs', ['--json', '--items-file', 'data/pending-replies/old.json']);
     const parsed = parseStdout(result);

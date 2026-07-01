@@ -1452,7 +1452,7 @@ async function main() {
     let agentResults = [];
 
     runMigrations();
-    const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: args.limit });
+    const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: args.limit, includeBlocked: true });
     loaded = { items: buildWorkCommentItemsFromDbRows(rows) };
     run.scanned = loaded.items.length;
     console.log(`[comments:execute] loaded pending comments from db: ${loaded.items.length}`);
