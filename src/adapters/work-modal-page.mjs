@@ -1280,6 +1280,8 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
             '.hOcDRkbZ.WcVcXqQb',
             '.wnIG9XCL',
             '.i1KE4QVe',
+            '.positionBox',
+            '[class*="immersive-player"]',
             '[class*="action-bar"]',
             '[class*="ActionBar"]',
           ];
@@ -1389,6 +1391,16 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
         document.querySelectorAll('[data-return-visit-comment-button="true"]')
           .forEach(el => el.removeAttribute('data-return-visit-comment-button'));
 
+        // 唤醒 xgplayer 交互区（抖音播放器空闲时会隐藏评论/点赞等按钮，positionBox class 含 hide-interaction-area）
+        const wakeTarget = document.querySelector('.xgplayer, [class*="immersive-player"], video');
+        if (wakeTarget) {
+          const wr = wakeTarget.getBoundingClientRect();
+          const cx = wr.left + wr.width / 2;
+          const cy = wr.top + wr.height / 2;
+          wakeTarget.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy }));
+          document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy }));
+        }
+
         // 限定在右侧 action bar 容器内查找，避免误点其他元素（如问问AI）
         const actionBar = pickActionBar();
         const searchScope = actionBar || document;
@@ -1416,15 +1428,16 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
           '[title*="评论"]',
         ];
         for (const selector of directSelectors) {
-          const commentContainer = searchScope.querySelector(selector);
-          if (commentContainer && visible(commentContainer)) {
-            return buildFoundResult(
-              commentContainer,
-              selector,
-              actionBar ? 'action-bar' : 'document',
-              diagAll,
-            );
-          }
+          const matches = Array.from(searchScope.querySelectorAll(selector));
+          if (matches.length === 0) continue;
+          // 优先选可见的；若全部不可见（播放器交互区被隐藏），退而用最后一个——DOM 派发点击仍可触发 React 处理器
+          const commentContainer = matches.find(visible) || matches[matches.length - 1];
+          return buildFoundResult(
+            commentContainer,
+            selector,
+            actionBar ? 'action-bar' : 'document',
+            diagAll,
+          );
         }
 
         const textSearchScope = actionBar ||
@@ -1533,6 +1546,17 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
       console.error('[work-modal] 评论区未展开，点击评论按钮...');
       let opened = false;
       for (let attempt = 1; attempt <= 4; attempt++) {
+        // 唤醒播放器交互区：抖音 xgplayer 空闲时隐藏评论按钮（positionBox class 含 hide-interaction-area），真实鼠标移动可触发 CSS 重新显示
+        const wakePoint = await page.evaluate(() => {
+          const player = document.querySelector('.xgplayer, [class*="immersive-player"], video');
+          if (!player) return null;
+          const r = player.getBoundingClientRect();
+          return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+        }).catch(() => null);
+        if (wakePoint && Number.isFinite(wakePoint.x) && Number.isFinite(wakePoint.y)) {
+          await page.mouse.move(wakePoint.x, wakePoint.y, { steps: 5 }).catch(() => null);
+          await page.waitForTimeout(400).catch(() => null);
+        }
         const clicked = await clickCommentOpenControl();
         if (!clicked.clicked) {
           console.error(`[work-modal] 未找到评论按钮 (attempt=${attempt})`);
