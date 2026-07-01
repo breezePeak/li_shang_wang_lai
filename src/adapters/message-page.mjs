@@ -9,6 +9,20 @@ const PRIVATE_MESSAGE_SELECTORS = [
   '[title*="私信"]',
 ];
 
+async function moveMouseFromTriggerIntoPanel(page, triggerLocator) {
+  try {
+    const box = await triggerLocator.boundingBox();
+    if (!box) return { ok: false, reason: 'trigger_box_not_found' };
+    const x = Math.max(0, box.x - 80);
+    const y = box.y + Math.max(90, box.height + 70);
+    await page.mouse.move(x, y);
+    await page.waitForTimeout(150);
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'trigger_box_not_found' };
+  }
+}
+
 async function waitForPrivateMessagePanel(page, { timeoutMs = 5000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -20,26 +34,17 @@ async function waitForPrivateMessagePanel(page, { timeoutMs = 5000 } = {}) {
         return rect.width > 10 && rect.height > 10 && style.display !== 'none' && style.visibility !== 'hidden';
       }
 
-      function findPanel() {
-        const candidates = [];
-        for (const el of document.querySelectorAll('body *')) {
-          if (!isVisible(el)) continue;
-          const rect = el.getBoundingClientRect();
-          if (rect.width < 240 || rect.width > 420 || rect.height < 300) continue;
-          if (rect.top > 180 || rect.left < window.innerWidth * 0.68) continue;
-          const text = (el.innerText || el.textContent || '').trim();
-          const hasSearch = text.includes('搜索');
-          const hasRecentTime = /刚刚|\d{1,2}:\d{2}|昨天/.test(text);
-          const hasSharePreview = text.includes('[分享用户]') || text.includes('[图片]') || text.includes('[视频]');
-          const hasMessageDots = (text.match(/刚刚/g) || []).length >= 2;
-          if (hasSearch || (hasRecentTime && (hasSharePreview || hasMessageDots))) {
-            candidates.push(rect.width * rect.height);
-          }
-        }
-        return candidates.length > 0;
+      const directSelectors = [
+        '.componentsEntrywrapper.imContainer',
+        '.componentsLeftPanelwrapper',
+        '.conversationConversationListwrapper',
+        '.componentsLeftPanelboxList',
+      ];
+      for (const selector of directSelectors) {
+        const el = document.querySelector(selector);
+        if (isVisible(el)) return true;
       }
-
-      return findPanel();
+      return false;
     }).catch(() => false);
 
     if (exists) return true;
@@ -76,6 +81,7 @@ export async function openPrivateMessagePanel(page, { timeoutMs = 15000 } = {}) 
     try {
       await trigger.locator.hover({ timeout: 1500 });
       if (await waitForPrivateMessagePanel(page, { timeoutMs: 1200 })) {
+        await moveMouseFromTriggerIntoPanel(page, trigger.locator);
         return { ok: true, method: 'hover', selector: trigger.selector, attempt };
       }
     } catch {}
@@ -83,6 +89,7 @@ export async function openPrivateMessagePanel(page, { timeoutMs = 15000 } = {}) 
     try {
       await trigger.locator.click({ timeout: 1500 });
       if (await waitForPrivateMessagePanel(page, { timeoutMs: 1200 })) {
+        await moveMouseFromTriggerIntoPanel(page, trigger.locator);
         return { ok: true, method: 'click', selector: trigger.selector, attempt };
       }
     } catch {}
@@ -103,23 +110,17 @@ export async function locateFirstPrivateConversation(page) {
     }
 
     function findPanel() {
-      const candidates = [];
-      for (const el of document.querySelectorAll('body *')) {
-        if (!isVisible(el)) continue;
-        const rect = el.getBoundingClientRect();
-        if (rect.width < 240 || rect.width > 420 || rect.height < 300) continue;
-        if (rect.top > 180 || rect.left < window.innerWidth * 0.68) continue;
-        const text = (el.innerText || el.textContent || '').trim();
-        const hasSearch = text.includes('搜索');
-        const hasRecentTime = /刚刚|\d{1,2}:\d{2}|昨天/.test(text);
-        const hasSharePreview = text.includes('[分享用户]') || text.includes('[图片]') || text.includes('[视频]');
-        const hasMessageDots = (text.match(/刚刚/g) || []).length >= 2;
-        if (hasSearch || (hasRecentTime && (hasSharePreview || hasMessageDots))) {
-          candidates.push({ el, area: rect.width * rect.height, right: rect.right });
-        }
+      const directSelectors = [
+        '.componentsEntrywrapper.imContainer',
+        '.componentsLeftPanelwrapper',
+        '.conversationConversationListwrapper',
+        '.componentsLeftPanelboxList',
+      ];
+      for (const selector of directSelectors) {
+        const el = document.querySelector(selector);
+        if (isVisible(el)) return el;
       }
-      candidates.sort((a, b) => (b.area - a.area) || (b.right - a.right));
-      return candidates[0]?.el || null;
+      return null;
     }
 
     const panel = findPanel();
@@ -131,14 +132,51 @@ export async function locateFirstPrivateConversation(page) {
       ? searchNode.getBoundingClientRect().bottom + 8
       : panelRect.top + Math.min(panelRect.height * 0.12, 72);
 
+    function readConversationMeta(el) {
+      let current = el;
+      for (let depth = 0; depth < 3 && current; depth++, current = current.parentElement) {
+        for (const key of Object.keys(current)) {
+          if (!key.startsWith('__reactProps$')) continue;
+          const props = current[key];
+          const candidates = [props?.children?.[2]?.props?.conversation, props?.children?.props?.conversation, props?.conversation];
+          for (const conversation of candidates) {
+            if (conversation && typeof conversation === 'object') {
+              return {
+                toParticipantSecUserId: conversation.toParticipantSecUserId ?? '',
+                participantCount: conversation.participantCount ?? conversation.participant_count ?? null,
+              };
+            }
+          }
+        }
+      }
+      return { toParticipantSecUserId: '', participantCount: null };
+    }
+
+    function classifyConversation(meta) {
+      const secUid = String(meta?.toParticipantSecUserId || '').trim();
+      const participantCount = Number(meta?.participantCount);
+      const normalizedCount = Number.isFinite(participantCount) ? participantCount : null;
+      const isPersonal = Boolean(secUid) && (normalizedCount === null || normalizedCount <= 2);
+      return {
+        type: isPersonal ? 'personal' : 'group',
+        toParticipantSecUserId: secUid,
+        participantCount: normalizedCount,
+      };
+    }
+
     const directRows = Array.from(panel.querySelectorAll('[class*="conversationConversationItemwrapper"], [class*="ConversationItemwrapper"]'))
       .filter(isVisible)
       .map((el) => {
         const rect = el.getBoundingClientRect();
+        const meta = readConversationMeta(el);
+        const classification = classifyConversation(meta);
         return {
           el,
           rect,
           text: (el.innerText || '').trim(),
+          conversationType: classification.type,
+          toParticipantSecUserId: classification.toParticipantSecUserId,
+          participantCount: classification.participantCount,
         };
       })
       .filter(item =>
@@ -148,7 +186,8 @@ export async function locateFirstPrivateConversation(page) {
         item.rect.left >= panelRect.left &&
         item.rect.right <= panelRect.right + 2 &&
         item.rect.height >= 48 &&
-        item.rect.height <= 160
+        item.rect.height <= 160 &&
+        item.conversationType === 'personal'
       )
       .sort((a, b) => (a.rect.top - b.rect.top) || (a.rect.left - b.rect.left));
 
@@ -164,6 +203,9 @@ export async function locateFirstPrivateConversation(page) {
           width: first.rect.width,
           height: first.rect.height,
           text: first.text.slice(0, 200),
+          conversationType: first.conversationType,
+          toParticipantSecUserId: first.toParticipantSecUserId,
+          participantCount: first.participantCount,
         },
       };
     }
@@ -211,6 +253,9 @@ export async function locateFirstPrivateConversation(page) {
               width: rect.width,
               height: rect.height,
               text: text.slice(0, 200),
+              conversationType: 'unknown',
+              toParticipantSecUserId: '',
+              participantCount: null,
             });
           }
           break;
@@ -220,10 +265,95 @@ export async function locateFirstPrivateConversation(page) {
     }
 
     rows.sort((a, b) => (a.top - b.top) || (a.left - b.left));
-    const first = rows[0];
-    if (!first) return { ok: false, reason: 'conversation_not_found' };
+    const first = rows.find(item => item.conversationType === 'personal');
+    if (!first) return { ok: false, reason: 'personal_conversation_not_found' };
     return { ok: true, conversation: first };
   });
+}
+
+export async function getPrivateMessagePanelBox(page) {
+  return await page.evaluate(() => {
+    function isVisible(el) {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 10 && rect.height > 10 && style.display !== 'none' && style.visibility !== 'hidden';
+    }
+
+    const directSelectors = [
+      '.componentsEntrywrapper.imContainer',
+      '.componentsLeftPanelwrapper',
+      '.conversationConversationListwrapper',
+      '.componentsLeftPanelboxList',
+    ];
+    let panelEl = null;
+    for (const selector of directSelectors) {
+      const el = document.querySelector(selector);
+      if (isVisible(el)) {
+        panelEl = el;
+        break;
+      }
+    }
+    if (!panelEl) return null;
+    const rect = panelEl.getBoundingClientRect();
+    const panel = {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    return panel;
+  });
+}
+
+export async function moveMouseIntoPrivateMessagePanel(page) {
+  const panelBox = await getPrivateMessagePanelBox(page);
+  if (!panelBox) return { ok: false, reason: 'panel_not_found' };
+  const x = panelBox.x + panelBox.width / 2;
+  const y = panelBox.y + Math.min(panelBox.height * 0.2, 90);
+  await page.mouse.move(x, y);
+  await page.waitForTimeout(150);
+  return { ok: true, panelBox };
+}
+
+export async function locateFirstPersonalConversation(page, { maxScrolls = 8 } = {}) {
+  for (let attempt = 0; attempt <= maxScrolls; attempt++) {
+    const located = await locateFirstPrivateConversation(page);
+    if (!located) return { ok: false, reason: 'panel_not_found' };
+    if (located.ok) return located;
+    if (located.reason !== 'personal_conversation_not_found') return located;
+
+    let scrolled;
+    try {
+      scrolled = await page.evaluate(() => {
+        function isVisible(el) {
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 10 && rect.height > 10 && style.display !== 'none' && style.visibility !== 'hidden';
+        }
+
+        const containers = Array.from(document.querySelectorAll('.conversationConversationListwrapper, .componentsLeftPanelboxList'))
+          .filter(isVisible)
+          .filter(el => el.scrollHeight > el.clientHeight + 20)
+          .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight));
+        const container = containers[0];
+        if (!container) return { ok: false, reason: 'panel_not_found' };
+
+        const before = container.scrollTop;
+        container.scrollTop = before + 900;
+        const after = container.scrollTop;
+        return { ok: after !== before, before, after };
+      });
+    } catch {
+      scrolled = { ok: false, reason: 'panel_not_found' };
+    }
+
+    if (!scrolled || !scrolled.ok) return { ok: false, reason: scrolled?.reason || 'panel_not_found' };
+    await page.waitForTimeout(500);
+  }
+
+  return { ok: false, reason: 'personal_conversation_not_found' };
 }
 
 export async function findPrivateMessageMenuAction(page, label, { anchor = null } = {}) {
@@ -342,7 +472,7 @@ export async function clearPrivateMessages(page, { count = 1 } = {}) {
       return { ok: index > 0, deletedCount: index, requestedCount: normalizedCount, stoppedReason: opened.reason, results };
     }
 
-    const located = await locateFirstPrivateConversation(page);
+    const located = await locateFirstPersonalConversation(page);
     if (!located.ok || !located.conversation) {
       return { ok: index > 0, deletedCount: index, requestedCount: normalizedCount, stoppedReason: located.reason || 'conversation_not_found', results };
     }

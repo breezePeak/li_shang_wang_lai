@@ -75,7 +75,7 @@ describe('message-page', () => {
         .mockResolvedValueOnce(true)
         .mockResolvedValueOnce({
           ok: true,
-          conversation: { x: 120, y: 180, text: '会话A\n13:06' },
+          conversation: { x: 120, y: 180, text: '会话A\n13:06', conversationType: 'personal', toParticipantSecUserId: 'sec-a', participantCount: 2 },
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -88,12 +88,12 @@ describe('message-page', () => {
         .mockResolvedValueOnce(true)
         .mockResolvedValueOnce({
           ok: true,
-          conversation: { x: 120, y: 240, text: '会话B\n13:05' },
+          conversation: { x: 120, y: 240, text: '会话B\n13:05', conversationType: 'personal', toParticipantSecUserId: 'sec-b', participantCount: 2 },
         })
         .mockResolvedValueOnce(true)
         .mockResolvedValueOnce({
           ok: true,
-          conversation: { x: 120, y: 240, text: '会话B\n13:05' },
+          conversation: { x: 120, y: 240, text: '会话B\n13:05', conversationType: 'personal', toParticipantSecUserId: 'sec-b', participantCount: 2 },
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -106,7 +106,7 @@ describe('message-page', () => {
         .mockResolvedValueOnce(true)
         .mockResolvedValueOnce({
           ok: true,
-          conversation: { x: 120, y: 300, text: '会话C\n13:04' },
+          conversation: { x: 120, y: 300, text: '会话C\n13:04', conversationType: 'personal', toParticipantSecUserId: 'sec-c', participantCount: 2 },
         }),
       waitForTimeout: vi.fn(async () => {}),
       mouse: {
@@ -133,7 +133,7 @@ describe('message-page', () => {
         .mockResolvedValueOnce(true)
         .mockResolvedValueOnce({
           ok: true,
-          conversation: { x: 120, y: 180, text: '会话A\n13:06' },
+          conversation: { x: 120, y: 180, text: '会话A\n13:06', conversationType: 'personal', toParticipantSecUserId: 'sec-a', participantCount: 2 },
         })
         .mockResolvedValueOnce({
           ok: false,
@@ -150,5 +150,27 @@ describe('message-page', () => {
 
     expect(result.ok).toBe(false);
     expect(result.stoppedReason).toBe('menu_action_not_found');
+  });
+
+  it('clearPrivateMessages stops when only group chats are present', async () => {
+    const page = {
+      locator: vi.fn(() => createLocator(1)),
+      evaluate: vi.fn()
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce({
+          ok: false,
+          reason: 'personal_conversation_not_found',
+        }),
+      waitForTimeout: vi.fn(async () => {}),
+      mouse: {
+        move: vi.fn(async () => {}),
+        click: vi.fn(async () => {}),
+      },
+    };
+
+    const result = await clearPrivateMessages(page, { count: 1 });
+
+    expect(result.ok).toBe(false);
+    expect(page.mouse.click).not.toHaveBeenCalled();
   });
 });
