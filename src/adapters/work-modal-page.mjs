@@ -497,6 +497,10 @@ export async function clickReplySendControl(page) {
     }
 
     const scoredCandidates = Array.from(sendArea.querySelectorAll('button, [role="button"], div, span, svg, img'))
+      .filter(visible)
+      .filter(el => !hasBlockedSemantics(el))
+      .filter(el => !containsFileInput(el))
+      .filter(isSendLike)
       .map(el => scoreSendCandidate(el, composerRect))
       .filter(Boolean)
       .sort((a, b) => b.score - a.score);

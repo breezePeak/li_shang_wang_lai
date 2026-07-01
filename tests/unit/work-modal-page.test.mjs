@@ -450,6 +450,60 @@ describe('clickReplySendControl', () => {
       await browser.close();
     }
   });
+
+  it('真实抖音：@ 是纯图标 span（无 class/aria/text），发送在最右红色，send_control_scored_click 不误点 @', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+      await page.setContent(`
+        <html>
+          <body>
+            <div class="comment-input-container" style="position:fixed;right:16px;bottom:16px;width:480px;height:120px;background:#1f1f1f;">
+              <div class="commentInput-left-ct">
+                <div contenteditable="true">回复内容已填好</div>
+              </div>
+              <div class="commentInput-right-ct jIK4bnv1" style="display:flex;gap:12px;align-items:center;">
+                <div class="Gsu55KI2" style="display:flex;gap:8px;align-items:center;">
+                  <input type="file" style="display:none" id="file-input" />
+                  <span id="image-span" style="display:inline-block;width:36px;height:36px;">
+                    <svg width="20" height="20"><path d="M2 2h16v16H2z" fill="rgb(150,150,150)" /></svg>
+                  </span>
+                  <span id="emoji-span" style="display:inline-block;width:36px;height:36px;">
+                    <svg width="22" height="22"><circle cx="11" cy="11" r="10" fill="rgb(255,200,0)" /></svg>
+                  </span>
+                  <span id="at-span" style="display:inline-block;width:36px;height:36px;">
+                    <svg width="22" height="22"><path d="M5 11a6 6 0 1 1 12 0v3a3 3 0 0 1-6 0v-3" fill="none" stroke="rgb(180,180,180)" stroke-width="2"/></svg>
+                  </span>
+                  <span id="send-span" class="f5hSYimo" style="display:inline-block;width:32px;height:32px;background:rgb(255,46,85);border-radius:50%;">
+                    <svg width="16" height="16"><path d="M1 1l14 7-14 7 3-7z" fill="rgb(255,255,255)" /></svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <script>
+              window.clicked = [];
+              const ids = ['file-input','image-span','emoji-span','at-span','send-span'];
+              for (const id of ids) {
+                document.getElementById(id).addEventListener('click', () => window.clicked.push(id));
+              }
+            </script>
+          </body>
+        </html>
+      `);
+
+      const result = await clickReplySendControl(page);
+      const clicked = await page.evaluate(() => window.clicked.slice());
+
+      expect(result.ok).toBe(true);
+      expect(clicked).toContain('send-span');
+      expect(clicked).not.toContain('at-span');
+      expect(clicked).not.toContain('emoji-span');
+      expect(clicked).not.toContain('image-span');
+      expect(clicked).not.toContain('file-input');
+    } finally {
+      await browser.close();
+    }
+  });
 });
 
 describe('waitForWorkModal', () => {
