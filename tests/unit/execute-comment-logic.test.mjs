@@ -20,6 +20,7 @@ import {
 } from '../../src/cli/execute-comment-replies.mjs';
 import { listPendingCommentsGroupedByHomepageAndWork } from '../../src/db/work-comment-repository.mjs';
 import { markCommentRetryFailure } from '../../src/db/work-comment-repository.mjs';
+import { RESULT_CODES } from '../../src/domain/result-codes.mjs';
 
 // ============================================================
 // Test helpers — run CLI and capture stdout
@@ -940,6 +941,50 @@ describe('comments:execute single-pass per work', () => {
     expect(verifyReply).toHaveBeenCalledTimes(1);
     expect(saveSucceeded).not.toHaveBeenCalled();
     expect(saveSentUnverified).toHaveBeenCalledTimes(1);
+  });
+
+  it('检测到手机号/短信安全认证时停止本轮且不改写评论状态', async () => {
+    const page = createFakePage();
+    const collectCandidates = vi.fn(async () => ({ ok: true, candidates: [] }));
+    const openMatchedReplyBox = vi.fn(async () => ({ ok: true }));
+    const fillReply = vi.fn(async () => ({ ok: true }));
+    const clickSend = vi.fn(async () => ({ ok: true }));
+    const verifyReply = vi.fn(async () => ({ ok: true }));
+    const saveSucceeded = vi.fn();
+    const saveBlocked = vi.fn();
+    const saveRetryable = vi.fn();
+    const saveSentUnverified = vi.fn();
+    const onResult = vi.fn();
+
+    const results = await executeSinglePassForWorkGroup(page, [
+      { commentId: 1, replyText: 'r1', targetCommentId: 'A', actorName: 'u1', commentText: 'A', replyStatus: 'pending' },
+    ], { getByCid: () => null, getStats: () => ({ hasMore: 1 }) }, {
+      collectCandidates,
+      scrollOnce: vi.fn(async () => ({ ok: true })),
+      openMatchedReplyBox,
+      fillReply,
+      clickSend,
+      verifyReply,
+      saveSucceeded,
+      saveBlocked,
+      saveRetryable,
+      saveSentUnverified,
+      detectSecurityVerification: async () => ({ reason: 'security_verification_required', preview: '手机号验证' }),
+      onResult,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(false);
+    expect(results[0].code).toBe(RESULT_CODES.IDENTITY_NOT_VERIFIED);
+    expect(results[0].error).toBe('security_verification_required');
+    expect(collectCandidates).not.toHaveBeenCalled();
+    expect(openMatchedReplyBox).not.toHaveBeenCalled();
+    expect(clickSend).not.toHaveBeenCalled();
+    expect(saveSucceeded).not.toHaveBeenCalled();
+    expect(saveBlocked).not.toHaveBeenCalled();
+    expect(saveRetryable).not.toHaveBeenCalled();
+    expect(saveSentUnverified).not.toHaveBeenCalled();
+    expect(onResult).toHaveBeenCalledTimes(1);
   });
 
   it('not_unique 会阻断当前项，但无 cid 的 actor_not_verified 会继续往下找其他 pending', async () => {

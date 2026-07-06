@@ -17,6 +17,7 @@ import { findWorkByIdentity } from '../db/work-repository.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 import { createBrowserContext, replaceContextPage } from '../browser/browser-context.mjs';
+import { detectDouyinSecurityVerification } from '../browser/douyin-auth-state.mjs';
 import { createRunContext, saveRunSummary, resolveBrowserClose } from '../browser/run-context.mjs';
 import { captureEvidence } from '../browser/failure-evidence.mjs';
 import { buildDouyinWorkUrl } from '../utils/douyin-url.mjs';
@@ -81,6 +82,29 @@ export function parseArgs(argv) {
   return args;
 }
 
+function readPositiveInt(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+export function resolveCommentActionCooldown(env = process.env) {
+  const minMs = readPositiveInt(env.LISHANGWANGLAI_COMMENT_ACTION_COOLDOWN_MIN_MS, 7000);
+  const maxMs = Math.max(minMs, readPositiveInt(env.LISHANGWANGLAI_COMMENT_ACTION_COOLDOWN_MAX_MS, 15000));
+  return { minMs, maxMs };
+}
+
+function randomIntBetween(min, max) {
+  return Math.floor(min + Math.random() * (max - min + 1));
+}
+
+async function waitCommentActionCooldown(page, env = process.env) {
+  const { minMs, maxMs } = resolveCommentActionCooldown(env);
+  const delayMs = randomIntBetween(minMs, maxMs);
+  console.error(`[comments:execute] 风控冷却 ${delayMs}ms 后继续下一条回评`);
+  if (typeof page?.waitForTimeout === 'function') await page.waitForTimeout(delayMs);
+  else await new Promise(resolve => setTimeout(resolve, delayMs));
+}
+
 export function buildWorkCommentItemsFromDbRows(rows = []) {
   return rows.map((row, index) => ({
     itemIndex: index,
@@ -110,6 +134,7 @@ export function buildWorkCommentItemsFromDbRows(rows = []) {
     repliedAt: row.replied_at || '',
     createdAt: row.created_at || '',
     targetCommentId: extractTargetCommentId({}, row),
+    replyStatus: row.reply_status || '',
     raw_comment_json: row.raw_comment_json || '',
   }));
 }
@@ -932,6 +957,8 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
   clickSend = clickSendWorkReply,
   verifyReply = verifyWorkReplyVisible,
   scrollOnce = scrollCommentViewport,
+  detectSecurityVerification = detectDouyinSecurityVerification,
+  waitCooldown = waitCommentActionCooldown,
   saveSucceeded = (item) => {
     markCommentReplied(item.commentId);
     saveReplyText(item.commentId, item.replyText);
@@ -963,9 +990,32 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
   let scrollRounds = 0;
   let rollbackRounds = 0;
 
+  function stopForSecurityVerification(verification = null) {
+    const reason = verification?.reason || 'security_verification_required';
+    console.log('[comments:execute] 检测到手机号/短信安全认证，暂停自动回评并保留当前浏览器窗口');
+    for (const item of pendingMap.values()) {
+      const result = {
+        ...item,
+        ok: false,
+        status: 'blocked',
+        code: RESULT_CODES.IDENTITY_NOT_VERIFIED,
+        error: reason,
+        recoverable: false,
+        securityVerification: verification || null,
+      };
+      localResults.push(result);
+      onResult(result);
+    }
+    pendingMap.clear();
+    return localResults;
+  }
+
   console.log(`[comments:execute] single-pass start work=${currentWork.workId || currentWork.modalId || currentWork.workUrl} pending=${pendingMap.size}`);
 
   while (pendingMap.size > 0) {
+    const securityVerification = await detectSecurityVerification(page).catch(() => null);
+    if (securityVerification) return stopForSecurityVerification(securityVerification);
+
     await quietWorkModalMedia(page, { installGuard: true, reason: 'single_pass_viewport_start' }).catch(() => null);
     await expandReplies(page, { maxClicks: 6 }).catch(() => null);
     await quietWorkModalMedia(page, { installGuard: true, reason: 'after_expand_replies' }).catch(() => null);
@@ -1056,6 +1106,9 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       try {
         const sent = await clickSend(page);
         if (!sent.ok) {
+          if (sent.code === RESULT_CODES.IDENTITY_NOT_VERIFIED) {
+            return stopForSecurityVerification(sent.data || { reason: 'security_verification_required' });
+          }
           const reason = sent.message || sent.code || 'send_failed';
           const finalStatus = saveRetryable(nextAction.item, `send_failed:${reason}`) || 'pending';
           pendingMap.delete(nextAction.item.commentId);
@@ -1103,6 +1156,8 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       localResults.push(result);
       onResult(result);
       console.log(`[comments:execute] replied commentId=${nextAction.item.commentId} matchedBy=${nextAction.picked.matchedBy} pending=${pendingMap.size}`);
+
+      if (pendingMap.size > 0) await waitCooldown(page).catch(() => null);
 
       break;
     }
@@ -1250,6 +1305,25 @@ async function executeWorkCommentItems(items, args, run, recorder) {
     } catch {}
   }
 
+  async function stopGroupForSecurityVerification(group, phase = 'unknown') {
+    const verification = await detectDouyinSecurityVerification(page).catch(() => null);
+    if (!verification) return false;
+    run.hadBlocked = true;
+    console.log(`[comments:execute] 检测到手机号/短信安全认证 phase=${phase}，暂停自动回评并保留当前浏览器窗口`);
+    for (const validated of group) {
+      results.push({
+        ...validated,
+        ok: false,
+        status: 'blocked',
+        code: RESULT_CODES.IDENTITY_NOT_VERIFIED,
+        error: 'security_verification_required',
+        recoverable: false,
+        securityVerification: verification,
+      });
+    }
+    return true;
+  }
+
   try {
     const prepared = items.map(validateWorkCommentItem);
     const executable = prepared.filter(item => item.ok);
@@ -1313,6 +1387,7 @@ async function executeWorkCommentItems(items, args, run, recorder) {
           }
 
           if (!openResult.ok) {
+            if (await stopGroupForSecurityVerification(group, 'open_profile_failed')) break;
             console.log(`[comments:execute] open_profile_failed reason=${openResult.reason || openResult.message || openResult.code || 'work_open_failed'}`);
             for (const validated of group) {
               const reason = openResult.reason || openResult.message || openResult.code || 'work_open_failed';
@@ -1323,10 +1398,12 @@ async function executeWorkCommentItems(items, args, run, recorder) {
           }
           console.log(`[comments:execute] open_profile_success opened_work_url=${openResult.url || ''}`);
           activeHomepageUrl = openResult.fallback ? '' : targetHomepageUrl;
+          if (await stopGroupForSecurityVerification(group, 'after_open_work')) break;
           await quietWorkModalMedia(page, { installGuard: true, reason: 'after_open_work' }).catch(() => null);
 
           const modalReady = await waitForWorkModal(page, { timeoutMs: 12000, closeAutoPlay: true });
           if (!modalReady.ok) {
+            if (await stopGroupForSecurityVerification(group, 'work_modal_not_ready')) break;
             for (const validated of group) {
               const reason = modalReady.message || modalReady.code || 'work_modal_not_ready';
               const finalStatus = diagnosePosition ? 'pending' : saveRetryablePending(validated, `work_modal_not_ready:${reason}`);
@@ -1337,6 +1414,7 @@ async function executeWorkCommentItems(items, args, run, recorder) {
 
           const commentAreaReady = await waitForWorkCommentArea(page, { timeoutMs: 10000 });
           if (!commentAreaReady.ok) {
+            if (await stopGroupForSecurityVerification(group, 'comment_area_not_ready')) break;
             for (const validated of group) {
               const reason = commentAreaReady.message || commentAreaReady.code || 'comment_area_not_ready';
               const finalStatus = diagnosePosition ? 'pending' : saveRetryablePending(validated, `comment_area_not_ready:${reason}`);

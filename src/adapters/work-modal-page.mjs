@@ -2984,11 +2984,29 @@ export async function fillWorkReplyText(page, replyText) {
 
 export async function clickSendWorkReply(page) {
   try {
+    const verificationBeforeClick = await detectDouyinSecurityVerification(page);
+    if (verificationBeforeClick) {
+      return blocking(
+        RESULT_CODES.IDENTITY_NOT_VERIFIED,
+        '抖音要求手机号/短信安全认证，请在浏览器中手动完成后再继续回访',
+        { recoverable: false, data: verificationBeforeClick }
+      );
+    }
+
     const clicked = await clickReplySendControl(page);
     if (clicked.ok) {
       console.error(`[work-modal] 点击发送控件 method=${clicked.method}`);
       await captureReplyBoxDebug(page, 'send-clicked', { success: true });
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(800);
+      const verificationAfterClick = await detectDouyinSecurityVerification(page);
+      if (verificationAfterClick) {
+        return blocking(
+          RESULT_CODES.IDENTITY_NOT_VERIFIED,
+          '抖音要求手机号/短信安全认证，请在浏览器中手动完成后再继续回访',
+          { recoverable: false, data: verificationAfterClick }
+        );
+      }
+      await page.waitForTimeout(1200);
       return success({ sent: true, method: clicked.method });
     }
 
@@ -2997,7 +3015,16 @@ export async function clickSendWorkReply(page) {
     await page.waitForTimeout(250).catch(() => {});
     await page.keyboard.press('Enter').catch(() => {});
     await captureReplyBoxDebug(page, 'send-keyboard-fallback', { success: true });
-    await page.waitForTimeout(1800).catch(() => {});
+    await page.waitForTimeout(800).catch(() => {});
+    const verificationAfterKeyboard = await detectDouyinSecurityVerification(page);
+    if (verificationAfterKeyboard) {
+      return blocking(
+        RESULT_CODES.IDENTITY_NOT_VERIFIED,
+        '抖音要求手机号/短信安全认证，请在浏览器中手动完成后再继续回访',
+        { recoverable: false, data: verificationAfterKeyboard }
+      );
+    }
+    await page.waitForTimeout(1000).catch(() => {});
     return success({ sent: true, method: 'keyboard_enter_fallback', fallbackReason: clicked.reason });
   } catch (err) {
     return blocking(RESULT_CODES.COMMENT_SEND_BUTTON_NOT_FOUND, `发送回复异常: ${err.message}`, { recoverable: true });
