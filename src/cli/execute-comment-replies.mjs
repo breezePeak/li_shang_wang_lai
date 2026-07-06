@@ -461,6 +461,12 @@ export function isDoneWithoutRetryResult(result) {
     || (!result?.ok && result?.status === 'sent_unverified');
 }
 
+export function isSecurityVerificationResult(result = {}) {
+  return Boolean(result?.securityVerification)
+    || result?.code === RESULT_CODES.IDENTITY_NOT_VERIFIED
+    || result?.error === 'security_verification_required';
+}
+
 export function validateWorkCommentItem(item) {
   const inputCommentId = Number(item.commentId);
   if (!item.commentId) {
@@ -1449,13 +1455,13 @@ async function executeWorkCommentItems(items, args, run, recorder) {
               results.push(result);
             },
           });
-          if (groupResults.some(result => !result.ok && result.status === 'blocked')) {
+          if (groupResults.some(isSecurityVerificationResult)) {
             run.hadBlocked = true;
           }
           await recorder?.capture(page, 'comments.work_group.finish', {
             groupIndex,
             groupSize: group.length,
-            hadBlocked: groupResults.some(result => !result.ok && result.status === 'blocked'),
+            hadBlocked: groupResults.some(isSecurityVerificationResult),
           });
 
           const nextGroup = workGroups[workGroups.indexOf(group) + 1] || null;
@@ -1475,7 +1481,7 @@ async function executeWorkCommentItems(items, args, run, recorder) {
           await releaseWorkModalMediaQuietGuard(page).catch(() => null);
         }
       } catch (err) {
-        run.hadBlocked = true;
+        run.hadError = true;
         for (const validated of group) {
           const finalStatus = diagnosePosition ? 'pending' : saveRetryablePending(validated, `group_execute_failed:${err.message}`);
           results.push({ ...validated, ok: false, status: finalStatus, error: err.message });

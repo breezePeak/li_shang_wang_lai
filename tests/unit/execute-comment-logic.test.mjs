@@ -13,6 +13,7 @@ import {
   groupExecutableItemsByWork,
   isDoneWithoutRetryResult,
   isReplyTextTooShort,
+  isSecurityVerificationResult,
   parseArgs,
   planViewportPendingMatches,
   resolveCommentActionCooldown,
@@ -998,6 +999,14 @@ describe('comments:execute single-pass per work', () => {
     expect(saveRetryable).not.toHaveBeenCalled();
     expect(saveSentUnverified).not.toHaveBeenCalled();
     expect(onResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('只有安全验证结果会触发阻塞保留浏览器判定', () => {
+    expect(isSecurityVerificationResult({ status: 'blocked', error: 'actor_not_verified:CF' })).toBe(false);
+    expect(isSecurityVerificationResult({ status: 'pending', error: 'single_pass_not_found:scroll_limit_20' })).toBe(false);
+    expect(isSecurityVerificationResult({ status: 'blocked', error: 'security_verification_required' })).toBe(true);
+    expect(isSecurityVerificationResult({ code: RESULT_CODES.IDENTITY_NOT_VERIFIED })).toBe(true);
+    expect(isSecurityVerificationResult({ securityVerification: { reason: 'security_verification_required' } })).toBe(true);
   });
 
   it('not_unique 会阻断当前项，但无 cid 的 actor_not_verified 会继续往下找其他 pending', async () => {
