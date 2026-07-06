@@ -88,8 +88,8 @@ function readPositiveInt(value, fallback) {
 }
 
 export function resolveCommentActionCooldown(env = process.env) {
-  const minMs = readPositiveInt(env.LISHANGWANGLAI_COMMENT_ACTION_COOLDOWN_MIN_MS, 7000);
-  const maxMs = Math.max(minMs, readPositiveInt(env.LISHANGWANGLAI_COMMENT_ACTION_COOLDOWN_MAX_MS, 15000));
+  const minMs = readPositiveInt(env.LISHANGWANGLAI_COMMENT_ACTION_COOLDOWN_MIN_MS, 3000);
+  const maxMs = Math.max(minMs, readPositiveInt(env.LISHANGWANGLAI_COMMENT_ACTION_COOLDOWN_MAX_MS, 6000));
   return { minMs, maxMs };
 }
 

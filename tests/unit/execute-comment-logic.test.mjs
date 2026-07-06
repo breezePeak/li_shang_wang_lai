@@ -15,6 +15,7 @@ import {
   isReplyTextTooShort,
   parseArgs,
   planViewportPendingMatches,
+  resolveCommentActionCooldown,
   resolveWorkUrlFromItem,
   validateWorkCommentItem,
 } from '../../src/cli/execute-comment-replies.mjs';
@@ -151,6 +152,18 @@ describe('comments:execute refactored logic', () => {
 
     expect(args.limit).toBeNull();
     expect(rows.map(row => row.id)).toEqual([2, 1]);
+  });
+
+  it('回评动作默认冷却为 3-6 秒，且可用环境变量覆盖', () => {
+    expect(resolveCommentActionCooldown({})).toEqual({ minMs: 3000, maxMs: 6000 });
+    expect(resolveCommentActionCooldown({
+      LISHANGWANGLAI_COMMENT_ACTION_COOLDOWN_MIN_MS: '1200',
+      LISHANGWANGLAI_COMMENT_ACTION_COOLDOWN_MAX_MS: '2500',
+    })).toEqual({ minMs: 1200, maxMs: 2500 });
+    expect(resolveCommentActionCooldown({
+      LISHANGWANGLAI_COMMENT_ACTION_COOLDOWN_MIN_MS: '5000',
+      LISHANGWANGLAI_COMMENT_ACTION_COOLDOWN_MAX_MS: '1000',
+    })).toEqual({ minMs: 5000, maxMs: 5000 });
   });
 
   it('includeBlocked=true 时也查出 blocked 状态的评论用于重试回评', () => {
