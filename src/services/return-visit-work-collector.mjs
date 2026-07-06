@@ -297,12 +297,20 @@ export async function closeCurrentWorkModalToProfile(page, profileUrl, options =
         const cls = String(el.getAttribute('class') || '');
         const rect = el.getBoundingClientRect();
         const inTopLeft = rect.left < 140 && rect.top < 140;
+        const looksLikeTopLeftCloseControl = inTopLeft
+          && rect.left < 120
+          && rect.top < 120
+          && rect.width >= 24
+          && rect.width <= 96
+          && rect.height >= 24
+          && rect.height <= 96;
         const closeLike = text === '关闭'
           || aria.includes('关闭')
+          || aria.toLowerCase().includes('close')
           || cls.includes('close')
           || cls.includes('Close')
-          || cls.includes('xgplayer-playswitch-next')
-          || cls.includes('semi-icon-close');
+          || cls.includes('semi-icon-close')
+          || looksLikeTopLeftCloseControl;
         if (!inTopLeft || !closeLike) continue;
         candidates.push({
           el,
@@ -328,11 +336,6 @@ export async function closeCurrentWorkModalToProfile(page, profileUrl, options =
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await quietWorkModalMedia(page, { installGuard: true, reason: 'closing_modal_loop' }).catch(() => null);
-    await page.keyboard.press('Escape').catch(() => {});
-    await page.waitForTimeout(500);
-    if (await onProfileWithoutModal()) {
-      return { ok: true, method: 'escape', url: page.url() };
-    }
 
     const clicked = await tryCloseButton();
     if (clicked.ok) {
@@ -341,6 +344,12 @@ export async function closeCurrentWorkModalToProfile(page, profileUrl, options =
       if (await onProfileWithoutModal()) {
         return { ok: true, method: 'close_button', url: page.url() };
       }
+    }
+
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.waitForTimeout(500);
+    if (await onProfileWithoutModal()) {
+      return { ok: true, method: 'escape', url: page.url() };
     }
   }
 

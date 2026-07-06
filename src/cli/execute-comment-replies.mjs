@@ -1344,6 +1344,7 @@ async function executeWorkCommentItems(items, args, run, recorder) {
     for (const group of workGroups) {
       groupIndex++;
       const currentWork = group[0];
+      const targetHomepageUrl = currentWork.authorProfileUrl || currentWork.homepageUrl || '';
       try {
         await recorder?.capture(page, 'comments.work_group.start', {
           groupIndex,
@@ -1352,17 +1353,21 @@ async function executeWorkCommentItems(items, args, run, recorder) {
           modalId: currentWork?.modalId || '',
         });
         if (groupIndex > 0) {
-          page = await replaceContextPage(ctx.context, page);
-          recorder?.instrumentPage(page, { label: 'comments.execute.page' });
-          activeHomepageUrl = '';
-          console.error(`[comments:execute] 切换到新页面执行作品组 group_index=${groupIndex + 1}/${workGroups.length}`);
+          const canReuseCurrentProfile = Boolean(activeHomepageUrl && targetHomepageUrl && activeHomepageUrl === targetHomepageUrl);
+          if (canReuseCurrentProfile) {
+            console.error(`[comments:execute] 复用当前主页执行作品组 group_index=${groupIndex + 1}/${workGroups.length}`);
+          } else {
+            page = await replaceContextPage(ctx.context, page);
+            recorder?.instrumentPage(page, { label: 'comments.execute.page' });
+            activeHomepageUrl = '';
+            console.error(`[comments:execute] 切换到新页面执行作品组 group_index=${groupIndex + 1}/${workGroups.length}`);
+          }
         }
         if (page.isClosed()) {
           throw new Error('Target page, context or browser has been closed');
         }
 
         console.log(`[comments:execute] current_homepage_url=${currentWork.homepageUrl || currentWork.authorProfileUrl || ''} current_work_id=${currentWork.workId || ''} current_modal_id=${currentWork.modalId || ''} group_comment_count=${group.length}`);
-        const targetHomepageUrl = currentWork.authorProfileUrl || currentWork.homepageUrl || '';
         const reuseCurrentProfile = Boolean(activeHomepageUrl && targetHomepageUrl && activeHomepageUrl === targetHomepageUrl);
         const commentListCollector = createCommentListApiCollector(page);
         try {
@@ -1458,8 +1463,10 @@ async function executeWorkCommentItems(items, args, run, recorder) {
           if (shouldReturnToProfile) {
             const closeResult = await closeCurrentWorkModalToProfile(page, targetHomepageUrl, { timeoutMs: 10000 });
             if (closeResult.ok) {
+              activeHomepageUrl = targetHomepageUrl;
               console.log(`[comments:execute] return_to_profile_success method=${closeResult.method} url=${closeResult.url || ''}`);
             } else {
+              activeHomepageUrl = '';
               console.log(`[comments:execute] return_to_profile_failed reason=${closeResult.reason || 'close_modal_to_profile_failed'}`);
             }
           }
