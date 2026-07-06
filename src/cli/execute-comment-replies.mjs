@@ -788,6 +788,27 @@ function closestDistanceFromTimeRange(range, targetTimes = []) {
   return Math.min(...distances);
 }
 
+const REPLY_SEARCH_TIMEOUT_DAYS = 30;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function findReplySearchTimedOutItems(pendingItems = [], currentRange = null, {
+  commentListCollector = null,
+  timeoutDays = REPLY_SEARCH_TIMEOUT_DAYS,
+} = {}) {
+  if (!currentRange) return [];
+  const timeoutMs = Number(timeoutDays || REPLY_SEARCH_TIMEOUT_DAYS) * MS_PER_DAY;
+  if (!(timeoutMs > 0)) return [];
+
+  return (pendingItems || [])
+    .map(item => ({ item, targetMs: getPendingItemTimestampMs(item, commentListCollector) }))
+    .filter(entry => Number.isFinite(entry.targetMs))
+    .filter(entry => currentRange.newestMs < entry.targetMs - timeoutMs)
+    .map(entry => ({
+      ...entry,
+      reason: `reply_timeout:visible_comment_older_than_target_over_${timeoutDays}_days`,
+    }));
+}
+
 function shouldStartRollbackByTime(pendingItems = [], visibleCandidates = [], lastViewportTimeRange = null, { commentListCollector = null } = {}) {
   const currentRange = summarizeViewportTimeRange(visibleCandidates, commentListCollector);
   if (!currentRange || !lastViewportTimeRange) {
@@ -980,6 +1001,9 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
   },
   saveManuallyReplied = (item, reason) => {
     markCommentManuallyReplied(item.commentId, reason);
+  },
+  saveTimedOut = (item, reason) => {
+    markCommentSkipped(item.commentId, reason);
   },
   createSubmitWatcher = (currentPage, expectedText, expectedTargetCommentId = '') => createCommentSubmitApiWatcher(currentPage, { expectedText, expectedTargetCommentId }),
   onResult = () => {},
@@ -1194,6 +1218,23 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
       { commentListCollector },
     );
     lastViewportTimeRange = rollbackDecision.currentRange || lastViewportTimeRange;
+
+    const timedOutEntries = findReplySearchTimedOutItems(pendingItems, rollbackDecision.currentRange, { commentListCollector });
+    if (timedOutEntries.length > 0) {
+      for (const entry of timedOutEntries) {
+        if (!pendingMap.has(entry.item.commentId)) continue;
+        saveTimedOut(entry.item, entry.reason);
+        pendingMap.delete(entry.item.commentId);
+        const result = { ...entry.item, ok: false, status: 'skipped', error: entry.reason };
+        localResults.push(result);
+        onResult(result);
+        console.log(`[comments:execute] timeout commentId=${entry.item.commentId} reason=${entry.reason} pending=${pendingMap.size}`);
+      }
+      if (pendingMap.size === 0) break;
+      noProgressRounds = 0;
+      lastSignature = '';
+      continue;
+    }
 
     const stats = commentListCollector?.getStats?.() || {};
     if (Number(stats.hasMore) === 0 && viewportRound > 2) {
@@ -1450,6 +1491,7 @@ async function executeWorkCommentItems(items, args, run, recorder) {
               saveRetryable: () => {},
               saveSentUnverified: () => {},
               saveManuallyReplied: () => {},
+              saveTimedOut: () => {},
             } : {}),
             onResult(result) {
               results.push(result);

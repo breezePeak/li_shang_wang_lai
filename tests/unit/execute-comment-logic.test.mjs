@@ -1133,6 +1133,50 @@ describe('comments:execute single-pass per work', () => {
     expect(saveRetryable).toHaveBeenCalledWith(expect.objectContaining({ commentId: 1 }), 'single_pass_not_found:scroll_limit_20');
   });
 
+  it('可见评论已经早于目标评论超过 30 天时直接标记超时跳过，不继续滚动', async () => {
+    const page = createFakePage();
+    const saveTimedOut = vi.fn();
+    const scrollOnce = vi.fn(async () => ({ ok: true }));
+    const targetCreateTime = 1780000000;
+    const olderThanTargetBy31Days = targetCreateTime - 31 * 24 * 60 * 60;
+
+    const results = await executeSinglePassForWorkGroup(page, [
+      {
+        commentId: 1,
+        replyText: 'r1',
+        targetCommentId: 'target-cid',
+        actorName: 'u1',
+        commentText: '目标评论',
+        eventTimeText: '2小时前',
+        rawCommentJson: JSON.stringify({ comment: { comment: { create_time: targetCreateTime } } }),
+      },
+    ], {
+      getByCid: (cid) => cid === 'visible-old' ? { commentId: 'visible-old', createTime: olderThanTargetBy31Days } : null,
+      getStats: () => ({ hasMore: 1 }),
+    }, {
+      collectCandidates: vi.fn(async () => ({
+        ok: true,
+        candidates: [{ domIndex: 0, cid: 'visible-old', actorName: 'u2', commentText: '很早以前的评论', timeText: '1月前', hasReplyButton: true }],
+      })),
+      scrollOnce,
+      openMatchedReplyBox: vi.fn(),
+      fillReply: vi.fn(),
+      clickSend: vi.fn(),
+      verifyReply: vi.fn(),
+      saveSucceeded: vi.fn(),
+      saveRetryable: vi.fn(),
+      saveSentUnverified: vi.fn(),
+      saveTimedOut,
+      onResult: vi.fn(),
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ commentId: 1, ok: false, status: 'skipped' });
+    expect(results[0].error).toBe('reply_timeout:visible_comment_older_than_target_over_30_days');
+    expect(saveTimedOut).toHaveBeenCalledWith(expect.objectContaining({ commentId: 1 }), 'reply_timeout:visible_comment_older_than_target_over_30_days');
+    expect(scrollOnce).not.toHaveBeenCalled();
+  });
+
   it('当可见评论时间越翻越旧并超过目标时间时，会开始回滚向上找', async () => {
     const page = createFakePage();
     let collectRound = 0;
