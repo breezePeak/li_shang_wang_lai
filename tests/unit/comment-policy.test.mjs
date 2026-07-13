@@ -78,6 +78,14 @@ describe('validateSelectedComment', () => {
     expect(r.valid).toBe(false);
   });
 
+  it('forbidden gendered address "老哥" → invalid', () => {
+    const r = validateSelectedComment({
+      text: '老哥说得对', replyMode: 'agent_generated_review_required', riskLevel: 'medium', manualReviewMethod: 'user_selected_agent_comment',
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.some(e => e.includes('forbidden'))).toBe(true);
+  });
+
   it('over 40 chars → invalid', () => {
     const r = validateSelectedComment({
       text: '啊'.repeat(41), replyMode: 'auto_simple', riskLevel: 'low', manualReviewMethod: 'user_selected_template',

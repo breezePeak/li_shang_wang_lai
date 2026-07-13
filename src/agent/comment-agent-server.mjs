@@ -58,6 +58,11 @@ export function hasViewerOnlyReplyText(text = '') {
   return /期待.{0,8}(更新|下次|下一期|下一集|下集|后续)|等.{0,8}(更新|下次|下一期|下一集|下集|后续)|蹲.{0,8}(更新|下次|下一期|下一集|下集|后续)|坐等.{0,8}(更新|下次|下一期|下一集|下集|后续)|催更|快更|啥时候更新|什么时候更新|求更新|更新了踢我|更新踢我/.test(String(text || ''));
 }
 
+/** 假定对方性别的称呼，易导致称呼性别错误 */
+export function hasGenderedAddress(text = '') {
+  return /老哥|老妹|老弟|兄弟们?|哥们|哥们儿|帅哥|美女|小姐姐|小哥哥|妹子|姐们|姐们儿|大哥|大姐|小美女|小帅哥/.test(String(text || ''));
+}
+
 function getReplyRiskHintLines() {
   return [
     '额外要求：这条回复会真实发送到评论区，请优先写得像真人临场回复，尽量降低被平台静默吞评或风控拦截的概率。',
@@ -229,6 +234,7 @@ export function validateComment(comment, { maxLength = getCommentMaxLength() } =
   const text = String(comment || '').trim();
   if (!text) throw new Error('comment 为空');
   if (text.length > maxLength) throw new Error(`comment 超长: ${text.length}/${maxLength}`);
+  if (hasGenderedAddress(text)) throw new Error('comment 使用了假定性别的称呼');
   if (/```|\{\s*"comment"|^\s*\[/.test(text)) throw new Error('comment 必须是纯文本');
   return text;
 }
@@ -247,6 +253,7 @@ export function validateReply(reply, { minLength = getReplyMinLength(), maxLengt
   if (hasForbiddenReplyPersona(text)) throw new Error('reply 使用了泛化或伪装身份提示');
   if (hasLowQualityReplyText(text)) throw new Error('reply 使用了低质套话或复读内容');
   if (hasViewerOnlyReplyText(text)) throw new Error('reply 使用了观众催更口吻');
+  if (hasGenderedAddress(text)) throw new Error('reply 使用了假定性别的称呼');
   if (/```|\{\s*"reply"|^\s*\[/.test(text)) throw new Error('reply 必须是纯文本');
   return text;
 }

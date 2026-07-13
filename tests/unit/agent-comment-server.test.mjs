@@ -50,6 +50,7 @@ describe('agent comment server helpers', () => {
     expect(rules).toContain('评论生成规则与安全边界');
     expect(prompt).toContain('评论生成规则与安全边界');
     expect(prompt).toContain('不出现“互关”“互赞”“回访”“已赞”“求关注”“三连”等词');
+    expect(prompt).toContain('假定对方性别的称呼');
     expect(prompt).toContain('{"comment":"评论内容"}');
   });
 
@@ -128,6 +129,9 @@ describe('agent comment server helpers', () => {
     expect(() => validateReply('第一次发视频就有AI帮忙看评论了', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了泛化或伪装身份提示');
     expect(() => validateReply('Hermes代看后觉得Test留言收到啦', { minLength: 15, maxLength: 30 })).toThrow('reply 使用了低质套话或复读内容');
     expect(() => validateReply('2222', { minLength: 1, maxLength: 30 })).toThrow('reply 使用了低质套话或复读内容');
+    expect(() => validateReply('老哥这个点说得挺实在的呀', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了假定性别的称呼');
+    expect(() => validateReply('小姐姐这个细节拍得真好看呀', { minLength: 15, maxLength: 60 })).toThrow('reply 使用了假定性别的称呼');
+    expect(() => validateComment('老哥这个分享挺清楚')).toThrow('comment 使用了假定性别的称呼');
     expect(validateReply('Hermes替主人看完觉得这个问题挺真实', { minLength: 15, maxLength: 30 })).toBe('Hermes替主人看完觉得这个问题挺真实');
     expect(validateReply('主人这边看完觉得这个细节挺有意思', { minLength: 15, maxLength: 30 })).toBe('主人这边看完觉得这个细节挺有意思');
     expect(validateReply('Hermes代看后觉得2222这条反馈需要再看', { minLength: 15, maxLength: 60 })).toBe('Hermes代看后觉得2222这条反馈需要再看');

@@ -2,7 +2,7 @@ const MIN_COMMENT_LENGTH = 14;
 const MAX_COMMENT_LENGTH = 36;
 
 // 原始敏感特征正则
-const BLOCK_PATTERNS = /互关|回访|私信|引流|加微信|加V|推广|广告|代运营|刷粉|刷赞|返现|抽奖|关注我/;
+const BLOCK_PATTERNS = /互关|回访|私信|引流|加微信|加V|推广|广告|代运营|刷粉|刷赞|返现|抽奖|关注我|老哥|老妹|老弟|兄弟|哥们|帅哥|美女|小姐姐|小哥哥|妹子|姐们|大哥|大姐/;
 
 const TYPE_PATTERNS = {
   tutorial: /教程|步骤|技巧|方法|教学|干货|入门|攻略|怎么|如何|收藏/,
@@ -215,8 +215,9 @@ export function validateReturnVisitComment(text, referenceComments = [], workTit
   // 5. 自动化痕迹黑名单拦截
   const BLACKLIST = [
     '回访', '互关', '求关注', '已关注', '来看看你', '支持一下', '打卡',
-    '引流', '私信', '加微信', '加V', '广告', '推广', '系统生成', '自动回复', '任务', 
-    '采集', '根据上下文'
+    '引流', '私信', '加微信', '加V', '广告', '推广', '系统生成', '自动回复', '任务',
+    '采集', '根据上下文',
+    '老哥', '老妹', '老弟', '兄弟', '哥们', '帅哥', '美女', '小姐姐', '小哥哥', '妹子', '姐们', '大哥', '大姐',
   ];
   for (const word of BLACKLIST) {
     if (text.includes(word)) return false;

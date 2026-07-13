@@ -30,6 +30,8 @@ describe('return visit comment safety validation', () => {
     expect(validateReturnVisitComment('这个思路梳理得挺清楚的。', ['这个思路梳理得挺清楚的。'])).toBe(false);
     expect(validateReturnVisitComment('如何做慢查询接口优化讲解挺清楚。', [], '如何做慢查询接口优化')).toBe(false);
     expect(validateReturnVisitComment('这个思路挺好已经收藏了。')).toBe(false);
+    expect(validateReturnVisitComment('老哥这个思路梳理得挺清楚。')).toBe(false);
+    expect(validateReturnVisitComment('小姐姐这个细节拍得真好看。')).toBe(false);
   });
 });
 
