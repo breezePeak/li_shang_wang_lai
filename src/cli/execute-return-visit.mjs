@@ -4,7 +4,10 @@ import { detectDouyinSecurityVerification } from '../browser/douyin-auth-state.m
 import { createRunContext, saveRunSummary } from '../browser/run-context.mjs';
 import { createRunDebugRecorder } from '../browser/run-debug-recorder.mjs';
 import { loadConfig } from '../config/user-config.mjs';
-import { DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK } from '../config/defaults.mjs';
+import {
+  DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK,
+  DEFAULT_RETURN_VISIT_WORK_TIMEOUT_MS,
+} from '../config/defaults.mjs';
 import { printJsonResult, printJsonError } from '../utils/cli-output.mjs';
 import { RESULT_CODES } from '../domain/result-codes.mjs';
 import {
@@ -112,6 +115,36 @@ export function resolveRestartBrowserEveryTasks(value, fallbackValue = 5) {
   return fallbackValue;
 }
 
+export function resolveReturnVisitWorkTimeoutMs(value, fallbackValue = DEFAULT_RETURN_VISIT_WORK_TIMEOUT_MS) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallbackValue;
+}
+
+/**
+ * 为单个作品设置硬时限。超时后立即返回，调用方可关闭页面，避免悬挂操作影响下一条任务。
+ */
+export async function executeWithWorkTimeout(execute, { timeoutMs, onTimeout = () => {} } = {}) {
+  let timeoutHandle;
+  const work = Promise.resolve()
+    .then(execute)
+    .then(value => ({ timedOut: false, value }), error => ({ timedOut: false, error }));
+  const timeout = new Promise(resolve => {
+    timeoutHandle = setTimeout(() => {
+      try {
+        onTimeout();
+      } catch {
+        // 超时记录是尽力而为，不能阻塞超时返回。
+      }
+      resolve({ timedOut: true });
+    }, timeoutMs);
+  });
+
+  const outcome = await Promise.race([work, timeout]);
+  if (!outcome.timedOut) clearTimeout(timeoutHandle);
+  if (outcome.error) throw outcome.error;
+  return outcome;
+}
+
 export async function waitForSecurityVerificationResolution(page, options = {}) {
   const {
     detector = detectDouyinSecurityVerification,
@@ -212,6 +245,7 @@ async function main() {
     DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK,
   );
   const pageLoadRetryCount = Number(returnVisitConfig.pageLoadRetryCount ?? 1);
+  const workTimeoutMs = resolveReturnVisitWorkTimeoutMs(returnVisitConfig.workTimeoutMs);
   const maxConsecutiveFailures = Number(returnVisitConfig.maxConsecutiveFailures ?? 3);
   const restartBrowserEveryTasks = resolveRestartBrowserEveryTasks(
     returnVisitConfig.restartBrowserEveryTasks,
@@ -380,7 +414,7 @@ async function main() {
 
       let result;
       try {
-        result = await executeReturnVisitTask(page, task, {
+        const execution = await executeWithWorkTimeout(() => executeReturnVisitTask(page, task, {
           execute: executeMode,
           pageLoadRetryCount,
           maxWorksToCheck,
@@ -390,7 +424,31 @@ async function main() {
           agentProvider,
           allLikedFallbackEnabled: returnVisitConfig.allLikedFallbackEnabled,
           allLikedFallbackComments: returnVisitConfig.allLikedFallbackComments,
+        }), {
+          timeoutMs: workTimeoutMs,
+          onTimeout: () => {
+            const error = `work_execution_timeout_after_${workTimeoutMs}ms`;
+            log(args.json, `[return-visit:execute] 作品处理超时 ${task.taskId}: ${workTimeoutMs}ms，已记录并跳过`);
+            void recorder.capture(page, 'return_visit.task.timeout', {
+              index,
+              taskId: task.taskId,
+              timeoutMs: workTimeoutMs,
+              error,
+            });
+            // 关闭本页会让仍在等待的 Playwright 操作尽快失败，防止它继续对下一作品操作。
+            void page?.close?.().catch(() => {});
+          },
         });
+        result = execution.timedOut
+          ? {
+              ok: false,
+              status: RETURN_VISIT_STATUS.FAILED_COLLECT,
+              error: `work_execution_timeout_after_${workTimeoutMs}ms`,
+              likeStatus: task.likeStatus || 'pending',
+              commentStatus: task.commentStatus || 'pending',
+              checkedWorks: [],
+            }
+          : execution.value;
       } catch (err) {
         const message = err?.message || 'execute_return_visit_task_failed';
         log(args.json, `[return-visit:execute] 执行异常 ${task.taskId}: ${message}`);

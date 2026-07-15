@@ -8,6 +8,8 @@ import {
   getReturnVisitTaskExecutionIssue,
   parseArgs,
   resolveRestartBrowserEveryTasks,
+  resolveReturnVisitWorkTimeoutMs,
+  executeWithWorkTimeout,
   waitForSecurityVerificationResolution,
 } from '../../src/cli/execute-return-visit.mjs';
 
@@ -80,6 +82,23 @@ describe('return-visit execute filtering & state flow logic', () => {
     expect(resolveRestartBrowserEveryTasks('8', 3)).toBe(8);
     expect(resolveRestartBrowserEveryTasks(0, 3)).toBe(3);
     expect(resolveRestartBrowserEveryTasks(null, 3)).toBe(3);
+  });
+
+  it('defaults a work timeout to three minutes and accepts an explicit value', () => {
+    expect(resolveReturnVisitWorkTimeoutMs(undefined)).toBe(180000);
+    expect(resolveReturnVisitWorkTimeoutMs(1500)).toBe(1500);
+    expect(resolveReturnVisitWorkTimeoutMs(0)).toBe(180000);
+  });
+
+  it('returns a timeout result and records the timeout callback for a stalled work', async () => {
+    const onTimeout = vi.fn();
+    const result = await executeWithWorkTimeout(
+      () => new Promise(() => {}),
+      { timeoutMs: 5, onTimeout },
+    );
+
+    expect(result).toEqual({ timedOut: true });
+    expect(onTimeout).toHaveBeenCalledTimes(1);
   });
 
   it('waits while security verification is visible and resumes after it disappears', async () => {

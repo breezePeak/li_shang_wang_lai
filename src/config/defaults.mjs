@@ -1,4 +1,5 @@
 export const DEFAULT_RETURN_VISIT_MAX_WORKS_TO_CHECK = 10;
+export const DEFAULT_RETURN_VISIT_WORK_TIMEOUT_MS = 3 * 60 * 1000;
 
 // 默认配置常量 — 占位，由 config/local.json 覆盖
 export const DEFAULTS = {
@@ -66,6 +67,8 @@ export const DEFAULTS = {
     maxRetryCount: 2,
     maxConsecutiveFailures: 3,
     pageLoadRetryCount: 1,
+    // 单个作品从打开到完成回访的最长处理时间；超时会记录问题并切换页面继续下一条。
+    workTimeoutMs: DEFAULT_RETURN_VISIT_WORK_TIMEOUT_MS,
     maxReferenceComments: 5,
     watchPolicy: 'seconds',
     watchSeconds: [3, 3],
