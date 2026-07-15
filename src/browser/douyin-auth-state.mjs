@@ -46,7 +46,6 @@ async function safePageText(page) {
         '[class*="login" i]',
         '[class*="verify" i]',
         '[class*="captcha" i]',
-        'body',
       ];
       const chunks = [];
       for (const selector of selectors) {

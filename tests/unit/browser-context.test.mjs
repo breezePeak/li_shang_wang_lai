@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
+import { resolve } from 'path';
 import { replaceContextPage } from '../../src/browser/browser-context.mjs';
 import { checkLoginStatus } from '../../src/browser/login-guard.mjs';
 import { inspectDouyinAuthState } from '../../src/browser/douyin-auth-state.mjs';
@@ -52,6 +54,12 @@ function fakeContext({ hasCookie = true } = {}) {
 }
 
 describe('douyin auth state detection', () => {
+  it('does not scan ordinary page comments for verification wording', () => {
+    const source = fs.readFileSync(resolve(import.meta.dirname, '../../src/browser/douyin-auth-state.mjs'), 'utf8');
+
+    expect(source).not.toContain("        'body',");
+  });
+
   it('treats phone verification dialog as not logged in even with cookies', async () => {
     const page = fakePage({ text: '为了账号安全，请完成手机号认证 获取验证码' });
     const context = fakeContext({ hasCookie: true });
