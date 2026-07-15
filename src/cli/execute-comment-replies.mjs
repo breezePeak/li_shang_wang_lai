@@ -1494,14 +1494,18 @@ async function executeWorkCommentItems(items, args, run, recorder) {
               results.push(result);
             },
           });
-          if (groupResults.some(isSecurityVerificationResult)) {
+          const hasSecurityVerification = groupResults.some(isSecurityVerificationResult);
+          if (hasSecurityVerification) {
             run.hadBlocked = true;
           }
           await recorder?.capture(page, 'comments.work_group.finish', {
             groupIndex,
             groupSize: group.length,
-            hadBlocked: groupResults.some(isSecurityVerificationResult),
+            hadBlocked: hasSecurityVerification,
           });
+
+          // 真实认证只能由发送接口判定。此时停在当前作品并保留浏览器，供用户完成认证。
+          if (hasSecurityVerification) break;
 
           const nextGroup = workGroups[workGroups.indexOf(group) + 1] || null;
           const shouldReturnToProfile = Boolean(nextGroup && (nextGroup[0]?.authorProfileUrl || nextGroup[0]?.homepageUrl) === targetHomepageUrl);

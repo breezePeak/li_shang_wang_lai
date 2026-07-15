@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdirSync, rmSync, existsSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
 import { resolve, join } from 'path';
 import { getDb, resetDb } from '../../src/db/database.mjs';
 import {
@@ -143,6 +143,12 @@ async function runCli(fileName, extraArgs = []) {
 // Tests
 // ============================================================
 describe('comments:execute refactored logic', () => {
+  it('认证阻塞后停止当前批次，不切换到下一作品', () => {
+    const source = readFileSync(resolve(import.meta.dirname, '../../src/cli/execute-comment-replies.mjs'), 'utf8');
+
+    expect(source).toContain('if (hasSecurityVerification) break;');
+  });
+
   beforeEach(() => {
     setup();
   });
