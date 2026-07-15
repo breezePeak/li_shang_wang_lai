@@ -476,6 +476,10 @@ describe('comments:execute refactored logic', () => {
     expect(args.limit).toBe(2);
   });
 
+  it('parseArgs 支持 --hours 限制最近回评时间范围', () => {
+    expect(parseArgs(['--hours', '24']).hours).toBe(24);
+  });
+
   it('parseArgs 支持 --headless，允许无头执行回评', () => {
     const args = parseArgs(['--limit', '2', '--headless']);
     expect(args.headless).toBe(true);

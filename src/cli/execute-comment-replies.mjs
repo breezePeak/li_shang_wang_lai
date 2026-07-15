@@ -59,6 +59,7 @@ export function parseArgs(argv) {
     keepOpen: false,
     headless: undefined,
     limit: null,
+    hours: null,
     maxScrollRounds: null,
     agentOnly: false,
     debug: false,
@@ -75,6 +76,7 @@ export function parseArgs(argv) {
     if (argv[i] === '--headless') args.headless = true;
     if (argv[i] === '--debug') args.debug = true;
     if ((argv[i] === '--limit' || argv[i] === '--max-count') && argv[i + 1]) args.limit = Number(argv[++i] || 0) || null;
+    if (argv[i] === '--hours' && argv[i + 1]) args.hours = Number(argv[++i] || 0) || null;
     if (argv[i] === '--max-scroll-rounds' && argv[i + 1]) args.maxScrollRounds = Number(argv[++i] || 0) || null;
     if (argv[i] === '--agent-only') args.agentOnly = true;
   }
@@ -1593,7 +1595,11 @@ async function main() {
     let agentResults = [];
 
     runMigrations();
-    const rows = listPendingCommentsGroupedByHomepageAndWork({ limit: args.limit, includeBlocked: true });
+    const rows = listPendingCommentsGroupedByHomepageAndWork({
+      limit: args.limit,
+      hours: args.hours,
+      includeBlocked: true,
+    });
     loaded = { items: buildWorkCommentItemsFromDbRows(rows) };
     run.scanned = loaded.items.length;
     console.log(`[comments:execute] loaded pending comments from db: ${loaded.items.length}`);
