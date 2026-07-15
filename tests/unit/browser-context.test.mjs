@@ -60,6 +60,15 @@ describe('douyin auth state detection', () => {
     expect(source).not.toContain("        'body',");
   });
 
+  it('does not mistake a comment mentioning phone verification for a security dialog', async () => {
+    const page = fakePage({ text: '一天 4 块还包手机验证，挂了就按天退' });
+    const context = fakeContext({ hasCookie: true });
+
+    const result = await inspectDouyinAuthState(page, context);
+
+    expect(result.loggedIn).toBe(true);
+  });
+
   it('treats phone verification dialog as not logged in even with cookies', async () => {
     const page = fakePage({ text: '为了账号安全，请完成手机号认证 获取验证码' });
     const context = fakeContext({ hasCookie: true });
