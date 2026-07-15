@@ -957,12 +957,19 @@ describe('comments:execute single-pass per work', () => {
     expect(saveSentUnverified).toHaveBeenCalledTimes(1);
   });
 
-  it('检测到手机号/短信安全认证时停止本轮且不改写评论状态', async () => {
+  it('发送接口明确返回安全认证时停止本轮且不改写评论状态', async () => {
     const page = createFakePage();
-    const collectCandidates = vi.fn(async () => ({ ok: true, candidates: [] }));
+    const collectCandidates = vi.fn(async () => ({
+      ok: true,
+      candidates: [{ cid: 'A', actorName: 'u1', commentText: 'A', domIndex: 0, timeText: '', hasReplyButton: true }],
+    }));
     const openMatchedReplyBox = vi.fn(async () => ({ ok: true }));
     const fillReply = vi.fn(async () => ({ ok: true }));
-    const clickSend = vi.fn(async () => ({ ok: true }));
+    const clickSend = vi.fn(async () => ({
+      ok: false,
+      code: RESULT_CODES.IDENTITY_NOT_VERIFIED,
+      data: { reason: 'security_verification_required' },
+    }));
     const verifyReply = vi.fn(async () => ({ ok: true }));
     const saveSucceeded = vi.fn();
     const saveBlocked = vi.fn();
@@ -983,7 +990,6 @@ describe('comments:execute single-pass per work', () => {
       saveBlocked,
       saveRetryable,
       saveSentUnverified,
-      detectSecurityVerification: async () => ({ reason: 'security_verification_required', preview: '手机号验证' }),
       onResult,
     });
 
@@ -991,9 +997,9 @@ describe('comments:execute single-pass per work', () => {
     expect(results[0].ok).toBe(false);
     expect(results[0].code).toBe(RESULT_CODES.IDENTITY_NOT_VERIFIED);
     expect(results[0].error).toBe('security_verification_required');
-    expect(collectCandidates).not.toHaveBeenCalled();
-    expect(openMatchedReplyBox).not.toHaveBeenCalled();
-    expect(clickSend).not.toHaveBeenCalled();
+    expect(collectCandidates).toHaveBeenCalledTimes(1);
+    expect(openMatchedReplyBox).toHaveBeenCalledTimes(1);
+    expect(clickSend).toHaveBeenCalledTimes(1);
     expect(saveSucceeded).not.toHaveBeenCalled();
     expect(saveBlocked).not.toHaveBeenCalled();
     expect(saveRetryable).not.toHaveBeenCalled();

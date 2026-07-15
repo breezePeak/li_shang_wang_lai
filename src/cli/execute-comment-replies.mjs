@@ -1043,9 +1043,6 @@ export async function executeSinglePassForWorkGroup(page, group, commentListColl
   console.log(`[comments:execute] single-pass start work=${currentWork.workId || currentWork.modalId || currentWork.workUrl} pending=${pendingMap.size}`);
 
   while (pendingMap.size > 0) {
-    const securityVerification = await detectSecurityVerification(page).catch(() => null);
-    if (securityVerification) return stopForSecurityVerification(securityVerification);
-
     await quietWorkModalMedia(page, { installGuard: true, reason: 'single_pass_viewport_start' }).catch(() => null);
     await expandReplies(page, { maxClicks: 6 }).catch(() => null);
     await quietWorkModalMedia(page, { installGuard: true, reason: 'after_expand_replies' }).catch(() => null);
