@@ -1089,6 +1089,13 @@ export async function waitForWorkModal(page, { timeoutMs = 10000, closeAutoPlay 
     }
     if (!modalVisible) {
       await page.waitForSelector('[data-e2e="modal-video-container"], .modal-video-container', { state: 'visible', timeout: 1000 }).catch(() => {});
+      modalVisible = await isWorkModalVisible(page).catch(() => false);
+    }
+    if (!modalVisible) {
+      return blocking(RESULT_CODES.BLOCKED, '目标作品弹层未加载，停止评论操作', {
+        recoverable: true,
+        data: { workModalMissing: true },
+      });
     }
 
     const removedAfter = await detectVideoRemoved(page).catch(() => null);

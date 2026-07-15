@@ -507,6 +507,20 @@ describe('clickReplySendControl', () => {
 });
 
 describe('waitForWorkModal', () => {
+  it('地址带 modal_id 但目标作品弹层未加载时停止，不在主页继续操作', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      await page.setContent('<html><body><main>抖音精选首页</main></body></html>');
+
+      const result = await waitForWorkModal(page, { timeoutMs: 0, closeAutoPlay: false, openCommentArea: true });
+      expect(result.ok).toBe(false);
+      expect(result.data?.workModalMissing).toBe(true);
+    } finally {
+      await browser.close();
+    }
+  });
+
   it('主页 modal 只有 action bar 第二项可点时也能展开评论区', async () => {
     const browser = await chromium.launch({ headless: true });
     try {
