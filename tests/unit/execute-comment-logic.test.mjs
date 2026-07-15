@@ -14,9 +14,11 @@ import {
   isDoneWithoutRetryResult,
   isReplyTextTooShort,
   isSecurityVerificationResult,
+  isWorkPublishExpired,
   parseArgs,
   planViewportPendingMatches,
   resolveCommentActionCooldown,
+  resolveWorkMaxAgeDays,
   resolveWorkUrlFromItem,
   validateWorkCommentItem,
 } from '../../src/cli/execute-comment-replies.mjs';
@@ -478,6 +480,15 @@ describe('comments:execute refactored logic', () => {
 
   it('parseArgs 支持 --hours 限制最近回评时间范围', () => {
     expect(parseArgs(['--hours', '24']).hours).toBe(24);
+  });
+
+  it('作品发布时间超过默认 10 天时标记过期，阈值可配置', () => {
+    const now = Date.parse('2026-07-16T00:00:00.000Z');
+    expect(isWorkPublishExpired({ work_published_at: String(Math.floor((now - 11 * 86400000) / 1000)) }, { now })).toBe(true);
+    expect(isWorkPublishExpired({ work_published_at: String(Math.floor((now - 10 * 86400000) / 1000)) }, { now })).toBe(false);
+    expect(resolveWorkMaxAgeDays({}, {})).toBe(10);
+    expect(resolveWorkMaxAgeDays({ workMaxAgeDays: 3 }, {})).toBe(3);
+    expect(resolveWorkMaxAgeDays({}, { LISHANGWANGLAI_WORK_MAX_AGE_DAYS: '7' })).toBe(7);
   });
 
   it('parseArgs 支持 --headless，允许无头执行回评', () => {

@@ -4,6 +4,7 @@
 // 用法：
 //   npm run comments:execute
 //   npm run comments:execute -- --limit 50
+//   npm run comments:execute -- --work-max-age-days 10
 //   npm run comments:execute -- --agent-only
 //
 // 输入要求：
@@ -60,6 +61,7 @@ export function parseArgs(argv) {
     headless: undefined,
     limit: null,
     hours: null,
+    workMaxAgeDays: null,
     maxScrollRounds: null,
     agentOnly: false,
     debug: false,
@@ -77,6 +79,7 @@ export function parseArgs(argv) {
     if (argv[i] === '--debug') args.debug = true;
     if ((argv[i] === '--limit' || argv[i] === '--max-count') && argv[i + 1]) args.limit = Number(argv[++i] || 0) || null;
     if (argv[i] === '--hours' && argv[i + 1]) args.hours = Number(argv[++i] || 0) || null;
+    if (argv[i] === '--work-max-age-days' && argv[i + 1]) args.workMaxAgeDays = Number(argv[++i] || 0) || null;
     if (argv[i] === '--max-scroll-rounds' && argv[i + 1]) args.maxScrollRounds = Number(argv[++i] || 0) || null;
     if (argv[i] === '--agent-only') args.agentOnly = true;
   }
@@ -93,6 +96,21 @@ export function resolveCommentActionCooldown(env = process.env) {
   const minMs = readPositiveInt(env.LISHANGWANGLAI_COMMENT_ACTION_COOLDOWN_MIN_MS, 3000);
   const maxMs = Math.max(minMs, readPositiveInt(env.LISHANGWANGLAI_COMMENT_ACTION_COOLDOWN_MAX_MS, 6000));
   return { minMs, maxMs };
+}
+
+export function resolveWorkMaxAgeDays(args = {}, env = process.env) {
+  return readPositiveInt(args.workMaxAgeDays, readPositiveInt(env.LISHANGWANGLAI_WORK_MAX_AGE_DAYS, 10));
+}
+
+export function isWorkPublishExpired(item = {}, { maxAgeDays = 10, now = Date.now() } = {}) {
+  const raw = String(item.work_published_at || item.publishedAt || '').trim();
+  if (!raw) return false;
+  const numeric = Number(raw);
+  const publishedMs = Number.isFinite(numeric) && numeric > 0
+    ? (numeric >= 1e12 ? numeric : numeric * 1000)
+    : Date.parse(raw);
+  if (!Number.isFinite(publishedMs)) return false;
+  return now - publishedMs > maxAgeDays * 24 * 60 * 60 * 1000;
 }
 
 function randomIntBetween(min, max) {
@@ -1604,6 +1622,17 @@ async function main() {
     run.scanned = loaded.items.length;
     console.log(`[comments:execute] loaded pending comments from db: ${loaded.items.length}`);
 
+    const workMaxAgeDays = resolveWorkMaxAgeDays(args);
+    const expiredResults = [];
+    loaded.items = loaded.items.filter(item => {
+      if (!isWorkPublishExpired(item, { maxAgeDays: workMaxAgeDays })) return true;
+      const reason = `work_published_over_max_age_days:${workMaxAgeDays}`;
+      markCommentSkipped(item.commentId, reason);
+      expiredResults.push({ ...item, ok: false, status: 'skipped', error: reason });
+      console.log(`[comments:execute] commentId=${item.commentId} 作品发布超过 ${workMaxAgeDays} 天，标记过期并跳过回评`);
+      return false;
+    });
+
     const agentProvider = createAgentProvider();
     try {
       agentResults = await generateMissingReplies(loaded.items, {
@@ -1628,7 +1657,10 @@ async function main() {
       return;
     }
 
-    const results = await executeWorkCommentItems(loaded.items, args, run, recorder);
+    const results = [
+      ...expiredResults,
+      ...await executeWorkCommentItems(loaded.items, args, run, recorder),
+    ];
     console.log(args.diagnosePosition
       ? `[comments:execute] diagnose-position 模式：不更新 DB，未发送回复`
       : `[comments:execute] DB 模式：不生成/读取/写回中间 JSON`);
